@@ -49,7 +49,7 @@ Work through phases in order. Each item below maps to a row in the Priority Tabl
 |---|---|---|
 | Docker | Whole pipeline runs in a container — one command reproduces the exact same environment on any machine | Done |
 | Rules doc | A file (e.g. `RULES.md`) cataloguing every deliberate "don't undo this" decision already made (no suffix stripping, cache hit requires `row_count > 0`, matching stays 100% deterministic, etc.), with an ID per rule referenced in code comments at the enforcement point | Done |
-| Migration tooling | A `schema_version` table plus numbered, versioned SQL migration scripts — every future schema change tracked, no more manual undocumented edits | Not Started |
+| Migration tooling | A `schema_version` table plus numbered, versioned SQL migration scripts — every future schema change tracked, no more manual undocumented edits | Done |
 
 ### Phase 2 — Reliability & Multi-User Foundation
 | Item | What it does | Status |
@@ -152,6 +152,13 @@ These weren't explicitly itemized in the Priority Table but are standard product
 setup — live pipeline testing with real Claude extraction is parked until
 that's resolved.
 
+**Note:** `tests/test_document_understanding_engine.py` and
+`tests/test_explanation_service.py` mock the AI client but not
+`audit_logger.log_ai_call`, so every pytest run writes a small number of
+real rows into `ai_audit_log` in whatever database is active. Not a
+correctness issue, just a known quirk — periodically clear `ai_audit_log`
+in dev if the row count looks odd, don't assume it means something broke.
+
 | Date | Item | Status change | Notes |
 |---|---|---|---|
 | 2026-07-13 | Docker | Not Started → Done | Dockerfile + docker-compose.yml + DOCKER.md added on branch phase-1-foundation. Verified: image builds clean, 30/30 tests pass in container, full 4-stage pipeline runs end-to-end on a real sample PDF. Added pytest to requirements.txt (was missing, untracked). Note: config/ is baked into the image, not volume-mounted — edits there require rebuild or docker exec. |
@@ -160,4 +167,5 @@ that's resolved.
 | 2026-07-13 | Rules doc | Not Started → Done | RULES.md created with 11 numbered rules covering invoice handling, cache semantics, matching determinism, Claude-only extraction chain, mock ERP CLI-only boundary, NetSuite placeholder, universal column mapping, flat permission model, deferred Phase 5 items, OCR confidence tagging, and no fuzzy-prefix matching. Reference comments added at each enforcement point in code. |
 | 2026-07-13 | Matching Level 3 → Level 2 rename | N/A → Done | Fixed standing inconsistency: matching_rules.json declared a 3-level hierarchy but classify_match() only ever implemented 2 real branches. Removed the never-built phantom "Level 2" (Invoice + Amount) config entry, merged its key into Level 1, renumbered RO+Amount from Level 3 to Level 2 throughout code/tests/config/docs. |
 | 2026-07-13 | Lakehouse database reset | N/A → Done | Backed up lakehouse/reconciliation.db to backup/ (gitignored) before deleting, due to Gemini→Claude provider change making prior cached/extracted data stale. Re-ran 00_setup_lakehouse_schema.py for a fresh, empty schema (10 tables, 0 rows each, individually verified). |
+| 2026-07-13 | Migration tooling | Not Started → Done | Added migrations/001_initial_schema.sql (10 existing tables, pulled verbatim) and src/lakehouse/migrations.py runner: schema_version bookkeeping insert combined into the same transaction as each migration's DDL, so they can never drift apart on a crash; comments stripped before splitting statements; failures raise MigrationError, never swallowed. Rewrote 00_setup_lakehouse_schema.py to call the runner instead of containing DDL directly. Verified: clean apply against pre-existing tables, true no-op on re-run, a non-trivial ALTER TABLE migration commits correctly, a deliberately-failing migration rolls back cleanly with nothing recorded, and a from-scratch database builds correctly via the migration path alone. Added RULES.md RULE-12 (schema changes go through numbered migrations only). Phase 1 is now fully complete except the live Claude API test (parked on billing). |
 | | | | |
