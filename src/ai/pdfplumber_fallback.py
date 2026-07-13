@@ -4,8 +4,17 @@ pdfplumber_fallback.py
 Last-resort extraction when all AI providers fail.
 No API needed. Works offline.
 
+Handles both text-based PDFs (via pdfplumber's geometry-based table
+extraction) and scanned/image-based pages (via Tesseract OCR, page-by-page,
+only for pages where pdfplumber finds no usable text layer). OCR-derived
+rows get a lower line_confidence (0.50 vs. 0.65) since column boundaries are
+inferred from whitespace in flat OCR text rather than real geometry — by
+design, this keeps OCR rows below the 0.60 validation threshold so they
+always route to human review rather than silently auto-passing.
+
 Limitations:
-- Only works for clean tabular PDFs with detectable column headers
+- Clean tabular PDFs (text or scanned) work well; highly irregular layouts
+  with no consistent column structure at all still won't parse cleanly, OCR or not
 - Cannot classify document type reliably (defaults to VENDOR_STATEMENT with low confidence)
 - Cannot infer vendor name from complex layouts
 - Does NOT return an AIResponse — returns the same Universal Schema dict shape
@@ -16,6 +25,12 @@ Use only when Gemini AND Groq have both failed.
 import re
 from datetime import datetime
 from typing import Optional
+
+# Mirrors the same threshold value previously used in
+# document_understanding_engine.py's FALLBACK_TEXT_THRESHOLD to decide
+# "is there a real text layer on this page" — reused here per-page (not
+# per-document) to decide whether a page is scanned and worth OCR'ing.
+OCR_TRIGGER_TEXT_THRESHOLD = 500
 
 
 def extract_with_pdfplumber(pdf_path: str) -> dict:
@@ -28,6 +43,14 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
     except ImportError:
         return _failed_schema(pdf_path, "pdfplumber not installed")
 
+    # Checked once per call, not per page — is_ocr_available() invokes the
+    # Tesseract binary, so avoid repeating that for every scanned page.
+    try:
+        from src.ai.ocr_extractor import is_ocr_available, ocr_page as ocr_page_fn
+        ocr_available = is_ocr_available()
+    except Exception:
+        ocr_available = False
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             page_count = len(pdf.pages)
@@ -35,6 +58,7 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
             warnings = []
             vendor_name = None
             shop_name = None
+            ocr_pages_used = []
 
             for page_num, page in enumerate(pdf.pages, start=1):
                 # Try to get header text (first 200 chars) to find vendor/shop
@@ -45,20 +69,35 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
                 # Try table extraction
                 table = page.extract_table()
                 if not table or len(table) < 2:
-                    # No table found — try word-based extraction
-                    warnings.append({
-                        "code": "UNSUPPORTED_LAYOUT",
-                        "message": f"Page {page_num}: no detectable table structure",
-                        "severity": "MEDIUM"
-                    })
-                    continue
+                    # A sparse text layer means this page is likely a scanned
+                    # image — worth trying OCR. A page with substantial text
+                    # but no clean table is a genuinely non-tabular layout;
+                    # OCR wouldn't help there, so keep the old behavior.
+                    if len(page_text.strip()) < OCR_TRIGGER_TEXT_THRESHOLD:
+                        ocr_table, ocr_warning = _try_ocr_page(
+                            pdf_path, page_num, ocr_available, ocr_page_fn
+                        )
+                        if ocr_table is not None:
+                            table = ocr_table
+                            ocr_pages_used.append(page_num)
+                        else:
+                            warnings.append(ocr_warning)
+                            continue
+                    else:
+                        warnings.append({
+                            "code": "UNSUPPORTED_LAYOUT",
+                            "message": f"Page {page_num}: no detectable table structure",
+                            "severity": "MEDIUM"
+                        })
+                        continue
 
                 # Find the header row
                 header_row, data_start = _find_header_row(table)
                 if not header_row:
                     warnings.append({
                         "code": "AMBIGUOUS_COLUMN",
-                        "message": f"Page {page_num}: could not identify column headers",
+                        "message": f"Page {page_num}: could not identify column headers"
+                                   + (" (OCR text)" if page_num in ocr_pages_used else ""),
                         "severity": "HIGH"
                     })
                     continue
@@ -66,10 +105,15 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
                 # Map column names to indices
                 col_map = _map_columns(header_row)
 
+                # OCR-derived rows get a lower confidence — column boundaries
+                # are inferred from whitespace in flat text, not real geometry.
+                row_confidence = 0.50 if page_num in ocr_pages_used else 0.65
+
                 # Extract invoice rows
                 for row_num, row in enumerate(table[data_start:], start=1):
                     invoice = _extract_invoice_row(
-                        row, col_map, page_num, row_num, shop_name
+                        row, col_map, page_num, row_num, shop_name,
+                        confidence=row_confidence,
                     )
                     if invoice:
                         all_invoices.append(invoice)
@@ -112,6 +156,7 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
             },
             "warnings": warnings,
             "_extraction_method": "pdfplumber_fallback",
+            "_ocr_pages_used": ocr_pages_used,
         }
 
     except Exception as e:
@@ -176,7 +221,7 @@ def _map_columns(header_row):
     return col_map
 
 
-def _extract_invoice_row(row, col_map, page_num, row_num, default_shop):
+def _extract_invoice_row(row, col_map, page_num, row_num, default_shop, confidence=0.65):
     """Extract a single invoice line from a table row."""
     def get(key):
         idx = col_map.get(key)
@@ -215,8 +260,77 @@ def _extract_invoice_row(row, col_map, page_num, row_num, default_shop):
         "shop": default_shop,
         "page_number": page_num,
         "row_number": row_num,
-        "line_confidence": 0.65,
+        "line_confidence": confidence,
     }
+
+
+def _try_ocr_page(pdf_path, page_num, ocr_available, ocr_page_fn):
+    """
+    Attempt to OCR a single scanned page and convert its text into a
+    pseudo-table (a list of rows, each split into cell strings) that
+    _find_header_row / _map_columns / _extract_invoice_row can parse exactly
+    like a real pdfplumber table.
+
+    Returns (pseudo_table, None) on success, or (None, warning_dict) if OCR
+    isn't available, fails, or produces nothing parsable — the caller treats
+    this exactly like any other "page skipped" case.
+    """
+    if not ocr_available:
+        return None, {
+            "code": "OTHER",
+            "message": f"Page {page_num}: looks scanned but OCR is unavailable "
+                       f"(Tesseract/Poppler not installed or not reachable) — page skipped",
+            "severity": "MEDIUM",
+        }
+
+    try:
+        ocr_text = ocr_page_fn(pdf_path, page_num)
+    except Exception as e:
+        return None, {
+            "code": "OTHER",
+            "message": f"Page {page_num}: OCR failed — {e}",
+            "severity": "MEDIUM",
+        }
+
+    if len(ocr_text.strip()) < OCR_TRIGGER_TEXT_THRESHOLD:
+        return None, {
+            "code": "UNSUPPORTED_LAYOUT",
+            "message": f"Page {page_num}: OCR ran but produced too little text to parse",
+            "severity": "MEDIUM",
+        }
+
+    pseudo_table = _ocr_text_to_pseudo_table(ocr_text)
+    if len(pseudo_table) < 2:
+        return None, {
+            "code": "AMBIGUOUS_COLUMN",
+            "message": f"Page {page_num}: OCR text had no detectable column structure",
+            "severity": "HIGH",
+        }
+
+    return pseudo_table, None
+
+
+def _ocr_text_to_pseudo_table(ocr_text: str) -> list:
+    """
+    Turn flat OCR text into a table-like list of rows (each row a list of
+    cell strings) so it can be fed through the same header-detection /
+    column-mapping / row-extraction logic used for pdfplumber's real
+    (geometry-based) tables.
+
+    Splits each non-blank line on runs of 2+ whitespace characters — a
+    standard heuristic for column-aligned text from Tesseract's --psm 6
+    mode. Best-effort: less reliable than geometry-based extraction, which
+    is why OCR-derived rows get a lower line_confidence (see
+    extract_with_pdfplumber).
+    """
+    rows = []
+    for line in ocr_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        cells = re.split(r'\s{2,}', line)
+        rows.append(cells)
+    return rows
 
 
 def _parse_amount(value):

@@ -51,6 +51,27 @@ def is_ocr_available() -> bool:
         return False
 
 
+def ocr_page(pdf_path: str, page_num: int, dpi: int = 200) -> str:
+    """
+    Run OCR on a single PDF page (1-indexed, matching pdfplumber's own page
+    numbering) and return its raw text.
+
+    Only rasterizes the requested page (via pdf2image's first_page/last_page),
+    not the whole document. Used by pdfplumber_fallback.py to OCR just the
+    specific pages where pdfplumber's own table extraction found nothing,
+    instead of paying the OCR cost for every page up front.
+    """
+    import pytesseract
+    from pdf2image import convert_from_path
+
+    _configure_tesseract_path(pytesseract)
+
+    images = convert_from_path(pdf_path, dpi=dpi, first_page=page_num, last_page=page_num)
+    if not images:
+        return ""
+    return pytesseract.image_to_string(images[0], config="--psm 6")
+
+
 def extract_text_with_ocr(pdf_path: str, dpi: int = 200):
     """
     Convert each PDF page to an image and run OCR on it.
