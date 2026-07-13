@@ -48,7 +48,7 @@ Work through phases in order. Each item below maps to a row in the Priority Tabl
 | Item | What it does | Status |
 |---|---|---|
 | Docker | Whole pipeline runs in a container — one command reproduces the exact same environment on any machine | Done |
-| Rules doc | A file (e.g. `RULES.md`) cataloguing every deliberate "don't undo this" decision already made (no suffix stripping, cache hit requires `row_count > 0`, matching stays 100% deterministic, etc.), with an ID per rule referenced in code comments at the enforcement point | Not Started |
+| Rules doc | A file (e.g. `RULES.md`) cataloguing every deliberate "don't undo this" decision already made (no suffix stripping, cache hit requires `row_count > 0`, matching stays 100% deterministic, etc.), with an ID per rule referenced in code comments at the enforcement point | Done |
 | Migration tooling | A `schema_version` table plus numbered, versioned SQL migration scripts — every future schema change tracked, no more manual undocumented edits | Not Started |
 
 ### Phase 2 — Reliability & Multi-User Foundation
@@ -148,6 +148,16 @@ These weren't explicitly itemized in the Priority Table but are standard product
 
 *Add an entry here every time an item's status changes.*
 
+**Note:** `ANTHROPIC_API_KEY` in `.env` is still empty pending company billing
+setup — live pipeline testing with real Claude extraction is parked until
+that's resolved.
+
 | Date | Item | Status change | Notes |
 |---|---|---|---|
 | 2026-07-13 | Docker | Not Started → Done | Dockerfile + docker-compose.yml + DOCKER.md added on branch phase-1-foundation. Verified: image builds clean, 30/30 tests pass in container, full 4-stage pipeline runs end-to-end on a real sample PDF. Added pytest to requirements.txt (was missing, untracked). Note: config/ is baked into the image, not volume-mounted — edits there require rebuild or docker exec. |
+| 2026-07-13 | Gemini/Groq removal | N/A → Done | Deleted gemini_client.py, groq_client.py, config/ai/gemini.json, config/ai/groq.json. Added src/ai/claude_client.py (retry/truncation logic ported from gemini_client.py). Rewrote client_factory.py and document_understanding_engine.py — Claude Vision primary (generate_with_file), pdfplumber+OCR fallback. Updated requirements.txt, .env/.env.example, active_provider.json, config/ai/claude.json. Tests: TestGeminiClient/TestGroqClient replaced with TestClaudeClient; fallback tests now assert routing to pdfplumber. 30 → 28 tests, all passing. |
+| 2026-07-13 | OCR fallback fix | N/A → Done | Fixed pre-existing gap: pdfplumber_fallback.py's extract_with_pdfplumber() never actually consumed OCR output (OCR text previously only fed Groq, now removed). Added per-page scanned-page detection, new ocr_extractor.ocr_page() helper, OCR-text-to-pseudo-table conversion feeding the existing column-mapping pipeline. OCR-derived rows tagged line_confidence=0.50 (below the 0.60 validation threshold) so OCR-extracted invoices always route to human review, never auto-pass. |
+| 2026-07-13 | Rules doc | Not Started → Done | RULES.md created with 11 numbered rules covering invoice handling, cache semantics, matching determinism, Claude-only extraction chain, mock ERP CLI-only boundary, NetSuite placeholder, universal column mapping, flat permission model, deferred Phase 5 items, OCR confidence tagging, and no fuzzy-prefix matching. Reference comments added at each enforcement point in code. |
+| 2026-07-13 | Matching Level 3 → Level 2 rename | N/A → Done | Fixed standing inconsistency: matching_rules.json declared a 3-level hierarchy but classify_match() only ever implemented 2 real branches. Removed the never-built phantom "Level 2" (Invoice + Amount) config entry, merged its key into Level 1, renumbered RO+Amount from Level 3 to Level 2 throughout code/tests/config/docs. |
+| 2026-07-13 | Lakehouse database reset | N/A → Done | Backed up lakehouse/reconciliation.db to backup/ (gitignored) before deleting, due to Gemini→Claude provider change making prior cached/extracted data stale. Re-ran 00_setup_lakehouse_schema.py for a fresh, empty schema (10 tables, 0 rows each, individually verified). |
+| | | | |
