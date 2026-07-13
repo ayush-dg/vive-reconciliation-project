@@ -207,3 +207,27 @@ the correct fallback otherwise.
 **Enforced at:** [`src/matching/engine.py`](src/matching/engine.py) —
 `classify_match()`, the `NOTE` comment directly above the Level 2 (RO +
 amount) branch.
+
+---
+
+### RULE-12 — Schema changes go through a new numbered migration file
+
+**Rule:** Every lakehouse schema change is a new file under `migrations/`
+(`NNN_description.sql`, zero-padded to 3 digits) — never a manual edit to
+an existing migration file, never a direct `ALTER`/`CREATE` run by hand
+against the database, and never a change to `notebooks/00_setup_lakehouse_schema.py`
+itself (it only calls the migration runner now).
+
+**Why:** Before this, all schema DDL lived directly in
+`00_setup_lakehouse_schema.py`, with no record of what had changed when or
+in what order. That's fine for a single always-fresh dev database, but
+breaks down the moment more than one environment or more than one person
+needs to apply the same sequence of changes reliably — the numbered,
+tracked migration history is what makes "what schema state is this
+database in" an answerable question instead of a guess.
+
+**Enforced at:** [`src/lakehouse/migrations.py`](src/lakehouse/migrations.py) —
+`apply_pending_migrations()` (discovery + application + `schema_version`
+bookkeeping), [`migrations/`](migrations/) (the migration files themselves),
+[`notebooks/00_setup_lakehouse_schema.py`](notebooks/00_setup_lakehouse_schema.py)
+(the only thing that should call the runner — it should never contain DDL directly again).
