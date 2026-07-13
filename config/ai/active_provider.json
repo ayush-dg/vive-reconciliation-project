@@ -1,8 +1,7 @@
 {
-  "_comment": "The system tries providers in this order. If the first one fails (API error, quota exhausted, timeout), it falls through to the next. 'pdfplumber' is always available as a last resort — no API key needed, but it only works for clean tabular PDFs.",
-  "provider_chain": ["groq", "gemini", "pdfplumber"],
+  "_comment": "Final chain (see docs/VIVE_Implementation_Context.md Section 3): Claude Vision primary, deterministic pdfplumber (with internal OCR fallback for scanned pages) as last resort. No other AI providers.",
+  "provider_chain": ["claude", "pdfplumber"],
   "provider_config_paths": {
-    "gemini": "config/ai/gemini.json",
-    "groq": "config/ai/groq.json"
+    "claude": "config/ai/claude.json"
   }
 }

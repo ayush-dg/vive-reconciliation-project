@@ -3,7 +3,7 @@ client_factory.py
 
 The only place that reads active_provider.json and instantiates
 concrete AI clients. Every other module calls get_ai_client()
-and gets back an AIClient — never a GeminiClient or GroqClient directly.
+and gets back an AIClient — never a ClaudeClient directly.
 """
 
 import json
@@ -23,27 +23,22 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
     If provider_name is None, reads active_provider.json to find the first
     provider in the chain.
 
-    The caller never needs to know whether it gets Gemini or Groq.
+    The caller never needs to know which concrete client it gets.
     """
     active_config_path = "config/ai/active_provider.json"
     active_config = _load_json(active_config_path)
 
     if provider_name is None:
         # Default: first in chain
-        chain = active_config.get("provider_chain", ["gemini"])
+        chain = active_config.get("provider_chain", ["claude"])
         provider_name = chain[0]
 
     config_paths = active_config.get("provider_config_paths", {})
 
-    if provider_name == "gemini":
-        from .gemini_client import GeminiClient
-        config = _load_json(config_paths.get("gemini", "config/ai/gemini.json"))
-        return GeminiClient(config)
-
-    elif provider_name == "groq":
-        from .groq_client import GroqClient
-        config = _load_json(config_paths.get("groq", "config/ai/groq.json"))
-        return GroqClient(config)
+    if provider_name == "claude":
+        from .claude_client import ClaudeClient
+        config = _load_json(config_paths.get("claude", "config/ai/claude.json"))
+        return ClaudeClient(config)
 
     else:
         raise ValueError(f"Unknown provider: '{provider_name}'. Add it to client_factory.py.")
@@ -53,4 +48,4 @@ def get_provider_chain() -> list:
     """Returns the full ordered provider chain from config."""
     active_config_path = "config/ai/active_provider.json"
     active_config = _load_json(active_config_path)
-    return active_config.get("provider_chain", ["gemini", "groq", "pdfplumber"])
+    return active_config.get("provider_chain", ["claude", "pdfplumber"])

@@ -1,8 +1,8 @@
 """
-gemini_client.py
+claude_client.py
 
-Gemini 2.5 Flash implementation of AIClient.
-The ONLY file that knows Gemini's SDK/wire format.
+Claude (Haiku 4.5) implementation of AIClient.
+The ONLY file that knows Anthropic's SDK/wire format.
 """
 
 import json
@@ -13,25 +13,24 @@ from typing import Callable, Optional
 from .base_client import AIClient, AIResponse
 
 
-class GeminiClient(AIClient):
+class ClaudeClient(AIClient):
     def __init__(self, config: dict, transport: Optional[Callable] = None):
         """
-        config   : parsed config/ai/gemini.json
+        config   : parsed config/ai/claude.json
         transport: optional injectable callable for testing.
                    Signature: (prompt, config) -> (success, text, error)
-                   If None, uses the real google-genai SDK.
+                   If None, uses the real anthropic SDK.
         """
         self.config = config
         self._transport = transport
 
-        api_key_var = config.get("api_key_env_var", "GEMINI_API_KEY")
+        api_key_var = config.get("api_key_env_var", "ANTHROPIC_API_KEY")
         self.api_key = os.environ.get(api_key_var)
 
     def generate(self, prompt: str, *, temperature=None, max_output_tokens=None) -> AIResponse:
         model = self.config["model"]
         temperature = temperature if temperature is not None else self.config.get("temperature", 0.1)
         max_tokens = max_output_tokens or self.config.get("max_output_tokens", 8192)
-        timeout = self.config.get("timeout_seconds", 60)
         retry_policy = self.config.get("retry_policy", {})
         max_retries = retry_policy.get("max_retries", 2)
         backoff = retry_policy.get("backoff_seconds", 2)
@@ -40,7 +39,7 @@ class GeminiClient(AIClient):
         if not self.api_key:
             return AIResponse(
                 success=False,
-                provider="gemini",
+                provider="claude",
                 model=model,
                 error=f"Missing API key — env var '{self.config.get('api_key_env_var')}' not set"
             )
@@ -53,8 +52,8 @@ class GeminiClient(AIClient):
                 if self._transport:
                     success, text, error = self._transport(prompt, self.config)
                 else:
-                    success, text, error = self._real_gemini_call(
-                        prompt, model, temperature, max_tokens, timeout
+                    success, text, error = self._real_claude_call(
+                        prompt, model, temperature, max_tokens
                     )
 
                 latency_ms = (time.monotonic() - start) * 1000
@@ -66,7 +65,7 @@ class GeminiClient(AIClient):
                         text=text,
                         parsed_json=parsed,
                         model=model,
-                        provider="gemini",
+                        provider="claude",
                         latency_ms=latency_ms,
                         attempt_count=attempt,
                     )
@@ -83,39 +82,26 @@ class GeminiClient(AIClient):
         latency_ms = (time.monotonic() - start) * 1000
         return AIResponse(
             success=False,
-            provider="gemini",
+            provider="claude",
             model=model,
             latency_ms=latency_ms,
             attempt_count=max_retries + 1,
             error=last_error,
         )
 
-    def _real_gemini_call(self, prompt, model, temperature, max_tokens, timeout):
-        """Real Gemini API call using google-genai SDK."""
+    def _real_claude_call(self, prompt, model, temperature, max_tokens):
+        """Real Claude API call using the anthropic SDK."""
         try:
-            from google import genai
-            from google.genai import types
+            import anthropic
 
-            # Gemini 2.5 models spend part of max_output_tokens on internal
-            # "thinking" before writing the visible response. For a
-            # deterministic extraction task (no multi-step reasoning needed),
-            # that budget is wasted and can silently truncate the JSON output.
-            # Disabling it (thinking_budget=0) keeps the full token budget
-            # available for the actual response.
-            thinking_budget = self.config.get("thinking_budget", 0)
-
-            client = genai.Client(api_key=self.api_key)
-            response = client.models.generate_content(
+            client = anthropic.Anthropic(api_key=self.api_key)
+            response = client.messages.create(
                 model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
-                ),
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=[{"role": "user", "content": prompt}],
             )
-            text = response.text
+            text = response.content[0].text
             return True, text, None
         except Exception as e:
             return False, "", self._clean_error(str(e))
@@ -145,7 +131,7 @@ class GeminiClient(AIClient):
                 pass
 
         # Step 3: Salvage — extract complete invoice objects from truncated JSON.
-        # This handles the case where Gemini's response is cut off mid-object
+        # This handles the case where Claude's response is cut off mid-object
         # because the full JSON exceeded the output token limit.
         # We find the "invoices" array and extract every complete object from it.
         return self._salvage_invoices_from_truncated_json(text)
@@ -234,7 +220,7 @@ class GeminiClient(AIClient):
         # Try to salvage metadata from the beginning of the response
         metadata = self._salvage_metadata(text)
 
-        print(f"  [GeminiClient] Salvaged {len(salvaged_invoices)} complete invoice objects "
+        print(f"  [ClaudeClient] Salvaged {len(salvaged_invoices)} complete invoice objects "
               f"from truncated JSON response")
 
         return {
@@ -319,27 +305,27 @@ class GeminiClient(AIClient):
 
     def _clean_error(self, raw_error: str) -> str:
         """
-        Convert a raw Gemini API error into a short, readable message.
-        Instead of the full JSON error dump, return one line.
+        Convert a raw Anthropic API error into a short, readable message.
+        Instead of the full error dump, return one line.
         """
         if not raw_error:
             return "unknown error"
 
         raw = str(raw_error)
 
-        # Quota / rate limit
-        if "RESOURCE_EXHAUSTED" in raw or "quota" in raw.lower():
-            # Try to extract retry delay
-            import re
-            delay_match = re.search(r"retryDelay['\"]:\s*['\"](\d+)s", raw)
-            delay = f" (retry in {delay_match.group(1)}s)" if delay_match else ""
-            return f"quota exhausted{delay}"
+        # Rate limit
+        if "rate_limit" in raw.lower() or "429" in raw:
+            return "rate limited — try again shortly"
+
+        # Overloaded (Anthropic-specific — servers temporarily at capacity)
+        if "overloaded_error" in raw.lower() or "529" in raw:
+            return "Claude API overloaded — try again shortly"
 
         # Auth / API key issues
-        if "API_KEY_INVALID" in raw or "invalid api key" in raw.lower():
+        if "authentication_error" in raw.lower() or "401" in raw or "invalid x-api-key" in raw.lower():
             return "invalid API key"
 
-        if "PERMISSION_DENIED" in raw:
+        if "permission_error" in raw.lower() or "403" in raw:
             return "permission denied — check API key"
 
         # Network / timeout
@@ -349,21 +335,16 @@ class GeminiClient(AIClient):
         if "connection" in raw.lower() or "network" in raw.lower():
             return "network error"
 
-        # Safety / content filter
-        if "SAFETY" in raw or "safety" in raw.lower():
-            return "blocked by safety filter"
-
         # Generic — just return first 100 chars, no JSON dump
         first_line = raw.split('\n')[0][:100]
         return first_line
 
     def generate_with_file(self, pdf_path: str, prompt: str) -> AIResponse:
         """
-        Send a PDF file directly to Gemini using inline base64 encoding.
-        Used for scanned PDFs where pdfplumber extracts no text.
-
-        This uses Gemini's multimodal capability — it can read the PDF
-        as an image and extract structured data from it directly.
+        Send a PDF file directly to Claude as a document content block.
+        This is the PRIMARY extraction path (not a fallback) — Claude reads
+        the PDF as a document natively, handling text-based, scanned, thin-text-
+        layer, and hybrid PDFs identically without needing OCR pre-processing.
         """
         import base64
         import time
@@ -378,7 +359,7 @@ class GeminiClient(AIClient):
 
         if not self.api_key:
             return AIResponse(
-                success=False, provider="gemini", model=model,
+                success=False, provider="claude", model=model,
                 error=f"Missing API key — env var '{self.config.get('api_key_env_var')}' not set"
             )
 
@@ -395,7 +376,7 @@ class GeminiClient(AIClient):
                 if self._transport:
                     success, text, error = self._transport(prompt, self.config)
                 else:
-                    success, text, error = self._real_gemini_file_call(
+                    success, text, error = self._real_claude_file_call(
                         pdf_b64, prompt, model, temperature, max_tokens
                     )
                 latency_ms = (time.monotonic() - start) * 1000
@@ -404,7 +385,7 @@ class GeminiClient(AIClient):
                     parsed = self._try_parse_json(text)
                     return AIResponse(
                         success=True, text=text, parsed_json=parsed,
-                        model=model, provider="gemini",
+                        model=model, provider="claude",
                         latency_ms=latency_ms, attempt_count=attempt,
                     )
                 else:
@@ -418,38 +399,41 @@ class GeminiClient(AIClient):
 
         latency_ms = (time.monotonic() - start) * 1000
         return AIResponse(
-            success=False, provider="gemini", model=model,
+            success=False, provider="claude", model=model,
             latency_ms=latency_ms, attempt_count=max_retries + 1,
             error=last_error,
         )
 
-    def _real_gemini_file_call(self, pdf_b64: str, prompt: str,
+    def _real_claude_file_call(self, pdf_b64: str, prompt: str,
                                 model: str, temperature: float, max_tokens: int):
-        """Gemini API call with inline base64 PDF (multimodal)."""
+        """Claude API call with an inline base64 PDF document block."""
         try:
-            import base64
-            from google import genai
-            from google.genai import types
+            import anthropic
 
-            thinking_budget = self.config.get("thinking_budget", 0)
-
-            client = genai.Client(api_key=self.api_key)
-            response = client.models.generate_content(
+            client = anthropic.Anthropic(api_key=self.api_key)
+            response = client.messages.create(
                 model=model,
-                contents=[
-                    types.Part.from_bytes(
-                        data=base64.standard_b64decode(pdf_b64),
-                        mime_type="application/pdf",
-                    ),
-                    types.Part.from_text(text=prompt),
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    response_mime_type="application/json",
-                    thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
-                ),
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_b64,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        },
+                    ],
+                }],
             )
-            return True, response.text, None
+            text = response.content[0].text
+            return True, text, None
         except Exception as e:
             return False, "", self._clean_error(str(e))
