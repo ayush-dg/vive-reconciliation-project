@@ -1,0 +1,8 @@
+{
+  "_comment": "Provider-agnostic structural validation rules. Applied to every extracted invoice line regardless of which AI provider or pdfplumber produced it.",
+  "required_fields": ["invoice_number", "outstanding_amount"],
+  "numeric_fields": ["amount", "outstanding_amount", "credit"],
+  "date_fields": ["invoice_date", "due_date"],
+  "confidence_threshold": 0.60,
+  "duplicate_key_fields": ["invoice_number", "outstanding_amount"]
+}

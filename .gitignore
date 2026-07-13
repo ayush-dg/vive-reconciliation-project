@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+lakehouse/*.db
+logs/*.log
+*.egg-info/
+.venv/
+venv/

@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "description": "Universal Financial Document Schema — the single contract every AI provider must conform to. The rest of the pipeline consumes only this shape, never a vendor-specific format.",
+  "structure": {
+    "document_metadata": {
+      "document_type": "VENDOR_STATEMENT | INVOICE | CREDIT_MEMO | PURCHASE_ORDER | PAYMENT_VOUCHER | UNKNOWN",
+      "source_file": "string, required",
+      "page_count": "integer, required",
+      "document_type_confidence": "float 0.0-1.0, required"
+    },
+    "vendor_metadata": {
+      "vendor_name": "string or null",
+      "vendor_address": "string or null",
+      "shop_or_entity": "list of strings",
+      "vendor_confidence": "float or null"
+    },
+    "statement_metadata": {
+      "statement_date": "ISO-8601 date or null",
+      "statement_period_start": "ISO-8601 date or null",
+      "statement_period_end": "ISO-8601 date or null",
+      "currency": "ISO-4217 code or null",
+      "statement_total_as_printed": "float or null",
+      "statement_confidence": "float or null"
+    },
+    "invoices": [
+      {
+        "invoice_number": "string or null",
+        "invoice_date": "string (date) or null",
+        "due_date": "string (date) or null",
+        "amount": "float or null",
+        "outstanding_amount": "float or null",
+        "ro_number": "string or null",
+        "po_number": "string or null",
+        "work_order_number": "string or null",
+        "description": "string or null",
+        "credit": "float or null",
+        "shop": "string or null",
+        "page_number": "integer, required",
+        "row_number": "integer, required",
+        "line_confidence": "float 0.0-1.0, required"
+      }
+    ],
+    "extraction_confidence": {
+      "overall": "float 0.0-1.0",
+      "table_detection_confidence": "float 0.0-1.0",
+      "column_mapping_confidence": "float 0.0-1.0"
+    },
+    "warnings": [
+      {
+        "code": "AMBIGUOUS_COLUMN | LOW_CONFIDENCE_FIELD | CURRENCY_INFERRED | DATE_FORMAT_AMBIGUOUS | OTHER",
+        "message": "string",
+        "severity": "LOW | MEDIUM | HIGH"
+      }
+    ]
+  }
+}

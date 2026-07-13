@@ -1,0 +1,8 @@
+{
+  "_comment": "The system tries providers in this order. If the first one fails (API error, quota exhausted, timeout), it falls through to the next. 'pdfplumber' is always available as a last resort — no API key needed, but it only works for clean tabular PDFs.",
+  "provider_chain": ["groq", "gemini", "pdfplumber"],
+  "provider_config_paths": {
+    "gemini": "config/ai/gemini.json",
+    "groq": "config/ai/groq.json"
+  }
+}

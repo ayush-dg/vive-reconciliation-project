@@ -1,0 +1,12 @@
+{
+  "_comment": "Controls the mutable Mock ERP generator.",
+  "generator_version": "1.0",
+  "default_erp_status": "POSTED",
+  "posting_date_lag_days": {"min": 1, "max": 5},
+  "controlled_exceptions": {
+    "missing_invoices": [],
+    "amount_mismatches": {},
+    "duplicate_invoices": [],
+    "pending_posting": []
+  }
+}
