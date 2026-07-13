@@ -183,3 +183,27 @@ deterministic table parser (see Progress Log). Fixing that gap meant OCR
 output could newly reach Bronze/Silver, so the confidence tagging above was
 added at the same time to keep the "never silently succeed" invariant intact
 for this newly-functional path.
+
+---
+
+### RULE-11 — No "fuzzy prefix" matching level
+
+**Rule:** The matching engine does not match invoices on a truncated
+invoice-number prefix (e.g. first 6 characters) plus amount. Level 1
+requires an exact invoice number match; anything short of that falls
+through to Level 2 (RO + amount) or an exception.
+
+**Why:** An earlier version matched on a truncated prefix plus amount,
+intended to catch revision suffixes that survived normalization. In
+practice, vendor invoice numbers commonly share a long common prefix
+(e.g. `"SIN122..."`) and flat per-line-item fees repeat constantly, so
+that heuristic cross-matched unrelated invoices whenever their prefix
+*and* amount coincidentally lined up — silently hiding genuinely missing
+invoices behind an unrelated match. Level 1 (exact `invoice_number`, via
+`invoice_number_normalized`) already covers genuine suffix normalization
+once a vendor-specific profile is configured; Level 2 (RO + amount) is
+the correct fallback otherwise.
+
+**Enforced at:** [`src/matching/engine.py`](src/matching/engine.py) —
+`classify_match()`, the `NOTE` comment directly above the Level 2 (RO +
+amount) branch.
