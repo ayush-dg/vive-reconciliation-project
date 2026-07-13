@@ -47,7 +47,7 @@ Work through phases in order. Each item below maps to a row in the Priority Tabl
 ### Phase 1 — Foundation
 | Item | What it does | Status |
 |---|---|---|
-| Docker | Whole pipeline runs in a container — one command reproduces the exact same environment on any machine | Not Started |
+| Docker | Whole pipeline runs in a container — one command reproduces the exact same environment on any machine | Done |
 | Rules doc | A file (e.g. `RULES.md`) cataloguing every deliberate "don't undo this" decision already made (no suffix stripping, cache hit requires `row_count > 0`, matching stays 100% deterministic, etc.), with an ID per rule referenced in code comments at the enforcement point | Not Started |
 | Migration tooling | A `schema_version` table plus numbered, versioned SQL migration scripts — every future schema change tracked, no more manual undocumented edits | Not Started |
 
@@ -150,4 +150,4 @@ These weren't explicitly itemized in the Priority Table but are standard product
 
 | Date | Item | Status change | Notes |
 |---|---|---|---|
-| | | | |
+| 2026-07-13 | Docker | Not Started → Done | Dockerfile + docker-compose.yml + DOCKER.md added on branch phase-1-foundation. Verified: image builds clean, 30/30 tests pass in container, full 4-stage pipeline runs end-to-end on a real sample PDF. Added pytest to requirements.txt (was missing, untracked). Note: config/ is baked into the image, not volume-mounted — edits there require rebuild or docker exec. |
