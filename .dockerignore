@@ -1,0 +1,31 @@
+# Secrets — never bake into the image, passed at runtime via env_file instead
+.env
+.env.*
+!.env.example
+
+# Version control
+.git
+.gitignore
+
+# Local Python environment (Windows venv; would break a Linux image anyway)
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Local SQLite database — mounted as a volume at runtime instead
+lakehouse/*.db
+lakehouse/*.db-*
+
+# Input PDFs — mounted as a volume at runtime so files can change without a rebuild
+sample_data/
+
+# Docs (large reference PDFs, not needed at runtime)
+docs/
+
+# Docker files themselves don't need to be in the build context twice
+Dockerfile
+docker-compose.yml
+.dockerignore
