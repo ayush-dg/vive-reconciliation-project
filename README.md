@@ -109,6 +109,12 @@ This enables a re-reconciliation loop without ever re-extracting the PDF:
    Bronze/Silver), so no AI call happens again. Only the ERP side regenerates and
    the match/exception outputs are recomputed.
 
+## Running in Docker
+
+The pipeline can also be run in a container — see [`DOCKER.md`](DOCKER.md) for
+build/run instructions, environment variable setup, and how to run each
+pipeline stage (including the Mock ERP CLI workflow) inside the container.
+
 ## Generic by design
 
 There is no per-vendor setup step. Upload any vendor statement PDF and the AI:
