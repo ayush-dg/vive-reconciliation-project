@@ -12,6 +12,8 @@ Match hierarchy (from config/matching/matching_rules.json):
 If no level matches → EXCEPTION
 
 AI never touches this. Financial decisions are deterministic and reproducible.
+
+See RULES.md RULE-03.
 """
 
 import json

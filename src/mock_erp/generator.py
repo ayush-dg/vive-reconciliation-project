@@ -7,6 +7,10 @@ Applies controlled, deterministic exceptions from scenario_config.json.
 This is NOT random. Every exception is explicitly listed in the config,
 which makes the re-reconciliation workflow work: edit the config,
 re-run the generator, re-run matching → updated results.
+
+See RULES.md RULE-05 — this module and its scenario_config.json workflow
+are CLI-only. Do not add a dashboard/web wrapper around it, even once a
+dashboard exists.
 """
 
 import json

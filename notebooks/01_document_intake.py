@@ -53,7 +53,11 @@ def compute_file_hash(pdf_path: str) -> str:
 
 
 def check_cache(document_hash: str):
-    """Returns the most recent successful extraction cache row for this PDF, or None."""
+    """Returns the most recent successful extraction cache row for this PDF, or None.
+
+    See RULES.md RULE-02 — row_count > 0 is required; a failed run must
+    never be treated as a valid cache hit.
+    """
     rows = execute_query(
         """
         SELECT * FROM extraction_cache
@@ -91,6 +95,9 @@ def validate_invoice(invoice: dict, rules: dict):
             except (TypeError, ValueError):
                 return False, f"INVALID_FIELD_TYPE: {field} must be numeric, got '{val}'"
 
+    # See RULES.md RULE-10 — OCR-derived rows are tagged at 0.50 specifically
+    # so they fail this check and route to review; don't lower this threshold
+    # without revisiting that rule.
     confidence = invoice.get("line_confidence")
     threshold = rules.get("confidence_threshold", 0.60)
     if confidence is not None and float(confidence) < threshold:

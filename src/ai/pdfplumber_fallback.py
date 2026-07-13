@@ -107,6 +107,9 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
 
                 # OCR-derived rows get a lower confidence — column boundaries
                 # are inferred from whitespace in flat text, not real geometry.
+                # See RULES.md RULE-10 — 0.50 is deliberately below the 0.60
+                # validation threshold, so OCR rows always route to human
+                # review. Do not raise this without revisiting that rule.
                 row_confidence = 0.50 if page_num in ocr_pages_used else 0.65
 
                 # Extract invoice rows
@@ -194,7 +197,12 @@ def _find_header_row(table):
 
 
 def _map_columns(header_row):
-    """Map column header strings to their indices."""
+    """Map column header strings to their indices.
+
+    See RULES.md RULE-07 — this generic keyword-based mapping is what lets
+    any vendor's PDF work without per-vendor configuration; don't replace
+    it with a per-vendor lookup table.
+    """
     col_map = {}
     for i, cell in enumerate(header_row):
         if not cell:

@@ -41,6 +41,8 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         return ClaudeClient(config)
 
     else:
+        # See RULES.md RULE-04 — Claude + pdfplumber/OCR is the final chain.
+        # Don't add another AI provider branch here without checking that rule first.
         raise ValueError(f"Unknown provider: '{provider_name}'. Add it to client_factory.py.")
 
 

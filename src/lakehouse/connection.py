@@ -5,6 +5,10 @@ The only file that knows the storage backend is SQLite locally.
 Every other module gets a connection from here.
 In production (Microsoft Fabric), this file is the only thing that changes —
 swap SQLite for Fabric's Lakehouse SQL endpoint.
+
+See RULES.md RULE-06 — mock ERP data is a deliberate placeholder for a real
+NetSuite integration, not yet built. This isolation (plus the record_source
+field in silver_reconciliation_standard) is what keeps that future swap narrow.
 """
 
 import sqlite3
