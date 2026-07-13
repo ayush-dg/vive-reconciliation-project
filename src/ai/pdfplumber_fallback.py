@@ -19,7 +19,7 @@ Limitations:
 - Cannot infer vendor name from complex layouts
 - Does NOT return an AIResponse — returns the same Universal Schema dict shape
 
-Use only when Gemini AND Groq have both failed.
+Use only when Claude has failed.
 """
 
 import re

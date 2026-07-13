@@ -12,8 +12,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-os.environ["GEMINI_API_KEY"] = "test-key"
-os.environ["GROQ_API_KEY"] = "test-key"
+os.environ["ANTHROPIC_API_KEY"] = "test-key"
 
 
 SAMPLE_EXPLANATION = {
@@ -64,22 +63,21 @@ class TestExplanationService(unittest.TestCase):
         original_chain = factory.get_provider_chain
 
         def fake_get_client(provider_name=None):
-            from src.ai.gemini_client import GeminiClient
+            from src.ai.claude_client import ClaudeClient
             config = {
-                "provider": "gemini", "model": "gemini-2.5-flash",
-                "api_key_env_var": "GEMINI_API_KEY", "temperature": 0.3,
+                "provider": "claude", "model": "claude-haiku-4-5-20251001",
+                "api_key_env_var": "ANTHROPIC_API_KEY", "temperature": 0.3,
                 "max_output_tokens": 500, "timeout_seconds": 10,
                 "retry_policy": {"max_retries": 0, "backoff_seconds": 0, "backoff_multiplier": 1}
             }
             def transport(prompt, cfg):
                 return True, json.dumps(SAMPLE_EXPLANATION), None
-            return GeminiClient(config, transport=transport)
+            return ClaudeClient(config, transport=transport)
 
-        # Pin the provider chain explicitly — the real config/ai/active_provider.json
-        # is allowed to change (e.g. groq-first while a quota is exhausted), and this
-        # test asserts gemini specifically, so that ordering must not leak in from disk.
+        # Pin the provider chain explicitly so this test doesn't depend on
+        # the real config/ai/active_provider.json on disk.
         factory.get_ai_client = fake_get_client
-        factory.get_provider_chain = lambda: ["gemini", "groq", "pdfplumber"]
+        factory.get_provider_chain = lambda: ["claude", "pdfplumber"]
 
         written = {}
 
@@ -100,43 +98,30 @@ class TestExplanationService(unittest.TestCase):
             self.assertTrue(result)
             self.assertIn("not posted", written.get("explanation", ""))
             self.assertAlmostEqual(written.get("confidence_score"), 0.88)
-            self.assertEqual(written.get("provider"), "gemini")
+            self.assertEqual(written.get("provider"), "claude")
         finally:
             factory.get_ai_client = original_get
             factory.get_provider_chain = original_chain
 
-    def test_explanation_falls_back_to_groq_when_gemini_fails(self):
-        """When Gemini fails, Groq should be tried for explanations."""
+    def test_explanation_fails_cleanly_when_claude_fails(self):
+        """When Claude fails, there's no second AI provider — explanation
+        generation should fail cleanly (return False), not crash."""
         import src.ai.client_factory as factory
         original_get = factory.get_ai_client
         original_chain = factory.get_provider_chain
-        groq_called = {"count": 0}
 
         def fake_get_client(provider_name=None):
-            if provider_name == "gemini":
-                from src.ai.gemini_client import GeminiClient
-                config = {
-                    "provider": "gemini", "model": "gemini-2.5-flash",
-                    "api_key_env_var": "GEMINI_API_KEY", "temperature": 0.3,
-                    "max_output_tokens": 100, "timeout_seconds": 5,
-                    "retry_policy": {"max_retries": 0, "backoff_seconds": 0, "backoff_multiplier": 1}
-                }
-                return GeminiClient(config, transport=lambda p, c: (False, "", "quota exceeded"))
-            elif provider_name == "groq":
-                from src.ai.groq_client import GroqClient
-                config = {
-                    "provider": "groq", "model": "llama-3.3-70b-versatile",
-                    "api_key_env_var": "GROQ_API_KEY", "temperature": 0.3,
-                    "max_output_tokens": 100, "timeout_seconds": 5,
-                    "retry_policy": {"max_retries": 0, "backoff_seconds": 0, "backoff_multiplier": 1}
-                }
-                def transport(p, c):
-                    groq_called["count"] += 1
-                    return True, json.dumps(SAMPLE_EXPLANATION), None
-                return GroqClient(config, transport=transport)
+            from src.ai.claude_client import ClaudeClient
+            config = {
+                "provider": "claude", "model": "claude-haiku-4-5-20251001",
+                "api_key_env_var": "ANTHROPIC_API_KEY", "temperature": 0.3,
+                "max_output_tokens": 100, "timeout_seconds": 5,
+                "retry_policy": {"max_retries": 0, "backoff_seconds": 0, "backoff_multiplier": 1}
+            }
+            return ClaudeClient(config, transport=lambda p, c: (False, "", "quota exceeded"))
 
         factory.get_ai_client = fake_get_client
-        factory.get_provider_chain = lambda: ["gemini", "groq", "pdfplumber"]
+        factory.get_provider_chain = lambda: ["claude", "pdfplumber"]
 
         from src.ai.explanation_service import ExplanationService
         svc = ExplanationService(max_per_run=5)
@@ -144,8 +129,7 @@ class TestExplanationService(unittest.TestCase):
 
         try:
             result = svc._explain_one(SAMPLE_EXCEPTION, "STMT-TEST")
-            self.assertTrue(result)
-            self.assertEqual(groq_called["count"], 1)
+            self.assertFalse(result)
         finally:
             factory.get_ai_client = original_get
             factory.get_provider_chain = original_chain

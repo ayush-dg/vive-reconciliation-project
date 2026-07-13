@@ -8,7 +8,7 @@ Usage:
     python notebooks/04_generate_report.py --statement-id STMT-TEST-001
     python notebooks/04_generate_report.py --statement-id STMT-TEST-001 --explain
 
-With --explain flag: calls Gemini/Groq to add AI explanations to open exceptions
+With --explain flag: calls Claude to add AI explanations to open exceptions
 before printing the report.
 """
 

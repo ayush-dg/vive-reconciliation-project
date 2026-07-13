@@ -22,13 +22,12 @@ container start via `env_file`.
 
 ## One-time setup
 
-1. Copy `.env.example` to `.env` and fill in your keys:
+1. Copy `.env.example` to `.env` and fill in your key:
    ```
    cp .env.example .env
    ```
    ```
-   GEMINI_API_KEY=...
-   GROQ_API_KEY=...
+   ANTHROPIC_API_KEY=...
    ```
    This file stays on your host and is never copied into the image — Docker
    reads it at container start (`docker-compose.yml`'s `env_file: .env`).

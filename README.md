@@ -54,22 +54,20 @@ The AI never decides whether two invoices match.
 
 Configured in [`config/ai/active_provider.json`](config/ai/active_provider.json):
 
-1. **Gemini 2.5 Flash** (primary) — [`config/ai/gemini.json`](config/ai/gemini.json)
-2. **Groq `llama-3.3-70b-versatile`** (fallback) — [`config/ai/groq.json`](config/ai/groq.json)
-3. **pdfplumber** (last resort) — no API key needed, works only on clean tabular PDFs
+1. **Claude (Haiku 4.5) Vision** (primary) — [`config/ai/claude.json`](config/ai/claude.json), sends the PDF directly, handles text/scanned/hybrid PDFs identically
+2. **pdfplumber** (last resort) — no API key needed; handles scanned pages internally via per-page Tesseract OCR
 
-If a provider errors, times out, or exhausts its quota, the pipeline automatically
-falls through to the next one in the chain. Every provider must return data shaped
-exactly like [`config/schema/universal_financial_document_schema.json`](config/schema/universal_financial_document_schema.json)
+If Claude errors, times out, or exhausts its quota, the pipeline automatically
+falls through to the deterministic pdfplumber fallback. Both paths return data
+shaped exactly like [`config/schema/universal_financial_document_schema.json`](config/schema/universal_financial_document_schema.json)
 — this is the single contract between the AI layer and everything downstream.
 
 ## Setup
 
 1. Clone/copy this project.
-2. Copy `.env.example` to `.env` and fill in your API keys:
+2. Copy `.env.example` to `.env` and fill in your API key:
    ```
-   GEMINI_API_KEY=...
-   GROQ_API_KEY=...
+   ANTHROPIC_API_KEY=...
    ```
 3. Install dependencies:
    ```

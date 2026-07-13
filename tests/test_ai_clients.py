@@ -1,7 +1,7 @@
 """
 tests/test_ai_clients.py
 
-Tests for GeminiClient and GroqClient using injected fake transports.
+Tests for ClaudeClient using injected fake transports.
 No real API calls made — tests run fully offline.
 """
 
@@ -12,26 +12,14 @@ import unittest
 # Make src importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-os.environ["GEMINI_API_KEY"] = "test-gemini-key"
-os.environ["GROQ_API_KEY"] = "test-groq-key"
+os.environ["ANTHROPIC_API_KEY"] = "test-claude-key"
 
-from src.ai.gemini_client import GeminiClient
-from src.ai.groq_client import GroqClient
+from src.ai.claude_client import ClaudeClient
 
-GEMINI_CONFIG = {
-    "provider": "gemini",
-    "model": "gemini-2.5-flash",
-    "api_key_env_var": "GEMINI_API_KEY",
-    "temperature": 0.1,
-    "max_output_tokens": 8192,
-    "timeout_seconds": 30,
-    "retry_policy": {"max_retries": 1, "backoff_seconds": 0, "backoff_multiplier": 1},
-}
-
-GROQ_CONFIG = {
-    "provider": "groq",
-    "model": "llama-3.3-70b-versatile",
-    "api_key_env_var": "GROQ_API_KEY",
+CLAUDE_CONFIG = {
+    "provider": "claude",
+    "model": "claude-haiku-4-5-20251001",
+    "api_key_env_var": "ANTHROPIC_API_KEY",
     "temperature": 0.1,
     "max_output_tokens": 8192,
     "timeout_seconds": 30,
@@ -39,22 +27,22 @@ GROQ_CONFIG = {
 }
 
 
-class TestGeminiClient(unittest.TestCase):
+class TestClaudeClient(unittest.TestCase):
 
     def test_successful_response_parses_json(self):
         def fake_transport(prompt, config):
             return True, '{"invoices": [], "document_metadata": {"document_type": "VENDOR_STATEMENT"}}', None
 
-        client = GeminiClient(GEMINI_CONFIG, transport=fake_transport)
+        client = ClaudeClient(CLAUDE_CONFIG, transport=fake_transport)
         response = client.generate("extract this")
 
         self.assertTrue(response.success)
         self.assertIsNotNone(response.parsed_json)
-        self.assertEqual(response.provider, "gemini")
+        self.assertEqual(response.provider, "claude")
 
     def test_missing_api_key_fails_cleanly(self):
-        config = dict(GEMINI_CONFIG, api_key_env_var="DEFINITELY_NOT_SET_XYZ")
-        client = GeminiClient(config, transport=None)
+        config = dict(CLAUDE_CONFIG, api_key_env_var="DEFINITELY_NOT_SET_XYZ")
+        client = ClaudeClient(config, transport=None)
         response = client.generate("test")
 
         self.assertFalse(response.success)
@@ -69,7 +57,7 @@ class TestGeminiClient(unittest.TestCase):
                 return False, "", "temporary error"
             return True, '{"invoices": []}', None
 
-        client = GeminiClient(GEMINI_CONFIG, transport=flaky_transport)
+        client = ClaudeClient(CLAUDE_CONFIG, transport=flaky_transport)
         response = client.generate("test")
 
         self.assertTrue(response.success)
@@ -79,7 +67,7 @@ class TestGeminiClient(unittest.TestCase):
         def always_fail(prompt, config):
             return False, "", "always fails"
 
-        client = GeminiClient(GEMINI_CONFIG, transport=always_fail)
+        client = ClaudeClient(CLAUDE_CONFIG, transport=always_fail)
         response = client.generate("test")
 
         self.assertFalse(response.success)
@@ -89,48 +77,34 @@ class TestGeminiClient(unittest.TestCase):
         def bad_json_transport(prompt, config):
             return True, "this is not json at all", None
 
-        client = GeminiClient(GEMINI_CONFIG, transport=bad_json_transport)
+        client = ClaudeClient(CLAUDE_CONFIG, transport=bad_json_transport)
         response = client.generate("test")
 
         self.assertTrue(response.success)
         self.assertIsNone(response.parsed_json)
         self.assertEqual(response.text, "this is not json at all")
 
+    def test_generate_with_file_parses_json(self):
+        """Primary path — send the PDF directly, same retry/parse wrapper as generate()."""
+        import tempfile
 
-class TestGroqClient(unittest.TestCase):
-
-    def test_successful_response(self):
         def fake_transport(prompt, config):
             return True, '{"invoices": [{"invoice_number": "INV001"}]}', None
 
-        client = GroqClient(GROQ_CONFIG, transport=fake_transport)
-        response = client.generate("extract invoices")
+        client = ClaudeClient(CLAUDE_CONFIG, transport=fake_transport)
+
+        # generate_with_file() reads and base64-encodes the file from disk
+        # before dispatching to the transport (matching the original Gemini
+        # client's behavior) — the transport injection only bypasses the
+        # network call, not the file read, so a real (even if dummy) file
+        # is needed here.
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(b"%PDF-1.4 dummy content")
+            f.flush()
+            response = client.generate_with_file(f.name, "extract this")
 
         self.assertTrue(response.success)
-        self.assertEqual(response.provider, "groq")
         self.assertEqual(response.parsed_json["invoices"][0]["invoice_number"], "INV001")
-
-    def test_missing_api_key_fails_cleanly(self):
-        config = dict(GROQ_CONFIG, api_key_env_var="DEFINITELY_NOT_SET_ABC")
-        client = GroqClient(config, transport=None)
-        response = client.generate("test")
-
-        self.assertFalse(response.success)
-
-    def test_rate_limit_retries(self):
-        attempts = {"count": 0}
-
-        def rate_limited(prompt, config):
-            attempts["count"] += 1
-            if attempts["count"] == 1:
-                return False, "", "429 rate limited"
-            return True, '{"invoices": []}', None
-
-        client = GroqClient(GROQ_CONFIG, transport=rate_limited)
-        response = client.generate("test")
-
-        self.assertTrue(response.success)
-        self.assertEqual(attempts["count"], 2)
 
 
 class TestPdfplumberFallback(unittest.TestCase):

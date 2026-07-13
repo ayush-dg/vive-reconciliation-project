@@ -11,7 +11,7 @@ Usage:
 What it does:
     1. Checks extraction cache (skip AI if already processed)
     2. Extracts PDF text with pdfplumber
-    3. Calls Document Understanding Engine (Gemini → Groq → pdfplumber)
+    3. Calls Document Understanding Engine (Claude → pdfplumber/OCR)
     4. Validates extracted invoices
     5. Writes valid invoices to bronze_vendor_statement_raw
     6. Normalizes to silver_reconciliation_standard
