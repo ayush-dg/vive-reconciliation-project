@@ -1,13 +1,14 @@
 """
 engine.py
 
-Deterministic 3-level matching engine.
+Deterministic 2-level matching engine.
 Compares Silver VENDOR_STATEMENT rows against Silver INTERNAL_ERP rows.
 
 Match hierarchy (from config/matching/matching_rules.json):
-  Level 1: Exact invoice number match
-  Level 2: Invoice number + amount match (within tolerance)
-  Level 3: RO number + amount match (within tolerance)
+  Level 1: Exact invoice number match (amount must also match within
+           tolerance — an invoice-number match with a mismatched amount is
+           an Amount Mismatch exception, not a lower match level)
+  Level 2: RO number + amount match (within tolerance)
 
 If no level matches → EXCEPTION
 
@@ -49,7 +50,7 @@ def classify_match(stmt_invoice: dict, erp_candidates: list, tolerance_pct: floa
 
     Returns a dict with:
         match_status: 'MATCHED' | 'EXCEPTION'
-        match_level: 1, 2, or 3 (None if EXCEPTION)
+        match_level: 1 or 2 (None if EXCEPTION)
         matched_erp: the matched ERP row (None if EXCEPTION)
         exception_reason: reason string (None if MATCHED)
         exception_erp_amount: the conflicting ERP amount, only set for
@@ -103,15 +104,16 @@ def classify_match(stmt_invoice: dict, erp_candidates: list, tolerance_pct: floa
     # hiding genuinely missing invoices behind an unrelated match. Level 1
     # (exact invoice_number, via invoice_number_normalized) already covers
     # genuine suffix normalization once a vendor-specific profile is
-    # configured; Level 3 (RO + amount) is the correct fallback otherwise.
+    # configured; Level 2 (RO + amount) is the correct fallback otherwise.
+    # See RULES.md RULE-11.
 
-    # Level 3: RO number + amount
+    # Level 2: RO number + amount
     if stmt_ro and stmt_ro in erp_by_ro:
         for erp in erp_by_ro[stmt_ro]:
             if amounts_match(stmt_amount, erp.get("outstanding_amount"), tolerance_pct, tolerance_abs):
                 return {
                     "match_status": "MATCHED",
-                    "match_level": 3,
+                    "match_level": 2,
                     "matched_erp": erp,
                     "exception_reason": None,
                     "exception_erp_amount": None,

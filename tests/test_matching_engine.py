@@ -79,12 +79,12 @@ class TestClassifyMatch(unittest.TestCase):
         self.assertEqual(result["match_status"], "EXCEPTION")
         self.assertEqual(result["exception_reason"], "Invoice Missing")
 
-    def test_level3_ro_number_match(self):
+    def test_level2_ro_number_match(self):
         stmt = make_stmt("SIN12200241", 48.75, ro_number="RO-12345")
         erp = [make_erp("DIFFERENT-INV", 48.75, ro_number="RO-12345")]
         result = classify_match(stmt, erp, TOLERANCE_PCT, TOLERANCE_ABS)
         self.assertEqual(result["match_status"], "MATCHED")
-        self.assertEqual(result["match_level"], 3)
+        self.assertEqual(result["match_level"], 2)
 
     def test_empty_erp_candidates_is_invoice_missing(self):
         stmt = make_stmt("SIN12200241", 48.75)
