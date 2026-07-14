@@ -68,6 +68,23 @@ CRITICAL INSTRUCTIONS — READ CAREFULLY:
 
 5. TOTAL ROWS — Capture grand total in statement_total_as_printed. Do NOT include as invoice.
 
+6. EXACT TRANSCRIPTION OF NUMBERS — invoice_number, ro_number, po_number, and work_order_number
+   must be transcribed EXACTLY character-by-character as printed. Never infer, correct, "clean up",
+   normalize, or add/remove a prefix or suffix — even if a similar-looking number elsewhere in the
+   document makes a different reading seem more plausible. Do NOT assume a prefix pattern applies
+   uniformly (e.g. do not assume every row shares the same letter prefix as a nearby row). If a
+   character is genuinely illegible, transcribe your best single reading and set line_confidence low
+   (below 0.5) rather than silently substituting a "corrected" or guessed value.
+
+7. MIXED PREFIX PATTERNS — When a column contains rows with different prefix patterns (e.g. some
+   rows start with I, others with M), treat each row's prefix as independently uncertain — do NOT
+   assume nearby rows share the same prefix. Lower line_confidence to 0.5 for any row where you are
+   not fully certain of the first character.
+
+8. CONFIDENCE CALIBRATION — A confidence score of 0.85 or above means you can read every character
+   clearly and are certain it is correct. Do not assign 0.85+ if there is any ambiguity about any
+   character in any field.
+
 Return ONLY a valid JSON object with this exact structure:
 {
   "document_metadata": {

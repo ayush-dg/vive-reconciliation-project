@@ -22,6 +22,15 @@ testing against the live endpoint, not assumed from GPT-4o-era docs):
     (input_type "input_file" + a `data:application/pdf;base64,...` URI),
     on the same api-version already used elsewhere in this project
     (2025-04-01-preview) — no need for the newer /openai/v1/ surface.
+  - For scanned pages (no text layer), sending the raw PDF and relying on
+    Azure's own internal, undocumented PDF-to-image conversion produced real
+    invoice-number corruption (wrong prefixes, transposed digits, merged
+    rows) in testing — see RULES.md RULE-04. generate_with_file() now
+    detects pages with no extractable text and rasterizes them itself at
+    SCANNED_PAGE_DPI via pdf2image, sending an `input_image` block instead
+    so we control resolution directly rather than trusting an opaque
+    server-side default. Text-layer pages are still sent as raw PDF
+    (`input_file`) — that path already gave exact, high-fidelity results.
 """
 
 import json
@@ -30,6 +39,13 @@ import time
 from typing import Callable, Optional
 
 from .base_client import AIClient, AIResponse
+
+# DPI used to rasterize scanned (no-text-layer) pages before sending as an
+# input_image block. 300 was chosen after 65/69 rows extracted correctly at
+# whatever (uncontrolled) resolution Azure's own internal PDF-to-image
+# conversion used by default — bumping to a resolution we control directly
+# is the fix, not a tuned/benchmarked optimum.
+SCANNED_PAGE_DPI = 300
 
 
 class AzureOpenAIClient(AIClient):
@@ -364,14 +380,68 @@ class AzureOpenAIClient(AIClient):
         first_line = raw.split('\n')[0][:150]
         return first_line
 
-    def generate_with_file(self, pdf_path: str, prompt: str) -> AIResponse:
+    def _page_has_text_layer(self, pdf_path: str) -> bool:
         """
-        Send a PDF file directly to the model as an inline base64 `input_file`
-        content block via the Responses API. Confirmed working for gpt-5-mini,
-        gpt-5-nano, and gpt-5.1 by direct testing against the live endpoint.
+        True if the PDF's first page has a real, substantial text layer.
+        A short/empty result means it's scanned (image-only) — anything
+        below this length is treated as "no usable text" rather than a
+        partial/thin layer worth trusting.
+        """
+        try:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                text = (pdf.pages[0].extract_text() or "").strip()
+                return len(text) > 20
+        except Exception:
+            # If we can't even open/read it, fall through to the existing
+            # raw-PDF path rather than guessing at rasterization.
+            return True
+
+    def _build_document_content_block(self, pdf_path: str, filename: str) -> dict:
+        """
+        Build the Responses API content block for a single-page PDF.
+
+        Text-layer pages are sent as-is (`input_file`, exact text preserved —
+        this path already produced exact, high-fidelity results in testing).
+        Scanned pages (no text layer) are rasterized locally at
+        SCANNED_PAGE_DPI via pdf2image and sent as `input_image` instead of
+        `input_file` — giving us control over resolution rather than relying
+        on Azure's own opaque server-side PDF-to-image conversion, which was
+        found to produce systematic invoice-number corruption on a real
+        scanned document (see RULES.md RULE-04).
         """
         import base64
 
+        if self._page_has_text_layer(pdf_path):
+            with open(pdf_path, "rb") as f:
+                pdf_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+            return {
+                "type": "input_file",
+                "filename": filename,
+                "file_data": f"data:application/pdf;base64,{pdf_b64}",
+            }
+
+        import io
+        from pdf2image import convert_from_path
+
+        images = convert_from_path(pdf_path, dpi=SCANNED_PAGE_DPI)
+        buf = io.BytesIO()
+        images[0].save(buf, format="PNG")
+        img_b64 = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+        return {
+            "type": "input_image",
+            "image_url": f"data:image/png;base64,{img_b64}",
+        }
+
+    def generate_with_file(self, pdf_path: str, prompt: str) -> AIResponse:
+        """
+        Send a PDF file to the model via the Responses API. Text-layer PDFs
+        go through as an inline base64 `input_file` block (exact text
+        preserved); scanned pages are rasterized locally at SCANNED_PAGE_DPI
+        and sent as `input_image` instead (see _build_document_content_block).
+        Confirmed working for gpt-5-mini, gpt-5-nano, and gpt-5.1 by direct
+        testing against the live endpoint.
+        """
         model = self.deployment
         max_tokens = self.config.get("max_output_tokens", 65536)
         retry_policy = self.config.get("retry_policy", {})
@@ -383,10 +453,8 @@ class AzureOpenAIClient(AIClient):
         if missing:
             return AIResponse(success=False, provider="azure_openai", model=model, error=missing)
 
-        with open(pdf_path, "rb") as f:
-            pdf_bytes = f.read()
-        pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
         filename = os.path.basename(pdf_path)
+        content_block = self._build_document_content_block(pdf_path, filename)
 
         start = time.monotonic()
         last_error = None
@@ -397,7 +465,7 @@ class AzureOpenAIClient(AIClient):
                     success, text, error = self._transport(prompt, self.config)
                 else:
                     success, text, error = self._real_azure_file_call(
-                        pdf_b64, filename, prompt, model, max_tokens
+                        content_block, prompt, model, max_tokens
                     )
                 latency_ms = (time.monotonic() - start) * 1000
 
@@ -425,9 +493,11 @@ class AzureOpenAIClient(AIClient):
             error=last_error,
         )
 
-    def _real_azure_file_call(self, pdf_b64: str, filename: str, prompt: str,
+    def _real_azure_file_call(self, content_block: dict, prompt: str,
                                model: str, max_tokens: int):
-        """Azure OpenAI Responses API call with an inline base64 input_file block."""
+        """Azure OpenAI Responses API call with a pre-built document content
+        block (either `input_file` for text-layer PDFs or `input_image` for
+        rasterized scanned pages — see _build_document_content_block)."""
         try:
             from openai import AzureOpenAI
 
@@ -448,11 +518,7 @@ class AzureOpenAIClient(AIClient):
                 "input": [{
                     "role": "user",
                     "content": [
-                        {
-                            "type": "input_file",
-                            "filename": filename,
-                            "file_data": f"data:application/pdf;base64,{pdf_b64}",
-                        },
+                        content_block,
                         {"type": "input_text", "text": prompt},
                     ],
                 }],
