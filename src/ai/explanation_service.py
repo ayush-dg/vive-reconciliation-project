@@ -3,6 +3,15 @@ explanation_service.py
 
 Generates AI-powered, business-friendly explanations for reconciliation exceptions.
 
+Uses Claude directly for narrative generation — separate from the
+document extraction chain (`config/ai/active_provider.json`'s
+`provider_chain`). Explanations are a small, low-frequency, text-only task
+(a few exceptions per reconciliation run); the extraction chain's primary
+provider is chosen for document-extraction speed/accuracy and may not even
+support text-only generation (e.g. Azure Document Intelligence has no
+text-completion mode at all) — the two are independent choices and must
+not be coupled.
+
 IMPORTANT: This service never changes match_status, exception_reason, or any
 financial figure. It only adds narrative context to already-classified exceptions.
 The deterministic matching engine's decisions are final.
@@ -18,6 +27,12 @@ from src.ai import client_factory
 from src.ai.audit_logger import log_ai_call
 from src.lakehouse.connection import execute_sql, execute_query
 
+
+# Hardcoded, independent of config/ai/active_provider.json's provider_chain
+# (that chain is for document extraction — see module docstring). Claude is
+# still registered in client_factory.py with a working API key path even
+# though it's not the extraction engine.
+EXPLANATION_PROVIDER = "claude"
 
 EXPLANATION_PROMPT_VERSION = "v1"
 
@@ -52,6 +67,10 @@ class ExplanationService:
     """
     Generates AI explanations for reconciliation exceptions.
     Reads from and writes to gold_exceptions.
+
+    Uses EXPLANATION_PROVIDER (Claude) directly for narrative generation —
+    intentionally decoupled from the document extraction chain (see module
+    docstring).
     """
 
     def __init__(self, max_per_run: int = 10):
@@ -60,7 +79,6 @@ class ExplanationService:
         Set lower during development to conserve API quota.
         """
         self.max_per_run = max_per_run
-        self.provider_chain = client_factory.get_provider_chain()
 
     def explain_all_open_exceptions(self, statement_id: str) -> dict:
         """
@@ -126,51 +144,42 @@ class ExplanationService:
             statement_period=exception_row.get("statement_period") or "unknown",
         )
 
-        # Try each provider in chain
-        for provider_name in self.provider_chain:
-            if provider_name == "pdfplumber":
-                # pdfplumber can't generate text explanations
-                continue
+        try:
+            client = client_factory.get_ai_client(EXPLANATION_PROVIDER)
+        except Exception as e:
+            print(f"  [Explain] Could not load {EXPLANATION_PROVIDER}: {e}")
+            print(f"  [Explain] Failed for {invoice_number}: no explanation provider available")
+            return False
 
-            try:
-                client = client_factory.get_ai_client(provider_name)
-            except Exception as e:
-                print(f"  [Explain] Could not load {provider_name}: {e}")
-                continue
+        response = client.generate(prompt, temperature=0.3)
 
-            response = client.generate(prompt, temperature=0.3)
+        # Log the call
+        try:
+            log_ai_call(
+                response,
+                interaction_type="EXCEPTION_EXPLANATION",
+                prompt_version=EXPLANATION_PROMPT_VERSION,
+                statement_id=statement_id,
+                vendor_id=exception_row.get("vendor_id"),
+            )
+        except Exception:
+            pass
 
-            # Log the call
-            try:
-                log_ai_call(
-                    response,
-                    interaction_type="EXCEPTION_EXPLANATION",
-                    prompt_version=EXPLANATION_PROMPT_VERSION,
-                    statement_id=statement_id,
-                    vendor_id=exception_row.get("vendor_id"),
-                )
-            except Exception:
-                pass
-
-            if response.success and response.parsed_json:
-                explanation_data = response.parsed_json
-                self._write_explanation(
-                    exception_id=exception_row["exception_id"],
-                    explanation=explanation_data.get("probable_cause", ""),
-                    suggested_resolution=explanation_data.get("suggested_resolution", ""),
-                    confidence_score=explanation_data.get("confidence_score"),
-                    provider=provider_name,
-                )
-                print(f"  [Explain] {invoice_number} ({exception_row.get('exception_reason')}) "
-                      f"— explained via {provider_name}")
-                return True
-            else:
-                print(f"  [Explain] {provider_name} failed for {invoice_number}: {response.error}")
-                continue
-
-        # All providers failed
-        print(f"  [Explain] All providers failed for {invoice_number}")
-        return False
+        if response.success and response.parsed_json:
+            explanation_data = response.parsed_json
+            self._write_explanation(
+                exception_id=exception_row["exception_id"],
+                explanation=explanation_data.get("probable_cause", ""),
+                suggested_resolution=explanation_data.get("suggested_resolution", ""),
+                confidence_score=explanation_data.get("confidence_score"),
+                provider=EXPLANATION_PROVIDER,
+            )
+            print(f"  [Explain] {invoice_number} ({exception_row.get('exception_reason')}) "
+                  f"— explained via {EXPLANATION_PROVIDER}")
+            return True
+        else:
+            print(f"  [Explain] {EXPLANATION_PROVIDER} failed for {invoice_number}: {response.error}")
+            return False
 
     def _write_explanation(self, exception_id: str, explanation: str,
                            suggested_resolution: str, confidence_score: float,

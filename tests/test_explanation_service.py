@@ -60,9 +60,9 @@ class TestExplanationService(unittest.TestCase):
         """A valid AI response should produce the right explanation fields."""
         import src.ai.client_factory as factory
         original_get = factory.get_ai_client
-        original_chain = factory.get_provider_chain
 
         def fake_get_client(provider_name=None):
+            self.assertEqual(provider_name, "claude")  # hardcoded, not read from provider_chain
             from src.ai.claude_client import ClaudeClient
             config = {
                 "provider": "claude", "model": "claude-haiku-4-5-20251001",
@@ -74,10 +74,7 @@ class TestExplanationService(unittest.TestCase):
                 return True, json.dumps(SAMPLE_EXPLANATION), None
             return ClaudeClient(config, transport=transport)
 
-        # Pin the provider chain explicitly so this test doesn't depend on
-        # the real config/ai/active_provider.json on disk.
         factory.get_ai_client = fake_get_client
-        factory.get_provider_chain = lambda: ["claude", "pdfplumber"]
 
         written = {}
 
@@ -101,14 +98,12 @@ class TestExplanationService(unittest.TestCase):
             self.assertEqual(written.get("provider"), "claude")
         finally:
             factory.get_ai_client = original_get
-            factory.get_provider_chain = original_chain
 
     def test_explanation_fails_cleanly_when_claude_fails(self):
         """When Claude fails, there's no second AI provider — explanation
         generation should fail cleanly (return False), not crash."""
         import src.ai.client_factory as factory
         original_get = factory.get_ai_client
-        original_chain = factory.get_provider_chain
 
         def fake_get_client(provider_name=None):
             from src.ai.claude_client import ClaudeClient
@@ -121,7 +116,6 @@ class TestExplanationService(unittest.TestCase):
             return ClaudeClient(config, transport=lambda p, c: (False, "", "quota exceeded"))
 
         factory.get_ai_client = fake_get_client
-        factory.get_provider_chain = lambda: ["claude", "pdfplumber"]
 
         from src.ai.explanation_service import ExplanationService
         svc = ExplanationService(max_per_run=5)
@@ -132,7 +126,27 @@ class TestExplanationService(unittest.TestCase):
             self.assertFalse(result)
         finally:
             factory.get_ai_client = original_get
-            factory.get_provider_chain = original_chain
+
+    def test_explanation_fails_cleanly_when_provider_cannot_load(self):
+        """If get_ai_client("claude") itself raises (e.g. missing API key),
+        explanation generation should fail cleanly, not crash."""
+        import src.ai.client_factory as factory
+        original_get = factory.get_ai_client
+
+        def raising_get_client(provider_name=None):
+            raise ValueError("Missing API key")
+
+        factory.get_ai_client = raising_get_client
+
+        from src.ai.explanation_service import ExplanationService
+        svc = ExplanationService(max_per_run=5)
+        svc._write_explanation = lambda *a, **k: None
+
+        try:
+            result = svc._explain_one(SAMPLE_EXCEPTION, "STMT-TEST")
+            self.assertFalse(result)
+        finally:
+            factory.get_ai_client = original_get
 
     def test_max_per_run_limits_explanations(self):
         """ExplanationService should respect max_per_run setting."""
