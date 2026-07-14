@@ -44,31 +44,49 @@ Analyze this vendor statement PDF and extract ALL invoice/line-item data.
 
 CRITICAL INSTRUCTIONS — READ CAREFULLY:
 
-1. COLUMN MAPPING — Every vendor uses different column names. You must map whatever columns
-   appear in this document to our standard fields:
-   - "Invoice #", "Invoice No", "Doc No", "Document", "Ref #", "Reference" → invoice_number
-   - "Invoice Date", "Doc Date", "Date", "Transaction Date", "Posted Date" → invoice_date
-   - "Due Date", "Payment Due", "Due By" → due_date
-   - "Amount", "Invoice Amount", "Charges", "Total", "Gross Amount", "Original Amount" → amount
-   - "Balance", "Outstanding", "Amount Due", "Open Amount", "Remaining", "Balance Due",
-     "Net Amount", "Unpaid", "Open Balance" → outstanding_amount
-   - "RO #", "RO No", "Repair Order", "Work Order", "WO #", "Job #" → ro_number
-   - "PO #", "PO No", "Purchase Order" → po_number
-   - "Description", "Desc", "Details", "Notes" → description
-   - "Shop", "Location", "Branch", "Store", "Entity", "Bill To" → shop
+1. COLUMN MAPPING — Every vendor uses different column names, including names you have never
+   seen before. Map by SEMANTIC MEANING, not by matching against a fixed list — the examples
+   below are illustrative, not exhaustive. Ask yourself what each column is FOR, not just what
+   it's literally labeled:
+   - Anything identifying a specific invoice/transaction ("Invoice #", "Invoice No", "Doc No",
+     "Document", "Document No.", "Ref #", "Reference", "Inv #", "Ticket #", "Transaction #",
+     or any other vendor-specific label serving the same purpose) → invoice_number
+   - Anything dating the invoice/transaction ("Invoice Date", "Doc Date", "Date", "Transaction Date",
+     "Posted Date") → invoice_date
+   - Anything giving a payment deadline ("Due Date", "Payment Due", "Due By") → due_date
+   - Anything giving the original charge ("Amount", "Invoice Amount", "Charges", "Total",
+     "Gross Amount", "Original Amount") → amount
+   - Anything giving what's still owed ("Balance", "Outstanding", "Amount Due", "Open Amount",
+     "Remaining", "Balance Due", "Net Amount", "Unpaid", "Open Balance") → outstanding_amount
+   - Anything referencing a repair/work order ("RO #", "RO No", "Repair Order", "Work Order",
+     "WO #", "Job #") → ro_number
+   - Anything referencing a purchase order ("PO #", "PO No", "Purchase Order") → po_number
+   - Anything describing the line item ("Description", "Desc", "Details", "Notes") → description
+   - Anything identifying the paying location ("Shop", "Location", "Branch", "Store", "Entity",
+     "Bill To") → shop
+   If this vendor's layout uses a column name you don't recognize, reason about its likely
+   purpose from context (its position in the table, the kind of values in it, the header text's
+   meaning) rather than giving up on mapping it.
 
-2. MISSING FIELDS — If a column does not exist in this document, set that field to null.
-   Do NOT invent data. Do NOT skip the invoice — include it with null for missing fields.
+2. MISSING FIELDS — If this vendor's layout has no column for a given field at all, set that
+   field to null. Never invent a value and never infer one from other fields, context, or what
+   a "typical" statement usually has — null is always correct when the data genuinely isn't
+   present in this document. Do NOT skip the invoice — include it with null for missing fields.
 
-3. AMOUNTS — Always extract as plain numbers. Remove $, commas, parentheses.
+3. UNREADABLE PAGES — If an entire page is too blurry, low-resolution, or otherwise unclear to
+   read reliably (not just a single ambiguous character, but the page as a whole), do not guess
+   at its contents. Return an empty invoices list for that page, set extraction_confidence.overall
+   below 0.3, and add a warning explaining that the page could not be read reliably.
+
+4. AMOUNTS — Always extract as plain numbers. Remove $, commas, parentheses.
    If a field like "Balance" or "Open Amount" exists, map it to outstanding_amount.
    If only one amount column exists, use it for BOTH amount AND outstanding_amount.
 
-4. EVERY LINE — Extract every invoice/transaction line you find. Do not skip any lines.
+5. EVERY LINE — Extract every invoice/transaction line you find. Do not skip any lines.
 
-5. TOTAL ROWS — Capture grand total in statement_total_as_printed. Do NOT include as invoice.
+6. TOTAL ROWS — Capture grand total in statement_total_as_printed. Do NOT include as invoice.
 
-6. EXACT TRANSCRIPTION OF NUMBERS — invoice_number, ro_number, po_number, and work_order_number
+7. EXACT TRANSCRIPTION OF NUMBERS — invoice_number, ro_number, po_number, and work_order_number
    must be transcribed EXACTLY character-by-character as printed. Never infer, correct, "clean up",
    normalize, or add/remove a prefix or suffix — even if a similar-looking number elsewhere in the
    document makes a different reading seem more plausible. Do NOT assume a prefix pattern applies
@@ -76,12 +94,12 @@ CRITICAL INSTRUCTIONS — READ CAREFULLY:
    character is genuinely illegible, transcribe your best single reading and set line_confidence low
    (below 0.5) rather than silently substituting a "corrected" or guessed value.
 
-7. MIXED PREFIX PATTERNS — When a column contains rows with different prefix patterns (e.g. some
+8. MIXED PREFIX PATTERNS — When a column contains rows with different prefix patterns (e.g. some
    rows start with I, others with M), treat each row's prefix as independently uncertain — do NOT
    assume nearby rows share the same prefix. Lower line_confidence to 0.5 for any row where you are
    not fully certain of the first character.
 
-8. CONFIDENCE CALIBRATION — A confidence score of 0.85 or above means you can read every character
+9. CONFIDENCE CALIBRATION — A confidence score of 0.85 or above means you can read every character
    clearly and are certain it is correct. Do not assign 0.85+ if there is any ambiguity about any
    character in any field.
 

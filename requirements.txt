@@ -4,4 +4,5 @@ anthropic>=0.40.0
 openai>=2.40.0
 pytesseract==0.3.13
 pdf2image==1.17.0
+pypdf>=6.0.0
 pytest==9.1.1

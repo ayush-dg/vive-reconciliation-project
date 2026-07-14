@@ -31,6 +31,14 @@ testing against the live endpoint, not assumed from GPT-4o-era docs):
     so we control resolution directly rather than trusting an opaque
     server-side default. Text-layer pages are still sent as raw PDF
     (`input_file`) — that path already gave exact, high-fidelity results.
+  - generate_with_file() sends ONE Responses API call PER PAGE, not the
+    whole document at once — sending an entire multi-page statement in a
+    single call was found to time out (even at 600s) or silently narrow
+    scope to a single page while still reporting success (see RULES.md
+    RULE-04). Pages are split via pypdf, processed independently, and
+    results are aggregated into one Universal Financial Document Schema
+    dict. A page whose call fails is retried once before being recorded as
+    a failed page — one bad page does not abort the whole document.
 """
 
 import json
@@ -433,65 +441,192 @@ class AzureOpenAIClient(AIClient):
             "image_url": f"data:image/png;base64,{img_b64}",
         }
 
+    def _split_into_pages(self, pdf_path: str):
+        """
+        Split a PDF into single-page PDF files on disk.
+        Returns (page_paths, temp_dir_or_None). temp_dir is None when the
+        source PDF is already a single page — in that case page_paths is
+        just [pdf_path] itself, and there's nothing to clean up (the
+        original file must never be deleted here).
+        """
+        from pypdf import PdfReader, PdfWriter
+
+        reader = PdfReader(pdf_path)
+        if len(reader.pages) <= 1:
+            return [pdf_path], None
+
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix="azure_openai_pages_")
+        page_paths = []
+        for i, page in enumerate(reader.pages, 1):
+            writer = PdfWriter()
+            writer.add_page(page)
+            page_path = os.path.join(temp_dir, f"page{i}.pdf")
+            with open(page_path, "wb") as f:
+                writer.write(f)
+            page_paths.append(page_path)
+        return page_paths, temp_dir
+
+    def _process_single_page(self, page_path: str, prompt: str, model: str, max_tokens: int):
+        """
+        Call the API for exactly one page, retrying once (fresh call, no
+        retry_policy backoff/multiplier — this is a distinct, simpler
+        retry-once-per-page mechanism) if the first attempt fails. Returns
+        (success, parsed_dict_or_None, error, attempts_used).
+
+        Only called from the real (non-transport) path — see
+        generate_with_file(), which short-circuits entirely to a single
+        direct _transport(...) call when a transport is injected, the same
+        way the real API path would be replaced end-to-end in tests.
+        """
+        filename = os.path.basename(page_path)
+
+        for attempt in (1, 2):
+            content_block = self._build_document_content_block(page_path, filename)
+            success, text, error = self._real_azure_file_call(
+                content_block, prompt, model, max_tokens
+            )
+
+            if success:
+                parsed = self._try_parse_json(text)
+                if parsed is not None:
+                    return True, parsed, None, attempt
+                error = "response did not contain parseable JSON"
+
+            if attempt == 1:
+                backoff = self.config.get("retry_policy", {}).get("backoff_seconds", 2)
+                time.sleep(backoff)
+
+        return False, None, error, 2
+
     def generate_with_file(self, pdf_path: str, prompt: str) -> AIResponse:
         """
-        Send a PDF file to the model via the Responses API. Text-layer PDFs
+        Send a PDF to the model via the Responses API, one page per call
+        (see module docstring — a whole multi-page statement in one call
+        was found to time out or silently narrow scope). Text-layer pages
         go through as an inline base64 `input_file` block (exact text
         preserved); scanned pages are rasterized locally at SCANNED_PAGE_DPI
         and sent as `input_image` instead (see _build_document_content_block).
-        Confirmed working for gpt-5-mini, gpt-5-nano, and gpt-5.1 by direct
-        testing against the live endpoint.
+        Per-page results are aggregated into one Universal Financial
+        Document Schema dict; a page that fails twice is recorded as a
+        failed page rather than aborting the whole document.
         """
         model = self.deployment
         max_tokens = self.config.get("max_output_tokens", 65536)
-        retry_policy = self.config.get("retry_policy", {})
-        max_retries = retry_policy.get("max_retries", 2)
-        backoff = retry_policy.get("backoff_seconds", 2)
-        multiplier = retry_policy.get("backoff_multiplier", 2)
 
         missing = self._missing_config_error()
         if missing:
             return AIResponse(success=False, provider="azure_openai", model=model, error=missing)
 
-        filename = os.path.basename(pdf_path)
-        content_block = self._build_document_content_block(pdf_path, filename)
-
         start = time.monotonic()
-        last_error = None
 
-        for attempt in range(1, max_retries + 2):
-            try:
-                if self._transport:
-                    success, text, error = self._transport(prompt, self.config)
-                else:
-                    success, text, error = self._real_azure_file_call(
-                        content_block, prompt, model, max_tokens
-                    )
-                latency_ms = (time.monotonic() - start) * 1000
+        if self._transport:
+            # Test injection point — stands in for the entire real call,
+            # including page splitting/rasterization, not just the network
+            # hop. Keeps unit tests offline and independent of pypdf/pdf2image.
+            success, text, error = self._transport(prompt, self.config)
+            latency_ms = (time.monotonic() - start) * 1000
+            if success:
+                parsed = self._try_parse_json(text)
+                return AIResponse(
+                    success=True, text=text, parsed_json=parsed,
+                    model=model, provider="azure_openai",
+                    latency_ms=latency_ms, attempt_count=1,
+                )
+            return AIResponse(
+                success=False, provider="azure_openai", model=model,
+                latency_ms=latency_ms, attempt_count=1, error=error,
+            )
 
-                if success:
-                    parsed = self._try_parse_json(text)
-                    return AIResponse(
-                        success=True, text=text, parsed_json=parsed,
-                        model=model, provider="azure_openai",
-                        latency_ms=latency_ms, attempt_count=attempt,
-                        raw_response=self._last_raw_response,
-                    )
-                else:
-                    last_error = error
-                    if attempt <= max_retries:
-                        time.sleep(backoff * (multiplier ** (attempt - 1)))
-            except Exception as e:
-                last_error = str(e)
-                if attempt <= max_retries:
-                    time.sleep(backoff * (multiplier ** (attempt - 1)))
+        try:
+            page_paths, temp_dir = self._split_into_pages(pdf_path)
+        except Exception as e:
+            latency_ms = (time.monotonic() - start) * 1000
+            return AIResponse(
+                success=False, provider="azure_openai", model=model,
+                latency_ms=latency_ms, attempt_count=1,
+                error=f"failed to split PDF into pages: {e}",
+            )
 
-        latency_ms = (time.monotonic() - start) * 1000
-        return AIResponse(
-            success=False, provider="azure_openai", model=model,
-            latency_ms=latency_ms, attempt_count=max_retries + 1,
-            error=last_error,
-        )
+        try:
+            all_invoices = []
+            warnings = []
+            failed_pages = []
+            confidences = []
+            first_metadata = None
+            total_attempts = 0
+
+            for page_num, page_path in enumerate(page_paths, 1):
+                success, parsed, error, attempts_used = self._process_single_page(
+                    page_path, prompt, model, max_tokens
+                )
+                total_attempts += attempts_used
+
+                if not success:
+                    failed_pages.append(page_num)
+                    warnings.append(f"Page {page_num} failed after retry: {error}")
+                    continue
+
+                page_invoices = parsed.get("invoices", []) or []
+                for inv in page_invoices:
+                    inv["page_number"] = page_num
+                all_invoices.extend(page_invoices)
+
+                page_warnings = parsed.get("warnings") or []
+                if isinstance(page_warnings, str):
+                    page_warnings = [page_warnings]
+                warnings.extend(str(w) for w in page_warnings)
+
+                overall_conf = parsed.get("extraction_confidence", {}).get("overall")
+                if isinstance(overall_conf, (int, float)):
+                    confidences.append(overall_conf)
+
+                if first_metadata is None:
+                    first_metadata = parsed
+
+            latency_ms = (time.monotonic() - start) * 1000
+
+            if first_metadata is None:
+                return AIResponse(
+                    success=False, provider="azure_openai", model=model,
+                    latency_ms=latency_ms, attempt_count=total_attempts,
+                    error=f"all {len(page_paths)} page(s) failed: {'; '.join(warnings) or 'unknown error'}",
+                )
+
+            if failed_pages:
+                warnings.append(
+                    f"Page(s) {failed_pages} could not be extracted after retry and are "
+                    f"missing from this result — {len(all_invoices)} invoices recovered from "
+                    f"the remaining {len(page_paths) - len(failed_pages)} page(s)."
+                )
+
+            doc_metadata = dict(first_metadata.get("document_metadata", {}))
+            doc_metadata["page_count"] = len(page_paths)  # known for certain, unlike any single page's guess
+
+            result = {
+                "document_metadata": doc_metadata,
+                "vendor_metadata": first_metadata.get("vendor_metadata", {}),
+                "statement_metadata": first_metadata.get("statement_metadata", {}),
+                "invoices": all_invoices,
+                # The whole document is only as trustworthy as its least confident
+                # page — averaging would let one bad page hide behind good ones.
+                "extraction_confidence": dict(
+                    first_metadata.get("extraction_confidence", {}),
+                    overall=min(confidences) if confidences else None,
+                ),
+                "warnings": warnings,
+            }
+            text_out = json.dumps(result)
+
+            return AIResponse(
+                success=True, text=text_out, parsed_json=result,
+                model=model, provider="azure_openai",
+                latency_ms=latency_ms, attempt_count=total_attempts,
+            )
+        finally:
+            if temp_dir:
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _real_azure_file_call(self, content_block: dict, prompt: str,
                                model: str, max_tokens: int):
