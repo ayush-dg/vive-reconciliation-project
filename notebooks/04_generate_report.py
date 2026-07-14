@@ -8,7 +8,7 @@ Usage:
     python notebooks/04_generate_report.py --statement-id STMT-TEST-001
     python notebooks/04_generate_report.py --statement-id STMT-TEST-001 --explain
 
-With --explain flag: calls Claude to add AI explanations to open exceptions
+With --explain flag: calls the active AI provider (Azure OpenAI gpt-5-mini) to add AI explanations to open exceptions
 before printing the report.
 """
 

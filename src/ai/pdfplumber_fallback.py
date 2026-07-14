@@ -19,7 +19,7 @@ Limitations:
 - Cannot infer vendor name from complex layouts
 - Does NOT return an AIResponse — returns the same Universal Schema dict shape
 
-Use only when Claude has failed.
+Use only when the primary AI provider has failed.
 """
 
 import re

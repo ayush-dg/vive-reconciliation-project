@@ -4,7 +4,7 @@ ocr_extractor.py
 Extracts text from scanned PDF pages using pytesseract OCR.
 Used as a last resort when:
   1. pdfplumber finds no text (scanned PDF)
-  2. Claude vision is unavailable (quota exceeded)
+  2. The primary AI provider (Azure OpenAI gpt-5-mini) is unavailable (quota exceeded)
 
 Returns the same (text, page_count) tuple as extract_pdf_text() in
 document_understanding_engine.py — so the rest of the pipeline is unchanged.

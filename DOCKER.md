@@ -22,12 +22,14 @@ container start via `env_file`.
 
 ## One-time setup
 
-1. Copy `.env.example` to `.env` and fill in your key:
+1. Copy `.env.example` to `.env` and fill in your Azure OpenAI credentials:
    ```
    cp .env.example .env
    ```
    ```
-   ANTHROPIC_API_KEY=...
+   AZURE_OPENAI_ENDPOINT=...
+   AZURE_OPENAI_API_KEY=...
+   AZURE_OPENAI_DEPLOYMENT_GPT5_MINI=...
    ```
    This file stays on your host and is never copied into the image — Docker
    reads it at container start (`docker-compose.yml`'s `env_file: .env`).

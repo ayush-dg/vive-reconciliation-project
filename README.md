@@ -54,10 +54,10 @@ The AI never decides whether two invoices match.
 
 Configured in [`config/ai/active_provider.json`](config/ai/active_provider.json):
 
-1. **Claude (Haiku 4.5) Vision** (primary) — [`config/ai/claude.json`](config/ai/claude.json), sends the PDF directly, handles text/scanned/hybrid PDFs identically
+1. **Azure OpenAI gpt-5-mini** (primary) — [`config/ai/azure_gpt5_mini.json`](config/ai/azure_gpt5_mini.json), sends the PDF one page at a time, handles text/scanned/hybrid PDFs identically
 2. **pdfplumber** (last resort) — no API key needed; handles scanned pages internally via per-page Tesseract OCR
 
-If Claude errors, times out, or exhausts its quota, the pipeline automatically
+If the primary provider errors, times out, or exhausts its quota, the pipeline automatically
 falls through to the deterministic pdfplumber fallback. Both paths return data
 shaped exactly like [`config/schema/universal_financial_document_schema.json`](config/schema/universal_financial_document_schema.json)
 — this is the single contract between the AI layer and everything downstream.
@@ -65,9 +65,11 @@ shaped exactly like [`config/schema/universal_financial_document_schema.json`](c
 ## Setup
 
 1. Clone/copy this project.
-2. Copy `.env.example` to `.env` and fill in your API key:
+2. Copy `.env.example` to `.env` and fill in your Azure OpenAI credentials:
    ```
-   ANTHROPIC_API_KEY=...
+   AZURE_OPENAI_ENDPOINT=...
+   AZURE_OPENAI_API_KEY=...
+   AZURE_OPENAI_DEPLOYMENT_GPT5_MINI=...
    ```
 3. Install dependencies:
    ```

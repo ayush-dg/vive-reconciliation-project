@@ -32,13 +32,15 @@ A Python-based tool built for VIVE Collision (multi-shop auto body repair compan
 
 ## 3. Final AI Extraction Decision
 
-- **Claude (Haiku 4.5) is the extraction engine.** Not Sonnet, not Opus — extraction is a straightforward task (reading numbers/text off a PDF), and Haiku is the appropriate, cost-effective tier for it.
-- **pdfplumber + Tesseract OCR is the last-resort fallback** if Claude is unavailable — free, no AI, no per-call cost. This is a real fallback, not theoretical: pdfplumber alone cannot read scanned PDFs, which is why OCR must run first for scanned documents before pdfplumber can parse them.
-- **Final chain: Claude → pdfplumber+OCR.** No other AI providers in the chain.
-- **Truncation handling**: if Claude's response is truncated (hit a token limit), detect this explicitly and fall back to pdfplumber+OCR immediately — the existing brace-counting salvage logic is kept only as a secondary recovery attempt, not the first thing tried.
-- **Claude is also used for the optional `--explain` narrative step** (unchanged from before) — writing a plain-English cause/suggested-action per exception. This never changes a match decision, only adds narrative.
+- **Azure OpenAI gpt-5-mini is the extraction engine.** Not gpt-5-nano, not gpt-5.1 — a real 3-model comparison was run against sample vendor statements using the production extraction schema, and gpt-5-mini passed the accuracy gate (exact invoice-count and line-level number/amount matches) at the appropriate, cost-effective tier for this task.
+- **History:** Claude (Haiku 4.5) briefly held this slot after the Gemini/Groq removal (see Progress Log below). It was replaced by Azure OpenAI gpt-5-mini for vendor consolidation — a committed decision independent of accuracy — after gpt-5-mini cleared the same accuracy bar in direct testing. See RULES.md RULE-04 for the full history, including the superseded Claude-era text.
+- **pdfplumber + Tesseract OCR is the last-resort fallback** if the primary provider is unavailable — free, no AI, no per-call cost. This is a real fallback, not theoretical: pdfplumber alone cannot read scanned PDFs, which is why OCR must run first for scanned documents before pdfplumber can parse them.
+- **Final chain: Azure OpenAI gpt-5-mini → pdfplumber+OCR.** No other AI providers in the chain.
+- **Per-page extraction, not whole-document-in-one-call**: sending an entire multi-page statement to gpt-5-mini in a single Responses API call was found to time out even at 600s; the PDF is split and sent one page per call instead (180s timeout, medium reasoning effort), with results aggregated afterward.
+- **Truncation handling**: if the primary provider's response is truncated (hit a token limit), detect this explicitly and fall back to pdfplumber+OCR immediately — the existing brace-counting salvage logic is kept only as a secondary recovery attempt, not the first thing tried.
+- **The primary provider is also used for the optional `--explain` narrative step** (unchanged from before) — writing a plain-English cause/suggested-action per exception. This never changes a match decision, only adds narrative.
 - **pdfplumber's "confidence" is fake/manual, not a real self-assessment** — the code assigns 0.65 if it found table-like rows, 0.20 if not. Since the validation gate threshold is 0.60, a 0.65 "pass" is really just "found something table-shaped," not a genuine quality signal. Be aware of this when touching validation logic — a messy but table-shaped extraction could slide through as "valid" when it shouldn't.
-- **Which extraction method processed a given document is already loggable** via the existing `document_intake_log.extraction_method` and `ai_audit_log.ai_provider` columns — when implementing the new chain, make sure the code writing to these columns uses clean values (`"claude"`, `"pdfplumber_ocr"`) and not leftover provider-specific strings from the old chain.
+- **Which extraction method processed a given document is already loggable** via the existing `document_intake_log.extraction_method` and `ai_audit_log.ai_provider` columns — when implementing the new chain, make sure the code writing to these columns uses clean values (`"azure_openai"`, `"pdfplumber_ocr"`) and not leftover provider-specific strings from prior chains.
 
 ## 4. Implementation Phases (Priority Order)
 
@@ -71,7 +73,7 @@ Work through phases in order. Each item below maps to a row in the Priority Tabl
 | Item | What it does | Status |
 |---|---|---|
 | Dependency-skip check | If a row is missing a required field (e.g. amount), tag it explicitly as `NOT_CHECKED` rather than guessing, crashing, or letting it silently fail a comparison — visibly distinct in the report from a row that was genuinely checked and didn't match | Not Started |
-| Retry/truncation fix | Covered above in Section 3 — Claude truncation detected explicitly, falls back to pdfplumber+OCR immediately, salvage kept only as backup | Not Started |
+| Retry/truncation fix | Covered above in Section 3 — primary provider truncation detected explicitly, falls back to pdfplumber+OCR immediately, salvage kept only as backup | Not Started |
 | Config cleanup | Move the two remaining hardcoded values (extraction confidence threshold, currently 0.60; any provider-specific text trim limits) out of source code and into config, consolidated alongside the existing `matching_rules.json` | Not Started |
 
 ### Phase 5 — Deferred (Only If a Real Trigger Occurs — Do Not Build Preemptively)
@@ -137,7 +139,7 @@ These weren't explicitly itemized in the Priority Table but are standard product
 - Do not relax the cache-hit condition (`row_count > 0`) — a failed run must never be treated as a valid cache hit.
 - Do not build per-vendor onboarding/configuration — VIVE's universal column-mapping approach is deliberate and should stay that way.
 - Do not build the Phase 5 items preemptively — they are gated behind specific trigger conditions, not a fixed timeline.
-- Do not add Gemini, Groq, or any other AI provider back into the extraction chain — Claude + pdfplumber/OCR is the final decision.
+- Do not add Gemini, Groq, Claude, or any other AI provider back into the extraction chain — Azure OpenAI gpt-5-mini + pdfplumber/OCR is the final decision.
 - Do not build full Admin/Reviewer role separation — a flat permission model is correct for VIVE's current team structure.
 - Do not modify, replace, or attempt to automate away the mock ERP generator, and do not build a live NetSuite integration — this is explicitly out of scope for the current phases (see Section 2). The mock data setup stays exactly as it is until NetSuite API access is available and a separate project is scoped for it.
 - Do not expose the mock ERP generator's suggestion workflow (`scenario_config.json`, the auto-suggested exception targets) in the Streamlit dashboard — it is a CLI-only developer/QA tool and must stay fully separate from the real dashboard used by the 5-10 end users.
@@ -148,9 +150,11 @@ These weren't explicitly itemized in the Priority Table but are standard product
 
 *Add an entry here every time an item's status changes.*
 
-**Note:** `ANTHROPIC_API_KEY` in `.env` is still empty pending company billing
-setup — live pipeline testing with real Claude extraction is parked until
-that's resolved.
+**Note:** Live pipeline testing now runs against the real Azure OpenAI
+endpoint (`AZURE_OPENAI_ENDPOINT`/`AZURE_OPENAI_API_KEY`/
+`AZURE_OPENAI_DEPLOYMENT_GPT5_MINI` in `.env`) — see RULES.md RULE-04 for
+the model-comparison results that led to gpt-5-mini being selected over
+Claude.
 
 **Note:** `tests/test_document_understanding_engine.py` and
 `tests/test_explanation_service.py` mock the AI client but not
