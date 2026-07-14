@@ -41,15 +41,21 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         return ClaudeClient(config)
 
     elif provider_name in ("azure_gpt5_mini", "azure_gpt5_nano", "azure_gpt5_1"):
-        # azure_gpt5_mini is the active primary (see RULES.md RULE-04) after
-        # winning a 3-model comparison; azure_gpt5_nano/azure_gpt5_1 configs
-        # are kept registered for direct get_ai_client() access but are not
-        # part of provider_chain. One shared client class, config-parameterized
-        # per deployment; see azure_openai_client.py.
+        # No longer the active chain (see RULES.md RULE-04 — superseded again
+        # by azure_doc_intel); configs are kept registered for direct
+        # get_ai_client() access pending a separate cleanup pass. One shared
+        # client class, config-parameterized per deployment; see azure_openai_client.py.
         from .azure_openai_client import AzureOpenAIClient
         default_path = f"config/ai/{provider_name}.json"
         config = _load_json(config_paths.get(provider_name, default_path))
         return AzureOpenAIClient(config)
+
+    elif provider_name == "azure_doc_intel":
+        # Active primary (see RULES.md RULE-04) — Azure Document Intelligence
+        # prebuilt-layout, replacing gpt-5-mini. See document_intelligence_client.py.
+        from .document_intelligence_client import DocumentIntelligenceClient
+        config = _load_json(config_paths.get("azure_doc_intel", "config/ai/azure_doc_intel.json"))
+        return DocumentIntelligenceClient(config)
 
     else:
         raise ValueError(f"Unknown provider: '{provider_name}'. Add it to client_factory.py.")

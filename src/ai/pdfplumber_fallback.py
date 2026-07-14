@@ -223,6 +223,8 @@ def _map_columns(header_row):
             col_map["ro_number"] = i
         elif any(kw in cell_lower for kw in ["po #", "po no", "purchase order"]):
             col_map["po_number"] = i
+        elif any(kw in cell_lower for kw in ["work order", "wo #", "wo no"]):
+            col_map["work_order_number"] = i
         elif "description" in cell_lower or "desc" in cell_lower:
             col_map["description"] = i
 
@@ -262,7 +264,7 @@ def _extract_invoice_row(row, col_map, page_num, row_num, default_shop, confiden
         "outstanding_amount": outstanding,
         "ro_number": get("ro_number"),
         "po_number": get("po_number"),
-        "work_order_number": None,
+        "work_order_number": get("work_order_number"),
         "description": get("description"),
         "credit": None,
         "shop": default_shop,

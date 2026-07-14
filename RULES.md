@@ -56,39 +56,64 @@ see the module docstring: "AI never touches this."
 
 ---
 
-### RULE-04 — Azure OpenAI gpt-5-mini + pdfplumber/OCR is the final extraction chain (supersedes original RULE-04)
+### RULE-04 — Azure Document Intelligence (prebuilt-layout) + pdfplumber/OCR is the final extraction chain (supersedes twice)
 
 **Rule:** No other AI providers in the extraction chain. Primary: Azure
-OpenAI gpt-5-mini via the Responses API, PDF sent as a per-page inline
-base64 `input_file` block (medium reasoning effort, 180s per-page timeout —
-sending a whole multi-page statement in one call was found to time out
-even at 600s; per-page calls complete reliably). Fallback: deterministic
-pdfplumber, which handles scanned pages internally via per-page OCR.
+Document Intelligence, `prebuilt-layout` model, the whole PDF sent in ONE
+call (no page splitting — prebuilt-layout handles multi-page and scanned
+documents natively via its own internal OCR). Its generic table
+output (rows/cells, no semantic field labels) is mapped to the Universal
+Financial Document Schema by reusing the same column-header interpreter
+the pdfplumber fallback already used (`_find_header_row` / `_map_columns` /
+`_extract_invoice_row`) — see RULE-07. Fallback: deterministic pdfplumber,
+unchanged, which handles scanned pages internally via per-page OCR.
 
-**Why:** Originally Claude (Haiku 4.5) held this slot (see the superseded
-text below). Vendor consolidation onto Azure OpenAI was a committed
-decision independent of accuracy, so a real 3-model comparison
+**Why:** Azure OpenAI gpt-5-mini (the prior primary — see superseded text
+below) took 90-180s per page; a live test of Document Intelligence's
+`prebuilt-layout` against the same sample vendor statement
+(`sample_data/ASTCollex0526.pdf`) completed the full 4-page document in
+14 seconds with equivalent table/column coverage (all invoice-number,
+date, RO#, work-order#, and outstanding-amount columns detected correctly).
+`prebuilt-invoice` (Document Intelligence's other prebuilt model) was
+explicitly rejected first — it's built for one invoice per document with a
+single header-level `InvoiceId`/`AmountDue`, not a table of many invoices
+per page, and has no equivalent field for dealer-specific `ro_number`/
+`work_order_number` at all. One structural quirk this client works around:
+`prebuilt-layout` returns one `Table` object per page for a table that
+visually continues across pages, but only the *first* such table includes
+the header row — the column map is detected once and reused for every
+subsequent same-shape table (see `document_intelligence_client.py`).
+`src/ai/azure_openai_client.py` and its three deployment configs
+(`azure_gpt5_mini`/`azure_gpt5_nano`/`azure_gpt5_1`) are kept in the repo
+(not deleted) pending a separate cleanup pass.
+
+**Superseded text (kept for history — gpt-5-mini era):** "No other AI
+providers in the extraction chain. Primary: Azure OpenAI gpt-5-mini via the
+Responses API, PDF sent as a per-page inline base64 `input_file` block
+(medium reasoning effort, 180s per-page timeout — sending a whole
+multi-page statement in one call was found to time out even at 600s;
+per-page calls complete reliably). Fallback: deterministic pdfplumber,
+which handles scanned pages internally via per-page OCR. Originally Claude
+(Haiku 4.5) held this slot; vendor consolidation onto Azure OpenAI was a
+committed decision independent of accuracy, so a real 3-model comparison
 (gpt-5-mini, gpt-5-nano, gpt-5.1) was run against sample vendor statements
-using the actual production `VISION_PROMPT` extraction schema. gpt-5-mini
-passed the accuracy gate (exact invoice-count and line-level number/amount
-matches on a smoke test); Claude was retired from the active chain as a
-result. `src/ai/claude_client.py` and `config/ai/claude.json` are kept in
-the repo (not deleted) pending a separate cleanup pass — see
-`src/ai/azure_openai_client.py` for the current primary client.
+using the actual production `VISION_PROMPT` extraction schema — gpt-5-mini
+passed the accuracy gate and Claude was retired from the active chain."
 
-**Superseded text (kept for history):** "No other AI providers in the
-extraction chain. Primary: Claude Vision (PDF sent directly). Fallback:
-deterministic pdfplumber, which handles scanned pages internally via
-per-page OCR. Settled decision (`docs/VIVE_Implementation_Context.md`
+**Superseded text (kept for history — Claude era):** "No other AI providers
+in the extraction chain. Primary: Claude Vision (PDF sent directly).
+Fallback: deterministic pdfplumber, which handles scanned pages internally
+via per-page OCR. Settled decision (`docs/VIVE_Implementation_Context.md`
 Section 3). Gemini and Groq were removed in this session specifically to
 enforce this — having three AI providers with an inconsistent fallback
 order was itself a source of confusion (see the OCR-fix and
 provider-removal work in the Progress Log)."
 
 **Enforced at:** [`config/ai/active_provider.json`](config/ai/active_provider.json)
-(`"provider_chain": ["azure_gpt5_mini", "pdfplumber"]`),
+(`"provider_chain": ["azure_doc_intel", "pdfplumber"]`),
 [`src/ai/client_factory.py`](src/ai/client_factory.py) — `get_ai_client()`,
-[`config/ai/azure_gpt5_mini.json`](config/ai/azure_gpt5_mini.json).
+[`config/ai/azure_doc_intel.json`](config/ai/azure_doc_intel.json),
+[`src/ai/document_intelligence_client.py`](src/ai/document_intelligence_client.py).
 
 ---
 
