@@ -1,7 +1,10 @@
 {
-  "_comment": "Final chain (see docs/VIVE_Implementation_Context.md Section 3): Claude Vision primary, deterministic pdfplumber (with internal OCR fallback for scanned pages) as last resort. No other AI providers.",
-  "provider_chain": ["claude", "pdfplumber"],
+  "_comment": "See RULES.md RULE-04 (superseded): Azure OpenAI gpt-5-mini is now the primary extraction engine (replaced Claude Vision after model comparison — see docs), deterministic pdfplumber (with internal OCR fallback for scanned pages) remains the non-AI last resort. azure_gpt5_nano/azure_gpt5_1 config paths are kept registered for direct get_ai_client() access but are not part of the active chain — gpt-5-mini won the comparison.",
+  "provider_chain": ["azure_gpt5_mini", "pdfplumber"],
   "provider_config_paths": {
-    "claude": "config/ai/claude.json"
+    "claude": "config/ai/claude.json",
+    "azure_gpt5_mini": "config/ai/azure_gpt5_mini.json",
+    "azure_gpt5_nano": "config/ai/azure_gpt5_nano.json",
+    "azure_gpt5_1": "config/ai/azure_gpt5_1.json"
   }
 }

@@ -30,7 +30,7 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
 
     if provider_name is None:
         # Default: first in chain
-        chain = active_config.get("provider_chain", ["claude"])
+        chain = active_config.get("provider_chain", ["azure_gpt5_mini"])
         provider_name = chain[0]
 
     config_paths = active_config.get("provider_config_paths", {})
@@ -40,9 +40,18 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         config = _load_json(config_paths.get("claude", "config/ai/claude.json"))
         return ClaudeClient(config)
 
+    elif provider_name in ("azure_gpt5_mini", "azure_gpt5_nano", "azure_gpt5_1"):
+        # azure_gpt5_mini is the active primary (see RULES.md RULE-04) after
+        # winning a 3-model comparison; azure_gpt5_nano/azure_gpt5_1 configs
+        # are kept registered for direct get_ai_client() access but are not
+        # part of provider_chain. One shared client class, config-parameterized
+        # per deployment; see azure_openai_client.py.
+        from .azure_openai_client import AzureOpenAIClient
+        default_path = f"config/ai/{provider_name}.json"
+        config = _load_json(config_paths.get(provider_name, default_path))
+        return AzureOpenAIClient(config)
+
     else:
-        # See RULES.md RULE-04 — Claude + pdfplumber/OCR is the final chain.
-        # Don't add another AI provider branch here without checking that rule first.
         raise ValueError(f"Unknown provider: '{provider_name}'. Add it to client_factory.py.")
 
 
@@ -50,4 +59,4 @@ def get_provider_chain() -> list:
     """Returns the full ordered provider chain from config."""
     active_config_path = "config/ai/active_provider.json"
     active_config = _load_json(active_config_path)
-    return active_config.get("provider_chain", ["claude", "pdfplumber"])
+    return active_config.get("provider_chain", ["azure_gpt5_mini", "pdfplumber"])

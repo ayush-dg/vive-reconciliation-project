@@ -56,21 +56,39 @@ see the module docstring: "AI never touches this."
 
 ---
 
-### RULE-04 — Claude (Haiku 4.5) + pdfplumber/OCR is the final extraction chain
+### RULE-04 — Azure OpenAI gpt-5-mini + pdfplumber/OCR is the final extraction chain (supersedes original RULE-04)
 
-**Rule:** No other AI providers in the extraction chain. Primary: Claude
-Vision (PDF sent directly). Fallback: deterministic pdfplumber, which
-handles scanned pages internally via per-page OCR.
+**Rule:** No other AI providers in the extraction chain. Primary: Azure
+OpenAI gpt-5-mini via the Responses API, PDF sent as a per-page inline
+base64 `input_file` block (medium reasoning effort, 180s per-page timeout —
+sending a whole multi-page statement in one call was found to time out
+even at 600s; per-page calls complete reliably). Fallback: deterministic
+pdfplumber, which handles scanned pages internally via per-page OCR.
 
-**Why:** Settled decision (`docs/VIVE_Implementation_Context.md` Section 3).
-Gemini and Groq were removed in this session specifically to enforce this —
-having three AI providers with an inconsistent fallback order was itself a
-source of confusion (see the OCR-fix and provider-removal work in the
-Progress Log).
+**Why:** Originally Claude (Haiku 4.5) held this slot (see the superseded
+text below). Vendor consolidation onto Azure OpenAI was a committed
+decision independent of accuracy, so a real 3-model comparison
+(gpt-5-mini, gpt-5-nano, gpt-5.1) was run against sample vendor statements
+using the actual production `VISION_PROMPT` extraction schema. gpt-5-mini
+passed the accuracy gate (exact invoice-count and line-level number/amount
+matches on a smoke test); Claude was retired from the active chain as a
+result. `src/ai/claude_client.py` and `config/ai/claude.json` are kept in
+the repo (not deleted) pending a separate cleanup pass — see
+`src/ai/azure_openai_client.py` for the current primary client.
+
+**Superseded text (kept for history):** "No other AI providers in the
+extraction chain. Primary: Claude Vision (PDF sent directly). Fallback:
+deterministic pdfplumber, which handles scanned pages internally via
+per-page OCR. Settled decision (`docs/VIVE_Implementation_Context.md`
+Section 3). Gemini and Groq were removed in this session specifically to
+enforce this — having three AI providers with an inconsistent fallback
+order was itself a source of confusion (see the OCR-fix and
+provider-removal work in the Progress Log)."
 
 **Enforced at:** [`config/ai/active_provider.json`](config/ai/active_provider.json)
-(`"provider_chain": ["claude", "pdfplumber"]`),
-[`src/ai/client_factory.py`](src/ai/client_factory.py) — `get_ai_client()`.
+(`"provider_chain": ["azure_gpt5_mini", "pdfplumber"]`),
+[`src/ai/client_factory.py`](src/ai/client_factory.py) — `get_ai_client()`,
+[`config/ai/azure_gpt5_mini.json`](config/ai/azure_gpt5_mini.json).
 
 ---
 
