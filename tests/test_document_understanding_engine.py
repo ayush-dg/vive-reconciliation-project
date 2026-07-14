@@ -14,8 +14,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 os.environ["ANTHROPIC_API_KEY"] = "test-key"
 
-# Claude Vision is the only AI path — it's tried on every PDF regardless of
-# this text's length. pdf_text itself is no longer consulted by the engine
+# The active provider (from provider_chain in active_provider.json — currently
+# Azure OpenAI gpt-5-mini) is the only AI path, tried on every PDF regardless
+# of this text's length. pdf_text itself is no longer consulted by the engine
 # (both the primary and fallback paths read the PDF file directly); it's
 # only accepted for call-site compatibility with notebooks/01_document_intake.py.
 SAMPLE_PDF_TEXT = (
@@ -87,13 +88,15 @@ SAMPLE_SCHEMA_RESULT = {
 }
 
 
-class FakeClaudeClient:
-    """Fake client with both text and vision methods stubbed."""
+class FakeAIClient:
+    """Fake client with both text and vision methods stubbed — stands in for
+    whichever provider is active (Azure OpenAI gpt-5-mini today, Claude
+    previously); the engine only depends on the AIClient interface."""
     def __init__(self, generate_result=None, vision_result=None):
         self._generate = generate_result
         self._vision = vision_result
-        self.model = "claude-haiku-4-5-20251001"
-        self.config = {"model": "claude-haiku-4-5-20251001"}
+        self.model = "gpt-5-mini"
+        self.config = {"model": "gpt-5-mini"}
 
     def generate(self, prompt, **kwargs):
         return self._generate
@@ -102,13 +105,13 @@ class FakeClaudeClient:
         return self._vision
 
 
-def make_response(success=True, parsed=None, provider="claude", error=None):
+def make_response(success=True, parsed=None, provider="azure_openai", error=None):
     from src.ai.base_client import AIResponse
     return AIResponse(
         success=success,
         text=json.dumps(parsed) if parsed else "",
         parsed_json=parsed,
-        model="claude-haiku-4-5-20251001",
+        model="gpt-5-mini",
         provider=provider,
         latency_ms=100.0,
         attempt_count=1,
@@ -118,17 +121,18 @@ def make_response(success=True, parsed=None, provider="claude", error=None):
 
 class TestDocumentUnderstandingEngine(unittest.TestCase):
 
-    def test_engine_uses_claude_vision_first(self):
-        """Claude Vision is the primary (and only AI) path for any PDF."""
+    def test_engine_uses_active_provider_first(self):
+        """The active provider (get_ai_client() with no args, resolved from
+        provider_chain) is the primary (and only AI) path for any PDF."""
         import src.ai.client_factory as factory
         original_get = factory.get_ai_client
 
         vision_called = {"count": 0}
 
         def fake_get_client(provider_name=None):
-            if provider_name == "claude":
-                client = FakeClaudeClient(
-                    vision_result=make_response(parsed=SAMPLE_SCHEMA_RESULT, provider="claude")
+            if provider_name is None:
+                client = FakeAIClient(
+                    vision_result=make_response(parsed=SAMPLE_SCHEMA_RESULT, provider="azure_openai")
                 )
                 original_vision = client.generate_with_file
                 def counted_vision(pdf_path, prompt):
@@ -145,21 +149,21 @@ class TestDocumentUnderstandingEngine(unittest.TestCase):
             result = engine.understand(SAMPLE_PDF_TEXT, "test.pdf")
 
             self.assertEqual(vision_called["count"], 1)
-            self.assertEqual(result["_provider_used"], "claude_vision")
+            self.assertEqual(result["_provider_used"], "azure_openai")
             self.assertEqual(len(result["invoices"]), 2)
         finally:
             factory.get_ai_client = original_get
 
     def test_engine_falls_back_to_pdfplumber_when_vision_fails(self):
-        """When Claude Vision fails, fallback is deterministic pdfplumber —
-        there's no second AI provider in the chain to try."""
+        """When the active provider fails, fallback is deterministic
+        pdfplumber — there's no second AI provider in the chain to try."""
         import src.ai.client_factory as factory
         original_get = factory.get_ai_client
 
         def fake_get_client(provider_name=None):
-            if provider_name == "claude":
-                return FakeClaudeClient(
-                    vision_result=make_response(success=False, error="Vision quota exceeded", provider="claude")
+            if provider_name is None:
+                return FakeAIClient(
+                    vision_result=make_response(success=False, error="Vision quota exceeded", provider="azure_openai")
                 )
             raise ValueError(f"Unexpected: {provider_name}")
 

@@ -4,19 +4,20 @@ document_understanding_engine.py
 The core AI stage. Takes a PDF path, calls the AI provider chain, and
 returns a Universal Financial Document Schema dict.
 
-Final chain (see docs/VIVE_Implementation_Context.md Section 3 — Claude
-(Haiku 4.5) + pdfplumber/OCR is the settled decision, no other AI
-providers):
-  Primary:  Claude Vision — send the PDF file directly as a document
-            content block. Handles text-based, scanned, thin-text-layer,
-            and hybrid PDFs identically, since Claude reads the PDF
-            natively regardless of what's underneath.
-  Fallback: only reached if Claude Vision itself fails (quota, network,
-            etc). Deterministic pdfplumber extraction — no AI, no cost.
-            pdfplumber_fallback.extract_with_pdfplumber() now handles
-            scanned pages internally via per-page OCR (see its module
-            docstring), so this fallback needs no OCR-vs-text branching
-            here — it's a single call either way.
+Final chain (see RULES.md RULE-04 — Azure OpenAI gpt-5-mini + pdfplumber/OCR
+is the settled decision, no other AI providers active):
+  Primary:  Whichever provider client_factory.get_ai_client() resolves from
+            active_provider.json's provider_chain (currently Azure OpenAI
+            gpt-5-mini) — send the PDF file directly as a document content
+            block. Handles text-based, scanned, thin-text-layer, and hybrid
+            PDFs identically, since the model reads the PDF natively
+            regardless of what's underneath.
+  Fallback: only reached if the primary provider itself fails (quota,
+            network, timeout, etc). Deterministic pdfplumber extraction —
+            no AI, no cost. pdfplumber_fallback.extract_with_pdfplumber()
+            now handles scanned pages internally via per-page OCR (see its
+            module docstring), so this fallback needs no OCR-vs-text
+            branching here — it's a single call either way.
 
 There is deliberately no character-count heuristic deciding between a
 "text PDF path" and a "scanned PDF path" up front for the primary path —
@@ -123,9 +124,10 @@ class DocumentUnderstandingEngine:
     """
     Universal PDF extraction engine.
 
-    Primary path: Claude Vision (handles any PDF — text, scanned, hybrid).
-    Fallback path (only if Claude fails): deterministic pdfplumber, which
-    handles scanned pages internally via per-page OCR.
+    Primary path: whichever provider is active in provider_chain (handles
+    any PDF — text, scanned, hybrid). Fallback path (only if the primary
+    provider fails): deterministic pdfplumber, which handles scanned pages
+    internally via per-page OCR.
 
     No PDF-format detection needed. Vision is format-agnostic.
 
@@ -142,16 +144,17 @@ class DocumentUnderstandingEngine:
         pdf_text is accepted for call-site compatibility with
         notebooks/01_document_intake.py (which still calls extract_pdf_text()
         for its own char/page-count logging) but is not used here — both the
-        primary (Claude Vision) and fallback (pdfplumber) paths read the PDF
-        file directly.
+        primary (active AI provider) and fallback (pdfplumber) paths read
+        the PDF file directly.
         """
         source_file = os.path.basename(pdf_path)
 
-        # --- PRIMARY PATH: Claude Vision (universal, handles all PDF formats) ---
-        print(f"  [Engine] Attempting Claude Vision (primary path — handles any PDF format)...")
+        # --- PRIMARY PATH: active provider from provider_chain (universal, handles all PDF formats) ---
+        primary_client = client_factory.get_ai_client()
+        provider_label = primary_client.__class__.__name__
+        print(f"  [Engine] Attempting {provider_label} (primary path — handles any PDF format)...")
         try:
-            claude_client = client_factory.get_ai_client("claude")
-            response = claude_client.generate_with_file(pdf_path, VISION_PROMPT)
+            response = primary_client.generate_with_file(pdf_path, VISION_PROMPT)
 
             try:
                 log_ai_call(
@@ -171,15 +174,15 @@ class DocumentUnderstandingEngine:
 
             if response.success and response.parsed_json:
                 result = response.parsed_json
-                result["_provider_used"] = "claude_vision"
+                result["_provider_used"] = response.provider
                 result["_model_used"] = response.model
-                print(f"  [Engine] Claude Vision success — "
+                print(f"  [Engine] {provider_label} success — "
                       f"{len(result.get('invoices', []))} invoices extracted")
                 return result
             else:
-                print(f"  [Engine] Claude Vision failed: {response.error}")
+                print(f"  [Engine] {provider_label} failed: {response.error}")
         except Exception as e:
-            print(f"  [Engine] Claude Vision error: {e}")
+            print(f"  [Engine] {provider_label} error: {e}")
 
         # --- FALLBACK PATH: deterministic pdfplumber (no AI, no cost) ---
         # extract_with_pdfplumber() handles scanned pages internally via
