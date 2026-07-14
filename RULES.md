@@ -78,12 +78,22 @@ date, RO#, work-order#, and outstanding-amount columns detected correctly).
 explicitly rejected first — it's built for one invoice per document with a
 single header-level `InvoiceId`/`AmountDue`, not a table of many invoices
 per page, and has no equivalent field for dealer-specific `ro_number`/
-`work_order_number` at all. One structural quirk this client works around:
-`prebuilt-layout` returns one `Table` object per page for a table that
-visually continues across pages, but only the *first* such table includes
-the header row — the column map is detected once and reused for every
-subsequent same-shape table (see `document_intelligence_client.py`).
-`src/ai/azure_openai_client.py` and its three deployment configs
+`work_order_number` at all. Two structural quirks this client works around,
+both found only by live-testing against all 3 real sample statements, not
+just one: (1) `prebuilt-layout` returns one `Table` object per page, and
+whether a later page's table has its own header or is a headerless
+continuation of an earlier one varies by vendor — ASTCollex is one ledger
+split across 4 pages (header only on page 1), while KSI/Fred Beans have a
+genuinely different table per page. Header detection therefore runs
+independently on every table first; the last successfully-detected col_map
+is reused only when a table has no header of its own *and* its column
+count matches — never assumed globally from the first table alone. (2) A
+trailing "Total Outstanding Invoices: ... $13,860.79 USD" footer row can
+trip the same broad keyword scan used to detect headers (it contains both
+"outstanding" and "invoice"); a header match found anywhere but at/near the
+top of a table (`HEADER_MAX_DATA_START` in `document_intelligence_client.py`)
+is rejected as a false positive rather than silently discarding every real
+row before it. `src/ai/azure_openai_client.py` and its three deployment configs
 (`azure_gpt5_mini`/`azure_gpt5_nano`/`azure_gpt5_1`) are kept in the repo
 (not deleted) pending a separate cleanup pass.
 

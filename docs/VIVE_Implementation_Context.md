@@ -28,19 +28,20 @@ A Python-based tool built for VIVE Collision (multi-shop auto body repair compan
 - **Partial-JSON salvage**: brace-counting logic recovers usable data from a truncated AI response — kept as a backup strategy, not the first thing tried (see Section 3)
 - **Bronze/Silver/Gold layering** in SQLite (`lakehouse/reconciliation.db`) — Bronze (raw AI output) → Silver (typed/normalized, shared schema for both vendor and ERP sides) → Gold (`gold_matched_invoices`, `gold_exceptions`, `gold_reconciliation_summary`)
 - **Existing logging tables**: `ai_audit_log` (every AI call, with `ai_provider`, `model`, `success`, `attempt_count`, `error_message` columns) and `document_intake_log` (one row per PDF, with `extraction_method`, `extraction_model`, `extraction_confidence_overall` columns) — **both already exist in the schema**, no new tables needed for basic provenance tracking
-- **30 passing tests** across 4 pytest files (AI clients, document understanding engine, matching engine, explanation service)
+- **45 tests** across 6 pytest files (AI clients, Azure OpenAI client, Document Intelligence client, document understanding engine, matching engine, explanation service) — 44 passing; 1 pre-existing failure (`test_ai_clients.py::TestClaudeClient::test_generate_with_file_parses_json`, a Windows file-locking quirk unrelated to any AI provider switch)
 
 ## 3. Final AI Extraction Decision
 
-- **Azure OpenAI gpt-5-mini is the extraction engine.** Not gpt-5-nano, not gpt-5.1 — a real 3-model comparison was run against sample vendor statements using the production extraction schema, and gpt-5-mini passed the accuracy gate (exact invoice-count and line-level number/amount matches) at the appropriate, cost-effective tier for this task.
-- **History:** Claude (Haiku 4.5) briefly held this slot after the Gemini/Groq removal (see Progress Log below). It was replaced by Azure OpenAI gpt-5-mini for vendor consolidation — a committed decision independent of accuracy — after gpt-5-mini cleared the same accuracy bar in direct testing. See RULES.md RULE-04 for the full history, including the superseded Claude-era text.
-- **pdfplumber + Tesseract OCR is the last-resort fallback** if the primary provider is unavailable — free, no AI, no per-call cost. This is a real fallback, not theoretical: pdfplumber alone cannot read scanned PDFs, which is why OCR must run first for scanned documents before pdfplumber can parse them.
-- **Final chain: Azure OpenAI gpt-5-mini → pdfplumber+OCR.** No other AI providers in the chain.
-- **Per-page extraction, not whole-document-in-one-call**: sending an entire multi-page statement to gpt-5-mini in a single Responses API call was found to time out even at 600s; the PDF is split and sent one page per call instead (180s timeout, medium reasoning effort), with results aggregated afterward.
-- **Truncation handling**: if the primary provider's response is truncated (hit a token limit), detect this explicitly and fall back to pdfplumber+OCR immediately — the existing brace-counting salvage logic is kept only as a secondary recovery attempt, not the first thing tried.
-- **The primary provider is also used for the optional `--explain` narrative step** (unchanged from before) — writing a plain-English cause/suggested-action per exception. This never changes a match decision, only adds narrative.
+- **Azure Document Intelligence (`prebuilt-layout`) is the extraction engine.** Not Azure OpenAI gpt-5-mini — a live test against sample vendor statements found `prebuilt-layout` completing a full 4-page document in ~14s vs. gpt-5-mini's 90-180s per page, with equivalent column coverage once a col_map-reuse bug found during live testing was fixed (see Progress Log, 2026-07-14). `prebuilt-invoice` (Document Intelligence's other prebuilt model) was evaluated and rejected first — it's built for one invoice per document with a single header-level `InvoiceId`/`AmountDue`, not a table of many invoices per page, and has no field at all for dealer-specific `ro_number`/`work_order_number`.
+- **History:** Claude (Haiku 4.5) held this slot after the Gemini/Groq removal, then Azure OpenAI gpt-5-mini replaced it for vendor consolidation after a real 3-model comparison (gpt-5-mini/gpt-5-nano/gpt-5.1) against the production extraction schema — gpt-5-mini passed the accuracy gate. Document Intelligence then replaced gpt-5-mini purely on speed, not accuracy. See RULES.md RULE-04 for the full history (now superseded twice), including exact numbers from all three eras.
+- **pdfplumber + Tesseract OCR is the last-resort fallback** if the primary provider is unavailable — free, no AI, no per-call cost. Unchanged by this switch. This is a real fallback, not theoretical: pdfplumber alone cannot read scanned PDFs, which is why OCR must run first for scanned documents before pdfplumber can parse them.
+- **Final chain: Azure Document Intelligence (`prebuilt-layout`) → pdfplumber+OCR.** No other AI providers in the chain. `src/ai/azure_openai_client.py` and its gpt-5-mini/gpt-5-nano/gpt-5.1 configs remain in the repo, registered for direct `get_ai_client()` access, but are not part of the active chain, pending a separate cleanup pass.
+- **One call for the whole document, not per-page.** The opposite of the gpt-5-mini era: `prebuilt-layout` handles a multi-page (and scanned) PDF natively in a single call — no page-splitting step, no per-page rasterization, no per-page retry loop. (The now-inactive `AzureOpenAIClient` still does per-page splitting internally; that logic is unchanged, just unused while gpt-5-mini is out of the chain.)
+- **Column mapping is now done in Python, not by an LLM.** `prebuilt-layout` returns generic table geometry (rows/cells), no semantic field labels — unlike gpt-5-mini, which used `VISION_PROMPT`'s natural-language column-mapping instructions. The same universal, per-vendor-config-free column-mapping goal (RULE-07) is preserved, but implemented as deterministic keyword matching (`_find_header_row`/`_map_columns`/`_extract_invoice_row`, shared with the pdfplumber fallback) instead of LLM reasoning about column semantics.
+- **Truncation handling is now moot for the primary path.** The token-truncation/JSON-salvage handling described in earlier versions of this section was specific to gpt-5-mini's LLM output format; Document Intelligence has no token-limit truncation failure mode. The pdfplumber+OCR fallback and its own salvage/confidence-tagging behavior are unaffected.
+- **⚠️ Known regression, not yet fixed: the optional `--explain` narrative step is currently broken.** `explanation_service.py`'s `_explain_one()` walks `provider_chain` looking for a text-capable client (skipping only `"pdfplumber"`), which worked when `chain[0]` was gpt-5-mini (a real LLM). Now `chain[0]` is `azure_doc_intel`, whose `generate()` always returns a clean failure by design (Document Intelligence has no text-completion mode — see `document_intelligence_client.py`), and `chain[1]` is `"pdfplumber"` (explicitly skipped) — so every exception explanation now fails with "All providers failed." No test caught this because `tests/test_explanation_service.py` pins its own fake `provider_chain` rather than reading the real config file. Needs a fix (e.g., `explanation_service.py` should call a specific text-capable provider directly instead of iterating the extraction chain) before `--explain` is used again.
 - **pdfplumber's "confidence" is fake/manual, not a real self-assessment** — the code assigns 0.65 if it found table-like rows, 0.20 if not. Since the validation gate threshold is 0.60, a 0.65 "pass" is really just "found something table-shaped," not a genuine quality signal. Be aware of this when touching validation logic — a messy but table-shaped extraction could slide through as "valid" when it shouldn't.
-- **Which extraction method processed a given document is already loggable** via the existing `document_intake_log.extraction_method` and `ai_audit_log.ai_provider` columns — when implementing the new chain, make sure the code writing to these columns uses clean values (`"azure_openai"`, `"pdfplumber_ocr"`) and not leftover provider-specific strings from prior chains.
+- **Which extraction method processed a given document is already loggable** via the existing `document_intake_log.extraction_method` and `ai_audit_log.ai_provider` columns — the current clean provider value is `"azure_document_intelligence"` (was `"azure_openai"` in the gpt-5-mini era); make sure any new code writing to these columns uses that value, not a leftover string from a prior chain.
 
 ## 4. Implementation Phases (Priority Order)
 
@@ -139,7 +140,7 @@ These weren't explicitly itemized in the Priority Table but are standard product
 - Do not relax the cache-hit condition (`row_count > 0`) — a failed run must never be treated as a valid cache hit.
 - Do not build per-vendor onboarding/configuration — VIVE's universal column-mapping approach is deliberate and should stay that way.
 - Do not build the Phase 5 items preemptively — they are gated behind specific trigger conditions, not a fixed timeline.
-- Do not add Gemini, Groq, Claude, or any other AI provider back into the extraction chain — Azure OpenAI gpt-5-mini + pdfplumber/OCR is the final decision.
+- Do not add Gemini, Groq, Claude, or any other AI provider back into the extraction chain — Azure Document Intelligence (`prebuilt-layout`) + pdfplumber/OCR is the final decision (see RULES.md RULE-04). Azure OpenAI gpt-5-mini/gpt-5-nano/gpt-5.1 were evaluated and are no longer the active chain, though the client and configs remain in the repo pending a separate cleanup pass.
 - Do not build full Admin/Reviewer role separation — a flat permission model is correct for VIVE's current team structure.
 - Do not modify, replace, or attempt to automate away the mock ERP generator, and do not build a live NetSuite integration — this is explicitly out of scope for the current phases (see Section 2). The mock data setup stays exactly as it is until NetSuite API access is available and a separate project is scoped for it.
 - Do not expose the mock ERP generator's suggestion workflow (`scenario_config.json`, the auto-suggested exception targets) in the Streamlit dashboard — it is a CLI-only developer/QA tool and must stay fully separate from the real dashboard used by the 5-10 end users.
@@ -150,11 +151,14 @@ These weren't explicitly itemized in the Priority Table but are standard product
 
 *Add an entry here every time an item's status changes.*
 
-**Note:** Live pipeline testing now runs against the real Azure OpenAI
-endpoint (`AZURE_OPENAI_ENDPOINT`/`AZURE_OPENAI_API_KEY`/
-`AZURE_OPENAI_DEPLOYMENT_GPT5_MINI` in `.env`) — see RULES.md RULE-04 for
-the model-comparison results that led to gpt-5-mini being selected over
-Claude.
+**Note:** Live pipeline testing now runs against the real Azure Document
+Intelligence endpoint (`AZURE_DOC_INTEL_ENDPOINT`/`AZURE_DOC_INTEL_KEY` in
+`.env`) — see RULES.md RULE-04 for the full history (Claude → Azure OpenAI
+gpt-5-mini → Azure Document Intelligence) and the reasoning behind each
+switch. The Azure OpenAI endpoint variables (`AZURE_OPENAI_ENDPOINT`/
+`AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_DEPLOYMENT_GPT5_MINI`) are still
+present in `.env` for the now-inactive client but are no longer read by
+the active chain.
 
 **Note:** `tests/test_document_understanding_engine.py` and
 `tests/test_explanation_service.py` mock the AI client but not
