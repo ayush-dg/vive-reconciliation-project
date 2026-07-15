@@ -5,6 +5,7 @@
     "claude": "config/ai/claude.json",
     "mistral": "config/ai/mistral.json",
     "gemini": "config/ai/gemini.json",
+    "claude_sonnet": "config/ai/claude_sonnet_extraction.json",
     "azure_gpt5_mini": "config/ai/azure_gpt5_mini.json",
     "azure_gpt5_nano": "config/ai/azure_gpt5_nano.json",
     "azure_gpt5_1": "config/ai/azure_gpt5_1.json",

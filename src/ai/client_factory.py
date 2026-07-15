@@ -49,6 +49,14 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         config = _load_json(config_paths.get("mistral", "config/ai/mistral.json"))
         return MistralClient(config)
 
+    elif provider_name == "claude_sonnet":
+        # Claude Sonnet 4.6 via Azure Foundry (streaming) — registered as an
+        # alternate extraction provider, not part of the active chain (gemini
+        # is primary — see above). See claude_sonnet_client.py.
+        from .claude_sonnet_client import ClaudeSonnetClient
+        config = _load_json(config_paths.get("claude_sonnet", "config/ai/claude_sonnet_extraction.json"))
+        return ClaudeSonnetClient(config)
+
     elif provider_name == "gemini":
         # Active primary — Gemini 2.5 Flash via the google-genai SDK. Sends
         # the whole PDF as one file upload + one generate_content call (no
