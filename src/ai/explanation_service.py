@@ -151,7 +151,11 @@ class ExplanationService:
             print(f"  [Explain] Failed for {invoice_number}: no explanation provider available")
             return False
 
-        response = client.generate(prompt, temperature=0.3)
+        # max_output_tokens is capped well below the client's 65536 default —
+        # this is a few sentences of JSON, not a document extraction, and a
+        # non-streaming call above ~16K max_tokens trips the SDK's own
+        # "streaming is required" guard against long-running requests.
+        response = client.generate(prompt, temperature=0.3, max_output_tokens=1024)
 
         # Log the call
         try:

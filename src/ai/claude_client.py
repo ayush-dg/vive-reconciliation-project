@@ -3,6 +3,11 @@ claude_client.py
 
 Claude (Haiku 4.5) implementation of AIClient.
 The ONLY file that knows Anthropic's SDK/wire format.
+
+Calls go through Azure Foundry (`anthropic.AnthropicFoundry`) rather than
+Anthropic's API directly — same Messages API wire format, just routed via
+an Azure-hosted deployment. See AZURE_CLAUDE_ENDPOINT / AZURE_CLAUDE_API_KEY /
+AZURE_CLAUDE_DEPLOYMENT in .env and config/ai/claude.json's *_env_var keys.
 """
 
 import json
@@ -27,8 +32,23 @@ class ClaudeClient(AIClient):
         api_key_var = config.get("api_key_env_var", "ANTHROPIC_API_KEY")
         self.api_key = os.environ.get(api_key_var)
 
+        # Azure Foundry routing — optional. When endpoint_env_var resolves to a
+        # set env var, _build_client() constructs an AnthropicFoundry client
+        # instead of talking to Anthropic directly, and deployment_env_var (if
+        # set) overrides config["model"] with the Foundry deployment name.
+        self.endpoint = os.environ.get(config.get("endpoint_env_var", "AZURE_CLAUDE_ENDPOINT"))
+        self.deployment = os.environ.get(config.get("deployment_env_var", "AZURE_CLAUDE_DEPLOYMENT"))
+
+    def _build_client(self):
+        """Anthropic client — routed via Azure Foundry when self.endpoint is set."""
+        import anthropic
+
+        if self.endpoint:
+            return anthropic.AnthropicFoundry(api_key=self.api_key, base_url=self.endpoint)
+        return anthropic.Anthropic(api_key=self.api_key)
+
     def generate(self, prompt: str, *, temperature=None, max_output_tokens=None) -> AIResponse:
-        model = self.config["model"]
+        model = self.deployment or self.config["model"]
         temperature = temperature if temperature is not None else self.config.get("temperature", 0.1)
         max_tokens = max_output_tokens or self.config.get("max_output_tokens", 8192)
         retry_policy = self.config.get("retry_policy", {})
@@ -90,11 +110,9 @@ class ClaudeClient(AIClient):
         )
 
     def _real_claude_call(self, prompt, model, temperature, max_tokens):
-        """Real Claude API call using the anthropic SDK."""
+        """Real Claude API call using the anthropic SDK (via Azure Foundry — see _build_client)."""
         try:
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=self.api_key)
+            client = self._build_client()
             response = client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
@@ -349,7 +367,7 @@ class ClaudeClient(AIClient):
         import base64
         import time
 
-        model = self.config["model"]
+        model = self.deployment or self.config["model"]
         temperature = self.config.get("temperature", 0.1)
         max_tokens = self.config.get("max_output_tokens", 65536)
         retry_policy = self.config.get("retry_policy", {})
@@ -406,11 +424,9 @@ class ClaudeClient(AIClient):
 
     def _real_claude_file_call(self, pdf_b64: str, prompt: str,
                                 model: str, temperature: float, max_tokens: int):
-        """Claude API call with an inline base64 PDF document block."""
+        """Claude API call with an inline base64 PDF document block (via Azure Foundry — see _build_client)."""
         try:
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=self.api_key)
+            client = self._build_client()
             response = client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
