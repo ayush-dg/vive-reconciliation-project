@@ -88,8 +88,15 @@ STEP 2: Extract every single data row exactly as printed. For each row:
 - Do NOT merge rows
 - Do NOT calculate anything
 
+Also extract document-level metadata at the top of the JSON response:
+- vendor_name: the vendor/supplier company name as printed on the
+  document (e.g. 'Fred Beans Parts Inc', 'asTech', 'KSI')
+- statement_date: the statement date if visible
+
 Return JSON:
 {
+  vendor_name: '...',
+  statement_date: '...',
   columns_found: [exact column names from header],
   rows: [{col1: val, col2: val, ...}]
 }"""
@@ -299,6 +306,8 @@ class GeminiClient(AIClient):
 
                 rows = parsed.get("rows", []) or []
                 columns_found = parsed.get("columns_found", []) or []
+                vendor_name = parsed.get("vendor_name") or None
+                statement_date = parsed.get("statement_date") or None
                 print(f"  [GeminiClient] Columns found: {columns_found}")
 
                 invoices, fallback_warnings = self._rows_to_invoices(rows, columns_found)
@@ -306,6 +315,7 @@ class GeminiClient(AIClient):
                 result = self._build_schema(
                     pdf_path, invoices, columns_found,
                     bool(parsed.get("_salvaged")), fallback_warnings,
+                    vendor_name=vendor_name, statement_date=statement_date,
                 )
 
                 if usage:
@@ -601,7 +611,8 @@ class GeminiClient(AIClient):
             return None
 
     def _build_schema(self, pdf_path: str, invoices: list, columns_found: list, salvaged: bool,
-                       fallback_warnings: Optional[list] = None) -> dict:
+                       fallback_warnings: Optional[list] = None, vendor_name: Optional[str] = None,
+                       statement_date: Optional[str] = None) -> dict:
         statement_total = sum(
             inv.get("outstanding_amount", 0) or 0
             for inv in invoices
@@ -633,13 +644,13 @@ class GeminiClient(AIClient):
                 "document_type_confidence": 0.60,
             },
             "vendor_metadata": {
-                "vendor_name": None,
+                "vendor_name": vendor_name,
                 "vendor_address": None,
                 "shop_or_entity": [],
-                "vendor_confidence": 0.10,
+                "vendor_confidence": 0.50 if vendor_name else 0.10,
             },
             "statement_metadata": {
-                "statement_date": None,
+                "statement_date": statement_date,
                 "statement_period_start": None,
                 "statement_period_end": None,
                 "currency": "USD",
@@ -701,6 +712,15 @@ class GeminiClient(AIClient):
                 except Exception:
                     columns_found = []
 
+        # vendor_name/statement_date are written before columns_found/rows in
+        # the prompted response shape, so they're recoverable even when
+        # truncation cuts off partway through the rows array.
+        header_text = text[:rows_start]
+        vendor_name_match = re.search(r'"vendor_name"\s*:\s*"([^"]*)"', header_text)
+        vendor_name = vendor_name_match.group(1) if vendor_name_match else None
+        statement_date_match = re.search(r'"statement_date"\s*:\s*"([^"]*)"', header_text)
+        statement_date = statement_date_match.group(1) if statement_date_match else None
+
         rows_text = text[array_start:]
         salvaged = []
         i = 0
@@ -743,7 +763,11 @@ class GeminiClient(AIClient):
 
         if not salvaged:
             return None
-        return {"rows": salvaged, "columns_found": columns_found, "_salvaged": True}
+        return {
+            "rows": salvaged, "columns_found": columns_found,
+            "vendor_name": vendor_name, "statement_date": statement_date,
+            "_salvaged": True,
+        }
 
     def _clean_error(self, raw_error: str) -> str:
         if not raw_error:

@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -353,6 +354,36 @@ def update_intake_log_blob_path(statement_id: str, blob_storage_path: str):
     )
 
 
+def derive_vendor_slug_from_filename(pdf_path: str):
+    """
+    Best-effort vendor slug guessed from the PDF filename, used only when
+    extraction didn't yield a vendor_name. Vendor statement filenames are
+    typically `<Vendor>[_<Shop/Location>]_<date-digits>.pdf` — split on
+    non-alphanumeric separators, drop any token that's purely digits (or
+    strip a trailing digit run off an alphanumeric token, e.g.
+    "ASTCollex0526" -> "ASTCollex"), and keep at most the first two
+    remaining tokens (the vendor name is at the front; shop/location and
+    date noise trail after it). Returns None if nothing usable remains.
+
+    Examples: ASTCollex0526.pdf -> astcollex,
+    Fred_Beans_MidNJ_053126.pdf -> fred_beans,
+    KSI_Noakers_053126.pdf -> ksi_noakers.
+    """
+    stem = os.path.splitext(os.path.basename(pdf_path))[0]
+    raw_tokens = re.split(r"[^A-Za-z0-9]+", stem)
+
+    tokens = []
+    for tok in raw_tokens:
+        stripped = re.sub(r"\d+$", "", tok)
+        if stripped:
+            tokens.append(stripped)
+
+    if not tokens:
+        return None
+
+    return "_".join(t.lower() for t in tokens[:2])
+
+
 def upload_pdf_to_blob_storage(pdf_path: str, vendor_name: str, statement_period: str,
                                 document_hash: str) -> str:
     """
@@ -362,8 +393,16 @@ def upload_pdf_to_blob_storage(pdf_path: str, vendor_name: str, statement_period
     unexpected (e.g. a malformed statement_period) so a Blob Storage issue
     can never crash document intake (see docs/VIVE_Implementation_Context.md
     Section 4, Phase 2, "Object storage (Blob)").
+
+    Vendor slug precedence: (1) vendor_name extracted from the document
+    itself (already in document_intake_log by the time this runs), (2) a
+    best-effort guess from the PDF filename, (3) BlobStorageClient's own
+    "unknown_vendor" fallback if neither is usable.
     """
     try:
+        if not vendor_name:
+            vendor_name = derive_vendor_slug_from_filename(pdf_path)
+
         if statement_period and len(statement_period) >= 7:
             year, month = statement_period[:4], statement_period[5:7]
         else:
