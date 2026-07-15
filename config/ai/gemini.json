@@ -1,0 +1,14 @@
+{
+  "provider": "gemini",
+  "model": "gemini-2.5-flash",
+  "api_key_env_var": "GEMINI_API_KEY",
+  "model_env_var": "GEMINI_MODEL",
+  "temperature": 0.1,
+  "timeout_seconds": 600,
+  "retry_policy": {
+    "max_retries": 1,
+    "backoff_seconds": 2,
+    "backoff_multiplier": 2,
+    "retry_on_status_codes": [429, 500, 502, 503, 504]
+  }
+}

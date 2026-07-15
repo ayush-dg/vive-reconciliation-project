@@ -1,9 +1,10 @@
 {
-  "_comment": "See RULES.md RULE-04 (superseded twice): Azure Document Intelligence (prebuilt-layout) is now the primary extraction engine, replacing Azure OpenAI gpt-5-mini — 14s for a full 4-page statement vs. 90-180s per page, with equivalent table structure/column coverage on the same sample document. Deterministic pdfplumber (with internal OCR fallback for scanned pages) remains the non-AI last resort, unchanged. azure_gpt5_mini/azure_gpt5_nano/azure_gpt5_1 config paths are kept registered for direct get_ai_client() access but are not part of the active chain, pending a separate cleanup pass to remove them.",
-  "provider_chain": ["azure_doc_intel", "pdfplumber"],
+  "_comment": "Gemini 2.5 Flash (gemini_client.py) is now the primary extraction engine — single whole-document call (no page splitting), validated across all 4 sample vendor statements during diagnostic testing (69-602 rows, 65-245s, no truncation), and column-agnostic mapping that correctly disambiguates vendors with multiple invoice-number-like columns. Supersedes azure_doc_intel (see RULES.md RULE-04 for that transition's own history). Deterministic pdfplumber (with internal OCR fallback for scanned pages) remains the non-AI last resort, unchanged. claude/mistral/azure_gpt5_*/azure_doc_intel config paths are kept registered for direct get_ai_client() access but are not part of the active chain.",
+  "provider_chain": ["gemini", "pdfplumber"],
   "provider_config_paths": {
     "claude": "config/ai/claude.json",
     "mistral": "config/ai/mistral.json",
+    "gemini": "config/ai/gemini.json",
     "azure_gpt5_mini": "config/ai/azure_gpt5_mini.json",
     "azure_gpt5_nano": "config/ai/azure_gpt5_nano.json",
     "azure_gpt5_1": "config/ai/azure_gpt5_1.json",

@@ -42,12 +42,23 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
 
     elif provider_name == "mistral":
         # Mistral Medium via the direct Mistral API — registered but not
-        # part of the default active chain (azure_doc_intel remains
-        # primary). See mistral_client.py for why per-page rasterization is
-        # required (Mistral rejects raw PDF data URIs).
+        # part of the default active chain (gemini is primary — see below).
+        # See mistral_client.py for why per-page rasterization is required
+        # (Mistral rejects raw PDF data URIs).
         from .mistral_client import MistralClient
         config = _load_json(config_paths.get("mistral", "config/ai/mistral.json"))
         return MistralClient(config)
+
+    elif provider_name == "gemini":
+        # Active primary — Gemini 2.5 Flash via the google-genai SDK. Sends
+        # the whole PDF as one file upload + one generate_content call (no
+        # page splitting needed). See gemini_client.py for the column-
+        # agnostic mapping approach and why it handles multi-invoice-column
+        # vendors (e.g. Fred_Beans_MidNJ_053126.pdf) better than picking by
+        # header order.
+        from .gemini_client import GeminiClient
+        config = _load_json(config_paths.get("gemini", "config/ai/gemini.json"))
+        return GeminiClient(config)
 
     elif provider_name in ("azure_gpt5_mini", "azure_gpt5_nano", "azure_gpt5_1"):
         # No longer the active chain (see RULES.md RULE-04 — superseded again
@@ -60,8 +71,9 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         return AzureOpenAIClient(config)
 
     elif provider_name == "azure_doc_intel":
-        # Active primary (see RULES.md RULE-04) — Azure Document Intelligence
-        # prebuilt-layout, replacing gpt-5-mini. See document_intelligence_client.py.
+        # No longer the active primary (superseded by gemini — see above);
+        # registered for direct get_ai_client() access. Azure Document
+        # Intelligence prebuilt-layout. See document_intelligence_client.py.
         from .document_intelligence_client import DocumentIntelligenceClient
         config = _load_json(config_paths.get("azure_doc_intel", "config/ai/azure_doc_intel.json"))
         return DocumentIntelligenceClient(config)
