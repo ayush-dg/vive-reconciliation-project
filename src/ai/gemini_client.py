@@ -39,6 +39,26 @@ This client never raises out of generate_with_file()/generate() — any
 upload, API, or parsing failure is converted into a clean AIResponse
 failure so a bad extraction never crashes the pipeline; the fallback chain
 (pdfplumber) takes over instead.
+
+Two additional behaviors, added after real-world testing surfaced gaps:
+
+  - 503 UNAVAILABLE retry: Gemini's backend occasionally returns a
+    transient 503. Unlike a genuine extraction failure, this is worth
+    retrying before giving up — generate_with_file() retries up to 2 times
+    with a 60s wait between attempts, specifically for 503/UNAVAILABLE.
+    Any other error (bad JSON, auth, 4xx, etc.) fails immediately with no
+    retry, same as before.
+
+  - Tolerant column mapping: the keyword-based field mapping (above) can
+    fail to recognize a column on some rows (inconsistent per-row keys,
+    an unfamiliar header, etc.). Rather than silently leaving
+    invoice_number/outstanding_amount null (which routes the row to the
+    review queue as MISSING_MANDATORY_FIELD), _row_to_invoice() falls back
+    to scanning the row's own values directly: for invoice_number, the
+    first value that looks alphanumeric and isn't a date or a currency
+    figure; for outstanding_amount, the first remaining numeric value.
+    Each fallback use is logged (stdout + an aggregated schema warning) so
+    it stays visible rather than silently degrading data quality.
 """
 
 import json
@@ -75,6 +95,21 @@ Return JSON:
 }"""
 
 ACCOUNT_CODE_PREFIX_RE = re.compile(r'^\s*\d{2}[\s.]?\d{2}\b')
+
+# Fallback-mapping heuristics (see module docstring "Tolerant column mapping").
+# A currency figure has $-signs, thousands commas, or 2-digit decimal cents —
+# that's what disqualifies a value from being treated as a bare invoice
+# number (a bare invoice number like "8923821" would otherwise also parse
+# as a float, so this can't just be "does it parse as a number").
+CURRENCY_LIKE_RE = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.\d{2}\)?-?$')
+DATE_LIKE_RE = re.compile(
+    r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$'          # 05/01/2026, 04/01/26
+    r'|^\d{1,2}[A-Za-z]{3}\d{2,4}$',            # 12DEC25
+)
+ALPHANUMERIC_TOKEN_RE = re.compile(r'^[A-Za-z0-9\-]+$')
+
+MAX_503_RETRIES = 2
+BACKOFF_503_SECONDS = 60
 
 INVOICE_NUMBER_KEYWORDS = (
     "invoice #", "invoice no", "invoice number", "invoice#", "inv #", "inv no",
@@ -196,11 +231,13 @@ class GeminiClient(AIClient):
         AIClient interface parity but unused — this client always sends its
         own EXTRACTION_PROMPT.
 
-        The entire real-call path (upload, generate, JSON parse, column
-        mapping) is wrapped in one try/except: any failure here becomes a
-        clean AIResponse(success=False, ...), never an uncaught exception,
-        so a bad extraction always falls through to the next provider in
-        the chain (pdfplumber) rather than crashing the pipeline.
+        Retries up to MAX_503_RETRIES times, waiting BACKOFF_503_SECONDS
+        between attempts, specifically for a 503 UNAVAILABLE response —
+        transient and worth retrying, unlike a genuine extraction failure.
+        Any other error (bad JSON, auth, 4xx, upload failure, ...) returns
+        a clean AIResponse(success=False, ...) immediately, with no retry,
+        so it falls through to the next provider in the chain (pdfplumber)
+        rather than crashing the pipeline or looping needlessly.
         """
         missing = self._missing_config_error()
         if missing:
@@ -223,71 +260,109 @@ class GeminiClient(AIClient):
                 latency_ms=latency_ms, attempt_count=1, error=error,
             )
 
-        uploaded_name = None
-        try:
-            from google import genai
-            from google.genai import types
+        last_error = None
+        for attempt in range(1, MAX_503_RETRIES + 2):
+            uploaded_name = None
+            try:
+                from google import genai
+                from google.genai import types
 
-            client = genai.Client(api_key=self.api_key)
+                client = genai.Client(api_key=self.api_key)
 
-            uploaded = client.files.upload(file=pdf_path)
-            uploaded_name = uploaded.name
+                uploaded = client.files.upload(file=pdf_path)
+                uploaded_name = uploaded.name
 
-            wait_start = time.monotonic()
-            while uploaded.state == types.FileState.PROCESSING and time.monotonic() - wait_start < 60:
-                time.sleep(1)
-                uploaded = client.files.get(name=uploaded.name)
+                wait_start = time.monotonic()
+                while uploaded.state == types.FileState.PROCESSING and time.monotonic() - wait_start < 60:
+                    time.sleep(1)
+                    uploaded = client.files.get(name=uploaded.name)
 
-            if uploaded.state != types.FileState.ACTIVE:
-                raise RuntimeError(f"uploaded file never became ACTIVE (state={uploaded.state})")
+                if uploaded.state != types.FileState.ACTIVE:
+                    raise RuntimeError(f"uploaded file never became ACTIVE (state={uploaded.state})")
 
-            response = client.models.generate_content(
-                model=self.model,
-                contents=[uploaded, EXTRACTION_PROMPT],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    http_options=types.HttpOptions(
-                        timeout=self.config.get("timeout_seconds", 600) * 1000
+                response = client.models.generate_content(
+                    model=self.model,
+                    contents=[uploaded, EXTRACTION_PROMPT],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        http_options=types.HttpOptions(
+                            timeout=self.config.get("timeout_seconds", 600) * 1000
+                        ),
                     ),
-                ),
-            )
-            text = response.text
-            usage = response.usage_metadata
+                )
+                text = response.text
+                usage = response.usage_metadata
 
-            parsed = self._try_parse_json(text)
-            if parsed is None:
-                raise ValueError("response did not contain parseable JSON")
+                parsed = self._try_parse_json(text)
+                if parsed is None:
+                    raise ValueError("response did not contain parseable JSON")
 
-            rows = parsed.get("rows", []) or []
-            columns_found = parsed.get("columns_found", []) or []
-            print(f"  [GeminiClient] Columns found: {columns_found}")
+                rows = parsed.get("rows", []) or []
+                columns_found = parsed.get("columns_found", []) or []
+                print(f"  [GeminiClient] Columns found: {columns_found}")
 
-            invoices = self._rows_to_invoices(rows, columns_found)
+                invoices, fallback_warnings = self._rows_to_invoices(rows, columns_found)
 
-            result = self._build_schema(pdf_path, invoices, columns_found, bool(parsed.get("_salvaged")))
+                result = self._build_schema(
+                    pdf_path, invoices, columns_found,
+                    bool(parsed.get("_salvaged")), fallback_warnings,
+                )
 
-            if usage:
-                print(f"  [GeminiClient] Tokens — input: {usage.prompt_token_count}, "
-                      f"output: {usage.candidates_token_count}, total: {usage.total_token_count}")
+                if usage:
+                    print(f"  [GeminiClient] Tokens — input: {usage.prompt_token_count}, "
+                          f"output: {usage.candidates_token_count}, total: {usage.total_token_count}")
 
-        except Exception as e:
-            latency_ms = (time.monotonic() - start) * 1000
-            self._cleanup_file(uploaded_name)
-            return AIResponse(
-                success=False, provider="gemini", model=self.model,
-                latency_ms=latency_ms, attempt_count=1,
-                error=self._clean_error(str(e)),
-            )
+                self._cleanup_file(uploaded_name)
+                latency_ms = (time.monotonic() - start) * 1000
+                text_out = json.dumps(result)
+                return AIResponse(
+                    success=True, text=text_out, parsed_json=result,
+                    model=self.model, provider="gemini",
+                    latency_ms=latency_ms, attempt_count=attempt,
+                )
 
-        self._cleanup_file(uploaded_name)
+            except Exception as e:
+                self._cleanup_file(uploaded_name)
+                last_error = self._clean_error(str(e))
 
+                if self._is_retryable_503(e) and attempt <= MAX_503_RETRIES:
+                    print(f"  [GeminiClient] 503 UNAVAILABLE — retrying in {BACKOFF_503_SECONDS}s "
+                          f"(attempt {attempt}/{MAX_503_RETRIES + 1})")
+                    time.sleep(BACKOFF_503_SECONDS)
+                    continue
+
+                latency_ms = (time.monotonic() - start) * 1000
+                return AIResponse(
+                    success=False, provider="gemini", model=self.model,
+                    latency_ms=latency_ms, attempt_count=attempt,
+                    error=last_error,
+                )
+
+        # Unreachable — the loop always returns on its last iteration.
         latency_ms = (time.monotonic() - start) * 1000
-        text_out = json.dumps(result)
         return AIResponse(
-            success=True, text=text_out, parsed_json=result,
-            model=self.model, provider="gemini",
-            latency_ms=latency_ms, attempt_count=1,
+            success=False, provider="gemini", model=self.model,
+            latency_ms=latency_ms, attempt_count=MAX_503_RETRIES + 1, error=last_error,
         )
+
+    @staticmethod
+    def _is_retryable_503(e: Exception) -> bool:
+        """True if `e` represents a 503 UNAVAILABLE from the Gemini API —
+        transient and worth retrying, unlike a genuine extraction failure."""
+        try:
+            from google.genai import errors
+            if isinstance(e, errors.APIError):
+                if getattr(e, "code", None) == 503:
+                    return True
+                status = str(getattr(e, "status", "") or "").upper()
+                if "UNAVAILABLE" in status:
+                    return True
+        except Exception:
+            pass
+        # Fallback string match, in case some path raises a differently
+        # shaped exception (e.g. an unwrapped transport-level error).
+        msg = str(e)
+        return "503" in msg and "UNAVAILABLE" in msg.upper()
 
     def _cleanup_file(self, uploaded_name):
         """Best-effort delete of the uploaded file — never lets cleanup
@@ -303,18 +378,20 @@ class GeminiClient(AIClient):
 
     # ---- column-agnostic mapping ----
 
-    def _rows_to_invoices(self, rows: list, columns_found: list) -> list:
+    def _rows_to_invoices(self, rows: list, columns_found: list):
+        """Returns (invoices, fallback_warning_messages)."""
         if not rows:
-            return []
+            return [], []
 
         field_map = self._map_columns(columns_found, rows)
 
         invoices = []
+        fallback_warnings = []
         for row_num, row in enumerate(rows, start=1):
             if not isinstance(row, dict):
                 continue
-            invoices.append(self._row_to_invoice(row, field_map, row_num))
-        return invoices
+            invoices.append(self._row_to_invoice(row, field_map, row_num, fallback_warnings))
+        return invoices, fallback_warnings
 
     @staticmethod
     def _normalize_header(header) -> str:
@@ -387,18 +464,53 @@ class GeminiClient(AIClient):
                 best = col
         return best
 
-    def _row_to_invoice(self, row: dict, field_map: dict, row_num: int) -> dict:
+    def _row_to_invoice(self, row: dict, field_map: dict, row_num: int, fallback_log: list) -> dict:
         def get(field):
             key = field_map.get(field)
             return row.get(key) if key else None
 
-        outstanding = self._to_float(get("outstanding_amount"))
-        amount = self._to_float(get("amount"))
+        raw_invoice_number = get("invoice_number")
+        raw_outstanding = get("outstanding_amount")
+        raw_amount = get("amount")
+
+        invoice_number = raw_invoice_number
+        outstanding = self._to_float(raw_outstanding)
+        amount = self._to_float(raw_amount)
         if amount is None:
             amount = outstanding
 
+        # Tolerant fallback mapping (see module docstring) — standard
+        # keyword-based mapping missed this field for this row (either no
+        # column was ever recognized for it, or this row's own key set
+        # doesn't match the rest of the document). Scan the row's raw
+        # values directly rather than leaving the field null and letting
+        # the row silently fail validation downstream.
+        used_fallback = []
+        already_used = {v for v in (raw_invoice_number, raw_outstanding, raw_amount) if v is not None}
+
+        if not invoice_number:
+            _, candidate = self._fallback_invoice_number(row, exclude=already_used)
+            if candidate is not None:
+                invoice_number = candidate
+                already_used.add(candidate)
+                used_fallback.append("invoice_number")
+
+        if outstanding is None:
+            _, candidate = self._fallback_amount(row, exclude=already_used)
+            if candidate is not None:
+                outstanding = candidate
+                if amount is None:
+                    amount = candidate
+                used_fallback.append("outstanding_amount")
+
+        if used_fallback:
+            msg = (f"Row {row_num}: standard column mapping missing {used_fallback} — "
+                   f"used value-based fallback instead of dropping the row")
+            print(f"  [GeminiClient] {msg}")
+            fallback_log.append(msg)
+
         return {
-            "invoice_number": get("invoice_number"),
+            "invoice_number": invoice_number,
             "invoice_date": get("invoice_date"),
             "due_date": get("due_date"),
             "amount": amount,
@@ -413,6 +525,63 @@ class GeminiClient(AIClient):
             "row_number": row_num,
             "line_confidence": ROW_CONFIDENCE,
         }
+
+    @staticmethod
+    def _looks_like_invoice_number(value) -> bool:
+        """True if `value` looks like a plausible invoice number: alphanumeric
+        (letters/digits/hyphens), not a date, not a currency figure. A bare
+        digit string (e.g. "8923821") passes — that's a legitimate invoice
+        number shape — but "$48.75" / "1,234.56" / "48.75" (2-decimal cents,
+        the currency tell) do not."""
+        if value is None:
+            return False
+        s = str(value).strip()
+        if not s or len(s) < 3:
+            return False
+        if DATE_LIKE_RE.match(s):
+            return False
+        if CURRENCY_LIKE_RE.match(s):
+            return False
+        if not ALPHANUMERIC_TOKEN_RE.match(s):
+            return False
+        return True
+
+    @classmethod
+    def _fallback_invoice_number(cls, row: dict, exclude=frozenset()):
+        """Scan all values in `row` for the first one that looks like an
+        invoice number, skipping any value already claimed by another
+        field (so the same cell can't become both the invoice number and
+        the amount — see module docstring / the earlier cross-contamination
+        bug this guards against). Returns (key, value) or (None, None)."""
+        for key, val in row.items():
+            if val in exclude:
+                continue
+            if cls._looks_like_invoice_number(val):
+                return key, val
+        return None, None
+
+    @classmethod
+    def _fallback_amount(cls, row: dict, exclude=frozenset()):
+        """Scan all values in `row` for the first one that looks like a
+        currency figure (CURRENCY_LIKE_RE — decimal cents, optional $/commas),
+        skipping any value already claimed by another field. Requiring the
+        currency shape (not just "parses as a number") is deliberate: vendor
+        statements with dual invoice-number-like columns (see module
+        docstring / _pick_cleanest_column) can leave a second, unmapped copy
+        of the bare invoice number sitting in the row — a value like
+        "8923821" parses as a float just as easily as "706.29" does, so
+        accepting any numeric value would silently reintroduce the invoice-
+        number-as-amount cross-contamination this fallback is supposed to
+        prevent. Returns (key, parsed_float) or (None, None)."""
+        for key, val in row.items():
+            if val in exclude or val is None:
+                continue
+            if not CURRENCY_LIKE_RE.match(str(val).strip()):
+                continue
+            parsed = cls._to_float(val)
+            if parsed is not None:
+                return key, parsed
+        return None, None
 
     @staticmethod
     def _to_float(val) -> Optional[float]:
@@ -431,7 +600,8 @@ class GeminiClient(AIClient):
         except ValueError:
             return None
 
-    def _build_schema(self, pdf_path: str, invoices: list, columns_found: list, salvaged: bool) -> dict:
+    def _build_schema(self, pdf_path: str, invoices: list, columns_found: list, salvaged: bool,
+                       fallback_warnings: Optional[list] = None) -> dict:
         statement_total = sum(
             inv.get("outstanding_amount", 0) or 0
             for inv in invoices
@@ -442,6 +612,17 @@ class GeminiClient(AIClient):
         warnings = []
         if salvaged:
             warnings.append(f"Response was truncated — {len(invoices)} rows salvaged from partial JSON.")
+        if fallback_warnings:
+            # Aggregate rather than including every per-row message here —
+            # each one was already printed individually during extraction
+            # (see _row_to_invoice); this just keeps a persisted, visible
+            # record that fallback mapping happened without bloating
+            # document_intake_log.warnings for a document with many rows.
+            warnings.append(
+                f"{len(fallback_warnings)} row(s) required value-based fallback column "
+                f"mapping (standard header-keyword mapping didn't recognize a column for "
+                f"invoice_number and/or outstanding_amount on those rows)."
+            )
 
         return {
             "document_metadata": {
