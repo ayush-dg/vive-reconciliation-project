@@ -3,6 +3,7 @@
   "provider_chain": ["azure_doc_intel", "pdfplumber"],
   "provider_config_paths": {
     "claude": "config/ai/claude.json",
+    "mistral": "config/ai/mistral.json",
     "azure_gpt5_mini": "config/ai/azure_gpt5_mini.json",
     "azure_gpt5_nano": "config/ai/azure_gpt5_nano.json",
     "azure_gpt5_1": "config/ai/azure_gpt5_1.json",

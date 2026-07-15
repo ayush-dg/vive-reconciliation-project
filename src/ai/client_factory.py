@@ -40,6 +40,15 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         config = _load_json(config_paths.get("claude", "config/ai/claude.json"))
         return ClaudeClient(config)
 
+    elif provider_name == "mistral":
+        # Mistral Medium via the direct Mistral API — registered but not
+        # part of the default active chain (azure_doc_intel remains
+        # primary). See mistral_client.py for why per-page rasterization is
+        # required (Mistral rejects raw PDF data URIs).
+        from .mistral_client import MistralClient
+        config = _load_json(config_paths.get("mistral", "config/ai/mistral.json"))
+        return MistralClient(config)
+
     elif provider_name in ("azure_gpt5_mini", "azure_gpt5_nano", "azure_gpt5_1"):
         # No longer the active chain (see RULES.md RULE-04 — superseded again
         # by azure_doc_intel); configs are kept registered for direct
