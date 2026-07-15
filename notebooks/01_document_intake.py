@@ -16,7 +16,8 @@ What it does:
     5. Writes valid invoices to bronze_vendor_statement_raw
     6. Normalizes to silver_reconciliation_standard
     7. Logs to document_intake_log
-    8. Updates extraction_cache
+    8. Uploads the PDF to Azure Blob Storage (never blocks the pipeline)
+    9. Updates extraction_cache
 """
 
 import argparse
@@ -44,6 +45,7 @@ load_dotenv()
 from src.ai.document_understanding_engine import DocumentUnderstandingEngine, extract_pdf_text
 from src.lakehouse.connection import execute_sql, execute_query
 from src.normalization import normalize_invoice_number
+from src.storage.blob_client import BlobStorageClient
 
 
 def compute_file_hash(pdf_path: str) -> str:
@@ -340,6 +342,43 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     )
 
 
+def update_intake_log_blob_path(statement_id: str, blob_storage_path: str):
+    """Back-fill blob_storage_path (+ uploaded_at) on the document_intake_log
+    row already written for this statement_id — see write_intake_log(),
+    which runs first and doesn't yet know the blob location."""
+    now = datetime.now(timezone.utc).isoformat()
+    execute_sql(
+        "UPDATE document_intake_log SET blob_storage_path = ?, uploaded_at = ? WHERE statement_id = ?",
+        [blob_storage_path, now, statement_id]
+    )
+
+
+def upload_pdf_to_blob_storage(pdf_path: str, vendor_name: str, statement_period: str,
+                                document_hash: str) -> str:
+    """
+    Uploads pdf_path to Azure Blob Storage and returns the blob URL, or None
+    on any failure. Never raises — BlobStorageClient.upload_pdf() already
+    swallows its own errors, but this also guards against anything
+    unexpected (e.g. a malformed statement_period) so a Blob Storage issue
+    can never crash document intake (see docs/VIVE_Implementation_Context.md
+    Section 4, Phase 2, "Object storage (Blob)").
+    """
+    try:
+        if statement_period and len(statement_period) >= 7:
+            year, month = statement_period[:4], statement_period[5:7]
+        else:
+            now = datetime.now(timezone.utc)
+            year, month = f"{now.year:04d}", f"{now.month:02d}"
+
+        return BlobStorageClient().upload_pdf(
+            pdf_path, vendor_name, year, month, document_hash,
+            original_filename=os.path.basename(pdf_path),
+        )
+    except Exception as e:
+        print(f"  Warning: PDF upload to Blob Storage failed unexpectedly ({e}) — continuing without it.")
+        return None
+
+
 def update_cache(document_hash: str, statement_id: str, source_file: str,
                  provider_used: str, row_count: int):
     """Insert or replace a cache entry."""
@@ -492,7 +531,19 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         statement_id, statement_period, bronze_count, routing
     )
 
-    # Step 8: Update cache
+    # Step 8: Upload PDF to Blob Storage for permanent archival. Silent by
+    # design — a failed upload logs a warning but never blocks the pipeline.
+    print(f"\n[Step 8] Uploading PDF to Blob Storage...")
+    blob_storage_path = upload_pdf_to_blob_storage(
+        pdf_path, vendor_name, statement_period, document_hash
+    )
+    if blob_storage_path:
+        update_intake_log_blob_path(statement_id, blob_storage_path)
+        print(f"  Uploaded to: {blob_storage_path}")
+    else:
+        print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
+
+    # Step 9: Update cache
     update_cache(document_hash, statement_id, os.path.basename(pdf_path),
                  provider_used, bronze_count)
 
