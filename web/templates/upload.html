@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Upload PDF{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">Upload vendor statement</div>
+</div>
+{% endblock %}
+
+{% block body %}
+<div class="upload-content">
+  <div class="left-col">
+    {% if error %}
+    <div class="upload-error">
+      {{ error }}
+      {% if pipeline_output %}<pre>{{ pipeline_output }}</pre>{% endif %}
+    </div>
+    {% endif %}
+
+    <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form">
+      <div class="upload-zone">
+        <div class="upload-icon">📁</div>
+        <div class="upload-title">Drop vendor PDF here</div>
+        <div class="upload-sub">PDF files only · up to 50 MB · text or scanned</div>
+        <button class="btn" type="button">Browse files</button>
+        <input type="file" name="file" id="pdf-file-input" accept="application/pdf,.pdf" required>
+      </div>
+
+      <div class="file-card" id="file-card" style="display:{{ 'block' if uploaded_file else 'none' }}">
+        <div class="file-row">
+          <div class="file-icon">📄</div>
+          <div style="flex:1">
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span class="file-name" id="file-name">{{ uploaded_file.name if uploaded_file else "" }}</span>
+              <span class="file-size" id="file-size">{{ "%.1f"|format(uploaded_file.size / (1024*1024)) + " MB" if uploaded_file else "" }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="prog-track"><div class="prog-fill"></div></div>
+        <div class="prog-label">✓ Ready to reconcile</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Vendor <span class="form-note">auto-detected from PDF</span></label>
+        <input type="text" value="Detected automatically during processing" disabled />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Statement period</label>
+        <select name="period">
+          <option value="">Auto-detect from statement</option>
+          <option value="2026-07">July 2026</option>
+          <option value="2026-06">June 2026</option>
+          <option value="2026-05">May 2026</option>
+          <option value="2026-04">April 2026</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes <span class="form-note">optional</span></label>
+        <input type="text" name="notes" placeholder="e.g. 'Late statement — covers May + June'" />
+      </div>
+      <div class="action-row">
+        <a href="/" class="btn">Cancel</a>
+        <button class="btn btn-primary" type="submit" id="run-btn">▶ Run reconciliation</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="right-col">
+    <div class="right-col-title">How it works</div>
+    <div class="info-card">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">Upload the vendor's PDF statement — any format, text or scanned</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">Claude AI extracts every invoice row automatically</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">Extracted invoices are matched against your NetSuite ERP data</div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text">Exceptions (missing invoices, amount mismatches) are flagged for review</div>
+      </div>
+      <div class="step" style="margin-bottom:0">
+        <div class="step-num">5</div>
+        <div class="step-text">You review and resolve exceptions — report is generated automatically</div>
+      </div>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title">⏱ Typical processing time</div>
+      <div class="info-card-body">
+        2–4 pages: ~1–2 min<br>
+        10–15 pages: ~3–5 min<br>
+        20+ pages: ~5–8 min
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="processing-overlay" id="processing-overlay">
+  <div class="spinner"></div>
+  <div class="processing-title">Processing your statement…</div>
+  <div class="processing-sub">Extracting invoices, matching against ERP, and building the reconciliation report. This can take a few minutes.</div>
+</div>
+
+<script src="/static/app.js"></script>
+{% endblock %}

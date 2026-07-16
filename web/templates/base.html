@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}VIVE Reconciliation{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <div class="sidebar">
+    <div class="logo">
+      <div class="logo-text">VIVE Reconciliation</div>
+      <div class="logo-sub">AP Management</div>
+    </div>
+    <a href="/" class="nav-item {{ 'active' if active_page == 'home' }}">🏠 Home</a>
+    <a href="/upload" class="nav-item {{ 'active' if active_page == 'upload' }}">📤 Upload PDF</a>
+    <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}">⚠️ Exceptions
+      {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
+    </a>
+    <a href="/reports" class="nav-item {{ 'active' if active_page == 'reports' }}">📄 Reports</a>
+    <div class="nav-section">Admin</div>
+    <div class="nav-item">👥 Users</div>
+    <div class="nav-item">⚙️ Settings</div>
+    <div style="flex:1"></div>
+    <div class="sidebar-footer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="user-avatar">AK</div>
+        <div><div style="font-size:12px;font-weight:500">Ayush K.</div><div style="font-size:11px;color:var(--text-secondary)">Admin</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="main">
+    {% block topbar %}{% endblock %}
+    {% block body %}
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+    {% endblock %}
+  </div>
+</div>
+</body>
+</html>

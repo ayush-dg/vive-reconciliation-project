@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Exceptions{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">Exceptions — current period</div>
+  <span style="font-size:12px;color:var(--text-secondary)">{{ total_open }} open across {{ vendor_count_with_ex }} vendor{{ "s" if vendor_count_with_ex != 1 }}</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">Vendors this period</div>
+{% if vendors %}
+<div class="vendor-grid">
+  {% for v in vendors %}
+  <a href="/exceptions/{{ v.url_name }}" class="vendor-card {{ 'has-ex' if v.exception_count > 0 else 'clean' }}">
+    <div class="vc-header">
+      <div class="vc-info">
+        <div class="vc-avatar {{ 'ava-amber' if v.exception_count > 0 else 'ava-green' }}">{{ v.vendor_name | initials }}</div>
+        <div>
+          <div class="vc-name">{{ v.vendor_name }}</div>
+          <div class="vc-period">{{ v.statement_period | period_label }} · {{ v.total_invoice_count }} invoices</div>
+        </div>
+      </div>
+      {% if v.exception_count > 0 %}
+      <span class="badge warning">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
+      {% else %}
+      <span class="badge success">✓ Reconciled</span>
+      {% endif %}
+    </div>
+    <div class="stats-row">
+      <div class="stat stat-col"><div class="stat-val">{{ v.total_invoice_count }}</div><div class="stat-lbl">Total</div></div>
+      <div class="stat stat-col"><div class="stat-val green">{{ v.matched_count }}</div><div class="stat-lbl">Matched</div></div>
+      <div class="stat stat-col"><div class="stat-val {{ 'amber' if v.exception_count > 0 else 'green' }}">{{ v.exception_count }}</div><div class="stat-lbl">Exceptions</div></div>
+      <div class="stat stat-col"><div class="stat-val">{{ v.statement_total | money_short }}</div><div class="stat-lbl">Value</div></div>
+    </div>
+    <div class="vc-footer">
+      {% if v.exception_count > 0 %}
+      <span class="vc-footer-note">
+        {%- set parts = [] -%}
+        {%- for reason, count in v.reason_breakdown.items() -%}
+          {%- set _ = parts.append(count|string ~ " " ~ reason) -%}
+        {%- endfor -%}
+        {{ parts | join(" · ") }}
+      </span>
+      <span class="review-link">Review exceptions →</span>
+      {% else %}
+      <span class="vc-footer-note" style="color:var(--success)">All invoices matched ✓</span>
+      <span class="review-link">View report →</span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
+{% endif %}
+{% endblock %}

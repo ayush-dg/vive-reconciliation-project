@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIVE Reconciliation — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-page">
+  <div class="login-left">
+    <div class="left-label">VIVE Collision · AP Operations</div>
+    <div class="left-heading">Vendor reconciliation,<br><span>automated.</span></div>
+    <div class="left-sub">Upload a vendor statement and get a complete reconciliation report in minutes — exceptions flagged, invoices matched, ready for review.</div>
+    <div class="stat-row">
+      <div class="stat"><div class="stat-value">93.8%</div><div class="stat-label">Auto-match rate</div></div>
+      <div class="stat"><div class="stat-value">1,024</div><div class="stat-label">Invoices this period</div></div>
+      <div class="stat"><div class="stat-value">4</div><div class="stat-label">Vendors tracked</div></div>
+    </div>
+  </div>
+  <div class="login-right">
+    <div class="card">
+      <div class="brand">
+        <div class="brand-icon">📄</div>
+        <div class="brand-name">VIVE Reconciliation</div>
+        <div class="brand-sub">Sign in to your account</div>
+      </div>
+      {% if error %}
+      <div class="login-error">{{ error }}</div>
+      {% endif %}
+      <form method="post" action="/login">
+        <div class="form-group">
+          <label class="form-label">Work email</label>
+          <input type="email" name="email" placeholder="name@vive-collision.com" required autofocus />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" name="password" placeholder="••••••••" required />
+        </div>
+        <button class="btn-primary" type="submit">Sign in</button>
+      </form>
+      <div class="divider">or continue with</div>
+      <button class="btn-ms" type="button" disabled>
+        <svg width="16" height="16" viewBox="0 0 16 16"><rect x="0" y="0" width="7.5" height="7.5" fill="#F25022"/><rect x="8.5" y="0" width="7.5" height="7.5" fill="#7FBA00"/><rect x="0" y="8.5" width="7.5" height="7.5" fill="#00A4EF"/><rect x="8.5" y="8.5" width="7.5" height="7.5" fill="#FFB900"/></svg>
+        Sign in with Microsoft
+      </button>
+      <div class="footer">VIVE Collision · Insight Factory · Confidential</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

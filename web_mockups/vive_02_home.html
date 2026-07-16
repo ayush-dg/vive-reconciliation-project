@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIVE Reconciliation — Home</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0F0F0F;color:#E8E8E6;min-height:100vh;display:flex}
+.sidebar{width:210px;background:#111111;border-right:1px solid #1E1E1E;display:flex;flex-direction:column;padding:20px 0;flex-shrink:0;min-height:100vh}
+.logo{padding:0 18px 20px;border-bottom:1px solid #1E1E1E;margin-bottom:14px}
+.logo-text{font-size:14px;font-weight:600;color:#E8E8E6}
+.logo-sub{font-size:11px;color:#6B6B6B;margin-top:3px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 18px;font-size:13px;color:#6B6B6B;cursor:pointer;border-radius:0}
+.nav-item:hover{color:#E8E8E6;background:#1A1A1A}
+.nav-item.active{color:#E07B3F;background:#1E1510;font-weight:500}
+.nav-dot{width:6px;height:6px;border-radius:50%;background:#E07B3F;margin-left:auto}
+.nav-section{font-size:10px;color:#3A3A3A;padding:14px 18px 4px;letter-spacing:.08em;text-transform:uppercase}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{padding:16px 24px;border-bottom:1px solid #1E1E1E;display:flex;align-items:center;justify-content:space-between}
+.topbar-title{font-size:15px;font-weight:600;color:#E8E8E6}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;font-size:12px;border:1px solid #2A2A2A;border-radius:7px;cursor:pointer;background:#1A1A1A;color:#9B9B9B;font-family:'Inter',sans-serif}
+.btn:hover{border-color:#3A3A3A;color:#E8E8E6}
+.btn-primary{background:#E07B3F;color:#fff;border-color:#E07B3F;font-weight:500}
+.btn-primary:hover{background:#D06B2F}
+.content{padding:24px;overflow:auto;flex:1}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.kpi{background:#111111;border:1px solid #1E1E1E;border-radius:10px;padding:16px 18px}
+.kpi-label{font-size:11px;color:#6B6B6B;margin-bottom:8px;font-weight:500}
+.kpi-value{font-size:26px;font-weight:600;color:#E8E8E6}
+.kpi-sub{font-size:11px;color:#6B6B6B;margin-top:5px}
+.kpi-value.green{color:#4ADE80}
+.kpi-value.amber{color:#FBBF24}
+.kpi-accent{display:inline-block;width:3px;height:20px;background:#E07B3F;border-radius:2px;vertical-align:middle;margin-right:6px}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-title{font-size:13px;font-weight:600;color:#E8E8E6}
+.link{color:#E07B3F;font-size:12px;cursor:pointer}
+.table{width:100%;border-collapse:collapse;font-size:13px}
+.table th{text-align:left;padding:9px 14px;color:#6B6B6B;font-weight:500;font-size:11px;border-bottom:1px solid #1E1E1E;background:#111111;text-transform:uppercase;letter-spacing:.05em}
+.table td{padding:12px 14px;border-bottom:1px solid #1A1A1A;vertical-align:middle}
+.table tr:last-child td{border-bottom:none}
+.table tbody tr:hover td{background:#111111}
+.badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500}
+.badge.success{background:#0D2D1A;color:#4ADE80;border:1px solid #1A4A2A}
+.badge.warning{background:#2D1F0A;color:#FBBF24;border:1px solid #4A3010}
+.badge.danger{background:#2D0D0D;color:#F87171;border:1px solid #4A1A1A}
+.vendor-avatar{width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600}
+.va-green{background:#0D2D1A;color:#4ADE80}
+.va-amber{background:#2D1F0A;color:#FBBF24}
+.user-avatar{width:28px;height:28px;border-radius:50%;background:#1E1510;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;color:#E07B3F}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <div class="logo">
+    <div class="logo-text">VIVE Reconciliation</div>
+    <div class="logo-sub">AP Management</div>
+  </div>
+  <div class="nav-item active">🏠 Home</div>
+  <div class="nav-item">📤 Upload PDF</div>
+  <div class="nav-item">⚠️ Exceptions <div class="nav-dot"></div></div>
+  <div class="nav-item">📄 Reports</div>
+  <div class="nav-section">Admin</div>
+  <div class="nav-item">👥 Users</div>
+  <div class="nav-item">⚙️ Settings</div>
+  <div style="flex:1"></div>
+  <div style="padding:14px 18px;border-top:1px solid #1E1E1E">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="user-avatar">AK</div>
+      <div><div style="font-size:12px;font-weight:500">Ayush K.</div><div style="font-size:11px;color:#6B6B6B">Admin</div></div>
+    </div>
+  </div>
+</div>
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-title">Dashboard — July 2026</div>
+    <div class="topbar-right">
+      <button class="btn">📅 Jul 2026</button>
+      <button class="btn btn-primary">📤 Upload PDF</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="kpi-label">Total invoices</div>
+        <div class="kpi-value">1,024</div>
+        <div class="kpi-sub">across 4 vendors</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Auto-reconciled</div>
+        <div class="kpi-value green">961</div>
+        <div class="kpi-sub">93.8% match rate</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Open exceptions</div>
+        <div class="kpi-value amber">63</div>
+        <div class="kpi-sub">need review</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Statement total</div>
+        <div class="kpi-value">$302.5K</div>
+        <div class="kpi-sub">this period</div>
+      </div>
+    </div>
+    <div class="section-header">
+      <div class="section-title">Reconciliation runs — July 2026</div>
+      <span class="link">View all →</span>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Vendor</th>
+          <th>Period</th>
+          <th>Invoices</th>
+          <th>Matched</th>
+          <th>Exceptions</th>
+          <th>Status</th>
+          <th>Completed</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><div style="display:flex;align-items:center;gap:10px"><div class="vendor-avatar va-green">AS</div><span style="font-weight:500">asTech</span></div></td>
+          <td style="color:#6B6B6B">Jul 2026</td>
+          <td>202</td>
+          <td style="color:#4ADE80">202</td>
+          <td style="color:#4ADE80">0</td>
+          <td><span class="badge success">✓ Reconciled</span></td>
+          <td style="color:#6B6B6B">Today, 2:14 PM</td>
+          <td><span class="link">View →</span></td>
+        </tr>
+        <tr>
+          <td><div style="display:flex;align-items:center;gap:10px"><div class="vendor-avatar va-green">KS</div><span style="font-weight:500">KSI Trading</span></div></td>
+          <td style="color:#6B6B6B">Jul 2026</td>
+          <td>69</td>
+          <td style="color:#4ADE80">69</td>
+          <td style="color:#4ADE80">0</td>
+          <td><span class="badge success">✓ Reconciled</span></td>
+          <td style="color:#6B6B6B">Today, 1:48 PM</td>
+          <td><span class="link">View →</span></td>
+        </tr>
+        <tr>
+          <td><div style="display:flex;align-items:center;gap:10px"><div class="vendor-avatar va-amber">FB</div><span style="font-weight:500">Fred Beans Parts</span></div></td>
+          <td style="color:#6B6B6B">Jul 2026</td>
+          <td>602</td>
+          <td>487</td>
+          <td style="color:#FBBF24">115</td>
+          <td><span class="badge warning">⚠ Exceptions</span></td>
+          <td style="color:#6B6B6B">Today, 12:30 PM</td>
+          <td><span class="link">Review →</span></td>
+        </tr>
+        <tr>
+          <td><div style="display:flex;align-items:center;gap:10px"><div class="vendor-avatar va-green">TK</div><span style="font-weight:500">Tekion / Vinart</span></div></td>
+          <td style="color:#6B6B6B">Jul 2026</td>
+          <td>551</td>
+          <td style="color:#4ADE80">550</td>
+          <td style="color:#FBBF24">1</td>
+          <td><span class="badge warning">⚠ Exceptions</span></td>
+          <td style="color:#6B6B6B">Today, 11:15 AM</td>
+          <td><span class="link">Review →</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

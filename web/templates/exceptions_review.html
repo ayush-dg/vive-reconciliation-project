@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Review Exceptions{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="/exceptions">← Exceptions</a>
+    <span>/</span>
+    <span style="color:var(--text);font-weight:500">{{ vendor_name }}</span>
+  </div>
+  {% if not not_found %}
+  <span style="font-size:11px;color:var(--text-secondary);margin-left:auto">{{ total }} exceptions · {{ resolved }} resolved</span>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block body %}
+{% if not_found %}
+<div class="content">
+  <div class="empty-state">No reconciliation run found for "{{ vendor_name }}".</div>
+</div>
+{% else %}
+<div class="body-split">
+  <div class="list">
+    <div class="list-header">
+      <div class="list-title">{{ vendor_name }} <span style="color:var(--text-secondary);font-weight:400">({{ exceptions | length }})</span></div>
+    </div>
+    <div class="filter-bar">
+      <a href="/exceptions/{{ vendor_url_name }}?filter=all" class="chip {{ 'active' if filter == 'all' }}">All</a>
+      <a href="/exceptions/{{ vendor_url_name }}?filter=missing" class="chip {{ 'active' if filter == 'missing' }}">Missing</a>
+      <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch" class="chip {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+    </div>
+    <div class="progress">
+      <span>{{ resolved }} / {{ total }} resolved</span>
+      <div class="prog-bar"><div class="prog-fill" style="width:{{ progress_pct }}%"></div></div>
+      <span>{{ progress_pct }}%</span>
+    </div>
+    <div class="exc-list">
+      {% for exc in exceptions %}
+      <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}&selected={{ exc.exception_id }}"
+         class="exc-item {{ 'sel' if selected and selected.exception_id == exc.exception_id }}">
+        <div class="exc-inv">Invoice #{{ exc.invoice_number }}</div>
+        <div class="exc-date">{{ exc.invoice_date | friendly_date }}</div>
+        <div class="exc-row">
+          <span class="badge {{ reason_badge.get(exc.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(exc.exception_reason, {}).label or exc.exception_reason }}</span>
+          <span style="font-size:12px;font-weight:600">{{ exc.statement_amount | money }}</span>
+        </div>
+      </a>
+      {% else %}
+      <div class="empty-state">No open exceptions{{ " in this filter" if filter != "all" else "" }}.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="detail">
+    {% if selected %}
+    <div class="detail-header">
+      <div class="detail-title">Invoice #{{ selected.invoice_number }} — {{ vendor_name }}</div>
+      <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'neutral' }}" style="flex-shrink:0">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
+    </div>
+    <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">
+    <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
+    <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
+    <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
+    <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
+    <input type="hidden" name="filter" value="{{ filter }}">
+    <div class="detail-body">
+      <div class="sec-label">Invoice details</div>
+      <div class="field-grid">
+        <div class="field"><div class="fl">Invoice number</div><div class="fv">{{ selected.invoice_number }}</div></div>
+        <div class="field"><div class="fl">Vendor</div><div class="fv">{{ vendor_name }}</div></div>
+        <div class="field"><div class="fl">Invoice date</div><div class="fv">{{ selected.invoice_date | friendly_date }}</div></div>
+        <div class="field"><div class="fl">Statement amount</div><div class="fv">{{ selected.statement_amount | money }}</div></div>
+        <div class="field">
+          <div class="fl">ERP amount</div>
+          {% if selected.erp_amount is not none %}
+          <div class="fv">{{ selected.erp_amount | money }}</div>
+          {% else %}
+          <div class="fv red">Not found</div>
+          {% endif %}
+        </div>
+        <div class="field">
+          <div class="fl">Difference</div>
+          {% if selected.erp_amount is not none %}
+          <div class="fv red">{{ (selected.statement_amount - selected.erp_amount) | money_signed }}</div>
+          {% else %}
+          <div class="fv red">{{ (0 - selected.statement_amount) | money_signed }}</div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="sec-label">Why this is an exception</div>
+      <div class="reason">
+        {% if selected.exception_reason == 'Invoice Missing' %}
+        Invoice #{{ selected.invoice_number }} appears on the {{ vendor_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
+        {% elif selected.exception_reason == 'Amount Mismatch' %}
+        Invoice #{{ selected.invoice_number }} was found in the ERP, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
+        {% else %}
+        {{ selected.exception_reason }}
+        {% endif %}
+      </div>
+      <label class="note-label">Add a note <span style="color:#4A4A4A;font-weight:400">(optional)</span></label>
+      <textarea rows="3" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
+    </div>
+    <div class="action-bar">
+      <button class="btn btn-accept" type="submit" name="action" value="ACCEPTED">✓ Accept</button>
+      <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED">✕ Dispute with vendor</button>
+      <button class="btn btn-writeoff" type="submit" name="action" value="WRITE_OFF">− Write off</button>
+      <button class="btn btn-dup" type="submit" name="action" value="DUPLICATE">⧉ Mark duplicate</button>
+    </div>
+    </form>
+    {% else %}
+    <div class="detail-body">
+      <div class="empty-state">🎉 All exceptions resolved for {{ vendor_name }}.</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Home{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">{{ dashboard_title }}</div>
+  <div class="topbar-right">
+    <button class="btn">📅 {{ current_month_label }}</button>
+    <a href="/upload" class="btn btn-primary">📤 Upload PDF</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">Total invoices</div>
+    <div class="kpi-value">{{ "{:,}".format(kpis.total_invoices) }}</div>
+    <div class="kpi-sub">across {{ kpis.vendor_count }} vendor{{ "s" if kpis.vendor_count != 1 }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Auto-reconciled</div>
+    <div class="kpi-value green">{{ "{:,}".format(kpis.auto_reconciled) }}</div>
+    <div class="kpi-sub">{{ kpis.match_rate }}% match rate</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Open exceptions</div>
+    <div class="kpi-value amber">{{ "{:,}".format(kpis.open_exceptions) }}</div>
+    <div class="kpi-sub">need review</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Statement total</div>
+    <div class="kpi-value">{{ kpis.statement_total | money_short }}</div>
+    <div class="kpi-sub">this period</div>
+  </div>
+</div>
+
+<div class="section-header">
+  <div class="section-title">Reconciliation runs — {{ current_month_label }}</div>
+  <a href="/reports" class="link">View all →</a>
+</div>
+
+{% if runs %}
+<table class="table">
+  <thead>
+    <tr>
+      <th>Vendor</th>
+      <th>Period</th>
+      <th>Invoices</th>
+      <th>Matched</th>
+      <th>Exceptions</th>
+      <th>Status</th>
+      <th>Completed</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    <tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="vendor-avatar {{ 'va-green' if run.exception_count == 0 else 'va-amber' }}">{{ run.vendor_name | initials }}</div>
+          <span style="font-weight:500">{{ run.vendor_name }}</span>
+        </div>
+      </td>
+      <td style="color:var(--text-secondary)">{{ run.statement_period | period_label }}</td>
+      <td>{{ run.total_invoice_count }}</td>
+      <td style="color:{{ 'var(--success)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
+      <td style="color:{{ 'var(--success)' if run.exception_count == 0 else 'var(--warning)' }}">{{ run.exception_count }}</td>
+      <td>
+        {% if run.overall_status == 'RECONCILED' %}
+        <span class="badge success">✓ Reconciled</span>
+        {% else %}
+        <span class="badge warning">⚠ Exceptions</span>
+        {% endif %}
+      </td>
+      <td style="color:var(--text-secondary)">{{ run.reconciliation_timestamp | friendly_dt }}</td>
+      <td>
+        <a href="/exceptions/{{ run.vendor_name | urlname }}" class="link">
+          {{ "View →" if run.exception_count == 0 else "Review →" }}
+        </a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
+{% endif %}
+{% endblock %}
