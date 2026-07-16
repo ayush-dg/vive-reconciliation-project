@@ -156,7 +156,8 @@ deliberately isolated so the eventual swap is narrow: both sides already
 share the same Silver schema, distinguished only by `record_source`.
 
 **Enforced at:** [`src/lakehouse/connection.py`](src/lakehouse/connection.py) —
-"the only file that knows the storage backend is SQLite locally"; the
+"the only file that knows the storage backend" (see RULE-13 — this is now
+Azure SQL or SQLite, not SQLite-only); the
 `record_source` column (`VENDOR_STATEMENT` vs `INTERNAL_ERP`) in
 `silver_reconciliation_standard`. Full rationale: `docs/VIVE_Implementation_Context.md` Section 2.
 
@@ -284,3 +285,46 @@ database in" an answerable question instead of a guess.
 bookkeeping), [`migrations/`](migrations/) (the migration files themselves),
 [`notebooks/00_setup_lakehouse_schema.py`](notebooks/00_setup_lakehouse_schema.py)
 (the only thing that should call the runner — it should never contain DDL directly again).
+
+---
+
+### RULE-13 — Azure SQL is the production backend; SQLite stays for local dev/tests
+
+**Rule:** `src/lakehouse/connection.py` picks the backend at connection time
+based on whether `AZURE_SQL_SERVER` is set in the environment — Azure SQL
+(via `pyodbc`) if set, SQLite otherwise. Callers write backend-agnostic SQL;
+`?` placeholders work unchanged on both (pyodbc's default paramstyle is
+qmark), and the two SQLite-only constructs this codebase actually uses —
+`INSERT OR REPLACE INTO table (...)` and a trailing `LIMIT n` — are rewritten
+into T-SQL (`MERGE`, `SELECT TOP n`) inside `execute_sql()`/`execute_query()`
+before they reach the driver. New `INSERT OR REPLACE` call sites must add
+their table's unique-key columns to `AZURE_UPSERT_KEYS` in that file.
+
+**Why:** Phase 3 requirement to run against a real production database
+instead of a local SQLite file, without breaking local development or the
+test suite (which never sets `AZURE_SQL_SERVER`, so they keep using SQLite
+untouched) or rewriting the SQLite-specific SQL embedded in
+`notebooks/01_document_intake.py` and `src/mock_erp/generator.py` — keeping
+`connection.py` the single place that knows the backend (RULE-06) meant
+absorbing the dialect differences there instead.
+
+**Azure SQL connectivity note:** Azure SQL's default "Redirect" connection
+policy needs outbound access to ports 11000–11999 in addition to 1433 —
+some corporate/ISP networks block that range, which surfaces as a pyodbc
+login timeout even though port 1433 itself connects fine. Switching the
+server's connectivity setting to "Proxy" (Azure Portal → SQL server →
+Networking, or `az sql server conn-policy update --connection-type Proxy`)
+routes everything through 1433 and avoids the issue.
+
+**Schema creation:** [`src/lakehouse/azure_sql_migrations.py`](src/lakehouse/azure_sql_migrations.py)
+creates the full schema directly in Azure SQL with T-SQL DDL (`NVARCHAR(MAX)`
+for `TEXT`, `NVARCHAR(255)` for any column that's `UNIQUE`/indexed — SQL
+Server can't key a MAX-length column — `INT` for `INTEGER`, `FLOAT` for
+`REAL`, `IDENTITY(1,1)` for `AUTOINCREMENT`). It's a one-shot, re-runnable
+creator (guarded by `sys.tables`/`sys.indexes` checks), not a numbered
+migration runner like `src/lakehouse/migrations.py` — the SQLite migration
+files under `migrations/` remain the source of truth for schema history.
+
+**Enforced at:** [`src/lakehouse/connection.py`](src/lakehouse/connection.py) —
+`get_connection()`, `execute_sql()`/`execute_query()`, `AZURE_UPSERT_KEYS`;
+[`src/lakehouse/azure_sql_migrations.py`](src/lakehouse/azure_sql_migrations.py).
