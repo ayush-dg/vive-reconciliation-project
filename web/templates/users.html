@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Users{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">Users</div>
+  <span style="font-size:12px;color:var(--text-secondary)">{{ users | length }} user{{ "s" if users | length != 1 }}</span>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="upload-error">{{ error }}</div>
+{% endif %}
+
+<div class="section-header">
+  <div class="section-title">All users</div>
+</div>
+
+{% if users %}
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Email</th>
+      <th>Created</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td style="display:flex;align-items:center;gap:10px">
+        <div class="vendor-avatar va-green">{{ u.name | initials }}</div>
+        <span style="font-weight:500">{{ u.name }}</span>
+      </td>
+      <td style="color:var(--text-secondary)">{{ u.email }}</td>
+      <td style="color:var(--text-secondary)">{{ u.created_at | friendly_dt }}</td>
+      <td>
+        {% if u.is_active %}
+        <span class="badge success">Active</span>
+        {% else %}
+        <span class="badge neutral">Inactive</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if u.email == user_email %}
+        <span style="font-size:11px;color:var(--text-secondary)">You</span>
+        {% else %}
+        <form method="post" action="/users/remove" style="margin:0">
+          <input type="hidden" name="email" value="{{ u.email }}">
+          <button class="btn btn-dispute" type="submit" style="padding:5px 12px;font-size:11px">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">No users yet.</div>
+{% endif %}
+
+<div class="section-header">
+  <div class="section-title">Add user</div>
+</div>
+<form method="post" action="/users/add" style="max-width:420px">
+  <div class="form-group">
+    <label class="form-label">Name</label>
+    <input type="text" name="name" placeholder="e.g. Jane Doe" required />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Email</label>
+    <input type="email" name="email" placeholder="name@vive-collision.com" required />
+  </div>
+  <div class="form-group">
+    <label class="form-label">Password</label>
+    <input type="password" name="password" placeholder="••••••••" required minlength="8" />
+  </div>
+  <button class="btn btn-primary" type="submit">Add user</button>
+</form>
+{% endblock %}

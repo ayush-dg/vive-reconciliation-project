@@ -29,9 +29,13 @@ def require_login(request: Request) -> str:
     return user
 
 
-def sidebar_context() -> dict:
+def sidebar_context(request: Request) -> dict:
     from web.queries import get_open_exceptions_count
-    return {"open_exceptions_count": get_open_exceptions_count()}
+    return {
+        "open_exceptions_count": get_open_exceptions_count(),
+        "user_email": request.session.get("user"),
+        "user_name": request.session.get("user_name") or request.session.get("user") or "",
+    }
 
 
 def render(request: Request, name: str, ctx: dict = None, status_code: int = 200):

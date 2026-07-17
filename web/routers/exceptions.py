@@ -38,7 +38,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
         "total_open": total_open,
         "vendor_count_with_ex": len(vendors_with_ex),
         "reason_badge": REASON_BADGE,
-        **sidebar_context(),
+        **sidebar_context(request),
     }
     return render(request, "exceptions_vendors.html", ctx)
 
@@ -54,7 +54,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
             "active_page": "exceptions",
             "vendor_name": vendor_name,
             "not_found": True,
-            **sidebar_context(),
+            **sidebar_context(request),
         }
         return render(request, "exceptions_review.html", ctx, status_code=404)
 
@@ -83,7 +83,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "progress_pct": progress_pct,
         "filter": filter,
         "reason_badge": REASON_BADGE,
-        **sidebar_context(),
+        **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
 

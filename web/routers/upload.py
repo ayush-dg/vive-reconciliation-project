@@ -35,7 +35,7 @@ def upload_form(request: Request, user: str = Depends(require_login)):
         "active_page": "upload",
         "error": None,
         "uploaded_file": None,
-        **sidebar_context(),
+        **sidebar_context(request),
     }
     return render(request, "upload.html", ctx)
 
@@ -49,7 +49,7 @@ def upload_submit(request: Request, user: str = Depends(require_login),
             "active_page": "upload",
             "error": "Only PDF files are accepted.",
             "uploaded_file": None,
-            **sidebar_context(),
+            **sidebar_context(request),
         }
         return render(request, "upload.html", ctx, status_code=400)
 
@@ -88,7 +88,7 @@ def upload_submit(request: Request, user: str = Depends(require_login),
             "error": "The reconciliation pipeline failed to process this PDF.",
             "pipeline_output": output.strip()[-4000:],
             "uploaded_file": {"name": safe_name, "size": len(contents)},
-            **sidebar_context(),
+            **sidebar_context(request),
         }
         return render(request, "upload.html", ctx, status_code=500)
 
@@ -100,7 +100,7 @@ def upload_submit(request: Request, user: str = Depends(require_login),
             "active_page": "upload",
             "error": f"Pipeline completed ({statement_id}) but the vendor could not be determined.",
             "uploaded_file": {"name": safe_name, "size": len(contents)},
-            **sidebar_context(),
+            **sidebar_context(request),
         }
         return render(request, "upload.html", ctx, status_code=500)
 

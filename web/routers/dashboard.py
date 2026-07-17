@@ -23,6 +23,6 @@ def home(request: Request, user: str = Depends(require_login)):
         "runs": queries.get_recent_runs(limit=10),
         "dashboard_title": datetime.now().strftime("Dashboard — %B %Y"),
         "current_month_label": datetime.now().strftime("%b %Y"),
-        **sidebar_context(),
+        **sidebar_context(request),
     }
     return render(request, "home.html", ctx)

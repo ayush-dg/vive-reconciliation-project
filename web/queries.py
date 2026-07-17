@@ -225,6 +225,44 @@ def get_vendor_name_for_statement(statement_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Users
+# ---------------------------------------------------------------------------
+
+def get_user_by_email(email: str):
+    if not email:
+        return None
+    rows = execute_query(
+        """
+        SELECT id, name, email, password_hash, is_active, created_at, created_by
+        FROM users WHERE email = ?
+        """,
+        [email.strip().lower()],
+    )
+    return rows[0] if rows else None
+
+
+def list_users() -> list:
+    return execute_query(
+        "SELECT id, name, email, is_active, created_at, created_by FROM users ORDER BY created_at"
+    )
+
+
+def create_user(name: str, email: str, password_hash: str, created_by: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    execute_sql(
+        """
+        INSERT INTO users (name, email, password_hash, is_active, created_at, created_by)
+        VALUES (?, ?, ?, 1, ?, ?)
+        """,
+        [name, email.strip().lower(), password_hash, now, created_by],
+    )
+
+
+def delete_user_by_email(email: str) -> None:
+    execute_sql("DELETE FROM users WHERE email = ?", [email.strip().lower()])
+
+
+# ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
 

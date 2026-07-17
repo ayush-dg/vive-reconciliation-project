@@ -20,7 +20,7 @@ def reports_list(request: Request, user: str = Depends(require_login)):
     ctx = {
         "active_page": "reports",
         "runs": queries.get_all_runs(),
-        **sidebar_context(),
+        **sidebar_context(request),
     }
     return render(request, "reports.html", ctx)
 
@@ -35,6 +35,6 @@ def report_detail(statement_id: str, request: Request, user: str = Depends(requi
         "active_page": "reports",
         "statement_id": statement_id,
         **data,
-        **sidebar_context(),
+        **sidebar_context(request),
     }
     return render(request, "report_detail.html", ctx)

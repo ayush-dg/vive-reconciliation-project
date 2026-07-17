@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
-from web.routers import auth, dashboard, exceptions, reports, upload
+from web.routers import auth, dashboard, exceptions, reports, upload, users
 
 app = FastAPI(title="VIVE Reconciliation")
 
@@ -45,3 +45,4 @@ app.include_router(dashboard.router)
 app.include_router(exceptions.router)
 app.include_router(upload.router)
 app.include_router(reports.router)
+app.include_router(users.router)

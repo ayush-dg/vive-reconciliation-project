@@ -275,6 +275,17 @@ TABLES = {
             created_at NVARCHAR(MAX) NOT NULL DEFAULT CONVERT(NVARCHAR(MAX), SYSUTCDATETIME(), 120)
         )
     """,
+    "users": """
+        CREATE TABLE users (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            name NVARCHAR(255) NOT NULL,
+            email NVARCHAR(255) UNIQUE NOT NULL,
+            password_hash NVARCHAR(255) NOT NULL,
+            is_active INT NOT NULL DEFAULT 1,
+            created_at NVARCHAR(MAX) NOT NULL,
+            created_by NVARCHAR(255)
+        )
+    """,
 }
 
 INDEXES = {
