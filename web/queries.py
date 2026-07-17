@@ -56,12 +56,21 @@ def get_recent_runs(limit: int = 10) -> list:
     # only rewrites a trailing "LIMIT <digit>" literal, not a bound "LIMIT ?"
     # placeholder — so the row cap is inlined as a validated int, not a param.
     limit = int(limit)
+    # One row per vendor — their single latest run — via a GROUP BY subquery
+    # joined back for the full row, rather than LIMIT 1-per-vendor tricks that
+    # don't translate cleanly across the SQLite/Azure SQL backends.
     return execute_query(
         f"""
-        SELECT statement_id, vendor_name, statement_period, total_invoice_count,
-               matched_count, exception_count, overall_status, reconciliation_timestamp
-        FROM gold_reconciliation_summary
-        ORDER BY reconciliation_timestamp DESC
+        SELECT s.statement_id, s.vendor_name, s.statement_period, s.total_invoice_count,
+               s.matched_count, s.exception_count, s.overall_status, s.reconciliation_timestamp
+        FROM gold_reconciliation_summary s
+        INNER JOIN (
+            SELECT vendor_name, MAX(reconciliation_timestamp) AS max_ts
+            FROM gold_reconciliation_summary
+            GROUP BY vendor_name
+        ) latest ON s.vendor_name = latest.vendor_name
+                AND s.reconciliation_timestamp = latest.max_ts
+        ORDER BY s.reconciliation_timestamp DESC
         LIMIT {limit}
         """
     )

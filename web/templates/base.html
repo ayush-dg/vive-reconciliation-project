@@ -26,9 +26,15 @@
     <div class="nav-item">⚙️ Settings</div>
     <div style="flex:1"></div>
     <div class="sidebar-footer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="user-avatar">AK</div>
-        <div><div style="font-size:12px;font-weight:500">Ayush K.</div><div style="font-size:11px;color:var(--text-secondary)">Admin</div></div>
+      <div class="profile-toggle" id="profile-toggle">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="user-avatar">AK</div>
+          <div><div style="font-size:12px;font-weight:500">Ayush K.</div><div style="font-size:11px;color:var(--text-secondary)">Admin</div></div>
+        </div>
+        <div class="profile-dropdown" id="profile-dropdown">
+          <div class="profile-dropdown-item disabled">My Profile</div>
+          <a href="/logout" class="profile-dropdown-item">Logout</a>
+        </div>
       </div>
     </div>
   </div>
@@ -41,5 +47,6 @@
     {% endblock %}
   </div>
 </div>
+<script src="/static/app.js"></script>
 </body>
 </html>

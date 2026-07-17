@@ -54,7 +54,14 @@ def upload_submit(request: Request, user: str = Depends(require_login),
         return render(request, "upload.html", ctx, status_code=400)
 
     os.makedirs(SAMPLE_DATA_DIR, exist_ok=True)
-    safe_name = os.path.basename(file.filename)
+    # Always save under the client's original filename — the pipeline derives
+    # the vendor from the PDF's filename stem (see derive_vendor_slug_from_filename
+    # in notebooks/01_document_intake.py), so anything else breaks vendor
+    # detection downstream. Normalize backslashes before os.path.basename(),
+    # since on this (Linux) deployment it only splits on "/" and a client that
+    # sends a full Windows-style path would otherwise leave it mostly intact.
+    original_filename = (file.filename or "upload.pdf").replace("\\", "/")
+    safe_name = os.path.basename(original_filename)
     pdf_path = os.path.join(SAMPLE_DATA_DIR, safe_name)
     contents = file.file.read()
     with open(pdf_path, "wb") as f:

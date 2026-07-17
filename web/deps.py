@@ -7,7 +7,7 @@ context (open exceptions count, shown as the nav-dot on "Exceptions").
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import Request
@@ -107,14 +107,23 @@ def friendly_date(value):
         return text
 
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def friendly_dt(iso_str):
+    """All timestamps are stored as UTC (see queries.py/resolve_exception
+    etc., which write datetime.now(timezone.utc).isoformat()) — this
+    converts to IST for display, since that's the app's audience."""
     if not iso_str:
         return "—"
     try:
         dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
     except ValueError:
         return str(iso_str)
-    now = datetime.now(dt.tzinfo) if dt.tzinfo else datetime.now()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt = dt.astimezone(IST)
+    now = datetime.now(timezone.utc).astimezone(IST)
     hour12 = dt.hour % 12 or 12
     ampm = "AM" if dt.hour < 12 else "PM"
     time_part = f"{hour12}:{dt.minute:02d} {ampm}"

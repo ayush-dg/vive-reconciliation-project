@@ -31,4 +31,23 @@ document.addEventListener("DOMContentLoaded", function () {
       if (runBtn) runBtn.disabled = true;
     });
   }
+
+  // Sidebar profile dropdown: click the profile block to toggle, click
+  // anywhere else to close. Stopping propagation on the dropdown itself
+  // keeps clicks inside it (e.g. the Logout link) from being swallowed by
+  // the document-level close handler.
+  const profileToggle = document.getElementById("profile-toggle");
+  const profileDropdown = document.getElementById("profile-dropdown");
+  if (profileToggle && profileDropdown) {
+    profileToggle.addEventListener("click", function (e) {
+      e.stopPropagation();
+      profileDropdown.classList.toggle("show");
+    });
+    profileDropdown.addEventListener("click", function (e) {
+      e.stopPropagation();
+    });
+    document.addEventListener("click", function () {
+      profileDropdown.classList.remove("show");
+    });
+  }
 });
