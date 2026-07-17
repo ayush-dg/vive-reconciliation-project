@@ -190,7 +190,7 @@ def generate_report(statement_id: str, run_explanations: bool = False,
             status = "OK" if a['success'] else "FAIL"
             latency = f"{a['latency_ms']/1000:.1f}s" if a['latency_ms'] else "N/A"
             print(f"  [{status}] {a['interaction_type']:<28} "
-                  f"{a['ai_provider']:<8} {a['model']:<25} {latency}")
+                  f"{(a['ai_provider'] or 'unknown'):<8} {(a['model'] or 'unknown'):<25} {latency}")
 
     # 5. Next steps
     print(f"\n  NEXT STEPS")
