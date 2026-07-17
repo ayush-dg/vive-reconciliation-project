@@ -29,13 +29,14 @@ REASON_LABELS = {
 
 # One row per vendor — their single latest run — via a GROUP BY subquery
 # joined back for the full row, rather than LIMIT-1-per-vendor tricks that
-# don't translate cleanly across the SQLite/Azure SQL backends. Rows with
-# no vendor_name are dropped (both here via the WHERE, and implicitly by
-# the join itself, since NULL never equals NULL).
+# don't translate cleanly across the SQLite/Azure SQL backends. Every run
+# now has a vendor_name (the intake pipeline falls back to a filename-
+# derived name when extraction can't determine one — see
+# notebooks/01_document_intake.py), so there's no null-vendor case to
+# exclude here anymore.
 _LATEST_RUN_PER_VENDOR = """
     SELECT vendor_name, MAX(reconciliation_timestamp) AS max_ts
     FROM gold_reconciliation_summary
-    WHERE vendor_name IS NOT NULL
     GROUP BY vendor_name
 """
 

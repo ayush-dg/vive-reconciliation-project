@@ -384,6 +384,22 @@ def derive_vendor_slug_from_filename(pdf_path: str):
     return "_".join(t.lower() for t in tokens[:2])
 
 
+def derive_vendor_name_from_filename(pdf_path: str) -> str:
+    """
+    Fallback vendor_name used when extraction returns None/empty — unlike
+    derive_vendor_slug_from_filename() above (a lowercase, truncated slug
+    for Blob Storage paths), this is meant to be stored and displayed as
+    the actual vendor_name, so it keeps every token and reads like a name:
+    strip the extension, turn separators into spaces, title-case it.
+
+    Examples: Synthetic_Reconciliation_Test_Document.pdf ->
+    "Synthetic Reconciliation Test Document"; Unknown_Vendor_May2026.pdf ->
+    "Unknown Vendor May2026".
+    """
+    stem = os.path.splitext(os.path.basename(pdf_path))[0]
+    return stem.replace("_", " ").replace("-", " ").title()
+
+
 def upload_pdf_to_blob_storage(pdf_path: str, vendor_name: str, statement_period: str,
                                 document_hash: str) -> str:
     """
@@ -498,10 +514,22 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     print(f"  Invoices found: {len(invoices)}")
     print(f"  Overall confidence: {schema_result.get('extraction_confidence', {}).get('overall', 'N/A')}")
 
-    # Update vendor_id from AI-detected vendor name if available
-    vendor_name = schema_result.get("vendor_metadata", {}).get("vendor_name")
-    if vendor_name:
-        vendor_id = vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
+    # Update vendor_id from AI-detected vendor name if available. If
+    # extraction couldn't determine a vendor name at all, fall back to one
+    # derived from the PDF filename — otherwise vendor_name is stored as
+    # NULL and the run is hidden from the dashboard (see web/queries.py).
+    # Mutating schema_result here (rather than threading a corrected value
+    # through every call site) means write_to_bronze() and write_intake_log()
+    # below — which both read vendor_metadata.vendor_name straight from
+    # schema_result — pick up the same fallback automatically, and so does
+    # everything silver/gold inherits from bronze downstream.
+    vendor_meta = schema_result.setdefault("vendor_metadata", {})
+    vendor_name = vendor_meta.get("vendor_name")
+    if not vendor_name or not str(vendor_name).strip():
+        vendor_name = derive_vendor_name_from_filename(pdf_path)
+        vendor_meta["vendor_name"] = vendor_name
+        print(f"  No vendor name extracted — using filename-derived vendor: {vendor_name}")
+    vendor_id = vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
 
     # Update statement_period from AI-detected dates if available
     stmt_meta = schema_result.get("statement_metadata", {})
