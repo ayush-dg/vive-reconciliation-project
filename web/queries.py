@@ -27,15 +27,31 @@ REASON_LABELS = {
 # Home / dashboard
 # ---------------------------------------------------------------------------
 
+# One row per vendor — their single latest run — via a GROUP BY subquery
+# joined back for the full row, rather than LIMIT-1-per-vendor tricks that
+# don't translate cleanly across the SQLite/Azure SQL backends. Rows with
+# no vendor_name are dropped (both here via the WHERE, and implicitly by
+# the join itself, since NULL never equals NULL).
+_LATEST_RUN_PER_VENDOR = """
+    SELECT vendor_name, MAX(reconciliation_timestamp) AS max_ts
+    FROM gold_reconciliation_summary
+    WHERE vendor_name IS NOT NULL
+    GROUP BY vendor_name
+"""
+
+
 def get_kpis() -> dict:
     totals = execute_query(
-        """
+        f"""
         SELECT
-            COALESCE(SUM(total_invoice_count), 0) AS total_invoices,
-            COALESCE(SUM(matched_count), 0) AS auto_reconciled,
-            COALESCE(SUM(statement_total), 0) AS statement_total,
-            COUNT(DISTINCT vendor_name) AS vendor_count
-        FROM gold_reconciliation_summary
+            COALESCE(SUM(s.total_invoice_count), 0) AS total_invoices,
+            COALESCE(SUM(s.matched_count), 0) AS auto_reconciled,
+            COALESCE(SUM(s.statement_total), 0) AS statement_total,
+            COUNT(DISTINCT s.vendor_name) AS vendor_count
+        FROM gold_reconciliation_summary s
+        INNER JOIN ({_LATEST_RUN_PER_VENDOR}) latest
+            ON s.vendor_name = latest.vendor_name
+            AND s.reconciliation_timestamp = latest.max_ts
         """
     )[0]
     open_exceptions = get_open_exceptions_count()
@@ -56,20 +72,14 @@ def get_recent_runs(limit: int = 10) -> list:
     # only rewrites a trailing "LIMIT <digit>" literal, not a bound "LIMIT ?"
     # placeholder — so the row cap is inlined as a validated int, not a param.
     limit = int(limit)
-    # One row per vendor — their single latest run — via a GROUP BY subquery
-    # joined back for the full row, rather than LIMIT 1-per-vendor tricks that
-    # don't translate cleanly across the SQLite/Azure SQL backends.
     return execute_query(
         f"""
         SELECT s.statement_id, s.vendor_name, s.statement_period, s.total_invoice_count,
                s.matched_count, s.exception_count, s.overall_status, s.reconciliation_timestamp
         FROM gold_reconciliation_summary s
-        INNER JOIN (
-            SELECT vendor_name, MAX(reconciliation_timestamp) AS max_ts
-            FROM gold_reconciliation_summary
-            GROUP BY vendor_name
-        ) latest ON s.vendor_name = latest.vendor_name
-                AND s.reconciliation_timestamp = latest.max_ts
+        INNER JOIN ({_LATEST_RUN_PER_VENDOR}) latest
+            ON s.vendor_name = latest.vendor_name
+            AND s.reconciliation_timestamp = latest.max_ts
         ORDER BY s.reconciliation_timestamp DESC
         LIMIT {limit}
         """
