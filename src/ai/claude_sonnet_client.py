@@ -258,6 +258,16 @@ class ClaudeSonnetClient(AIClient):
                 statement_date = parsed.get("statement_date") or None
                 print(f"  [ClaudeSonnetClient] Columns found: {columns_found}")
 
+                truncation_reason = self._detect_truncation(parsed, rows, columns_found, pdf_path)
+                if truncation_reason:
+                    print(f"  [ClaudeSonnetClient] Truncation detected — {truncation_reason}")
+                    latency_ms = (time.monotonic() - start) * 1000
+                    return AIResponse(
+                        success=False, provider="claude_sonnet", model=self.model,
+                        latency_ms=latency_ms, attempt_count=attempt,
+                        error="Response appears truncated — falling back",
+                    )
+
                 invoices, fallback_warnings = self._rows_to_invoices(rows, columns_found)
                 result = self._build_schema(
                     pdf_path, invoices, columns_found,
@@ -317,6 +327,52 @@ class ClaudeSonnetClient(AIClient):
             return True, message.content[0].text, None
         except Exception as e:
             return False, "", self._clean_error(str(e))
+
+    # ---- truncation detection ----
+
+    TRUNCATION_ROW_RATIO = 0.10
+
+    def _detect_truncation(self, parsed: dict, rows: list, columns_found: list, pdf_path: str) -> Optional[str]:
+        """
+        Returns a human-readable reason if the parsed response looks
+        truncated, or None if it looks complete. Two independent signals:
+
+        1. rows is empty but columns_found is not — the model found a table
+           but the response was cut off before any row was written.
+        2. The JSON itself was salvaged from a truncated response (see
+           _try_parse_json/_salvage_rows_from_truncated_json) AND the
+           salvaged row count is under 10% of what deterministic pdfplumber
+           extraction finds in the same document — a real truncation, not
+           just a document with few rows.
+
+        On a truncation, generate_with_file() returns a failed AIResponse
+        immediately rather than retrying — a truncated response is a
+        systematic issue (hit the token budget), not a transient one, so
+        retrying the same model would very likely truncate again. The
+        caller (DocumentUnderstandingEngine) falls back to pdfplumber.
+        """
+        if not rows and columns_found:
+            return "rows list is empty but columns_found is not"
+
+        if parsed.get("_salvaged"):
+            pdfplumber_row_count = self._pdfplumber_row_count(pdf_path)
+            if pdfplumber_row_count and len(rows) < self.TRUNCATION_ROW_RATIO * pdfplumber_row_count:
+                return (f"JSON was truncated and salvaged only {len(rows)} row(s), but "
+                        f"pdfplumber found {pdfplumber_row_count} row(s) in the same document")
+
+        return None
+
+    @staticmethod
+    def _pdfplumber_row_count(pdf_path: str) -> int:
+        """Deterministic row count for the same document, used only to
+        judge whether a salvaged (truncated) response is suspiciously
+        short. Never raises — a failure here just disables signal 2."""
+        try:
+            from src.ai.pdfplumber_fallback import extract_with_pdfplumber
+            result = extract_with_pdfplumber(pdf_path)
+            return len(result.get("invoices", []) or [])
+        except Exception:
+            return 0
 
     # ---- column-agnostic mapping (same logic as GeminiClient) ----
 

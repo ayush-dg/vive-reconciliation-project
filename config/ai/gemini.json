@@ -6,8 +6,8 @@
   "temperature": 0.1,
   "timeout_seconds": 600,
   "retry_policy": {
-    "max_retries": 1,
-    "backoff_seconds": 2,
+    "max_retries": 2,
+    "backoff_seconds": 60,
     "backoff_multiplier": 2,
     "retry_on_status_codes": [429, 500, 502, 503, 504]
   }

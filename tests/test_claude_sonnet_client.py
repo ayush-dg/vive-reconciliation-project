@@ -371,5 +371,87 @@ class TestClaudeSonnetClientJsonSalvage(unittest.TestCase):
         self.assertIsNone(self.client._try_parse_json(None))
 
 
+class TestClaudeSonnetClientTruncationDetection(unittest.TestCase):
+    """Direct unit tests for _detect_truncation — the check generate_with_file()
+    runs after parsing to decide whether to fail fast (no retry) instead of
+    handing a truncated response on to invoice mapping."""
+
+    def setUp(self):
+        self.client = ClaudeSonnetClient(CLAUDE_SONNET_CONFIG, transport=lambda *a: (False, None, "unused"))
+
+    def test_empty_rows_with_columns_found_is_truncated(self):
+        parsed = {"rows": [], "columns_found": ["Invoice #", "Amount"]}
+        reason = self.client._detect_truncation(parsed, [], ["Invoice #", "Amount"], "fake.pdf")
+        self.assertIsNotNone(reason)
+
+    def test_no_rows_and_no_columns_is_not_truncated(self):
+        """An empty document (no table found at all) isn't itself evidence
+        of truncation — only 'found columns but no rows' is."""
+        parsed = {"rows": [], "columns_found": []}
+        reason = self.client._detect_truncation(parsed, [], [], "fake.pdf")
+        self.assertIsNone(reason)
+
+    def test_non_salvaged_response_with_rows_is_not_truncated(self):
+        parsed = {"rows": [{"Invoice #": "A1"}], "columns_found": ["Invoice #"]}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], parsed["columns_found"], "fake.pdf")
+        self.assertIsNone(reason)
+
+    @mock.patch.object(ClaudeSonnetClient, "_pdfplumber_row_count", return_value=100)
+    def test_salvaged_with_row_count_under_10_percent_is_truncated(self, mock_count):
+        parsed = {"rows": [{"a": 1}] * 5, "_salvaged": True}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], [], "fake.pdf")
+        self.assertIsNotNone(reason)
+
+    @mock.patch.object(ClaudeSonnetClient, "_pdfplumber_row_count", return_value=10)
+    def test_salvaged_with_row_count_at_10_percent_is_not_truncated(self, mock_count):
+        parsed = {"rows": [{"a": 1}], "_salvaged": True}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], [], "fake.pdf")
+        self.assertIsNone(reason)
+
+    @mock.patch.object(ClaudeSonnetClient, "_pdfplumber_row_count", return_value=0)
+    def test_salvaged_with_no_pdfplumber_baseline_is_not_truncated(self, mock_count):
+        """If pdfplumber itself finds nothing there's no baseline to compare
+        against — don't flag truncation off a zero baseline."""
+        parsed = {"rows": [{"a": 1}], "_salvaged": True}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], [], "fake.pdf")
+        self.assertIsNone(reason)
+
+    def test_generate_with_file_fails_fast_without_retry_on_truncation(self):
+        """Integration-style: the real streaming call path must return a
+        failed AIResponse the moment truncation is detected, even when the
+        config would otherwise allow retries — a truncated response is
+        systematic (token budget), not transient, so retrying the same
+        model is pointless."""
+        response_json = json.dumps({"columns_found": ["Invoice #", "Amount"], "rows": []})
+        fake_message = mock.MagicMock()
+        fake_message.content = [mock.MagicMock(text=response_json)]
+        fake_stream = mock.MagicMock()
+        fake_stream.get_final_message.return_value = fake_message
+        fake_manager = mock.MagicMock()
+        fake_manager.__enter__ = mock.Mock(return_value=fake_stream)
+        fake_manager.__exit__ = mock.Mock(return_value=False)
+
+        fake_client = mock.MagicMock()
+        fake_client.messages.stream.return_value = fake_manager
+
+        config = dict(CLAUDE_SONNET_CONFIG,
+                      retry_policy={"max_retries": 2, "backoff_seconds": 0, "backoff_multiplier": 1})
+
+        fd, pdf_path = tempfile.mkstemp(suffix=".pdf")
+        with os.fdopen(fd, "wb") as f:
+            f.write(b"%PDF-1.4 dummy content")
+        try:
+            with mock.patch("anthropic.Anthropic", return_value=fake_client):
+                client = ClaudeSonnetClient(config, transport=None)
+                response = client.generate_with_file(pdf_path, "extract this")
+        finally:
+            os.remove(pdf_path)
+
+        self.assertFalse(response.success)
+        self.assertIn("truncated", response.error.lower())
+        self.assertEqual(response.attempt_count, 1)
+        fake_client.messages.stream.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

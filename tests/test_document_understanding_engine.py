@@ -235,6 +235,59 @@ class TestDocumentUnderstandingEngine(unittest.TestCase):
         self.assertTrue(is_valid)
         self.assertEqual(reason, "")
 
+    @staticmethod
+    def _load_intake_module():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "intake",
+            os.path.join(os.path.dirname(__file__), "..", "notebooks", "01_document_intake.py")
+        )
+        intake = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(intake)
+        return intake
+
+    def test_get_skip_reason_no_invoice_number_and_no_ro_fallback(self):
+        """A row with neither invoice_number nor ro_number is genuinely
+        unusable — it can never be matched or reviewed against anything."""
+        intake = self._load_intake_module()
+        row = {"outstanding_amount": 100.0}
+        self.assertEqual(intake.get_skip_reason(row), "no invoice identifier found")
+
+    def test_get_skip_reason_missing_invoice_number_with_ro_fallback_is_not_skipped(self):
+        """A ro_number is an acceptable fallback identifier — the row still
+        goes through normal validation (and likely to the review queue),
+        it just isn't dropped outright."""
+        intake = self._load_intake_module()
+        row = {"ro_number": "RO-123", "outstanding_amount": 100.0}
+        self.assertEqual(intake.get_skip_reason(row), "")
+
+    def test_get_skip_reason_no_amount_at_all(self):
+        """A row with an invoice_number but no outstanding_amount, amount,
+        or credit has nothing to reconcile against — genuinely unusable."""
+        intake = self._load_intake_module()
+        row = {"invoice_number": "INV-001"}
+        self.assertEqual(intake.get_skip_reason(row), "no amount found")
+
+    def test_get_skip_reason_amount_present_is_not_skipped(self):
+        intake = self._load_intake_module()
+        row = {"invoice_number": "INV-001", "amount": 50.0}
+        self.assertEqual(intake.get_skip_reason(row), "")
+
+    def test_get_skip_reason_credit_alone_counts_as_an_amount(self):
+        intake = self._load_intake_module()
+        row = {"invoice_number": "INV-001", "credit": 25.0}
+        self.assertEqual(intake.get_skip_reason(row), "")
+
+    def test_get_skip_reason_blank_strings_count_as_missing(self):
+        intake = self._load_intake_module()
+        row = {"invoice_number": "  ", "ro_number": "", "outstanding_amount": None}
+        self.assertEqual(intake.get_skip_reason(row), "no invoice identifier found")
+
+    def test_get_skip_reason_complete_row_is_not_skipped(self):
+        intake = self._load_intake_module()
+        row = {"invoice_number": "INV-001", "outstanding_amount": 100.0}
+        self.assertEqual(intake.get_skip_reason(row), "")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

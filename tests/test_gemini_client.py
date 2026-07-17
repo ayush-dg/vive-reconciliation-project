@@ -28,7 +28,7 @@ GEMINI_CONFIG = {
     "model_env_var": "GEMINI_TEST_MODEL",
     "temperature": 0.1,
     "timeout_seconds": 60,
-    "retry_policy": {"max_retries": 0, "backoff_seconds": 0, "backoff_multiplier": 1},
+    "retry_policy": {"max_retries": 2, "backoff_seconds": 60, "backoff_multiplier": 2},
 }
 
 
@@ -455,6 +455,83 @@ class TestGeminiClientJsonSalvage(unittest.TestCase):
         self.assertIsNone(self.client._try_parse_json("not json at all"))
         self.assertIsNone(self.client._try_parse_json(""))
         self.assertIsNone(self.client._try_parse_json(None))
+
+
+class TestGeminiClientTruncationDetection(unittest.TestCase):
+    """Direct unit tests for _detect_truncation — the check generate_with_file()
+    runs after parsing to decide whether to fail fast (no retry) instead of
+    handing a truncated response on to invoice mapping."""
+
+    def setUp(self):
+        self.client = GeminiClient(GEMINI_CONFIG, transport=lambda *a: (False, None, "unused"))
+
+    def test_empty_rows_with_columns_found_is_truncated(self):
+        parsed = {"rows": [], "columns_found": ["Invoice #", "Amount Due"]}
+        reason = self.client._detect_truncation(parsed, [], ["Invoice #", "Amount Due"], "fake.pdf")
+        self.assertIsNotNone(reason)
+
+    def test_no_rows_and_no_columns_is_not_truncated(self):
+        """An empty document (no table found at all) isn't itself evidence
+        of truncation — only 'found columns but no rows' is."""
+        parsed = {"rows": [], "columns_found": []}
+        reason = self.client._detect_truncation(parsed, [], [], "fake.pdf")
+        self.assertIsNone(reason)
+
+    def test_non_salvaged_response_with_rows_is_not_truncated(self):
+        parsed = {"rows": [{"Invoice #": "A1"}], "columns_found": ["Invoice #"]}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], parsed["columns_found"], "fake.pdf")
+        self.assertIsNone(reason)
+
+    @mock.patch.object(GeminiClient, "_pdfplumber_row_count", return_value=100)
+    def test_salvaged_with_row_count_under_10_percent_is_truncated(self, mock_count):
+        parsed = {"rows": [{"a": 1}] * 5, "_salvaged": True}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], [], "fake.pdf")
+        self.assertIsNotNone(reason)
+
+    @mock.patch.object(GeminiClient, "_pdfplumber_row_count", return_value=10)
+    def test_salvaged_with_row_count_at_10_percent_is_not_truncated(self, mock_count):
+        parsed = {"rows": [{"a": 1}], "_salvaged": True}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], [], "fake.pdf")
+        self.assertIsNone(reason)
+
+    @mock.patch.object(GeminiClient, "_pdfplumber_row_count", return_value=0)
+    def test_salvaged_with_no_pdfplumber_baseline_is_not_truncated(self, mock_count):
+        """If pdfplumber itself finds nothing there's no baseline to compare
+        against — don't flag truncation off a zero baseline."""
+        parsed = {"rows": [{"a": 1}], "_salvaged": True}
+        reason = self.client._detect_truncation(parsed, parsed["rows"], [], "fake.pdf")
+        self.assertIsNone(reason)
+
+    @mock.patch("time.sleep", return_value=None)
+    def test_generate_with_file_fails_fast_without_retry_on_truncation(self, mock_sleep):
+        """Real (non-transport) call path — truncation must short-circuit
+        immediately even though the 503-retry loop (GEMINI_CONFIG now allows
+        2 retries) would otherwise retry; a truncated response isn't a 503
+        and isn't worth retrying against the same model."""
+        from google.genai import types as genai_types
+
+        fake_uploaded = mock.MagicMock()
+        fake_uploaded.name = "files/fake123"
+        fake_uploaded.state = genai_types.FileState.ACTIVE
+
+        fake_response = mock.MagicMock()
+        fake_response.text = json.dumps({"columns_found": ["Invoice #"], "rows": []})
+        fake_response.usage_metadata = None
+
+        fake_client = mock.MagicMock()
+        fake_client.files.upload.return_value = fake_uploaded
+        fake_client.files.get.return_value = fake_uploaded
+        fake_client.models.generate_content.return_value = fake_response
+
+        with mock.patch("google.genai.Client", return_value=fake_client):
+            client = GeminiClient(GEMINI_CONFIG, transport=None)
+            response = client.generate_with_file("fake.pdf", "extract this")
+
+        self.assertFalse(response.success)
+        self.assertIn("truncated", response.error.lower())
+        self.assertEqual(response.attempt_count, 1)
+        fake_client.models.generate_content.assert_called_once()
+        mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":

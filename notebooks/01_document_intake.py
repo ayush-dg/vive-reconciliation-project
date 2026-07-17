@@ -172,6 +172,52 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
     return count
 
 
+def get_skip_reason(invoice: dict) -> str:
+    """
+    A row is genuinely unusable — not just low-confidence — when it has
+    neither an invoice identifier nor any amount at all. Returns a skip
+    reason string for such rows, or "" if the row should proceed to
+    normal validation (validate_invoice), which may still route it to the
+    review queue for other reasons (missing a single required field,
+    low confidence, etc).
+    """
+    def has_value(field):
+        val = invoice.get(field)
+        return val is not None and str(val).strip() != ""
+
+    if not has_value("invoice_number") and not has_value("ro_number"):
+        return "no invoice identifier found"
+
+    if not has_value("outstanding_amount") and not has_value("amount") and not has_value("credit"):
+        return "no amount found"
+
+    return ""
+
+
+def log_row_skip(statement_id: str, source_file: str, message: str):
+    """Log a genuinely-unusable skipped row to ai_audit_log
+    (interaction_type='ROW_SKIP'). Never raises — a logging failure must
+    never block intake."""
+    try:
+        execute_sql(
+            """
+            INSERT INTO ai_audit_log (
+                audit_id, source_file, statement_id, interaction_type,
+                request_timestamp, success, response_status, error_message
+            ) VALUES (?, ?, ?, 'ROW_SKIP', ?, 0, 'ROW_SKIPPED', ?)
+            """,
+            [
+                str(uuid.uuid4()),
+                source_file,
+                statement_id,
+                datetime.now(timezone.utc).isoformat(),
+                message,
+            ]
+        )
+    except Exception as e:
+        print(f"  Warning: failed to log row skip to ai_audit_log ({e})")
+
+
 def write_to_review_queue(invalid_invoices: list, reasons: list,
                            statement_id: str, source_file: str, stage: str):
     """Write invalid records to the review queue."""
@@ -547,11 +593,24 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     valid_invoices = []
     invalid_invoices = []
     invalid_reasons = []
+    skipped_count = 0
 
     seen_keys = set()
     dup_fields = validation_rules.get("duplicate_key_fields", ["invoice_number", "outstanding_amount"])
 
-    for inv in invoices:
+    for row_num, inv in enumerate(invoices, start=1):
+        # Genuinely-unusable rows (no invoice identifier at all, or no
+        # amount at all) are skipped outright — they aren't worth a human
+        # review queue entry, unlike a row that's merely missing one field
+        # or has low confidence (still handled by validate_invoice below).
+        skip_reason = get_skip_reason(inv)
+        if skip_reason:
+            skipped_count += 1
+            message = f"Row {row_num} skipped — {skip_reason}"
+            print(f"  {message}")
+            log_row_skip(statement_id, os.path.basename(pdf_path), message)
+            continue
+
         is_valid, reason = validate_invoice(inv, validation_rules)
         if not is_valid:
             invalid_invoices.append(inv)
@@ -567,7 +626,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         seen_keys.add(dup_key)
         valid_invoices.append(inv)
 
-    print(f"  Valid: {len(valid_invoices)} | Invalid/queued: {len(invalid_invoices)}")
+    print(f"  Valid: {len(valid_invoices)} | Invalid/queued: {len(invalid_invoices)} | Skipped: {skipped_count}")
 
     # Step 5: Write to Bronze
     print(f"\n[Step 5] Writing to Bronze...")
@@ -626,6 +685,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     print(f"  Silver rows:     {silver_count}")
     print(f"  Invalid/queued:  {len(invalid_invoices)}")
     print(f"  Routing:         {routing}")
+    print(f"{'='*60}")
+    print(f"  {skipped_count} rows skipped (missing required fields)")
     print(f"{'='*60}\n")
 
     # Auto-suggest exception targets from extracted Silver rows
@@ -679,6 +740,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         "bronze_count": bronze_count,
         "silver_count": silver_count,
         "invalid_count": len(invalid_invoices),
+        "skipped_count": skipped_count,
         "routing": routing,
     }
 

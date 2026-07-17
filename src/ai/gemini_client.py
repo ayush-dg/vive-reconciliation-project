@@ -115,9 +115,6 @@ DATE_LIKE_RE = re.compile(
 )
 ALPHANUMERIC_TOKEN_RE = re.compile(r'^[A-Za-z0-9\-]+$')
 
-MAX_503_RETRIES = 2
-BACKOFF_503_SECONDS = 60
-
 INVOICE_NUMBER_KEYWORDS = (
     "invoice #", "invoice no", "invoice number", "invoice#", "inv #", "inv no",
     "document no", "sin", "reference",
@@ -238,7 +235,8 @@ class GeminiClient(AIClient):
         AIClient interface parity but unused — this client always sends its
         own EXTRACTION_PROMPT.
 
-        Retries up to MAX_503_RETRIES times, waiting BACKOFF_503_SECONDS
+        Retries up to retry_policy.max_retries times (config/ai/gemini.json,
+        default 2), waiting a flat retry_policy.backoff_seconds (default 60)
         between attempts, specifically for a 503 UNAVAILABLE response —
         transient and worth retrying, unlike a genuine extraction failure.
         Any other error (bad JSON, auth, 4xx, upload failure, ...) returns
@@ -267,8 +265,12 @@ class GeminiClient(AIClient):
                 latency_ms=latency_ms, attempt_count=1, error=error,
             )
 
+        retry_policy = self.config.get("retry_policy", {})
+        max_503_retries = retry_policy.get("max_retries", 2)
+        backoff_503_seconds = retry_policy.get("backoff_seconds", 60)
+
         last_error = None
-        for attempt in range(1, MAX_503_RETRIES + 2):
+        for attempt in range(1, max_503_retries + 2):
             uploaded_name = None
             try:
                 from google import genai
@@ -310,6 +312,17 @@ class GeminiClient(AIClient):
                 statement_date = parsed.get("statement_date") or None
                 print(f"  [GeminiClient] Columns found: {columns_found}")
 
+                truncation_reason = self._detect_truncation(parsed, rows, columns_found, pdf_path)
+                if truncation_reason:
+                    print(f"  [GeminiClient] Truncation detected — {truncation_reason}")
+                    self._cleanup_file(uploaded_name)
+                    latency_ms = (time.monotonic() - start) * 1000
+                    return AIResponse(
+                        success=False, provider="gemini", model=self.model,
+                        latency_ms=latency_ms, attempt_count=attempt,
+                        error="Response appears truncated — falling back",
+                    )
+
                 invoices, fallback_warnings = self._rows_to_invoices(rows, columns_found)
 
                 result = self._build_schema(
@@ -335,10 +348,10 @@ class GeminiClient(AIClient):
                 self._cleanup_file(uploaded_name)
                 last_error = self._clean_error(str(e))
 
-                if self._is_retryable_503(e) and attempt <= MAX_503_RETRIES:
-                    print(f"  [GeminiClient] 503 UNAVAILABLE — retrying in {BACKOFF_503_SECONDS}s "
-                          f"(attempt {attempt}/{MAX_503_RETRIES + 1})")
-                    time.sleep(BACKOFF_503_SECONDS)
+                if self._is_retryable_503(e) and attempt <= max_503_retries:
+                    print(f"  [GeminiClient] 503 UNAVAILABLE — retrying in {backoff_503_seconds}s "
+                          f"(attempt {attempt}/{max_503_retries + 1})")
+                    time.sleep(backoff_503_seconds)
                     continue
 
                 latency_ms = (time.monotonic() - start) * 1000
@@ -352,7 +365,7 @@ class GeminiClient(AIClient):
         latency_ms = (time.monotonic() - start) * 1000
         return AIResponse(
             success=False, provider="gemini", model=self.model,
-            latency_ms=latency_ms, attempt_count=MAX_503_RETRIES + 1, error=last_error,
+            latency_ms=latency_ms, attempt_count=max_503_retries + 1, error=last_error,
         )
 
     @staticmethod
@@ -373,6 +386,52 @@ class GeminiClient(AIClient):
         # shaped exception (e.g. an unwrapped transport-level error).
         msg = str(e)
         return "503" in msg and "UNAVAILABLE" in msg.upper()
+
+    # ---- truncation detection ----
+
+    TRUNCATION_ROW_RATIO = 0.10
+
+    def _detect_truncation(self, parsed: dict, rows: list, columns_found: list, pdf_path: str) -> Optional[str]:
+        """
+        Returns a human-readable reason if the parsed response looks
+        truncated, or None if it looks complete. Two independent signals:
+
+        1. rows is empty but columns_found is not — the model found a table
+           but the response was cut off before any row was written.
+        2. The JSON itself was salvaged from a truncated response (see
+           _try_parse_json/_salvage_rows_from_truncated_json) AND the
+           salvaged row count is under 10% of what deterministic pdfplumber
+           extraction finds in the same document — a real truncation, not
+           just a document with few rows.
+
+        On a truncation, generate_with_file() returns a failed AIResponse
+        immediately rather than retrying — a truncated response is a
+        systematic issue (hit the token budget), not a transient one, so
+        retrying the same model would very likely truncate again. The
+        caller (DocumentUnderstandingEngine) falls back to pdfplumber.
+        """
+        if not rows and columns_found:
+            return "rows list is empty but columns_found is not"
+
+        if parsed.get("_salvaged"):
+            pdfplumber_row_count = self._pdfplumber_row_count(pdf_path)
+            if pdfplumber_row_count and len(rows) < self.TRUNCATION_ROW_RATIO * pdfplumber_row_count:
+                return (f"JSON was truncated and salvaged only {len(rows)} row(s), but "
+                        f"pdfplumber found {pdfplumber_row_count} row(s) in the same document")
+
+        return None
+
+    @staticmethod
+    def _pdfplumber_row_count(pdf_path: str) -> int:
+        """Deterministic row count for the same document, used only to
+        judge whether a salvaged (truncated) response is suspiciously
+        short. Never raises — a failure here just disables signal 2."""
+        try:
+            from src.ai.pdfplumber_fallback import extract_with_pdfplumber
+            result = extract_with_pdfplumber(pdf_path)
+            return len(result.get("invoices", []) or [])
+        except Exception:
+            return 0
 
     def _cleanup_file(self, uploaded_name):
         """Best-effort delete of the uploaded file — never lets cleanup
