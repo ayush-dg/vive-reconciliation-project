@@ -1,23 +1,34 @@
-// Upload page: show the picked file in the file-card, and a full-page
-// "Processing..." overlay for the duration of the (synchronous) pipeline
-// run triggered by the form's normal submit.
+// Upload page: list every picked file in the file-card (multiple files are
+// supported), and show a brief "Queuing..." overlay while the upload
+// request is in flight — it returns as soon as files are saved and queued,
+// the pipeline itself now runs later on the background worker.
 document.addEventListener("DOMContentLoaded", function () {
   const fileInput = document.getElementById("pdf-file-input");
   const fileCard = document.getElementById("file-card");
-  const fileName = document.getElementById("file-name");
-  const fileSize = document.getElementById("file-size");
+  const fileList = document.getElementById("file-list");
   const form = document.getElementById("upload-form");
   const overlay = document.getElementById("processing-overlay");
   const runBtn = document.getElementById("run-btn");
 
   if (fileInput) {
     fileInput.addEventListener("change", function () {
-      const file = fileInput.files[0];
-      if (!file) return;
-      if (fileCard) fileCard.style.display = "block";
-      if (fileName) fileName.textContent = file.name;
-      if (fileSize) fileSize.textContent = (file.size / (1024 * 1024)).toFixed(1) + " MB";
-      if (runBtn) runBtn.disabled = false;
+      const files = Array.from(fileInput.files || []);
+      if (fileCard) fileCard.style.display = files.length ? "block" : "none";
+      if (runBtn) runBtn.disabled = files.length === 0;
+      if (fileList) {
+        fileList.innerHTML = "";
+        files.forEach(function (file) {
+          const row = document.createElement("div");
+          row.className = "file-row";
+          row.innerHTML =
+            '<div class="file-icon">📄</div>' +
+            '<div style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:3px">' +
+            '<span class="file-name"></span><span class="file-size"></span></div></div>';
+          row.querySelector(".file-name").textContent = file.name;
+          row.querySelector(".file-size").textContent = (file.size / (1024 * 1024)).toFixed(1) + " MB";
+          fileList.appendChild(row);
+        });
+      }
     });
   }
 
@@ -49,5 +60,21 @@ document.addEventListener("DOMContentLoaded", function () {
     document.addEventListener("click", function () {
       profileDropdown.classList.remove("show");
     });
+  }
+
+  // Home page: while any job is still PENDING/PROCESSING/FAILED, reload
+  // periodically so statuses (and the reconciliation runs table, once a
+  // job completes) stay current. GET /jobs is the source of truth for
+  // whether there's still anything worth refreshing for — once it comes
+  // back empty, this stops rescheduling itself and the page goes quiet.
+  if (document.body.dataset.page === "home") {
+    fetch("/jobs")
+      .then(function (r) { return r.json(); })
+      .then(function (activeJobs) {
+        if (activeJobs.length > 0) {
+          setTimeout(function () { location.reload(); }, 30000);
+        }
+      })
+      .catch(function () {});
   }
 });

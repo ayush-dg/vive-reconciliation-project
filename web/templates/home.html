@@ -35,6 +35,41 @@
   </div>
 </div>
 
+{% if active_jobs %}
+<div class="section-header">
+  <div class="section-title">Active jobs</div>
+  <a href="/jobs/history" class="link">Job history →</a>
+</div>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>Status</th>
+      <th>Submitted</th>
+      <th>Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for job in active_jobs %}
+    <tr>
+      <td style="font-weight:500">{{ job.pdf_filename }}</td>
+      <td>
+        {% if job.status == 'PENDING' %}
+        <span class="badge neutral">Pending</span>
+        {% elif job.status == 'PROCESSING' %}
+        <span class="badge warning">Processing…</span>
+        {% elif job.status == 'FAILED' %}
+        <span class="badge danger">Failed</span>
+        {% endif %}
+      </td>
+      <td style="color:var(--text-secondary)">{{ job.submitted_at | friendly_dt }}</td>
+      <td style="color:var(--danger);font-size:12px">{{ job.error_message[:200] if job.error_message else "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 <div class="section-header">
   <div class="section-title">Reconciliation runs — {{ current_month_label }}</div>
   <a href="/reports" class="link">View all →</a>

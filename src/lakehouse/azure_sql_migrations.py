@@ -286,6 +286,23 @@ TABLES = {
             created_by NVARCHAR(255)
         )
     """,
+    "jobs": """
+        CREATE TABLE jobs (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            job_id NVARCHAR(255) UNIQUE NOT NULL,
+            pdf_filename NVARCHAR(MAX) NOT NULL,
+            pdf_path NVARCHAR(MAX) NOT NULL,
+            statement_id NVARCHAR(MAX),
+            status NVARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK(status IN
+                ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED')),
+            submitted_by NVARCHAR(255),
+            submitted_at NVARCHAR(255) NOT NULL,
+            started_at NVARCHAR(MAX),
+            completed_at NVARCHAR(MAX),
+            error_message NVARCHAR(MAX),
+            vendor_name NVARCHAR(MAX)
+        )
+    """,
 }
 
 INDEXES = {
@@ -293,6 +310,10 @@ INDEXES = {
         "exception_dispositions",
         "CREATE INDEX idx_exception_dispositions_lookup "
         "ON exception_dispositions(vendor_name, invoice_number, reason_code)",
+    ),
+    "idx_jobs_status_submitted": (
+        "jobs",
+        "CREATE INDEX idx_jobs_status_submitted ON jobs(status, submitted_at)",
     ),
 }
 

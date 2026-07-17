@@ -224,6 +224,7 @@ textarea { resize: none; }
 .step-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 .upload-error { background: #2D0D0D; border: 1px solid #4A1A1A; color: var(--danger); font-size: 12px; border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; }
 .upload-error pre { white-space: pre-wrap; font-size: 11px; color: #C99; margin-top: 8px; max-height: 160px; overflow: auto; }
+.upload-success { background: #0D2D1A; border: 1px solid #1A4A2A; color: var(--success); font-size: 12px; border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* ---------------------------------------------------------------- Processing overlay */
 

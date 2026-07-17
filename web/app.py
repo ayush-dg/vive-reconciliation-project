@@ -16,15 +16,25 @@ if PROJECT_ROOT not in sys.path:
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
-from web.routers import auth, dashboard, exceptions, reports, upload, users
+from web.routers import auth, dashboard, exceptions, jobs, reports, upload, users
+from web.worker import start_worker
 
-app = FastAPI(title="VIVE Reconciliation")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_worker()
+    yield
+
+
+app = FastAPI(title="VIVE Reconciliation", lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,
@@ -46,3 +56,4 @@ app.include_router(exceptions.router)
 app.include_router(upload.router)
 app.include_router(reports.router)
 app.include_router(users.router)
+app.include_router(jobs.router)

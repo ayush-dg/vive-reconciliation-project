@@ -221,6 +221,18 @@ def get_vendor_name_for_statement(statement_id: str):
         "SELECT vendor_name FROM document_intake_log WHERE statement_id = ? LIMIT 1",
         [statement_id],
     )
+    if rows and rows[0]["vendor_name"]:
+        return rows[0]["vendor_name"]
+    # Falls back to gold_reconciliation_summary: on a cache hit, the
+    # pipeline's run_intake() re-normalizes Bronze->Silver under a new
+    # statement_id but never calls write_intake_log() again (see
+    # notebooks/01_document_intake.py), so document_intake_log has no row
+    # for that statement_id even though the matching engine already wrote
+    # the vendor to gold_reconciliation_summary from the Silver rows.
+    rows = execute_query(
+        "SELECT vendor_name FROM gold_reconciliation_summary WHERE statement_id = ? LIMIT 1",
+        [statement_id],
+    )
     return rows[0]["vendor_name"] if rows else None
 
 
@@ -260,6 +272,73 @@ def create_user(name: str, email: str, password_hash: str, created_by: str) -> N
 
 def delete_user_by_email(email: str) -> None:
     execute_sql("DELETE FROM users WHERE email = ?", [email.strip().lower()])
+
+
+# ---------------------------------------------------------------------------
+# Jobs (background reconciliation queue — see web/worker.py)
+# ---------------------------------------------------------------------------
+
+def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    execute_sql(
+        """
+        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at)
+        VALUES (?, ?, ?, 'PENDING', ?, ?)
+        """,
+        [job_id, pdf_filename, pdf_path, submitted_by, now],
+    )
+
+
+def get_next_pending_job():
+    rows = execute_query(
+        "SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY submitted_at LIMIT 1"
+    )
+    return rows[0] if rows else None
+
+
+def update_job_status(job_id: str, status: str, started_at: str = None,
+                       completed_at: str = None, statement_id: str = None,
+                       vendor_name: str = None, error_message: str = None) -> None:
+    """Builds the SET clause from whichever fields are relevant to this
+    transition — PENDING->PROCESSING only sets started_at; COMPLETED/FAILED
+    also set completed_at plus their own outcome fields."""
+    sets = ["status = ?"]
+    params = [status]
+    if started_at is not None:
+        sets.append("started_at = ?")
+        params.append(started_at)
+    if completed_at is not None:
+        sets.append("completed_at = ?")
+        params.append(completed_at)
+    if statement_id is not None:
+        sets.append("statement_id = ?")
+        params.append(statement_id)
+    if vendor_name is not None:
+        sets.append("vendor_name = ?")
+        params.append(vendor_name)
+    if error_message is not None:
+        sets.append("error_message = ?")
+        params.append(error_message)
+    params.append(job_id)
+    execute_sql(f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ?", params)
+
+
+def get_active_jobs() -> list:
+    """Jobs still relevant to surface on the dashboard: not yet finished
+    (PENDING/PROCESSING), or finished with an error nobody's addressed yet
+    (FAILED). COMPLETED jobs drop out of this list — their result is
+    already visible as a normal reconciliation run."""
+    return execute_query(
+        """
+        SELECT * FROM jobs
+        WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')
+        ORDER BY submitted_at DESC
+        """
+    )
+
+
+def get_job_history() -> list:
+    return execute_query("SELECT * FROM jobs ORDER BY submitted_at DESC")
 
 
 # ---------------------------------------------------------------------------

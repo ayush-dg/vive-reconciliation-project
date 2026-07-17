@@ -21,6 +21,7 @@ def home(request: Request, user: str = Depends(require_login)):
         "active_page": "home",
         "kpis": queries.get_kpis(),
         "runs": queries.get_recent_runs(limit=10),
+        "active_jobs": queries.get_active_jobs(),
         "dashboard_title": datetime.now().strftime("Dashboard — %B %Y"),
         "current_month_label": datetime.now().strftime("%b %Y"),
         **sidebar_context(request),

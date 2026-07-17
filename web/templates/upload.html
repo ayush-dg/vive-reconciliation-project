@@ -11,37 +11,28 @@
 <div class="upload-content">
   <div class="left-col">
     {% if error %}
-    <div class="upload-error">
-      {{ error }}
-      {% if pipeline_output %}<pre>{{ pipeline_output }}</pre>{% endif %}
-    </div>
+    <div class="upload-error">{{ error }}</div>
+    {% endif %}
+    {% if success %}
+    <div class="upload-success">✓ {{ success }} <a href="/jobs/history" class="link">View job history →</a></div>
     {% endif %}
 
     <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form">
       <div class="upload-zone">
         <div class="upload-icon">📁</div>
-        <div class="upload-title">Drop vendor PDF here</div>
-        <div class="upload-sub">PDF files only · up to 50 MB · text or scanned</div>
+        <div class="upload-title">Drop vendor PDFs here</div>
+        <div class="upload-sub">PDF files only · up to 50 MB each · text or scanned · multiple files supported</div>
         <button class="btn" type="button">Browse files</button>
-        <input type="file" name="file" id="pdf-file-input" accept="application/pdf,.pdf" required>
+        <input type="file" name="files" id="pdf-file-input" accept="application/pdf,.pdf" multiple required>
       </div>
 
-      <div class="file-card" id="file-card" style="display:{{ 'block' if uploaded_file else 'none' }}">
-        <div class="file-row">
-          <div class="file-icon">📄</div>
-          <div style="flex:1">
-            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-              <span class="file-name" id="file-name">{{ uploaded_file.name if uploaded_file else "" }}</span>
-              <span class="file-size" id="file-size">{{ "%.1f"|format(uploaded_file.size / (1024*1024)) + " MB" if uploaded_file else "" }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="prog-track"><div class="prog-fill"></div></div>
-        <div class="prog-label">✓ Ready to reconcile</div>
+      <div class="file-card" id="file-card" style="display:none">
+        <div id="file-list"></div>
+        <div class="prog-label">✓ Ready to queue</div>
       </div>
 
       <div class="form-group">
-        <label class="form-label">Vendor <span class="form-note">auto-detected from PDF</span></label>
+        <label class="form-label">Vendor <span class="form-note">auto-detected from each PDF</span></label>
         <input type="text" value="Detected automatically during processing" disabled />
       </div>
       <div class="form-group">
@@ -60,7 +51,7 @@
       </div>
       <div class="action-row">
         <a href="/" class="btn">Cancel</a>
-        <button class="btn btn-primary" type="submit" id="run-btn">▶ Run reconciliation</button>
+        <button class="btn btn-primary" type="submit" id="run-btn" disabled>▶ Queue for reconciliation</button>
       </div>
     </form>
   </div>
@@ -102,7 +93,7 @@
 
 <div class="processing-overlay" id="processing-overlay">
   <div class="spinner"></div>
-  <div class="processing-title">Processing your statement…</div>
-  <div class="processing-sub">Extracting invoices, matching against ERP, and building the reconciliation report. This can take a few minutes.</div>
+  <div class="processing-title">Queuing files…</div>
+  <div class="processing-sub">Each file is picked up by the background worker shortly — check Active Jobs on the dashboard for progress.</div>
 </div>
 {% endblock %}
