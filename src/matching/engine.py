@@ -169,10 +169,18 @@ def run_matching(statement_id: str,
     print(f"  [Matching] Statement invoices: {len(stmt_rows)}")
     print(f"  [Matching] ERP invoices: {len(erp_rows)}")
 
-    # Clear Gold tables for this statement (idempotent re-run)
+    # Clear Gold tables for this statement (idempotent re-run). Exempt
+    # EXTRACTION_INCOMPLETE rows — those are raised by intake for rows that
+    # were skipped before ever reaching Silver (see
+    # notebooks/01_document_intake.py get_skip_reason()/write_skip_exception()),
+    # so matching has no Silver data to reclassify them from; deleting them
+    # here would erase them permanently since nothing recreates them.
     now = datetime.now(timezone.utc).isoformat()
     execute_sql("DELETE FROM gold_matched_invoices WHERE statement_id = ?", [statement_id])
-    execute_sql("DELETE FROM gold_exceptions WHERE statement_id = ?", [statement_id])
+    execute_sql(
+        "DELETE FROM gold_exceptions WHERE statement_id = ? AND exception_reason != 'EXTRACTION_INCOMPLETE'",
+        [statement_id]
+    )
     execute_sql("DELETE FROM gold_reconciliation_summary WHERE statement_id = ?", [statement_id])
 
     matched_erp_ids = set()  # track which ERP rows have been consumed

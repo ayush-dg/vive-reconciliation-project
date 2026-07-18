@@ -94,6 +94,8 @@
         Invoice #{{ selected.invoice_number }} appears on the {{ vendor_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
         {% elif selected.exception_reason == 'Amount Mismatch' %}
         Invoice #{{ selected.invoice_number }} was found in the ERP, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
+        {% elif selected.exception_reason == 'EXTRACTION_INCOMPLETE' %}
+        {{ selected.ai_explanation }}
         {% else %}
         {{ selected.exception_reason }}
         {% endif %}

@@ -20,6 +20,7 @@ from src.lakehouse.connection import execute_query, execute_sql
 REASON_LABELS = {
     "Invoice Missing": "missing",
     "Amount Mismatch": "amount mismatch",
+    "EXTRACTION_INCOMPLETE": "extraction incomplete",
 }
 
 

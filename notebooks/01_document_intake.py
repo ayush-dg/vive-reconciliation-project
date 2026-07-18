@@ -218,6 +218,51 @@ def log_row_skip(statement_id: str, source_file: str, message: str):
         print(f"  Warning: failed to log row skip to ai_audit_log ({e})")
 
 
+def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
+                          statement_period: str, invoice: dict, message: str):
+    """
+    Raise a skipped row as an EXTRACTION_INCOMPLETE exception in
+    gold_exceptions, so AP reviewers see and can action it on the
+    exceptions page — the same table matching writes to, but raised here
+    at intake instead, since a skipped row never reaches Silver for the
+    matching engine to see at all (see src/matching/engine.py's
+    EXTRACTION_INCOMPLETE-exempt DELETE, which keeps this row alive across
+    matching re-runs for the same statement_id).
+
+    Never raises — a logging failure must never block intake.
+    """
+    statement_amount = (
+        invoice.get("outstanding_amount")
+        if invoice.get("outstanding_amount") is not None
+        else invoice.get("amount") if invoice.get("amount") is not None
+        else invoice.get("credit")
+    )
+    try:
+        execute_sql(
+            """
+            INSERT INTO gold_exceptions (
+                exception_id, vendor_id, invoice_number, statement_amount,
+                erp_amount, match_status, exception_reason, exception_status,
+                source_file, statement_id, date_raised, statement_period,
+                ai_explanation
+            ) VALUES (?, ?, ?, ?, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
+                      'OPEN', ?, ?, ?, ?)
+            """,
+            [
+                str(uuid.uuid4()),
+                vendor_id,
+                invoice.get("invoice_number"),
+                statement_amount,
+                source_file,
+                statement_id,
+                statement_period,
+                f"{message}. Please check the original PDF manually.",
+            ]
+        )
+    except Exception as e:
+        print(f"  Warning: failed to write EXTRACTION_INCOMPLETE exception to gold_exceptions ({e})")
+
+
 def write_to_review_queue(invalid_invoices: list, reasons: list,
                            statement_id: str, source_file: str, stage: str):
     """Write invalid records to the review queue."""
@@ -609,6 +654,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             message = f"Row {row_num} skipped — {skip_reason}"
             print(f"  {message}")
             log_row_skip(statement_id, os.path.basename(pdf_path), message)
+            write_skip_exception(statement_id, vendor_id, os.path.basename(pdf_path),
+                                  statement_period, inv, message)
             continue
 
         is_valid, reason = validate_invoice(inv, validation_rules)
