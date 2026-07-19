@@ -123,10 +123,10 @@ def generate_report(statement_id: str, run_explanations: bool = False,
             print(f"\n  [{exc['exception_reason']}]")
             print(f"  Invoice:      {exc['invoice_number']}")
             print(f"  RO Number:    {exc.get('ro_number') or 'N/A'}")
-            print(f"  Stmt Amount:  ${exc.get('statement_amount', 0):,.2f}")
+            print(f"  Stmt Amount:  ${(exc.get('statement_amount') or 0):,.2f}")
             if exc.get('erp_amount'):
-                print(f"  ERP Amount:   ${exc.get('erp_amount', 0):,.2f}")
-                print(f"  Difference:   ${(exc['statement_amount'] - exc['erp_amount']):,.2f}")
+                print(f"  ERP Amount:   ${(exc.get('erp_amount') or 0):,.2f}")
+                print(f"  Difference:   ${((exc.get('statement_amount') or 0) - (exc.get('erp_amount') or 0)):,.2f}")
             else:
                 print(f"  ERP Amount:   not in ERP")
             print(f"  Status:       {exc.get('exception_status', 'OPEN')}")
