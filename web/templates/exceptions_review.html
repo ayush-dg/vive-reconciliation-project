@@ -82,9 +82,9 @@
         <div class="field">
           <div class="fl">Difference</div>
           {% if selected.erp_amount is not none %}
-          <div class="fv red">{{ (selected.statement_amount - selected.erp_amount) | money_signed }}</div>
+          <div class="fv red">{{ ((selected.statement_amount or 0) - (selected.erp_amount or 0)) | money_signed }}</div>
           {% else %}
-          <div class="fv red">{{ (0 - selected.statement_amount) | money_signed }}</div>
+          <div class="fv red">{{ (0 - (selected.statement_amount or 0)) | money_signed }}</div>
           {% endif %}
         </div>
       </div>
