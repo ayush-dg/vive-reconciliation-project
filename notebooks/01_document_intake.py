@@ -237,6 +237,7 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
         else invoice.get("amount") if invoice.get("amount") is not None
         else invoice.get("credit")
     )
+    now = datetime.now(timezone.utc).isoformat()
     try:
         execute_sql(
             """
@@ -246,7 +247,7 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
                 source_file, statement_id, date_raised, statement_period,
                 ai_explanation
             ) VALUES (?, ?, ?, ?, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
-                      'OPEN', ?, ?, ?, ?)
+                      'OPEN', ?, ?, ?, ?, ?)
             """,
             [
                 str(uuid.uuid4()),
@@ -255,6 +256,7 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
                 statement_amount,
                 source_file,
                 statement_id,
+                now,
                 statement_period,
                 f"{message}. Please check the original PDF manually.",
             ]
