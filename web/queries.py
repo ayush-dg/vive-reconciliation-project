@@ -74,7 +74,7 @@ def get_recent_runs(limit: int = 10) -> list:
     # only rewrites a trailing "LIMIT <digit>" literal, not a bound "LIMIT ?"
     # placeholder — so the row cap is inlined as a validated int, not a param.
     limit = int(limit)
-    return execute_query(
+    rows = execute_query(
         f"""
         SELECT s.statement_id, s.vendor_name, s.statement_period, s.total_invoice_count,
                s.matched_count, s.exception_count, s.overall_status, s.reconciliation_timestamp
@@ -86,11 +86,49 @@ def get_recent_runs(limit: int = 10) -> list:
         LIMIT {limit}
         """
     )
+    return _with_live_exception_counts(rows)
 
 
 def get_open_exceptions_count() -> int:
     rows = execute_query("SELECT COUNT(*) AS c FROM gold_exceptions WHERE exception_status = 'OPEN'")
     return rows[0]["c"] or 0 if rows else 0
+
+
+def _live_open_exception_count(statement_id: str) -> int:
+    """
+    Live count of OPEN gold_exceptions rows for a statement — the same
+    live query the detail page already uses (get_open_exceptions() /
+    get_exception_counts()). Used to replace gold_reconciliation_summary's
+    cached exception_count/overall_status, which go stale for two reasons:
+
+      1. EXTRACTION_INCOMPLETE rows are raised by intake (see
+         notebooks/01_document_intake.py write_skip_exception()) AFTER
+         matching's Silver-based classification already ran, so matching
+         (src/matching/engine.py) never counts them into the summary it
+         writes.
+      2. Resolving an exception (Accept/Dispute/Write-off) updates
+         gold_exceptions.exception_status but never touches the summary's
+         cached count.
+    """
+    rows = execute_query(
+        "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = ? AND exception_status = 'OPEN'",
+        [statement_id],
+    )
+    return rows[0]["c"] or 0 if rows else 0
+
+
+def _with_live_exception_counts(rows: list) -> list:
+    """Overwrites exception_count/overall_status on each row (as returned
+    by a gold_reconciliation_summary query) with a live count — see
+    _live_open_exception_count(). overall_status only ever needs to
+    distinguish RECONCILED from not here — every consumer template
+    (home.html, reports.html) renders any non-RECONCILED value identically
+    as a generic "Exceptions" badge."""
+    for row in rows:
+        count = _live_open_exception_count(row["statement_id"])
+        row["exception_count"] = count
+        row["overall_status"] = "RECONCILED" if count == 0 else "EXCEPTIONS_PRESENT"
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +166,11 @@ def get_vendor_summaries() -> list:
             REASON_LABELS.get(r["exception_reason"], r["exception_reason"]): r["c"]
             for r in reason_rows
         }
+        # Live count (sum of the OPEN breakdown just fetched above) —
+        # replaces the stale exception_count from gold_reconciliation_summary,
+        # which matching writes once from Silver-classified exceptions only
+        # and never updates again. See _live_open_exception_count().
+        vendor["exception_count"] = sum(r["c"] for r in reason_rows)
     return vendors
 
 
@@ -347,7 +390,7 @@ def get_job_history() -> list:
 # ---------------------------------------------------------------------------
 
 def get_all_runs() -> list:
-    return execute_query(
+    rows = execute_query(
         """
         SELECT statement_id, vendor_name, statement_period, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
@@ -356,6 +399,7 @@ def get_all_runs() -> list:
         ORDER BY reconciliation_timestamp DESC
         """
     )
+    return _with_live_exception_counts(rows)
 
 
 def get_statement_report(statement_id: str) -> dict:
