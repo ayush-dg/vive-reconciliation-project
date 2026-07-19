@@ -90,7 +90,29 @@ def get_recent_runs(limit: int = 10) -> list:
 
 
 def get_open_exceptions_count() -> int:
-    rows = execute_query("SELECT COUNT(*) AS c FROM gold_exceptions WHERE exception_status = 'OPEN'")
+    """
+    Live count of OPEN gold_exceptions rows, scoped to each vendor's LATEST
+    statement_id only (same _LATEST_RUN_PER_VENDOR scoping get_kpis()/
+    get_recent_runs() already use) — a flat, unscoped COUNT(*) here would
+    also pick up exceptions still OPEN on a superseded run of the same
+    vendor/period (e.g. a statement re-run several times while debugging a
+    cache/connectivity issue, producing multiple statement_ids), which the
+    recent-runs table correctly excludes. Without this scoping, this KPI
+    and the table's per-row exception_count (see _with_live_exception_counts())
+    disagree — the whole point of both is to describe the same "open
+    exceptions right now" state.
+    """
+    rows = execute_query(
+        f"""
+        SELECT COUNT(*) AS c
+        FROM gold_exceptions ge
+        INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
+        INNER JOIN ({_LATEST_RUN_PER_VENDOR}) latest
+            ON s.vendor_name = latest.vendor_name
+            AND s.reconciliation_timestamp = latest.max_ts
+        WHERE ge.exception_status = 'OPEN'
+        """
+    )
     return rows[0]["c"] or 0 if rows else 0
 
 
