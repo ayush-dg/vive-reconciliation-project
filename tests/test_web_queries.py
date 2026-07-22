@@ -25,6 +25,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from web import queries
+from src.lakehouse.migrations import apply_pending_migrations
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "migrations", "001_initial_schema.sql")
 
@@ -275,6 +276,82 @@ class TestOpenExceptionsCountScopedToLatestRunPerVendor(unittest.TestCase):
         table_sum = sum(r["exception_count"] for r in runs)
         self.assertEqual(kpis["open_exceptions"], table_sum)
         self.assertEqual(kpis["open_exceptions"], 2)
+
+
+def _make_jobs_db():
+    """In-memory SQLite DB with the full migration history applied (needed
+    for the jobs table + its claim_token column, added in
+    migrations/005_add_jobs_table.sql and 006_add_job_claim_token.sql)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    apply_pending_migrations(conn)
+    return conn
+
+
+class TestClaimNextPendingJobIsAtomic(unittest.TestCase):
+    """Covers the bug where uploading the same PDF twice re-ran the full
+    (~5 minute) AI extraction both times instead of cache-hitting on the
+    second upload. Root cause: the worker claimed jobs via a plain SELECT
+    then a separate UPDATE, so more than one worker process (e.g. a
+    leftover dev server still running from an earlier session) could pick
+    up two different jobs for the same just-uploaded PDF and run them
+    concurrently -- each starting its own extraction before the other had
+    committed its extraction_cache row. claim_next_pending_job() now does
+    the claim as one atomic UPDATE that also refuses to claim anything
+    while another job is already PROCESSING, so jobs for the same file are
+    always fully serialized -- the second one's cache check can only run
+    after the first one's cache write has committed."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+        # Two uploads of the identical PDF, queued back to back -- exactly
+        # what the web upload form does for two clicks in the same session.
+        queries.create_job(job_id="job-1", pdf_filename="KSI_Noakers_053126.pdf",
+                            pdf_path="sample_data/KSI_Noakers_053126.pdf", submitted_by="tester")
+        queries.create_job(job_id="job-2", pdf_filename="KSI_Noakers_053126.pdf",
+                            pdf_path="sample_data/KSI_Noakers_053126.pdf", submitted_by="tester")
+
+    def test_second_claim_is_refused_while_first_job_still_processing(self):
+        first = queries.claim_next_pending_job()
+        self.assertEqual(first["job_id"], "job-1")
+        self.assertEqual(first["status"], "PROCESSING")
+
+        # A second worker polling right now (e.g. a duplicate server
+        # instance) must NOT also pick up job-2 while job-1 is in flight --
+        # that's what let both jobs run their extraction concurrently.
+        second = queries.claim_next_pending_job()
+        self.assertIsNone(second)
+
+    def test_next_job_claimable_only_after_first_completes(self):
+        first = queries.claim_next_pending_job()
+        self.assertEqual(first["job_id"], "job-1")
+
+        queries.update_job_status("job-1", status="COMPLETED",
+                                   completed_at="2026-07-22T00:05:00+00:00",
+                                   statement_id="STMT-AAA111")
+
+        second = queries.claim_next_pending_job()
+        self.assertIsNotNone(second)
+        self.assertEqual(second["job_id"], "job-2")
+        self.assertEqual(second["status"], "PROCESSING")
+
+    def test_claim_never_returns_the_same_job_twice(self):
+        first = queries.claim_next_pending_job()
+        self.assertEqual(first["job_id"], "job-1")
+
+        # Simulate two more racing polls before job-1 finishes -- neither
+        # should claim job-1 again or jump ahead to job-2.
+        self.assertIsNone(queries.claim_next_pending_job())
+        self.assertIsNone(queries.claim_next_pending_job())
 
 
 if __name__ == "__main__":

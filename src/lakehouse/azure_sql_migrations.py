@@ -300,7 +300,8 @@ TABLES = {
             started_at NVARCHAR(MAX),
             completed_at NVARCHAR(MAX),
             error_message NVARCHAR(MAX),
-            vendor_name NVARCHAR(MAX)
+            vendor_name NVARCHAR(MAX),
+            claim_token NVARCHAR(255)
         )
     """,
 }

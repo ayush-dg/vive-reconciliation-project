@@ -9,6 +9,7 @@ SQL abstraction). Routers stay thin; this module owns the SQL.
 
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -355,10 +356,42 @@ def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str)
     )
 
 
-def get_next_pending_job():
-    rows = execute_query(
-        "SELECT * FROM jobs WHERE status = 'PENDING' ORDER BY submitted_at LIMIT 1"
+def claim_next_pending_job():
+    """Atomically claims the oldest PENDING job by flipping it straight to
+    PROCESSING in one UPDATE, then looks it up by the claim_token that
+    UPDATE just stamped on it.
+
+    This has to be one statement rather than a SELECT-then-UPDATE: with two
+    worker processes polling at once (e.g. a second server instance left
+    running from an earlier session), a separate SELECT and UPDATE leaves a
+    window where both can read the same PENDING row before either writes,
+    so both claim it — or each claims a different job for the same
+    just-uploaded PDF and runs it concurrently, so neither sees the other's
+    extraction_cache write in time and both re-run the full AI extraction.
+    The NOT EXISTS guard also means only one job is ever PROCESSING
+    system-wide, so a second upload of an identical PDF always waits for
+    the first run to fully commit (including its cache write) before its
+    own cache check runs. Ordering is by the unique autoincrement id
+    (submission order) rather than MIN(submitted_at) — two jobs created in
+    quick succession can land on the exact same submitted_at timestamp
+    (datetime.now() resolution isn't fine-grained enough to guarantee two
+    close-together calls differ, especially on Windows), which would make
+    that WHERE clause match both rows and claim them together. id has no
+    such tie. MIN(...) is used instead of LIMIT 1 inside the subquery so
+    this stays valid T-SQL if this ever runs against Azure SQL (see
+    src/lakehouse/connection.py)."""
+    claim_token = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    execute_sql(
+        """
+        UPDATE jobs SET status = 'PROCESSING', started_at = ?, claim_token = ?
+        WHERE id = (SELECT MIN(id) FROM jobs WHERE status = 'PENDING')
+          AND status = 'PENDING'
+          AND NOT EXISTS (SELECT 1 FROM jobs WHERE status = 'PROCESSING')
+        """,
+        [now, claim_token],
     )
+    rows = execute_query("SELECT * FROM jobs WHERE claim_token = ?", [claim_token])
     return rows[0] if rows else None
 
 

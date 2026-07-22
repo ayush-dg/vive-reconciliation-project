@@ -9,6 +9,14 @@ uses the same subprocess pattern for a synchronous single-file upload).
 Runs on a daemon thread started from web/app.py at application startup.
 Must never crash: every exception is caught so one bad PDF can't take the
 worker down and silently stop processing everything queued after it.
+
+Job claiming (queries.claim_next_pending_job) is atomic and refuses to
+claim a new job while another is already PROCESSING, so this stays
+"one job at a time" even if more than one process ends up running this
+loop (e.g. a leftover dev server from an earlier session, or multiple
+uvicorn worker processes) — otherwise two jobs for the same just-uploaded
+PDF could run concurrently, each missing the other's extraction_cache
+write and both re-running the full AI extraction.
 """
 
 import os
@@ -37,9 +45,6 @@ def _run_job(job: dict) -> None:
     pdf_path = job["pdf_path"]
 
     print(f"[worker] Starting job {job_id} ({job['pdf_filename']})")
-    queries.update_job_status(
-        job_id, status="PROCESSING", started_at=datetime.now(timezone.utc).isoformat()
-    )
 
     python_exe = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
     relative_pdf_path = os.path.relpath(pdf_path, PROJECT_ROOT)
@@ -96,7 +101,7 @@ def _worker_loop() -> None:
 
     while True:
         try:
-            job = queries.get_next_pending_job()
+            job = queries.claim_next_pending_job()
             if job:
                 _run_job(job)
         except Exception:
