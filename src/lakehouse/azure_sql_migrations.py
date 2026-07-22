@@ -318,14 +318,38 @@ INDEXES = {
     ),
 }
 
+# Columns added to a table that already exists (a real CREATE TABLE above
+# only ever runs for a brand-new database — once "jobs" exists, the
+# CREATE TABLE IF NOT EXISTS check for it is always a no-op, so a column
+# added to that table's definition here is never actually applied to a
+# live Azure SQL database by TABLES alone; it needs its own ALTER TABLE
+# entry below, run every time regardless of whether the table itself was
+# just created. See migrations/006_add_job_claim_token.sql (the SQLite
+# side of this same change) — web/queries.py's claim_next_pending_job()
+# needs this column to exist to atomically claim a job.
+COLUMNS = {
+    "jobs": [
+        ("claim_token", "ALTER TABLE jobs ADD claim_token NVARCHAR(255)"),
+    ],
+}
+
 
 def run_migrations():
-    """Creates every table/index listed above that doesn't already exist
-    in the connected Azure SQL database. Returns (created_tables,
-    created_indexes) — names actually created during this call."""
+    """Creates every table/index/column listed above that doesn't already
+    exist in the connected Azure SQL database. Returns (created_tables,
+    created_indexes, created_columns) — names actually created during this
+    call.
+
+    Columns are applied last and unconditionally checked even for tables
+    that already existed before this call (see COLUMNS) — a table's entry
+    in TABLES is only ever used for the initial CREATE TABLE, so a column
+    added to an existing table's schema has to be picked up here instead,
+    or it silently never reaches a database where that table already
+    exists."""
     conn = get_connection()
     created_tables = []
     created_indexes = []
+    created_columns = []
     try:
         cursor = conn.cursor()
         for table_name, create_sql in TABLES.items():
@@ -347,10 +371,22 @@ def run_migrations():
             cursor.execute(create_sql)
             conn.commit()
             created_indexes.append(index_name)
+
+        for table_name, column_specs in COLUMNS.items():
+            for column_name, add_column_sql in column_specs:
+                cursor.execute(
+                    "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(?) AND name = ?",
+                    [table_name, column_name],
+                )
+                if cursor.fetchone():
+                    continue
+                cursor.execute(add_column_sql)
+                conn.commit()
+                created_columns.append(f"{table_name}.{column_name}")
     finally:
         conn.close()
 
-    return created_tables, created_indexes
+    return created_tables, created_indexes, created_columns
 
 
 def list_tables():
@@ -374,7 +410,7 @@ if __name__ == "__main__":
         print("AZURE_SQL_SERVER is not set — nothing to do (this script only targets Azure SQL).")
         sys.exit(1)
 
-    created_tables, created_indexes = run_migrations()
+    created_tables, created_indexes, created_columns = run_migrations()
 
     if created_tables:
         for name in created_tables:
@@ -385,6 +421,12 @@ if __name__ == "__main__":
     if created_indexes:
         for name in created_indexes:
             print(f"Created index: {name}")
+
+    if created_columns:
+        for name in created_columns:
+            print(f"Added column: {name}")
+    else:
+        print("No new columns — schema already up to date")
 
     print("\nTables now in Azure SQL database:")
     for name in list_tables():
