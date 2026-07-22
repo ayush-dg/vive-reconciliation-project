@@ -30,7 +30,8 @@ import uuid
 from datetime import datetime, timezone
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 # Windows' default console codepage (cp1252) can't encode every character
 # that might appear in AI-extracted vendor/warning text — force UTF-8
@@ -39,9 +40,17 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-# Load .env file
+# Load .env file by explicit absolute path, matching web/app.py — a bare
+# load_dotenv() discovers the file via cwd/call-stack heuristics, which
+# depend on how this module was invoked (this script also gets exec'd via
+# importlib.util.spec_from_file_location by scripts/run_full_pipeline.py,
+# not just run directly). An explicit path removes that ambiguity, so the
+# same AZURE_SQL_SERVER check in src/lakehouse/connection.py always sees
+# the same .env the web app loaded — otherwise this process can silently
+# fall back to the local SQLite db while the web app reads/writes Azure
+# SQL, and the two never see each other's extraction_cache rows.
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.ai.document_understanding_engine import DocumentUnderstandingEngine, extract_pdf_text
 from src.lakehouse.connection import execute_sql, execute_query

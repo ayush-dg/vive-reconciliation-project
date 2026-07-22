@@ -29,8 +29,14 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+# Explicit absolute path, matching web/app.py — a bare load_dotenv() finds
+# .env via cwd/call-stack heuristics, which is one more thing that can go
+# wrong depending on how this script gets invoked (e.g. as a subprocess
+# from web/worker.py) and silently leave AZURE_SQL_SERVER unset, sending
+# this process to the local SQLite db instead of the Azure SQL the web app
+# uses — see src/lakehouse/connection.py's _using_azure_sql().
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 
 def load_notebook(name, relative_path):

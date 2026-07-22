@@ -14,7 +14,8 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 # Windows' default console codepage (cp1252) can't encode characters like
 # the checkmark used below and crashes with UnicodeEncodeError instead of
@@ -23,8 +24,10 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
+# Explicit absolute path, matching web/app.py — see
+# notebooks/01_document_intake.py for why a bare load_dotenv() is unsafe here.
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.matching.engine import run_matching
 from src.lakehouse.connection import execute_query
