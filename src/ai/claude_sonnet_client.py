@@ -43,6 +43,19 @@ from .base_client import AIClient, AIResponse
 
 ROW_CONFIDENCE = 0.75
 
+# Applied to a row's line_confidence only when the model omits a "confidence"
+# field, or returns something unparseable/out-of-range — deliberately below
+# the 0.60 validate_invoice() threshold (config/validation/extraction_rules.json)
+# so a missing/untrustworthy signal always routes to human review rather than
+# silently passing (RULE-10's "never silently succeed" principle). See
+# discovery/RISK_REGISTER.md R-001.
+FALLBACK_LINE_CONFIDENCE = 0.40
+
+# Mirrors pdfplumber_fallback.py's _extract_invoice_row() keyword skip (see
+# discovery/INVARIANT_CATALOGUE.md IC-20) — a grand-total/balance/subtotal
+# row must never be ingested as an invoice line.
+TOTALS_ROW_KEYWORDS = ("total", "balance", "subtotal")
+
 EXTRACTION_PROMPT = """You are extracting data from a vendor statement PDF for an accounts payable system. This is critical financial data — accuracy is essential.
 
 STEP 1: Look at the table headers and identify all columns.
@@ -57,6 +70,14 @@ STEP 2: Extract every single data row exactly as printed. For each row:
 - Do NOT skip any rows
 - Do NOT merge rows
 - Do NOT calculate anything
+- Do NOT include a grand total, subtotal, or balance-forward row as if it
+  were an invoice line — report those separately in statement-level totals
+  only, never inside rows.
+- Include a "confidence" field (0.0-1.0) for every row: 0.9+ only if every
+  character is unambiguous; lower it for anything uncertain — unclear
+  handwriting/scan quality, an invoice number you had to guess between two
+  readings, a column you weren't fully sure how to map, etc. Be honest and
+  granular — do not default to a single value for every row.
 
 Also extract document-level metadata at the top of the JSON response:
 - vendor_name: the vendor/supplier company name as printed on the
@@ -68,7 +89,7 @@ Return JSON:
   vendor_name: '...',
   statement_date: '...',
   columns_found: [exact column names from header],
-  rows: [{col1: val, col2: val, ...}]
+  rows: [{col1: val, col2: val, ..., confidence: 0.0-1.0}]
 }"""
 
 ACCOUNT_CODE_PREFIX_RE = re.compile(r'^\s*\d{2}[\s.]?\d{2}\b')
@@ -388,7 +409,10 @@ class ClaudeSonnetClient(AIClient):
         for row_num, row in enumerate(rows, start=1):
             if not isinstance(row, dict):
                 continue
-            invoices.append(self._row_to_invoice(row, field_map, row_num, fallback_warnings))
+            invoice = self._row_to_invoice(row, field_map, row_num, fallback_warnings)
+            if invoice is None:
+                continue
+            invoices.append(invoice)
         return invoices, fallback_warnings
 
     @staticmethod
@@ -461,7 +485,7 @@ class ClaudeSonnetClient(AIClient):
                 best = col
         return best
 
-    def _row_to_invoice(self, row: dict, field_map: dict, row_num: int, fallback_log: list) -> dict:
+    def _row_to_invoice(self, row: dict, field_map: dict, row_num: int, fallback_log: list) -> Optional[dict]:
         def get(field):
             key = field_map.get(field)
             return row.get(key) if key else None
@@ -504,6 +528,11 @@ class ClaudeSonnetClient(AIClient):
             print(f"  [ClaudeSonnetClient] {msg}")
             fallback_log.append(msg)
 
+        if self._is_totals_row(invoice_number):
+            print(f"  [ClaudeSonnetClient] Row {row_num}: skipped — looks like a "
+                  f"totals/summary row (invoice_number={invoice_number!r})")
+            return None
+
         return {
             "invoice_number": invoice_number,
             "invoice_date": get("invoice_date"),
@@ -518,8 +547,35 @@ class ClaudeSonnetClient(AIClient):
             "shop": get("shop"),
             "page_number": 1,  # single whole-document call — no per-page split to track
             "row_number": row_num,
-            "line_confidence": ROW_CONFIDENCE,
+            "line_confidence": self._parse_confidence(row.get("confidence")),
         }
+
+    @staticmethod
+    def _is_totals_row(invoice_number) -> bool:
+        """True if `invoice_number` looks like a grand-total/balance/subtotal
+        row rather than a real invoice line — same keyword check as
+        pdfplumber_fallback.py:_extract_invoice_row() (see IC-20)."""
+        if not invoice_number:
+            return False
+        inv_lower = str(invoice_number).lower()
+        return any(kw in inv_lower for kw in TOTALS_ROW_KEYWORDS)
+
+    @staticmethod
+    def _parse_confidence(raw_confidence) -> float:
+        """Real per-row confidence from the model's own "confidence" field.
+        Falls back to FALLBACK_LINE_CONFIDENCE (below the 0.60 validation
+        threshold) whenever the signal can't be trusted — missing, not a
+        number, or outside [0.0, 1.0] — rather than defaulting to a value
+        that would silently clear the review gate. See RISK_REGISTER.md R-001."""
+        if raw_confidence is None:
+            return FALLBACK_LINE_CONFIDENCE
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            return FALLBACK_LINE_CONFIDENCE
+        if confidence < 0.0 or confidence > 1.0:
+            return FALLBACK_LINE_CONFIDENCE
+        return confidence
 
     @staticmethod
     def _looks_like_invoice_number(value) -> bool:
