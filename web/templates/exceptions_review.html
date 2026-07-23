@@ -39,7 +39,7 @@
       {% for exc in exceptions %}
       <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}&selected={{ exc.exception_id }}"
          class="exc-item {{ 'sel' if selected and selected.exception_id == exc.exception_id }}">
-        <div class="exc-inv">Invoice #{{ exc.invoice_number }}</div>
+        <div class="exc-inv">Invoice #{{ exc.invoice_number or "Unknown" }}</div>
         <div class="exc-date">{{ exc.invoice_date | friendly_date }}</div>
         <div class="exc-row">
           <span class="badge {{ reason_badge.get(exc.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(exc.exception_reason, {}).label or exc.exception_reason }}</span>
@@ -55,7 +55,7 @@
   <div class="detail">
     {% if selected %}
     <div class="detail-header">
-      <div class="detail-title">Invoice #{{ selected.invoice_number }} — {{ vendor_name }}</div>
+      <div class="detail-title">Invoice #{{ selected.invoice_number or "Unknown" }} — {{ vendor_name }}</div>
       <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'neutral' }}" style="flex-shrink:0">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
     </div>
     <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">

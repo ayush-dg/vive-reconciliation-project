@@ -134,12 +134,12 @@ def generate_report(statement_id: str, run_explanations: bool = False,
                 print(f"  ERP Amount:   not in ERP")
             print(f"  Status:       {exc.get('exception_status', 'OPEN')}")
 
-            if exc.get('ai_explanation'):
+            if exc.get('ai_explanation') and exc.get('ai_provider'):
                 print(f"\n  AI Analysis (via {exc.get('ai_provider', 'unknown')}, "
                       f"confidence: {exc.get('ai_confidence_score', 'N/A')}):")
                 print(f"  Probable cause:      {exc['ai_explanation']}")
                 print(f"  Suggested action:    {exc['ai_suggested_resolution']}")
-            else:
+            elif not exc.get('ai_explanation'):
                 if not run_explanations:
                     print(f"  AI Analysis:  (run with --explain to generate)")
 
@@ -190,7 +190,10 @@ def generate_report(statement_id: str, run_explanations: bool = False,
         print(f"\n  AI ACTIVITY LOG ({len(audit_rows)} calls)")
         print(f"  {'-'*60}")
         for a in audit_rows:
-            status = "OK" if a['success'] else "FAIL"
+            if a['interaction_type'] == 'ROW_SKIP':
+                status = "SKIP"
+            else:
+                status = "OK" if a['success'] else "FAIL"
             latency = f"{a['latency_ms']/1000:.1f}s" if a['latency_ms'] else "N/A"
             print(f"  [{status}] {a['interaction_type']:<28} "
                   f"{(a['ai_provider'] or 'unknown'):<8} {(a['model'] or 'unknown'):<25} {latency}")
