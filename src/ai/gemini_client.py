@@ -5,8 +5,13 @@ Gemini 2.5 Flash implementation of AIClient, via the google-genai SDK
 (Files API + generate_content). The ONLY file that knows Gemini's SDK/wire
 format.
 
-Registered in client_factory.py as "gemini" and set as the active primary
-provider in active_provider.json.
+Registered in client_factory.py as "gemini" — NOT part of the active
+provider chain (Claude Sonnet 4.6 is primary, see active_provider.json
+and RULES.md RULE-04). Available as an alternate/fallback extraction
+provider via a direct get_ai_client("gemini") call.
+[Corrected 2026-07-24, BCE Stage 3 documentation sweep — this docstring
+previously claimed to be the active primary; confirmed false against
+active_provider.json's provider_chain.]
 
 Sends the whole PDF as ONE file upload + ONE generate_content call — no
 page splitting. Diagnostic testing validated this is reliable across all

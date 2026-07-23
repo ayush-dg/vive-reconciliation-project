@@ -56,46 +56,59 @@ see the module docstring: "AI never touches this."
 
 ---
 
-### RULE-04 — Azure Document Intelligence (prebuilt-layout) + pdfplumber/OCR is the final extraction chain (supersedes twice)
+### RULE-04 — Claude Sonnet 4.6 (Azure AI Foundry) + pdfplumber/OCR is the final extraction chain (supersedes three times)
 
-**Rule:** No other AI providers in the extraction chain. Primary: Azure
-Document Intelligence, `prebuilt-layout` model, the whole PDF sent in ONE
-call (no page splitting — prebuilt-layout handles multi-page and scanned
-documents natively via its own internal OCR). Its generic table
-output (rows/cells, no semantic field labels) is mapped to the Universal
-Financial Document Schema by reusing the same column-header interpreter
-the pdfplumber fallback already used (`_find_header_row` / `_map_columns` /
-`_extract_invoice_row`) — see RULE-07. Fallback: deterministic pdfplumber,
+**Rule:** No other AI providers in the extraction chain. Primary: Claude
+Sonnet 4.6, via Azure AI Foundry, the whole PDF sent in ONE streaming
+call (no page splitting). Column mapping is column-agnostic — done in
+Python (`_map_columns()`/`_row_to_invoice()` in `claude_sonnet_client.py`),
+not by a shared per-vendor config. Fallback: deterministic pdfplumber,
 unchanged, which handles scanned pages internally via per-page OCR.
 
-**Why:** Azure OpenAI gpt-5-mini (the prior primary — see superseded text
-below) took 90-180s per page; a live test of Document Intelligence's
-`prebuilt-layout` against the same sample vendor statement
-(`sample_data/ASTCollex0526.pdf`) completed the full 4-page document in
-14 seconds with equivalent table/column coverage (all invoice-number,
-date, RO#, work-order#, and outstanding-amount columns detected correctly).
-`prebuilt-invoice` (Document Intelligence's other prebuilt model) was
-explicitly rejected first — it's built for one invoice per document with a
-single header-level `InvoiceId`/`AmountDue`, not a table of many invoices
-per page, and has no equivalent field for dealer-specific `ro_number`/
-`work_order_number` at all. Two structural quirks this client works around,
-both found only by live-testing against all 3 real sample statements, not
-just one: (1) `prebuilt-layout` returns one `Table` object per page, and
-whether a later page's table has its own header or is a headerless
-continuation of an earlier one varies by vendor — ASTCollex is one ledger
-split across 4 pages (header only on page 1), while KSI/Fred Beans have a
-genuinely different table per page. Header detection therefore runs
-independently on every table first; the last successfully-detected col_map
-is reused only when a table has no header of its own *and* its column
-count matches — never assumed globally from the first table alone. (2) A
-trailing "Total Outstanding Invoices: ... $13,860.79 USD" footer row can
-trip the same broad keyword scan used to detect headers (it contains both
-"outstanding" and "invoice"); a header match found anywhere but at/near the
-top of a table (`HEADER_MAX_DATA_START` in `document_intelligence_client.py`)
-is rejected as a false positive rather than silently discarding every real
-row before it. `src/ai/azure_openai_client.py` and its three deployment configs
-(`azure_gpt5_mini`/`azure_gpt5_nano`/`azure_gpt5_1`) are kept in the repo
-(not deleted) pending a separate cleanup pass.
+**Why:** Validated across all 4 sample vendor statements (69-602 rows),
+with column-agnostic mapping that correctly disambiguates vendors with
+multiple invoice-number-like columns, and reliable document-level
+`vendor_name` extraction (as of the vendor_name/statement_date prompt
+fix). Supersedes both Azure Document Intelligence and Gemini as primary.
+`config/ai/azure_gpt5_*.json`, `config/ai/azure_doc_intel.json`,
+`config/ai/gemini.json`, and `config/ai/mistral.json` all remain
+registered in `provider_config_paths` as alternate/fallback options,
+directly accessible via `get_ai_client()`, but are not part of the active
+chain.
+
+**Known gap, tracked separately (see `discovery/RISK_REGISTER.md` R-001,
+`discovery/INVARIANT_CATALOGUE.md` IC-15):** unlike the Document
+Intelligence and gpt-5-mini eras, `ClaudeSonnetClient` does not request or
+elicit a genuine per-row confidence value — `line_confidence` is a
+hardcoded `0.75` constant, which always clears the `0.60` human-review
+threshold regardless of actual extraction quality. Accepted as a known
+risk as of 2026-07-24 (Critical severity, tracked against Sprint 1
+planning), not fixed as part of this rule update.
+
+**Superseded text (kept for history — Document Intelligence era):** "No
+other AI providers in the extraction chain. Primary: Azure Document
+Intelligence, `prebuilt-layout` model, the whole PDF sent in ONE call (no
+page splitting — prebuilt-layout handles multi-page and scanned documents
+natively via its own internal OCR). Its generic table output (rows/cells,
+no semantic field labels) is mapped to the Universal Financial Document
+Schema by reusing the same column-header interpreter the pdfplumber
+fallback already used (`_find_header_row` / `_map_columns` /
+`_extract_invoice_row`) — see RULE-07. Fallback: deterministic pdfplumber,
+unchanged, which handles scanned pages internally via per-page OCR. Why:
+Azure OpenAI gpt-5-mini (the prior primary) took 90-180s per page; a live
+test of Document Intelligence's `prebuilt-layout` against the same sample
+vendor statement (`sample_data/ASTCollex0526.pdf`) completed the full
+4-page document in 14 seconds with equivalent table/column coverage.
+`prebuilt-invoice` was explicitly rejected first — built for one invoice
+per document, not a table of many invoices per page, with no field for
+dealer-specific `ro_number`/`work_order_number` at all. Two structural
+quirks this client works around, found only by live-testing against all 3
+real sample statements: (1) header detection runs independently on every
+table first, since whether a later page's table has its own header or is a
+headerless continuation varies by vendor; (2) a trailing totals footer row
+can trip the header-detection keyword scan, so a header match found
+anywhere but at/near the top of a table (`HEADER_MAX_DATA_START` in
+`document_intelligence_client.py`) is rejected as a false positive."
 
 **Superseded text (kept for history — gpt-5-mini era):** "No other AI
 providers in the extraction chain. Primary: Azure OpenAI gpt-5-mini via the
@@ -120,10 +133,19 @@ order was itself a source of confusion (see the OCR-fix and
 provider-removal work in the Progress Log)."
 
 **Enforced at:** [`config/ai/active_provider.json`](config/ai/active_provider.json)
-(`"provider_chain": ["azure_doc_intel", "pdfplumber"]`),
+(`"provider_chain": ["claude_sonnet", "pdfplumber"]`),
 [`src/ai/client_factory.py`](src/ai/client_factory.py) — `get_ai_client()`,
-[`config/ai/azure_doc_intel.json`](config/ai/azure_doc_intel.json),
-[`src/ai/document_intelligence_client.py`](src/ai/document_intelligence_client.py).
+[`config/ai/claude_sonnet_extraction.json`](config/ai/claude_sonnet_extraction.json),
+[`src/ai/claude_sonnet_client.py`](src/ai/claude_sonnet_client.py).
+
+**Corrected 2026-07-24** (BCE Stage 3 documentation sweep, engineer-confirmed):
+this rule previously described Azure Document Intelligence as the final
+chain — stale relative to `active_provider.json`, which has named
+`claude_sonnet` as `provider_chain[0]` since before this correction. Part
+of a coordinated 6-location sweep (see `discovery/ANNOTATION_CHECKLIST.md`
+P1-S3-002) — the other five locations were `docs/VIVE_Implementation_Context.md`
+Section 3, `src/ai/gemini_client.py`, `src/ai/client_factory.py`'s inline
+comments, `src/ai/ocr_extractor.py`, and `notebooks/04_generate_report.py`.
 
 ---
 
@@ -171,25 +193,44 @@ or setup step before a new vendor's statement can be processed.
 **Why:** Deliberate design goal: any vendor statement PDF, any layout,
 works without a human configuring column mappings for that vendor first.
 
-**Enforced at:** [`src/ai/document_understanding_engine.py`](src/ai/document_understanding_engine.py) —
-`VISION_PROMPT`'s generic column-mapping instructions;
-[`src/ai/pdfplumber_fallback.py`](src/ai/pdfplumber_fallback.py) — `_map_columns()`.
+**Enforced at:** [`src/ai/claude_sonnet_client.py`](src/ai/claude_sonnet_client.py) —
+`_map_columns()`, the actual live enforcement point for the current
+active provider (see RULE-04);
+[`src/ai/pdfplumber_fallback.py`](src/ai/pdfplumber_fallback.py) — `_map_columns()`, the
+deterministic fallback path.
+
+**Corrected 2026-07-24** (BCE Stage 3, engineer-signed-off): this rule
+previously cited `src/ai/document_understanding_engine.py`'s `VISION_PROMPT`
+as the enforcement point — that prompt is confirmed not read by the current
+active provider (`ClaudeSonnetClient` sends its own embedded prompt
+instead; see RULE-04). The underlying rule (no per-vendor config) was never
+false — only the citation was stale.
 
 ---
 
 ### RULE-08 — No full Admin/Reviewer role separation
 
-**Rule:** Even once per-user logins exist (Phase 3), there is deliberately
-only one flat permission level — no Admin vs. Reviewer tiers.
+**Rule:** Now that per-user logins exist (Phase 3, built), there is
+deliberately only one flat permission level — no Admin vs. Reviewer tiers.
 
 **Why:** Everyone using the dashboard does the same job today. Per-user
-logins exist so `resolved_by` on a disposition means something real, not to
-gate access by role.
+logins exist so `resolved_by`/`disposed_by` on a disposition means something
+real, not to gate access by role.
 
-**Enforced at:** Not yet built (Phase 3 — per-user logins is unbuilt as of
-this writing). Enforced by design intent — check any future PR that
-introduces role/permission checks against `docs/VIVE_Implementation_Context.md`
-Sections 4 and 5 before merging it.
+**Enforced at:** [`web/routers/users.py`](web/routers/users.py) and
+[`web/deps.py`](web/deps.py) — `require_login()` — enforced by absence of
+any role/permission check anywhere in either file or the request path. Any
+authenticated user, including one added by another non-admin user, can add
+or remove any other user (self-removal excepted). Check any future PR that
+introduces role/permission checks against this rule and against
+`docs/VIVE_Implementation_Context.md` Sections 4 and 5 before merging it.
+
+**Corrected 2026-07-24** (BCE Stage 3, engineer-signed-off): this rule
+previously stated per-user logins were "unbuilt as of this writing" — false
+as of Phase 3's completion (`users`/`jobs` tables, login/logout, user
+management all built and functional). The flat-permission design intent
+this rule describes is confirmed still accurate in the now-built code —
+only the build-status premise was stale.
 
 ---
 

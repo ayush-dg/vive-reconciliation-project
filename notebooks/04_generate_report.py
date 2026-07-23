@@ -8,8 +8,15 @@ Usage:
     python notebooks/04_generate_report.py --statement-id STMT-TEST-001
     python notebooks/04_generate_report.py --statement-id STMT-TEST-001 --explain
 
-With --explain flag: calls the active AI provider (Azure OpenAI gpt-5-mini) to add AI explanations to open exceptions
-before printing the report.
+With --explain flag: adds AI explanations to open exceptions before printing
+the report, via ExplanationService — which always uses Claude Haiku 4.5
+(hardcoded EXPLANATION_PROVIDER in src/ai/explanation_service.py),
+independent of whatever's in config/ai/active_provider.json's provider_chain.
+[Corrected 2026-07-24, BCE Stage 3 documentation sweep — this docstring
+previously said "the active AI provider (Azure OpenAI gpt-5-mini)," wrong on
+two counts: the extraction chain's active provider is now Claude Sonnet 4.6
+(RULES.md RULE-04), and --explain never uses the extraction chain's
+provider at all — it's deliberately decoupled.]
 """
 
 import argparse
