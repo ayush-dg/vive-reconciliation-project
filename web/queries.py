@@ -292,6 +292,64 @@ def get_vendor_latest_statement(vendor_name: str):
     return rows[0] if rows else None
 
 
+def get_exceptions_only_vendor(vendor_name: str):
+    """Statement-shaped lookup for an "exceptions-only" vendor (see
+    _get_exceptions_only_vendors()) -- used by the exceptions detail route
+    when get_vendor_latest_statement() finds nothing, so a vendor raised
+    straight to gold_exceptions (e.g. a flagged review-queue row, before
+    its PDF got a full pipeline run) is still reachable instead of hitting
+    "No reconciliation run found".
+
+    Re-derives every orphaned source_file's display name (the same
+    derivation _get_exceptions_only_vendors() used to build the vendor
+    card link) and matches it against vendor_name, since gold_exceptions
+    has no vendor_name column to look up directly. Returns None if
+    vendor_name doesn't match any orphaned source_file."""
+    orphan_source_files = execute_query(
+        """
+        SELECT DISTINCT ge.source_file
+        FROM gold_exceptions ge
+        WHERE ge.exception_status = 'OPEN'
+          AND NOT EXISTS (
+              SELECT 1 FROM gold_reconciliation_summary s
+              WHERE s.statement_id = ge.statement_id
+          )
+        """
+    )
+    source_file = next(
+        (r["source_file"] for r in orphan_source_files
+         if _vendor_name_from_source_file(r["source_file"] or "Unknown source") == vendor_name),
+        None,
+    )
+    if not source_file:
+        return None
+
+    count_rows = execute_query(
+        """
+        SELECT COUNT(*) AS c
+        FROM gold_exceptions ge
+        WHERE ge.source_file = ? AND ge.exception_status = 'OPEN'
+          AND NOT EXISTS (
+              SELECT 1 FROM gold_reconciliation_summary s
+              WHERE s.statement_id = ge.statement_id
+          )
+        """,
+        [source_file],
+    )
+    return {
+        "statement_id": None,
+        "vendor_name": vendor_name,
+        "source_file": source_file,
+        "statement_period": None,
+        "total_invoice_count": 0,
+        "matched_count": 0,
+        "exception_count": count_rows[0]["c"] or 0 if count_rows else 0,
+        "statement_total": 0,
+        "overall_status": "EXCEPTIONS_PRESENT",
+        "exceptions_only": True,
+    }
+
+
 _REASON_FILTER_SQL = {
     "missing": "Invoice Missing",
     "mismatch": "Amount Mismatch",
@@ -331,6 +389,58 @@ def get_exception_counts(statement_id: str):
     resolved = execute_query(
         "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = ? AND exception_status != 'OPEN'",
         [statement_id],
+    )[0]["c"] or 0
+    return total, resolved
+
+
+# ---------------------------------------------------------------------------
+# Exceptions — review, "exceptions-only" vendors (no summary row)
+# ---------------------------------------------------------------------------
+# Scoped by source_file + "no gold_reconciliation_summary row" rather than a
+# single statement_id, since an exceptions-only vendor's rows may span more
+# than one orphaned statement_id (e.g. more than one review-queue flag
+# raised before that vendor's PDF ever got a full pipeline run) -- see
+# get_exceptions_only_vendor().
+
+_ORPHAN_EXCEPTIONS_WHERE = """
+    ge.source_file = ?
+    AND NOT EXISTS (
+        SELECT 1 FROM gold_reconciliation_summary s
+        WHERE s.statement_id = ge.statement_id
+    )
+"""
+
+
+def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None) -> list:
+    reason = _REASON_FILTER_SQL.get(reason_filter)
+    if reason:
+        return execute_query(
+            _OPEN_EXCEPTIONS_SELECT + f"""
+            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
+            ORDER BY ge.invoice_number
+            """,
+            [source_file, reason],
+        )
+    return execute_query(
+        _OPEN_EXCEPTIONS_SELECT + f"""
+        WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
+        ORDER BY ge.invoice_number
+        """,
+        [source_file],
+    )
+
+
+def get_exception_counts_for_source_file(source_file: str):
+    total = execute_query(
+        f"SELECT COUNT(*) AS c FROM gold_exceptions ge WHERE {_ORPHAN_EXCEPTIONS_WHERE}",
+        [source_file],
+    )[0]["c"] or 0
+    resolved = execute_query(
+        f"""
+        SELECT COUNT(*) AS c FROM gold_exceptions ge
+        WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status != 'OPEN'
+        """,
+        [source_file],
     )[0]["c"] or 0
     return total, resolved
 

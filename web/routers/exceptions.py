@@ -51,6 +51,16 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
     vendor_name = unquote(vendor_name)
     statement = queries.get_vendor_latest_statement(vendor_name)
 
+    # Vendors with OPEN gold_exceptions rows but no gold_reconciliation_summary
+    # row at all (e.g. a flagged review-queue row raised before this
+    # vendor's PDF got a full pipeline run — see queries.get_vendor_summaries())
+    # have no statement to look up here; fall back to deriving one straight
+    # from their gold_exceptions rows instead of 404ing.
+    exceptions_only = False
+    if not statement:
+        statement = queries.get_exceptions_only_vendor(vendor_name)
+        exceptions_only = statement is not None
+
     if not statement:
         ctx = {
             "active_page": "exceptions",
@@ -60,9 +70,14 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         }
         return render(request, "exceptions_review.html", ctx, status_code=404)
 
-    statement_id = statement["statement_id"]
-    open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter)
-    total, resolved = queries.get_exception_counts(statement_id)
+    if exceptions_only:
+        source_file = statement["source_file"]
+        open_list = queries.get_open_exceptions_for_source_file(source_file, None if filter == "all" else filter)
+        total, resolved = queries.get_exception_counts_for_source_file(source_file)
+    else:
+        statement_id = statement["statement_id"]
+        open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter)
+        total, resolved = queries.get_exception_counts(statement_id)
 
     selected_exc = None
     if selected:
