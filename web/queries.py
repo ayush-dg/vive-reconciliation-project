@@ -162,7 +162,16 @@ def _with_live_exception_counts(rows: list) -> list:
 
 def get_vendor_summaries() -> list:
     """One row per vendor: their most recent reconciliation run, plus a
-    breakdown of open-exception reasons for that run's footer note."""
+    breakdown of open-exception reasons for that run's footer note.
+
+    Also includes "exceptions-only" vendors: ones with OPEN gold_exceptions
+    rows raised against a statement_id that never got a
+    gold_reconciliation_summary row at all -- e.g. a review-queue row
+    flagged via action_review_item() before that vendor's PDF finished a
+    full pipeline run (see web/routers/review_queue.py). Without this,
+    such a vendor's exceptions are real and OPEN but never show up on the
+    exceptions page — the vendor cards only ever queried
+    gold_reconciliation_summary. See _get_exceptions_only_vendors()."""
     rows = execute_query(
         """
         SELECT statement_id, vendor_name, statement_period, total_invoice_count,
@@ -175,7 +184,7 @@ def get_vendor_summaries() -> list:
     latest_by_vendor = {}
     for row in rows:
         latest_by_vendor[row["vendor_name"]] = row  # later (ASC) rows win
-    vendors = sorted(latest_by_vendor.values(), key=lambda v: v["vendor_name"] or "")
+    vendors = list(latest_by_vendor.values())
 
     for vendor in vendors:
         reason_rows = execute_query(
@@ -196,7 +205,72 @@ def get_vendor_summaries() -> list:
         # which matching writes once from Silver-classified exceptions only
         # and never updates again. See _live_open_exception_count().
         vendor["exception_count"] = sum(r["c"] for r in reason_rows)
+
+    vendors.extend(_get_exceptions_only_vendors())
+    return sorted(vendors, key=lambda v: v["vendor_name"] or "")
+
+
+def _get_exceptions_only_vendors() -> list:
+    """Synthesizes a vendor-card-shaped row for each source_file with OPEN
+    gold_exceptions raised against a statement_id that has no
+    gold_reconciliation_summary row at all. These rows have no Bronze/
+    Silver data behind them (no pipeline run ever completed for that
+    statement_id), so there's no invoice total, matched count, or
+    statement value to show — only the exception itself.
+
+    gold_exceptions has no vendor_name column (flagged review-queue rows
+    don't set vendor_id either — see action_review_item()), so source_file
+    stands in as the grouping key, the same way review_queue.py groups by
+    source_file. Note: if this same vendor separately already has a normal
+    summary-backed card under a differently-derived vendor_name, it'll
+    show up as a second, duplicate-looking card here — there's no reliable
+    way to link the two without a real vendor identity on gold_exceptions.
+    """
+    orphan_rows = execute_query(
+        """
+        SELECT ge.source_file, ge.exception_reason, COUNT(*) AS c
+        FROM gold_exceptions ge
+        WHERE ge.exception_status = 'OPEN'
+          AND NOT EXISTS (
+              SELECT 1 FROM gold_reconciliation_summary s
+              WHERE s.statement_id = ge.statement_id
+          )
+        GROUP BY ge.source_file, ge.exception_reason
+        """
+    )
+    by_source_file = {}
+    for row in orphan_rows:
+        source_file = row["source_file"] or "Unknown source"
+        by_source_file.setdefault(source_file, {})[row["exception_reason"]] = row["c"]
+
+    vendors = []
+    for source_file, reason_counts in by_source_file.items():
+        vendors.append({
+            "statement_id": None,
+            "vendor_name": _vendor_name_from_source_file(source_file),
+            "statement_period": None,
+            "total_invoice_count": 0,
+            "matched_count": 0,
+            "exception_count": sum(reason_counts.values()),
+            "statement_total": 0,
+            "overall_status": "EXCEPTIONS_PRESENT",
+            "reconciliation_timestamp": None,
+            "reason_breakdown": {
+                REASON_LABELS.get(reason, reason): c
+                for reason, c in reason_counts.items()
+            },
+            "exceptions_only": True,
+        })
     return vendors
+
+
+def _vendor_name_from_source_file(source_file: str) -> str:
+    """Best-effort display name for a vendor with no summary row (and thus
+    no AI-extracted vendor_name) — the same fallback title-casing
+    notebooks/01_document_intake.py's derive_vendor_name_from_filename()
+    uses when extraction itself can't determine a vendor_name."""
+    stem = os.path.splitext(source_file)[0]
+    return stem.replace("_", " ").replace("-", " ").title()
 
 
 # ---------------------------------------------------------------------------
