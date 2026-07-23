@@ -20,6 +20,9 @@
     <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}">⚠️ Exceptions
       {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
     </a>
+    <a href="/review-queue" class="nav-item {{ 'active' if active_page == 'review_queue' }}">🗂️ Review queue
+      {% if pending_review_count %}<div class="nav-dot"></div>{% endif %}
+    </a>
     <a href="/reports" class="nav-item {{ 'active' if active_page == 'reports' }}">📄 Reports</a>
     <div class="nav-section">Admin</div>
     <a href="/users" class="nav-item {{ 'active' if active_page == 'users' }}">👥 Users</a>

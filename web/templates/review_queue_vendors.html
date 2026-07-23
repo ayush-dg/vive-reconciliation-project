@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Review Queue{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">Review queue — rejected extraction rows</div>
+  <span style="font-size:12px;color:var(--text-secondary)">{{ total_pending }} pending across {{ vendors | length }} source file{{ "s" if vendors | length != 1 }}</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">Pending review</div>
+{% if vendors %}
+<div class="vendor-grid">
+  {% for v in vendors %}
+  <a href="/review-queue/{{ v.url_name }}" class="vendor-card has-ex">
+    <div class="vc-header">
+      <div class="vc-info">
+        <div class="vc-avatar ava-amber">{{ v.source_file | initials }}</div>
+        <div>
+          <div class="vc-name">{{ v.source_file }}</div>
+          <div class="vc-period">{{ v.pending_count }} row{{ "s" if v.pending_count != 1 }} pending</div>
+        </div>
+      </div>
+      <span class="badge warning">{{ v.pending_count }} pending</span>
+    </div>
+    <div class="vc-footer">
+      <span class="vc-footer-note">
+        {%- set parts = [] -%}
+        {%- for category, count in v.category_breakdown.items() -%}
+          {%- set _ = parts.append(count|string ~ " " ~ (category_badge.get(category, {}).label or category)) -%}
+        {%- endfor -%}
+        {{ parts | join(" · ") }}
+      </span>
+      <span class="review-link">Review →</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No rows pending review — all extracted rows passed validation.</div>
+{% endif %}
+{% endblock %}

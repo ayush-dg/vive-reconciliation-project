@@ -21,6 +21,7 @@ REASON_BADGE = {
     "Invoice Missing": {"label": "Missing in ERP", "css": "danger"},
     "Amount Mismatch": {"label": "Amount mismatch", "css": "warning"},
     "EXTRACTION_INCOMPLETE": {"label": "Extraction incomplete", "css": "grey"},
+    "DUPLICATE_RECORD": {"label": "Duplicate record", "css": "info"},
 }
 
 

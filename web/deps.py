@@ -30,9 +30,10 @@ def require_login(request: Request) -> str:
 
 
 def sidebar_context(request: Request) -> dict:
-    from web.queries import get_open_exceptions_count
+    from web.queries import get_open_exceptions_count, get_pending_review_count
     return {
         "open_exceptions_count": get_open_exceptions_count(),
+        "pending_review_count": get_pending_review_count(),
         "user_email": request.session.get("user"),
         "user_name": request.session.get("user_name") or request.session.get("user") or "",
     }

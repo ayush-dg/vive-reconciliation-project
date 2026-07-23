@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
-from web.routers import auth, dashboard, exceptions, jobs, reports, upload, users
+from web.routers import auth, dashboard, exceptions, jobs, reports, review_queue, upload, users
 from web.worker import start_worker
 
 
@@ -53,6 +53,7 @@ async def login_required_handler(request: Request, exc: LoginRequired):
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(exceptions.router)
+app.include_router(review_queue.router)
 app.include_router(upload.router)
 app.include_router(reports.router)
 app.include_router(users.router)

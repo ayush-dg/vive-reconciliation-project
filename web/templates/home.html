@@ -35,6 +35,13 @@
   </div>
 </div>
 
+{% if kpis.pending_review_count %}
+<div class="section-header" style="margin-top:-14px;margin-bottom:28px">
+  <span style="font-size:12px;color:var(--text-secondary)">⚠ {{ "{:,}".format(kpis.pending_review_count) }} row{{ "s" if kpis.pending_review_count != 1 }} pending review (rejected during extraction)</span>
+  <a href="/review-queue" class="link">Review queue →</a>
+</div>
+{% endif %}
+
 {% if active_jobs %}
 <div class="section-header">
   <div class="section-title">Active jobs</div>

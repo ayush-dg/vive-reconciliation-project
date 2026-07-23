@@ -7,6 +7,7 @@ pipeline itself uses — see that module's docstring for the SQLite/Azure
 SQL abstraction). Routers stay thin; this module owns the SQL.
 """
 
+import json
 import os
 import sys
 import uuid
@@ -67,6 +68,7 @@ def get_kpis() -> dict:
         "statement_total": totals["statement_total"] or 0,
         "vendor_count": totals["vendor_count"] or 0,
         "match_rate": round((auto_reconciled / total_invoices) * 100, 1) if total_invoices else 0.0,
+        "pending_review_count": get_pending_review_count(),
     }
 
 
@@ -495,3 +497,127 @@ def get_statement_report(statement_id: str) -> dict:
         "matched": matched,
         "exceptions": exceptions,
     }
+
+
+# ---------------------------------------------------------------------------
+# Review queue (validation_document_review_queue)
+# ---------------------------------------------------------------------------
+# Rows here never get an AI-detected vendor_id/vendor_name (see
+# notebooks/01_document_intake.py write_to_review_queue(), which only ever
+# writes source_file/statement_id) -- so, per the caller's direction,
+# source_file stands in as the vendor grouping key, the same way
+# vendor_name is the grouping key for gold_exceptions in the section above.
+
+def _parse_review_row(row: dict) -> dict:
+    """Attaches the parsed raw_payload dict plus its invoice_number/amount
+    (the fields the sidebar and detail panel need) onto the row, tolerating
+    malformed JSON rather than raising."""
+    try:
+        payload = json.loads(row["raw_payload"]) if row.get("raw_payload") else {}
+    except (TypeError, ValueError):
+        payload = {}
+    row["payload"] = payload
+    row["invoice_number"] = payload.get("invoice_number")
+    amount = payload.get("outstanding_amount")
+    row["amount"] = amount if amount is not None else payload.get("amount")
+    return row
+
+
+def get_pending_review_count() -> int:
+    rows = execute_query(
+        "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
+    )
+    return rows[0]["c"] or 0 if rows else 0
+
+
+def get_review_queue_vendors() -> list:
+    """One row per source_file with pending review rows, plus a
+    rejection_category breakdown for that source_file's footer note."""
+    rows = execute_query(
+        """
+        SELECT source_file, COUNT(*) AS pending_count
+        FROM validation_document_review_queue
+        WHERE review_status = 'PENDING_REVIEW'
+        GROUP BY source_file
+        ORDER BY source_file
+        """
+    )
+    for row in rows:
+        cat_rows = execute_query(
+            """
+            SELECT rejection_category, COUNT(*) AS c
+            FROM validation_document_review_queue
+            WHERE source_file = ? AND review_status = 'PENDING_REVIEW'
+            GROUP BY rejection_category
+            """,
+            [row["source_file"]],
+        )
+        row["category_breakdown"] = {r["rejection_category"]: r["c"] for r in cat_rows}
+    return rows
+
+
+def get_review_queue_for_vendor(source_file: str) -> list:
+    rows = execute_query(
+        """
+        SELECT * FROM validation_document_review_queue
+        WHERE source_file = ? AND review_status = 'PENDING_REVIEW'
+        ORDER BY id
+        """,
+        [source_file],
+    )
+    return [_parse_review_row(r) for r in rows]
+
+
+def get_review_queue_item(review_id: str):
+    rows = execute_query(
+        "SELECT * FROM validation_document_review_queue WHERE review_id = ?",
+        [review_id],
+    )
+    return _parse_review_row(rows[0]) if rows else None
+
+
+def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
+    """Approves or flags a review queue row. Flagging also raises a
+    gold_exceptions row so the item surfaces on the normal exceptions page
+    too -- DUPLICATE_RECORD keeps its own reason so it reads distinctly
+    from EXTRACTION_INCOMPLETE (every other rejection_category, e.g.
+    MISSING_MANDATORY_FIELD, is genuinely an incomplete extraction)."""
+    item = get_review_queue_item(review_id)
+    if not item:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    status = "APPROVED" if action == "approve" else "FLAGGED"
+    execute_sql(
+        """
+        UPDATE validation_document_review_queue
+        SET review_status = ?, reviewed_by = ?, reviewed_timestamp = ?
+        WHERE review_id = ?
+        """,
+        [status, reviewed_by, now, review_id],
+    )
+    if action == "flag":
+        exception_reason = (
+            "DUPLICATE_RECORD" if item["rejection_category"] == "DUPLICATE_RECORD"
+            else "EXTRACTION_INCOMPLETE"
+        )
+        execute_sql(
+            """
+            INSERT INTO gold_exceptions (
+                exception_id, invoice_number, statement_amount, erp_amount,
+                match_status, exception_reason, exception_status,
+                source_file, statement_id, date_raised, statement_period,
+                ai_explanation
+            ) VALUES (?, ?, ?, NULL, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?)
+            """,
+            [
+                str(uuid.uuid4()),
+                item["invoice_number"],
+                item["amount"],
+                exception_reason,
+                item["source_file"],
+                item["statement_id"],
+                now,
+                item["statement_period"],
+                item["rejection_details"],
+            ],
+        )
