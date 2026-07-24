@@ -17,11 +17,12 @@ os.environ["AZURE_BLOB_TEST_CONNECTION_STRING"] = "AccountName=test;AccountKey=t
 from src.storage.blob_client import BlobStorageClient, _slugify_vendor_name
 
 
-def _make_client(transport=None):
+def _make_client(transport=None, download_transport=None):
     return BlobStorageClient(
         container_name="vendor-statements",
         connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING",
         transport=transport,
+        download_transport=download_transport,
     )
 
 
@@ -141,6 +142,64 @@ class TestBlobStorageClientUploadPdf(unittest.TestCase):
         client.upload_pdf(self.pdf_path, "Vendor", 2026, 7, "h1")
 
         self.assertEqual(captured["metadata"]["original_filename"], os.path.basename(self.pdf_path))
+
+
+class TestBlobStorageClientDownloadPdf(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.dest_path = os.path.join(self.tmp_dir, "downloaded.pdf")
+        self.blob_url = "https://viverecondropzone.blob.core.windows.net/incoming-statements/statement.pdf"
+
+    def test_successful_download_returns_true(self):
+        captured = {}
+
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            captured["container_name"] = container_name
+            captured["blob_name"] = blob_name
+            captured["dest_path"] = dest_path
+            return True, None
+
+        client = _make_client(download_transport=fake_download_transport)
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertTrue(result)
+        self.assertEqual(captured["container_name"], "incoming-statements")
+        self.assertEqual(captured["blob_name"], "statement.pdf")
+        self.assertEqual(captured["dest_path"], self.dest_path)
+
+    def test_download_transport_failure_returns_false_not_raise(self):
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            return False, "simulated network error"
+
+        client = _make_client(download_transport=fake_download_transport)
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_download_transport_raising_exception_returns_false_not_raise(self):
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            raise RuntimeError("boom")
+
+        client = _make_client(download_transport=fake_download_transport)
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_missing_connection_string_returns_false(self):
+        client = BlobStorageClient(
+            container_name="incoming-statements",
+            connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING_UNSET",
+        )
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_url_without_container_and_blob_segments_returns_false(self):
+        client = _make_client(download_transport=lambda *a: (True, None))
+        result = client.download_pdf("https://viverecondropzone.blob.core.windows.net/", self.dest_path)
+
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

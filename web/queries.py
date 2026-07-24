@@ -531,14 +531,15 @@ def delete_user_by_email(email: str) -> None:
 # Jobs (background reconciliation queue — see web/worker.py)
 # ---------------------------------------------------------------------------
 
-def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str) -> None:
+def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
+                batch_id: str = None) -> None:
     now = datetime.now(timezone.utc).isoformat()
     execute_sql(
         """
-        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at)
-        VALUES (?, ?, ?, 'PENDING', ?, ?)
+        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at, batch_id)
+        VALUES (?, ?, ?, 'PENDING', ?, ?, ?)
         """,
-        [job_id, pdf_filename, pdf_path, submitted_by, now],
+        [job_id, pdf_filename, pdf_path, submitted_by, now, batch_id],
     )
 
 
