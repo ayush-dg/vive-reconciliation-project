@@ -418,5 +418,158 @@ class TestClaimNextPendingJobAllowsDifferentFilenamesConcurrently(unittest.TestC
         self.assertEqual(second["job_id"], "job-a2")
 
 
+def _insert_gold_summary(execute_sql, *, statement_id, total_invoice_count):
+    execute_sql(
+        """
+        INSERT INTO gold_reconciliation_summary (
+            summary_id, vendor_id, vendor_name, statement_period, statement_id,
+            statement_total, erp_total, difference, total_invoice_count,
+            matched_count, exception_count, match_percentage, overall_status,
+            reconciliation_timestamp, erp_version
+        ) VALUES (?, 'V1', 'Vendor One', '2026-07', ?, 1000.0, 1000.0, 0.0, ?, ?, 0, 100.0,
+                  'RECONCILED', '2026-07-24T00:00:00+00:00', 1)
+        """,
+        [f"SUM-{statement_id}", statement_id, total_invoice_count, total_invoice_count],
+    )
+
+
+def _insert_gold_exception(execute_sql, *, statement_id, exception_id, status="OPEN"):
+    execute_sql(
+        """
+        INSERT INTO gold_exceptions (
+            exception_id, vendor_id, invoice_number, statement_amount, erp_amount,
+            match_status, exception_reason, exception_status, statement_id, date_raised
+        ) VALUES (?, 'V1', 'INV-1', 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, '2026-07-24T00:00:00+00:00')
+        """,
+        [exception_id, status, statement_id],
+    )
+
+
+class TestBatchQueries(unittest.TestCase):
+    """get_all_batches()/get_batch_detail()/get_manual_uploads()/
+    get_recent_completed_batches() -- the /batches feature's query layer
+    (see web/routers/batches.py, migrations/007_add_batch_id_to_jobs.sql)."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+    def _job(self, job_id, batch_id, status, statement_id=None,
+              submitted_at="2026-07-24T10:00:00+00:00", completed_at=None, filename=None):
+        queries.create_job(job_id=job_id, pdf_filename=filename or f"{job_id}.pdf",
+                            pdf_path=f"sample_data/{job_id}.pdf", submitted_by="tester",
+                            batch_id=batch_id)
+        self.execute_sql("UPDATE jobs SET submitted_at = ? WHERE job_id = ?", [submitted_at, job_id])
+        queries.update_job_status(job_id, status=status, completed_at=completed_at, statement_id=statement_id)
+
+    def test_completed_batch_aggregates_invoices_and_status(self):
+        self._job("job-1", "batch-a", "COMPLETED", statement_id="STMT-1",
+                   submitted_at="2026-07-24T10:00:00+00:00", completed_at="2026-07-24T10:02:00+00:00")
+        self._job("job-2", "batch-a", "COMPLETED", statement_id="STMT-2",
+                   submitted_at="2026-07-24T10:01:00+00:00", completed_at="2026-07-24T10:05:00+00:00")
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-1", total_invoice_count=5)
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-2", total_invoice_count=3)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-2", exception_id="EXC-1")
+
+        batches = queries.get_all_batches()
+
+        self.assertEqual(len(batches), 1)
+        batch = batches[0]
+        self.assertEqual(batch["batch_id"], "batch-a")
+        self.assertEqual(batch["total_files"], 2)
+        self.assertEqual(batch["completed_count"], 2)
+        self.assertEqual(batch["failed_count"], 0)
+        self.assertEqual(batch["active_count"], 0)
+        self.assertEqual(batch["status"], "COMPLETED")
+        self.assertEqual(batch["total_invoices"], 8)
+        self.assertEqual(batch["total_exceptions"], 1)
+        self.assertEqual(batch["time_taken"], "5m 0s")
+
+    def test_batch_with_a_failed_job_is_partial(self):
+        self._job("job-1", "batch-b", "COMPLETED", statement_id="STMT-3",
+                   completed_at="2026-07-24T10:02:00+00:00")
+        self._job("job-2", "batch-b", "FAILED", completed_at="2026-07-24T10:03:00+00:00")
+
+        batch = queries.get_all_batches()[0]
+
+        self.assertEqual(batch["status"], "PARTIAL")
+
+    def test_batch_still_processing_has_no_time_taken(self):
+        self._job("job-1", "batch-c", "COMPLETED", statement_id="STMT-4",
+                   completed_at="2026-07-24T10:02:00+00:00")
+        self._job("job-2", "batch-c", "PROCESSING")
+
+        batch = queries.get_all_batches()[0]
+
+        self.assertEqual(batch["status"], "PROCESSING")
+        self.assertIsNone(batch["time_taken"])
+
+    def test_manual_uploads_batch_id_null_excluded_from_batches(self):
+        queries.create_job(job_id="manual-1", pdf_filename="manual.pdf",
+                            pdf_path="sample_data/manual.pdf", submitted_by="tester")
+
+        self.assertEqual(queries.get_all_batches(), [])
+
+    def test_get_manual_uploads_groups_by_date(self):
+        self._job("manual-1", None, "COMPLETED", submitted_at="2026-07-24T09:00:00+00:00")
+        self._job("manual-2", None, "COMPLETED", submitted_at="2026-07-24T11:00:00+00:00")
+        self._job("manual-3", None, "COMPLETED", submitted_at="2026-07-23T09:00:00+00:00")
+
+        groups = queries.get_manual_uploads()
+
+        self.assertEqual([g["date"] for g in groups], ["2026-07-24", "2026-07-23"])
+        self.assertEqual(len(groups[0]["jobs"]), 2)
+        self.assertEqual(len(groups[1]["jobs"]), 1)
+
+    def test_get_batch_detail_returns_none_for_unknown_batch(self):
+        result = queries.get_batch_detail("does-not-exist")
+
+        self.assertIsNone(result["batch"])
+        self.assertEqual(result["jobs"], [])
+
+    def test_get_batch_detail_enriches_each_job(self):
+        self._job("job-1", "batch-d", "COMPLETED", statement_id="STMT-5",
+                   submitted_at="2026-07-24T10:00:00+00:00", completed_at="2026-07-24T10:01:30+00:00")
+        self._job("job-2", "batch-d", "FAILED",
+                   submitted_at="2026-07-24T10:00:00+00:00", completed_at="2026-07-24T10:00:45+00:00")
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-5", total_invoice_count=4)
+
+        result = queries.get_batch_detail("batch-d")
+
+        self.assertEqual(result["batch"]["total_files"], 2)
+        self.assertEqual(result["batch"]["status"], "PARTIAL")
+        by_id = {j["job_id"]: j for j in result["jobs"]}
+        self.assertEqual(by_id["job-1"]["invoice_count"], 4)
+        self.assertEqual(by_id["job-1"]["exception_count"], 0)
+        self.assertEqual(by_id["job-2"]["invoice_count"], 0)
+        self.assertIsNotNone(by_id["job-1"]["time_taken"])
+
+    def test_get_recent_completed_batches_excludes_still_processing(self):
+        self._job("job-1", "batch-done", "COMPLETED", statement_id="STMT-6",
+                   submitted_at="2026-07-24T09:00:00+00:00", completed_at="2026-07-24T09:05:00+00:00")
+        self._job("job-2", "batch-running", "PROCESSING",
+                   submitted_at="2026-07-24T11:00:00+00:00")
+
+        recent = queries.get_recent_completed_batches(limit=3)
+
+        self.assertEqual([b["batch_id"] for b in recent], ["batch-done"])
+
+    def test_get_recent_completed_batches_respects_limit(self):
+        for i in range(5):
+            self._job(f"job-{i}", f"batch-{i}", "COMPLETED", statement_id=f"STMT-{i}",
+                       submitted_at=f"2026-07-2{i}T09:00:00+00:00", completed_at=f"2026-07-2{i}T09:05:00+00:00")
+
+        recent = queries.get_recent_completed_batches(limit=3)
+
+        self.assertEqual(len(recent), 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

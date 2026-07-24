@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Batch {{ batch.batch_id[:8] }}{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="/batches">← Batches</a>
+    <span>/</span>
+    <span style="color:var(--text);font-weight:500">Batch {{ batch.batch_id[:8] }}</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">Files</div>
+    <div class="kpi-value">{{ batch.total_files }}</div>
+    <div class="kpi-sub">{{ batch.completed_count }} completed · {{ batch.failed_count }} failed · {{ batch.active_count }} processing</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Invoices</div>
+    <div class="kpi-value">{{ batch.total_invoices }}</div>
+    <div class="kpi-sub">across this batch</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Exceptions</div>
+    <div class="kpi-value {{ 'amber' if batch.total_exceptions else 'green' }}">{{ batch.total_exceptions }}</div>
+    <div class="kpi-sub">open, across this batch</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Status</div>
+    <div class="kpi-value {{ 'green' if batch.status == 'COMPLETED' else 'amber' }}">{{ batch.status | title }}</div>
+    <div class="kpi-sub">{{ ("Took " ~ batch.time_taken) if batch.time_taken else "Still running…" }}</div>
+  </div>
+</div>
+
+<div class="section-header">
+  <div class="section-title">Files in this batch</div>
+</div>
+{% if jobs %}
+<table class="table">
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>Status</th>
+      <th>Invoices</th>
+      <th>Exceptions</th>
+      <th>Time taken</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for job in jobs %}
+    <tr>
+      <td style="font-weight:500">{{ job.pdf_filename }}</td>
+      <td>
+        {% if job.status == 'COMPLETED' %}
+        <span class="badge success">Completed</span>
+        {% elif job.status == 'FAILED' %}
+        <span class="badge danger">Failed</span>
+        {% elif job.status == 'PROCESSING' %}
+        <span class="badge warning">Processing</span>
+        {% else %}
+        <span class="badge neutral">Pending</span>
+        {% endif %}
+      </td>
+      <td>{{ job.invoice_count }}</td>
+      <td style="color:{{ 'var(--warning)' if job.exception_count else 'var(--success)' }}">{{ job.exception_count }}</td>
+      <td style="color:var(--text-secondary)">{{ job.time_taken or "—" }}</td>
+      <td>
+        {% if job.statement_id %}
+        <a href="/reports/{{ job.statement_id }}" class="link">View report →</a>
+        {% else %}
+        <span style="color:var(--text-secondary)">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">No files found for this batch.</div>
+{% endif %}
+{% endblock %}

@@ -643,6 +643,165 @@ def get_job_history() -> list:
 
 
 # ---------------------------------------------------------------------------
+# Batches (Event Grid auto-intake grouping — see migrations/007 and
+# web/routers/intake_trigger.py, which stamps one batch_id per webhook
+# delivery). Manual /upload jobs have batch_id = NULL.
+# ---------------------------------------------------------------------------
+
+def _format_duration(total_seconds: float) -> str:
+    seconds = int(total_seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
+def _stats_for_statement(statement_id):
+    """(invoice_count, open_exception_count) for one statement_id, or
+    (0, 0) if the job hasn't reached COMPLETED yet (no statement_id) or
+    the summary row isn't found. Reuses _live_open_exception_count so a
+    resolved exception drops out of the batch total the same way it does
+    everywhere else in this file."""
+    if not statement_id:
+        return 0, 0
+    summary_rows = execute_query(
+        "SELECT total_invoice_count FROM gold_reconciliation_summary WHERE statement_id = ?",
+        [statement_id],
+    )
+    invoice_count = summary_rows[0]["total_invoice_count"] if summary_rows else 0
+    return invoice_count or 0, _live_open_exception_count(statement_id)
+
+
+def _batch_status(batch: dict) -> str:
+    if batch["active_count"]:
+        return "PROCESSING"
+    if batch["failed_count"]:
+        return "PARTIAL"
+    return "COMPLETED"
+
+
+def _batch_time_taken(batch: dict):
+    """Wall-clock from the first job's submitted_at to the last job's
+    completed_at — only meaningful once every job in the batch has
+    finished (COMPLETED or FAILED); a still-PROCESSING batch has no
+    end time yet, so this returns None rather than a partial duration."""
+    if batch["active_count"] or not batch["last_completed_at"]:
+        return None
+    start = datetime.fromisoformat(batch["submitted_at"])
+    end = datetime.fromisoformat(batch["last_completed_at"])
+    return _format_duration((end - start).total_seconds())
+
+
+def _job_time_taken(job: dict):
+    """Wall-clock from this job's started_at (submitted_at if it was
+    somehow never claimed) to completed_at. None while still
+    PENDING/PROCESSING."""
+    if not job["completed_at"]:
+        return None
+    start = datetime.fromisoformat(job["started_at"] or job["submitted_at"])
+    end = datetime.fromisoformat(job["completed_at"])
+    return _format_duration((end - start).total_seconds())
+
+
+def get_all_batches() -> list:
+    """One row per batch_id, newest first, with aggregated file/invoice/
+    exception counts, overall status, and total time taken."""
+    batches = execute_query(
+        """
+        SELECT
+            batch_id,
+            COUNT(*) AS total_files,
+            SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_count,
+            SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
+            SUM(CASE WHEN status IN ('PENDING', 'PROCESSING') THEN 1 ELSE 0 END) AS active_count,
+            MIN(submitted_at) AS submitted_at,
+            MAX(completed_at) AS last_completed_at
+        FROM jobs
+        WHERE batch_id IS NOT NULL
+        GROUP BY batch_id
+        ORDER BY MIN(submitted_at) DESC
+        """
+    )
+
+    for batch in batches:
+        batch["status"] = _batch_status(batch)
+        batch["time_taken"] = _batch_time_taken(batch)
+
+        statement_ids = execute_query(
+            "SELECT statement_id FROM jobs WHERE batch_id = ? AND statement_id IS NOT NULL",
+            [batch["batch_id"]],
+        )
+        stats = [_stats_for_statement(row["statement_id"]) for row in statement_ids]
+        batch["total_invoices"] = sum(s[0] for s in stats)
+        batch["total_exceptions"] = sum(s[1] for s in stats)
+
+    return batches
+
+
+def get_batch_detail(batch_id: str) -> dict:
+    """{"batch": {...summary...}, "jobs": [...]} for one batch_id, or
+    {"batch": None, "jobs": []} if the batch_id doesn't exist. Each job
+    dict is enriched with invoice_count/exception_count/time_taken for
+    the per-file rows on the batch detail page."""
+    jobs = execute_query(
+        "SELECT * FROM jobs WHERE batch_id = ? ORDER BY submitted_at",
+        [batch_id],
+    )
+    if not jobs:
+        return {"batch": None, "jobs": []}
+
+    for job in jobs:
+        invoice_count, exception_count = _stats_for_statement(job["statement_id"])
+        job["invoice_count"] = invoice_count
+        job["exception_count"] = exception_count
+        job["time_taken"] = _job_time_taken(job)
+
+    completed_ats = [j["completed_at"] for j in jobs if j["completed_at"]]
+    batch = {
+        "batch_id": batch_id,
+        "total_files": len(jobs),
+        "completed_count": sum(1 for j in jobs if j["status"] == "COMPLETED"),
+        "failed_count": sum(1 for j in jobs if j["status"] == "FAILED"),
+        "active_count": sum(1 for j in jobs if j["status"] in ("PENDING", "PROCESSING")),
+        "submitted_at": min(j["submitted_at"] for j in jobs),
+        "last_completed_at": max(completed_ats) if completed_ats else None,
+        "total_invoices": sum(j["invoice_count"] for j in jobs),
+        "total_exceptions": sum(j["exception_count"] for j in jobs),
+    }
+    batch["status"] = _batch_status(batch)
+    batch["time_taken"] = _batch_time_taken(batch)
+
+    return {"batch": batch, "jobs": jobs}
+
+
+def get_manual_uploads() -> list:
+    """Jobs with batch_id = NULL (manual /upload submissions), grouped by
+    submission date (newest date first, newest job first within a date)
+    for the /batches page's "Manual uploads" section."""
+    jobs = execute_query("SELECT * FROM jobs WHERE batch_id IS NULL ORDER BY submitted_at DESC")
+
+    groups = {}
+    for job in jobs:
+        date_key = job["submitted_at"][:10]
+        groups.setdefault(date_key, []).append(job)
+
+    return [{"date": date_key, "jobs": jobs_for_date} for date_key, jobs_for_date in groups.items()]
+
+
+def get_recent_completed_batches(limit: int = 3) -> list:
+    """Last `limit` finished batches (COMPLETED or PARTIAL — no jobs still
+    PENDING/PROCESSING), newest first, for the home dashboard's "Recent
+    batches" section. Reuses get_all_batches() rather than re-deriving
+    batch status with a second query."""
+    limit = int(limit)
+    finished = [b for b in get_all_batches() if b["status"] != "PROCESSING"]
+    return finished[:limit]
+
+
+# ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
 

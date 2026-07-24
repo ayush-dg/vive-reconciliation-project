@@ -77,6 +77,39 @@
 </table>
 {% endif %}
 
+{% if recent_batches %}
+<div class="section-header">
+  <div class="section-title">Recent batches</div>
+  <a href="/batches" class="link">All batches →</a>
+</div>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr>
+      <th>Batch</th>
+      <th>Files</th>
+      <th>Status</th>
+      <th>Submitted</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for batch in recent_batches %}
+    <tr>
+      <td style="font-weight:500"><a href="/batches/{{ batch.batch_id }}" class="link">Batch {{ batch.batch_id[:8] }}</a></td>
+      <td>{{ batch.total_files }}</td>
+      <td>
+        {% if batch.status == 'PARTIAL' %}
+        <span class="badge danger">Partial</span>
+        {% else %}
+        <span class="badge success">✓ Completed</span>
+        {% endif %}
+      </td>
+      <td style="color:var(--text-secondary)">{{ batch.submitted_at | friendly_dt }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 <div class="section-header">
   <div class="section-title">Reconciliation runs — {{ current_month_label }}</div>
   <a href="/reports" class="link">View all →</a>
