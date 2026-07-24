@@ -44,6 +44,85 @@ def amounts_match(stmt_amount: float, erp_amount: float,
     return diff <= tolerance_abs or pct_diff <= tolerance_pct
 
 
+# ---------------------------------------------------------------------------
+# Match confidence scoring (gold_matched_invoices.match_confidence /
+# gold_exceptions.match_confidence -- see migrations/008_add_match_confidence.sql)
+# ---------------------------------------------------------------------------
+#
+# Two distinct scales, both stored under the same column name:
+#   MATCH_CONFIDENCE           -- how reliable a MATCHED row is (a match on
+#                                 exact invoice number + exact amount is far
+#                                 more trustworthy than an RO-number match on
+#                                 a fuzzy amount).
+#   EXCEPTION_MATCH_CONFIDENCE -- how confident the system is that an
+#                                 EXCEPTION row is a genuine exception
+#                                 rather than a matching error -- an
+#                                 entirely different question, scored on
+#                                 its own scale.
+#
+# MATCH_CONFIDENCE covers "PO" and "FUZZY" match types and an
+# ("INVOICE", "MISMATCH") tier even though classify_match() can't produce
+# any of them today (there is no PO-based matching, and the fuzzy-prefix
+# level was deliberately removed -- see the NOTE below; an invoice-number
+# match with a mismatched amount always becomes an "Amount Mismatch"
+# EXCEPTION, never a MATCHED row). Included anyway so this table doesn't
+# need to change again the moment one of those levels is added.
+MATCH_CONFIDENCE = {
+    ("INVOICE", "EXACT"): 1.00,
+    ("INVOICE", "TOLERANCE"): 0.95,
+    ("INVOICE", "MISMATCH"): 0.70,
+    ("PO", "EXACT"): 0.85,
+    ("PO", "TOLERANCE"): 0.80,
+    ("RO", "EXACT"): 0.80,
+    ("RO", "TOLERANCE"): 0.75,
+    ("FUZZY", "EXACT"): 0.60,
+    ("FUZZY", "TOLERANCE"): 0.60,
+    ("FUZZY", "MISMATCH"): 0.60,
+}
+
+# classify_match()'s match_level -> the match-type key MATCH_CONFIDENCE
+# uses. Anything else (there is no level 3+ today) falls back to "FUZZY".
+MATCH_LEVEL_TO_TYPE = {1: "INVOICE", 2: "RO"}
+
+EXCEPTION_MATCH_CONFIDENCE = {
+    "Invoice Missing": 0.90,       # no match found at all -- high confidence it's genuinely missing
+    "Amount Mismatch": 0.85,
+    "EXTRACTION_INCOMPLETE": 0.50,  # uncertain by definition
+}
+
+# Floating-point safety margin for treating two amounts as "exactly equal"
+# (as opposed to merely within the matching engine's configured
+# tolerance) -- not a business tolerance, just guards against binary
+# float representation noise (e.g. 0.1 + 0.2 != 0.3).
+EXACT_AMOUNT_EPSILON = 0.005
+
+
+def _amount_status(stmt_amount, erp_amount) -> str:
+    """"EXACT" if the two amounts are equal to the cent, else "TOLERANCE".
+    Only meaningful once amounts_match() has already confirmed the two
+    amounts fall within the matching engine's configured tolerance --
+    this never needs to express "doesn't match at all" for a MATCHED row."""
+    if stmt_amount is None or erp_amount is None:
+        return "TOLERANCE"
+    return "EXACT" if abs(stmt_amount - erp_amount) <= EXACT_AMOUNT_EPSILON else "TOLERANCE"
+
+
+def score_match_confidence(match_level: int, stmt_amount, erp_amount) -> float:
+    """match_confidence for a row about to be written to
+    gold_matched_invoices -- see MATCH_CONFIDENCE above."""
+    match_type = MATCH_LEVEL_TO_TYPE.get(match_level, "FUZZY")
+    return MATCH_CONFIDENCE[(match_type, _amount_status(stmt_amount, erp_amount))]
+
+
+def score_exception_confidence(exception_reason: str) -> float:
+    """match_confidence for a row about to be written to gold_exceptions --
+    see EXCEPTION_MATCH_CONFIDENCE above. Falls back to the
+    EXTRACTION_INCOMPLETE score (the most conservative of the three) for
+    any exception_reason not in that table, e.g. DUPLICATE_RECORD, which
+    Step 7 didn't specify a score for."""
+    return EXCEPTION_MATCH_CONFIDENCE.get(exception_reason, 0.50)
+
+
 def classify_match(stmt_invoice: dict, erp_candidates: list, tolerance_pct: float, tolerance_abs: float) -> dict:
     """
     Try to match one statement invoice against a list of ERP candidates.
@@ -207,14 +286,17 @@ def run_matching(statement_id: str,
             total_erp_amount += erp.get("outstanding_amount") or 0.0
 
             match_id = str(uuid.uuid4())
+            match_confidence = score_match_confidence(
+                result["match_level"], stmt_amount, erp.get("outstanding_amount")
+            )
             execute_sql(
                 """
                 INSERT INTO gold_matched_invoices (
                     match_id, vendor_id, shop, invoice_number, ro_number,
                     statement_amount, erp_amount, match_level, match_status,
                     statement_record_id, erp_record_id, source_file,
-                    statement_id, match_timestamp, statement_period
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MATCHED', ?, ?, ?, ?, ?, ?)
+                    statement_id, match_timestamp, statement_period, match_confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MATCHED', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     match_id,
@@ -231,20 +313,22 @@ def run_matching(statement_id: str,
                     statement_id,
                     now,
                     stmt.get("statement_period"),
+                    match_confidence,
                 ]
             )
             matched_count += 1
 
         else:
             exception_id = str(uuid.uuid4())
+            match_confidence = score_exception_confidence(result["exception_reason"])
             execute_sql(
                 """
                 INSERT INTO gold_exceptions (
                     exception_id, vendor_id, shop, invoice_number, ro_number,
                     statement_amount, erp_amount, match_status, exception_reason,
                     exception_status, statement_record_id, source_file,
-                    statement_id, date_raised, statement_period
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?)
+                    statement_id, date_raised, statement_period, match_confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     exception_id,
@@ -260,6 +344,7 @@ def run_matching(statement_id: str,
                     statement_id,
                     now,
                     stmt.get("statement_period"),
+                    match_confidence,
                 ]
             )
             exception_count += 1

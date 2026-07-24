@@ -434,16 +434,16 @@ def _insert_gold_summary(execute_sql, *, statement_id, total_invoice_count):
 
 
 def _insert_gold_exception(execute_sql, *, statement_id, exception_id, status="OPEN",
-                            ai_confidence_score=None, invoice_number="INV-1"):
+                            ai_confidence_score=None, match_confidence=None, invoice_number="INV-1"):
     execute_sql(
         """
         INSERT INTO gold_exceptions (
             exception_id, vendor_id, invoice_number, statement_amount, erp_amount,
             match_status, exception_reason, exception_status, statement_id, date_raised,
-            ai_confidence_score
-        ) VALUES (?, 'V1', ?, 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, '2026-07-24T00:00:00+00:00', ?)
+            ai_confidence_score, match_confidence
+        ) VALUES (?, 'V1', ?, 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, '2026-07-24T00:00:00+00:00', ?, ?)
         """,
-        [exception_id, invoice_number, status, statement_id, ai_confidence_score],
+        [exception_id, invoice_number, status, statement_id, ai_confidence_score, match_confidence],
     )
 
 
@@ -595,11 +595,11 @@ class TestBulkApproveExceptions(unittest.TestCase):
 
     def test_count_excludes_null_and_below_threshold_confidence(self):
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
-                                invoice_number="INV-1", ai_confidence_score=None)
+                                invoice_number="INV-1", match_confidence=None)
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-2",
-                                invoice_number="INV-2", ai_confidence_score=0.85)
+                                invoice_number="INV-2", match_confidence=0.85)
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-3",
-                                invoice_number="INV-3", ai_confidence_score=0.995)
+                                invoice_number="INV-3", match_confidence=0.995)
 
         count = queries.get_high_confidence_exception_count("Vendor One", threshold=0.99)
 
@@ -607,7 +607,7 @@ class TestBulkApproveExceptions(unittest.TestCase):
 
     def test_count_excludes_already_resolved_exceptions(self):
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
-                                invoice_number="INV-1", ai_confidence_score=0.999, status="RESOLVED")
+                                invoice_number="INV-1", match_confidence=0.999, status="RESOLVED")
 
         count = queries.get_high_confidence_exception_count("Vendor One", threshold=0.99)
 
@@ -620,11 +620,11 @@ class TestBulkApproveExceptions(unittest.TestCase):
 
     def test_bulk_approve_resolves_only_qualifying_exceptions(self):
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
-                                invoice_number="INV-1", ai_confidence_score=0.995)
+                                invoice_number="INV-1", match_confidence=0.995)
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-2",
-                                invoice_number="INV-2", ai_confidence_score=0.999)
+                                invoice_number="INV-2", match_confidence=0.999)
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-3",
-                                invoice_number="INV-3", ai_confidence_score=0.50)
+                                invoice_number="INV-3", match_confidence=0.50)
 
         approved = queries.bulk_approve_exceptions("Vendor One", threshold=0.99, reviewed_by="reviewer@vive.com")
 
@@ -641,7 +641,7 @@ class TestBulkApproveExceptions(unittest.TestCase):
 
     def test_bulk_approve_writes_a_disposition_row_per_exception(self):
         _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
-                                invoice_number="INV-1", ai_confidence_score=0.995)
+                                invoice_number="INV-1", match_confidence=0.995)
 
         queries.bulk_approve_exceptions("Vendor One", threshold=0.99, reviewed_by="reviewer@vive.com")
 

@@ -64,7 +64,14 @@
     {% if selected %}
     <div class="detail-header">
       <div class="detail-title">Invoice #{{ selected.invoice_number or "Unknown" }} — {{ vendor_name }}</div>
-      <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'neutral' }}" style="flex-shrink:0">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+        {% if selected.match_confidence is not none %}
+        <span class="badge {{ 'success' if selected.match_confidence >= 0.95 else ('warning' if selected.match_confidence >= 0.80 else 'danger') }}">
+          Match confidence: {{ (selected.match_confidence * 100) | round | int }}%
+        </span>
+        {% endif %}
+        <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
+      </div>
     </div>
     <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">
     <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">

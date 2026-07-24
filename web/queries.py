@@ -18,6 +18,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.lakehouse.connection import execute_query, execute_sql
+from src.matching.engine import score_exception_confidence
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -466,12 +467,23 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
 
 
 def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.99) -> int:
-    """Count of OPEN exceptions for this vendor with ai_confidence_score
+    """Count of OPEN exceptions for this vendor with match_confidence
     >= threshold — drives whether the "Bulk approve" button shows on the
-    exceptions review page. Most exceptions today have ai_confidence_score
-    = NULL (raised by the deterministic matching engine, not AI
-    extraction) — NULL >= threshold is false in SQL, so those rows are
-    excluded with no special-casing needed here.
+    exceptions review page. match_confidence is written by the matching
+    engine (src/matching/engine.py's EXCEPTION_MATCH_CONFIDENCE, see
+    migrations/008_add_match_confidence.sql) and by a couple of
+    non-matching-engine write sites that raise exceptions directly (see
+    notebooks/01_document_intake.py:write_skip_exception() and
+    action_review_item() below) — rows from any other write site, or
+    written before this column existed, have match_confidence = NULL;
+    NULL >= threshold is false in SQL, so those are excluded with no
+    special-casing needed here.
+
+    Note: today's highest exception match_confidence is 0.90 (Invoice
+    Missing), so at the default threshold of 0.99 this — and therefore
+    the Bulk approve button — will not surface for real exceptions yet.
+    That's intentional: 0.99 is deliberately the safest possible default,
+    not tuned to today's scoring scale.
 
     Mirrors the same statement-vs-exceptions-only-vendor branching as
     exceptions_review() in web/routers/exceptions.py."""
@@ -480,7 +492,7 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
         rows = execute_query(
             """
             SELECT COUNT(*) AS c FROM gold_exceptions
-            WHERE statement_id = ? AND exception_status = 'OPEN' AND ai_confidence_score >= ?
+            WHERE statement_id = ? AND exception_status = 'OPEN' AND match_confidence >= ?
             """,
             [statement["statement_id"], threshold],
         )
@@ -492,7 +504,7 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
     rows = execute_query(
         f"""
         SELECT COUNT(*) AS c FROM gold_exceptions ge
-        WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.ai_confidence_score >= ?
+        WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.match_confidence >= ?
         """,
         [statement["source_file"], threshold],
     )
@@ -500,7 +512,7 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
 
 
 def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str) -> int:
-    """Marks every OPEN exception for this vendor with ai_confidence_score
+    """Marks every OPEN exception for this vendor with match_confidence
     >= threshold as RESOLVED/ACCEPTED, via the same disposition write
     (exception_dispositions insert + gold_exceptions update) a single
     Accept click uses — see resolve_exception(). Returns the number of
@@ -510,7 +522,7 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
         candidates = execute_query(
             """
             SELECT * FROM gold_exceptions
-            WHERE statement_id = ? AND exception_status = 'OPEN' AND ai_confidence_score >= ?
+            WHERE statement_id = ? AND exception_status = 'OPEN' AND match_confidence >= ?
             """,
             [statement["statement_id"], threshold],
         )
@@ -521,7 +533,7 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
         candidates = execute_query(
             f"""
             SELECT ge.* FROM gold_exceptions ge
-            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.ai_confidence_score >= ?
+            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.match_confidence >= ?
             """,
             [statement["source_file"], threshold],
         )
@@ -1035,14 +1047,21 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
             "DUPLICATE_RECORD" if item["rejection_category"] == "DUPLICATE_RECORD"
             else "EXTRACTION_INCOMPLETE"
         )
+        # Step 7 only specifies a match_confidence score for
+        # EXTRACTION_INCOMPLETE — DUPLICATE_RECORD stays NULL rather than
+        # guessing a number that wasn't asked for.
+        match_confidence = (
+            score_exception_confidence("EXTRACTION_INCOMPLETE")
+            if exception_reason == "EXTRACTION_INCOMPLETE" else None
+        )
         execute_sql(
             """
             INSERT INTO gold_exceptions (
                 exception_id, invoice_number, statement_amount, erp_amount,
                 match_status, exception_reason, exception_status,
                 source_file, statement_id, date_raised, statement_period,
-                ai_explanation
-            ) VALUES (?, ?, ?, NULL, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?)
+                ai_explanation, match_confidence
+            ) VALUES (?, ?, ?, NULL, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?)
             """,
             [
                 str(uuid.uuid4()),
@@ -1054,5 +1073,6 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
                 now,
                 item["statement_period"],
                 item["rejection_details"],
+                match_confidence,
             ],
         )

@@ -10,6 +10,7 @@ endpoint would never be reached.
 """
 
 import os
+import re
 import sqlite3
 import sys
 import unittest
@@ -64,17 +65,17 @@ def _insert_gold_summary(execute_sql, *, statement_id, vendor_name):
     )
 
 
-def _insert_gold_exception(execute_sql, *, statement_id, exception_id, invoice_number, ai_confidence_score):
+def _insert_gold_exception(execute_sql, *, statement_id, exception_id, invoice_number, match_confidence):
     execute_sql(
         """
         INSERT INTO gold_exceptions (
             exception_id, vendor_id, invoice_number, statement_amount, erp_amount,
             match_status, exception_reason, exception_status, statement_id, date_raised,
-            ai_confidence_score
+            match_confidence
         ) VALUES (?, 'V1', ?, 100.0, NULL, 'EXCEPTION', 'Invoice Missing', 'OPEN', ?,
                   '2026-07-24T00:00:00+00:00', ?)
         """,
-        [exception_id, invoice_number, statement_id, ai_confidence_score],
+        [exception_id, invoice_number, statement_id, match_confidence],
     )
 
 
@@ -99,9 +100,9 @@ class TestBulkApproveRoute(unittest.TestCase):
 
         _insert_gold_summary(self.execute_sql, statement_id="STMT-1", vendor_name="Vendor One")
         _insert_gold_exception(self.execute_sql, statement_id="STMT-1", exception_id="EXC-1",
-                                invoice_number="INV-1", ai_confidence_score=0.995)
+                                invoice_number="INV-1", match_confidence=0.995)
         _insert_gold_exception(self.execute_sql, statement_id="STMT-1", exception_id="EXC-2",
-                                invoice_number="INV-2", ai_confidence_score=0.50)
+                                invoice_number="INV-2", match_confidence=0.50)
 
     def test_bulk_approve_only_resolves_qualifying_exceptions(self):
         resp = self.client.post("/exceptions/Vendor%20One/bulk-approve")
@@ -142,12 +143,76 @@ class TestBulkApproveRoute(unittest.TestCase):
         self.assertIn("Approve 1 at 99%+ confidence", resp.text)
 
     def test_get_review_page_hides_bulk_approve_button_when_none_qualify(self):
-        self.execute_sql("UPDATE gold_exceptions SET ai_confidence_score = 0.1")
+        self.execute_sql("UPDATE gold_exceptions SET match_confidence = 0.1")
 
         resp = self.client.get("/exceptions/Vendor%20One")
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn('id="bulk-approve-btn"', resp.text)
+
+
+class TestMatchConfidenceDisplay(unittest.TestCase):
+    """exceptions_review.html shows match_confidence as a percentage,
+    color-coded (>=95% green, 80-94% amber, <80% red), next to the
+    exception reason badge in the detail panel."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+        app = FastAPI()
+        app.add_middleware(SessionMiddleware, secret_key="test-secret")
+        app.include_router(exceptions.router)
+        app.dependency_overrides[require_login] = lambda: "reviewer@vive.com"
+        self.client = TestClient(app)
+
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-2", vendor_name="Vendor Two")
+
+    def _confidence_badge_css(self, html):
+        match = re.search(r'badge (\w+)">\s*Match confidence: \d+%', html)
+        return match.group(1) if match else None
+
+    def test_confidence_at_or_above_95_percent_is_green(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-2", exception_id="EXC-1",
+                                invoice_number="INV-1", match_confidence=1.00)
+
+        resp = self.client.get("/exceptions/Vendor%20Two")
+
+        self.assertIn("Match confidence: 100%", resp.text)
+        self.assertEqual(self._confidence_badge_css(resp.text), "success")
+
+    def test_confidence_between_80_and_94_percent_is_amber(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-2", exception_id="EXC-1",
+                                invoice_number="INV-1", match_confidence=0.90)
+
+        resp = self.client.get("/exceptions/Vendor%20Two")
+
+        self.assertIn("Match confidence: 90%", resp.text)
+        self.assertEqual(self._confidence_badge_css(resp.text), "warning")
+
+    def test_confidence_below_80_percent_is_red(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-2", exception_id="EXC-1",
+                                invoice_number="INV-1", match_confidence=0.50)
+
+        resp = self.client.get("/exceptions/Vendor%20Two")
+
+        self.assertIn("Match confidence: 50%", resp.text)
+        self.assertEqual(self._confidence_badge_css(resp.text), "danger")
+
+    def test_null_confidence_hides_the_confidence_badge_entirely(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-2", exception_id="EXC-1",
+                                invoice_number="INV-1", match_confidence=None)
+
+        resp = self.client.get("/exceptions/Vendor%20Two")
+
+        self.assertNotIn("Match confidence:", resp.text)
 
 
 if __name__ == "__main__":

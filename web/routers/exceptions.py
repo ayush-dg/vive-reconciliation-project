@@ -24,10 +24,13 @@ REASON_BADGE = {
     "DUPLICATE_RECORD": {"label": "Duplicate record", "css": "info"},
 }
 
-# Bulk approve only ever targets exceptions the AI extraction pipeline
-# marked very high confidence — see queries.get_high_confidence_exception_count()
-# and Step 7 (match confidence scoring), which will populate
-# ai_confidence_score more broadly than it is today.
+# Bulk approve only ever targets exceptions the matching engine scored
+# very high confidence — see queries.get_high_confidence_exception_count()
+# and src/matching/engine.py's EXCEPTION_MATCH_CONFIDENCE. Deliberately
+# the highest possible bar: today's highest-scoring exception type
+# (Invoice Missing) tops out at 0.90, so at 0.99 nothing currently
+# qualifies — that's intentional, not a bug; see
+# get_high_confidence_exception_count()'s docstring.
 BULK_APPROVE_THRESHOLD = 0.99
 
 

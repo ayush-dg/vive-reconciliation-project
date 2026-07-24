@@ -127,7 +127,8 @@ TABLES = {
             source_file NVARCHAR(MAX),
             statement_id NVARCHAR(MAX),
             match_timestamp NVARCHAR(MAX),
-            statement_period NVARCHAR(MAX)
+            statement_period NVARCHAR(MAX),
+            match_confidence FLOAT
         )
     """,
     "gold_exceptions": """
@@ -152,7 +153,8 @@ TABLES = {
             ai_explanation NVARCHAR(MAX),
             ai_suggested_resolution NVARCHAR(MAX),
             ai_confidence_score FLOAT,
-            ai_provider NVARCHAR(MAX)
+            ai_provider NVARCHAR(MAX),
+            match_confidence FLOAT
         )
     """,
     "gold_reconciliation_summary": """
@@ -332,6 +334,12 @@ COLUMNS = {
     "jobs": [
         ("claim_token", "ALTER TABLE jobs ADD claim_token NVARCHAR(255)"),
         ("batch_id", "ALTER TABLE jobs ADD batch_id NVARCHAR(36)"),
+    ],
+    "gold_matched_invoices": [
+        ("match_confidence", "ALTER TABLE gold_matched_invoices ADD match_confidence FLOAT"),
+    ],
+    "gold_exceptions": [
+        ("match_confidence", "ALTER TABLE gold_exceptions ADD match_confidence FLOAT"),
     ],
 }
 
