@@ -755,5 +755,77 @@ class TestExceptionRoutingAndAging(unittest.TestCase):
         self.assertIsNone(summary)
 
 
+class TestDatetimeColumnsAcceptBothStringsAndDatetimeObjects(unittest.TestCase):
+    """Bug: Azure SQL's pyodbc driver returns DATETIME2 columns (e.g.
+    gold_exceptions.escalated_at) as native datetime objects, not
+    strings -- unlike every other timestamp column in this schema
+    (NVARCHAR/TEXT on both backends), which always comes back as a
+    plain ISO8601 string. _parse_datetime()/_days_since() and the
+    batch/job wall-clock helpers must accept either without crashing."""
+
+    def test_parse_datetime_accepts_a_string(self):
+        dt = queries._parse_datetime("2026-07-20T00:00:00+00:00")
+
+        self.assertEqual(dt, datetime(2026, 7, 20, tzinfo=timezone.utc))
+
+    def test_parse_datetime_accepts_a_datetime_object_unchanged(self):
+        native = datetime(2026, 7, 20, tzinfo=timezone.utc)
+
+        self.assertIs(queries._parse_datetime(native), native)
+
+    def test_parse_datetime_returns_none_for_none(self):
+        self.assertIsNone(queries._parse_datetime(None))
+
+    def test_days_since_accepts_a_datetime_object(self):
+        native = datetime.now(timezone.utc) - timedelta(days=4)
+
+        self.assertEqual(queries._days_since(native), 4)
+
+    def test_days_since_accepts_a_string(self):
+        iso = (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()
+
+        self.assertEqual(queries._days_since(iso), 4)
+
+    def test_days_since_returns_none_for_none(self):
+        self.assertIsNone(queries._days_since(None))
+
+    def test_days_since_handles_a_naive_datetime_object(self):
+        # DATETIME2 has no timezone offset stored -- pyodbc returns a
+        # naive datetime for it, same as a naive ISO string would parse to.
+        native_naive = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=4)
+
+        self.assertEqual(queries._days_since(native_naive), 4)
+
+    def test_with_aging_fields_does_not_crash_when_escalated_at_is_a_datetime_object(self):
+        rows = [{
+            "date_raised": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(),
+            "escalation_status": "ESCALATED",
+            "escalated_at": datetime.now(timezone.utc) - timedelta(days=2),
+        }]
+
+        result = queries._with_aging_fields(rows)
+
+        self.assertEqual(result[0]["days_open"], 10)
+        self.assertEqual(result[0]["days_since_escalated"], 2)
+
+    def test_batch_time_taken_accepts_datetime_objects(self):
+        batch = {
+            "active_count": 0,
+            "submitted_at": datetime(2026, 7, 20, 9, 0, 0, tzinfo=timezone.utc),
+            "last_completed_at": datetime(2026, 7, 20, 9, 5, 0, tzinfo=timezone.utc),
+        }
+
+        self.assertEqual(queries._batch_time_taken(batch), "5m 0s")
+
+    def test_job_time_taken_accepts_datetime_objects(self):
+        job = {
+            "started_at": datetime(2026, 7, 20, 9, 0, 0, tzinfo=timezone.utc),
+            "submitted_at": datetime(2026, 7, 20, 8, 59, 0, tzinfo=timezone.utc),
+            "completed_at": datetime(2026, 7, 20, 9, 1, 30, tzinfo=timezone.utc),
+        }
+
+        self.assertEqual(queries._job_time_taken(job), "1m 30s")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -365,14 +365,27 @@ _OPEN_EXCEPTIONS_SELECT = """
 """
 
 
-def _days_since(iso_timestamp) -> int:
-    """Whole days between iso_timestamp (a UTC ISO8601 string, as every
-    gold_exceptions writer produces via datetime.now(timezone.utc).isoformat())
-    and now. Computed in Python rather than read from a stored column --
-    see migrations/009_add_routing_aging.sql's note on why SQLite can't
-    do this as a live generated column the way Azure SQL's days_open
-    computed column does."""
-    dt = datetime.fromisoformat(iso_timestamp)
+def _parse_datetime(value):
+    """Normalizes a timestamp column value into a datetime, or None if
+    value is falsy. Every timestamp column in this schema is written as
+    an ISO8601 string (via datetime.now(timezone.utc).isoformat()), but
+    Azure SQL's pyodbc driver returns DATETIME2 columns (e.g.
+    gold_exceptions.escalated_at) as native Python datetime objects
+    already, not strings -- unlike every other timestamp column here,
+    which is NVARCHAR/TEXT on both backends and always comes back as a
+    plain string. Accepting either means every caller below can stay
+    agnostic to which case it's in."""
+    if not value:
+        return None
+    return value if isinstance(value, datetime) else datetime.fromisoformat(value)
+
+
+def _days_since(iso_timestamp):
+    """Whole days between iso_timestamp (see _parse_datetime() for the
+    accepted shapes) and now, or None if iso_timestamp is falsy."""
+    dt = _parse_datetime(iso_timestamp)
+    if dt is None:
+        return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return (datetime.now(timezone.utc) - dt).days
@@ -383,10 +396,9 @@ def _with_aging_fields(rows: list) -> list:
     rows, days_since_escalated (from escalated_at) to every exception row
     -- see exceptions_review.html's aging/escalation display."""
     for row in rows:
-        row["days_open"] = _days_since(row["date_raised"]) if row.get("date_raised") else None
+        row["days_open"] = _days_since(row.get("date_raised"))
         row["days_since_escalated"] = (
-            _days_since(row["escalated_at"])
-            if row.get("escalation_status") == "ESCALATED" and row.get("escalated_at") else None
+            _days_since(row.get("escalated_at")) if row.get("escalation_status") == "ESCALATED" else None
         )
     return rows
 
@@ -853,8 +865,8 @@ def _batch_time_taken(batch: dict):
     end time yet, so this returns None rather than a partial duration."""
     if batch["active_count"] or not batch["last_completed_at"]:
         return None
-    start = datetime.fromisoformat(batch["submitted_at"])
-    end = datetime.fromisoformat(batch["last_completed_at"])
+    start = _parse_datetime(batch["submitted_at"])
+    end = _parse_datetime(batch["last_completed_at"])
     return _format_duration((end - start).total_seconds())
 
 
@@ -864,8 +876,8 @@ def _job_time_taken(job: dict):
     PENDING/PROCESSING."""
     if not job["completed_at"]:
         return None
-    start = datetime.fromisoformat(job["started_at"] or job["submitted_at"])
-    end = datetime.fromisoformat(job["completed_at"])
+    start = _parse_datetime(job["started_at"] or job["submitted_at"])
+    end = _parse_datetime(job["completed_at"])
     return _format_duration((end - start).total_seconds())
 
 
