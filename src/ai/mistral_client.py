@@ -6,9 +6,13 @@ Mistral Medium implementation of AIClient, via the direct Mistral API
 Mistral's SDK/wire format.
 
 Registered in client_factory.py as "mistral" — not part of the default
-active_provider.json chain (azure_doc_intel remains primary), but available
-for direct get_ai_client("mistral") access or a deliberate provider swap,
-same pattern as the azure_gpt5_* configs.
+active_provider.json chain (claude_sonnet is primary — see RULES.md
+RULE-04), but available for direct get_ai_client("mistral") access or a
+deliberate provider swap, same pattern as the azure_gpt5_* configs.
+[Corrected 2026-07-24, BCE Stage 3 documentation sweep follow-up — this
+comment previously said "azure_doc_intel remains primary," stale relative
+to active_provider.json's provider_chain; never part of any prior
+documentation-sweep fix list.]
 
 Unlike ClaudeClient/DocumentIntelligenceClient, this client cannot send the
 PDF natively — validated during diagnostic testing that Mistral's
@@ -29,6 +33,16 @@ errors, and the model's own row count disagreeing with its own output on
 (ROW_CONFIDENCE), and document/vendor/statement metadata are left as
 defaults — same spirit as DocumentIntelligenceClient's ROW_CONFIDENCE
 constant for a layout-only extraction with no semantic classification.
+
+The prompt asks for both a raw column-name-keyed dict AND a mapped
+standard-fields dict per row (column-agnostic — works on any vendor's
+header names, not a fixed list), so _row_to_invoice() reads from
+row["mapped"] with a fallback to row["raw"] if a page response is missing
+the "mapped" key. The raw dict is also stashed (as JSON) into the
+Universal Financial Document Schema's `description` field — TEMPORARY,
+so the full per-vendor column set is visible/queryable in bronze/silver
+after a real pipeline run, not because `description` is the right home
+for it long-term.
 """
 
 import base64
@@ -46,27 +60,46 @@ ROW_CONFIDENCE = 0.75
 EXTRACTION_PROMPT = """You are extracting data from a vendor statement PDF for an accounts payable system.
 This is critical financial data — accuracy is essential.
 
-Extract every row from the table exactly as printed. For each row return:
-- date: the transaction date exactly as printed
-- invoice_number: ONLY the invoice or document reference number.
-  Many vendor statements have extra columns (account codes, route codes,
-  store codes, sequence numbers) near the invoice column — ignore these
-  completely. The invoice number is typically alphanumeric (e.g. 8923821,
-  SIN12200241, CM8923821, 366377-1). If you see numbers like '60', '35',
-  '99', '57' that appear to be codes rather than invoice numbers, do not
-  include them.
-- charges: amount in CHARGES or similar column, null if empty
-- credits: amount in CREDITS column, null if empty
-- amount_due: amount in AMOUNT DUE or BALANCE column, null if empty
+STEP 1 — Identify all columns:
+Look at the table header row and list every column name exactly as printed.
 
-Rules:
-- If a cell is blank/empty return null (not zero, not empty string)
+STEP 2 — Extract every row:
+Extract every single data row from the table. For each row return:
+- One entry per column exactly as printed in the PDF
+- Use the exact column name from the header as the key
+- If a cell is blank/empty return null
 - Do NOT skip any rows
 - Do NOT merge rows
 - Do NOT calculate anything
 - Do NOT include currency symbols in amounts
 
-Return JSON: {rows: [{date, invoice_number, charges, credits, amount_due}]}"""
+STEP 3 — Map to standard fields:
+Also map the columns to these standard fields where you can identify them
+(leave null if you cannot find a matching column):
+- date: transaction or invoice date
+- invoice_number: invoice or document reference number ONLY
+  (ignore any account codes, route codes, store codes before the invoice number)
+- charges: amount charged (may be called Amount, Charges, Invoice Amt, Debit etc)
+- credits: credit or payment applied (may be called Credits, Payments, Credit Memo etc)
+- amount_due: net balance or outstanding amount (may be called Amount Due,
+  Balance, Outstanding, Net etc)
+- due_date: payment due date if present
+- ro_number: repair order number if present
+- po_number: purchase order number if present
+- description: any description or notes column if present
+- shop: store, shop, or location name if present
+
+Return JSON:
+{
+  columns_found: [list of all column names exactly as in PDF header],
+  rows: [
+    {
+      raw: {column_name: value, ...},
+      mapped: {date, invoice_number, charges, credits, amount_due,
+               due_date, ro_number, po_number, description, shop}
+    }
+  ]
+}"""
 
 
 class MistralClient(AIClient):
@@ -206,9 +239,10 @@ class MistralClient(AIClient):
         warnings = []
         failed_pages = []
         total_attempts = 0
+        all_columns_found = []  # ordered union across pages, dedup preserving first-seen order
 
         for page_num, img in enumerate(images, start=1):
-            success, rows, error, attempts_used = self._process_single_page(img, page_num)
+            success, rows, columns_found, error, attempts_used = self._process_single_page(img, page_num)
             total_attempts += attempts_used
 
             if not success:
@@ -216,8 +250,15 @@ class MistralClient(AIClient):
                 warnings.append(f"Page {page_num} failed after retry: {error}")
                 continue
 
+            print(f"  [MistralClient] Page {page_num} columns_found: {columns_found}")
+            for col in columns_found or []:
+                if col not in all_columns_found:
+                    all_columns_found.append(col)
+
             for row_num, row in enumerate(rows, start=1):
                 all_invoices.append(self._row_to_invoice(row, page_num, row_num))
+
+        print(f"  [MistralClient] All columns found across document: {all_columns_found}")
 
         latency_ms = (time.monotonic() - start) * 1000
 
@@ -235,7 +276,7 @@ class MistralClient(AIClient):
                 f"the remaining {len(images) - len(failed_pages)} page(s)."
             )
 
-        result = self._build_schema(pdf_path, images, all_invoices, warnings)
+        result = self._build_schema(pdf_path, images, all_invoices, warnings, all_columns_found)
         text_out = json.dumps(result)
         return AIResponse(
             success=True, text=text_out, parsed_json=result,
@@ -249,16 +290,17 @@ class MistralClient(AIClient):
         from generate()'s own outer retry loop)."""
         error = None
         for attempt in (1, 2):
-            success, rows, error = self._real_page_call(img)
+            success, rows, columns_found, error = self._real_page_call(img)
             if success:
-                return True, rows, None, attempt
+                return True, rows, columns_found, None, attempt
             if attempt == 1:
                 backoff = self.config.get("retry_policy", {}).get("backoff_seconds", 2)
                 time.sleep(backoff)
-        return False, None, error, 2
+        return False, None, None, error, 2
 
     def _real_page_call(self, img):
-        """One chat-completions call for a single rasterized page image."""
+        """One chat-completions call for a single rasterized page image.
+        Returns (success, rows, columns_found, error)."""
         try:
             import openai
             client = openai.OpenAI(base_url=self.endpoint, api_key=self.api_key)
@@ -283,27 +325,36 @@ class MistralClient(AIClient):
             text = response.choices[0].message.content
             parsed = self._try_parse_json(text)
             if parsed is None:
-                return False, None, "response did not contain parseable JSON"
-            return True, parsed.get("rows", []) or [], None
+                return False, None, None, "response did not contain parseable JSON"
+            return True, parsed.get("rows", []) or [], parsed.get("columns_found", []) or [], None
         except Exception as e:
-            return False, None, self._clean_error(str(e))
+            return False, None, None, self._clean_error(str(e))
 
     def _row_to_invoice(self, row: dict, page_num: int, row_num: int) -> dict:
-        """Map this client's simplified {date, invoice_number, charges,
-        credits, amount_due} row shape onto the Universal Financial
-        Document Schema invoice fields."""
+        """Map this client's {raw: {...}, mapped: {...}} row shape onto the
+        Universal Financial Document Schema invoice fields. Falls back to
+        treating the row itself as the mapped dict if "mapped" is missing
+        (e.g. an older cached/salvaged response). The raw per-column dict is
+        stashed into `description` as JSON — TEMPORARY, purely so the full
+        column set survives into bronze/silver for inspection (see module
+        docstring); it is not a real description."""
+        raw = row.get("raw") if isinstance(row, dict) else None
+        mapped = row.get("mapped") if isinstance(row, dict) else None
+        if not mapped:
+            mapped = raw if raw else (row if isinstance(row, dict) else {})
+
         return {
-            "invoice_number": row.get("invoice_number"),
-            "invoice_date": row.get("date"),
-            "due_date": None,
-            "amount": self._to_float(row.get("charges")),
-            "outstanding_amount": self._to_float(row.get("amount_due")),
-            "ro_number": None,
-            "po_number": None,
+            "invoice_number": mapped.get("invoice_number"),
+            "invoice_date": mapped.get("date"),
+            "due_date": mapped.get("due_date"),
+            "amount": self._to_float(mapped.get("charges")),
+            "outstanding_amount": self._to_float(mapped.get("amount_due")),
+            "ro_number": mapped.get("ro_number"),
+            "po_number": mapped.get("po_number"),
             "work_order_number": None,
-            "description": None,
-            "credit": self._to_float(row.get("credits")),
-            "shop": None,
+            "description": json.dumps(raw) if raw else mapped.get("description"),
+            "credit": self._to_float(mapped.get("credits")),
+            "shop": mapped.get("shop"),
             "page_number": page_num,
             "row_number": row_num,
             "line_confidence": ROW_CONFIDENCE,
@@ -326,7 +377,8 @@ class MistralClient(AIClient):
         except ValueError:
             return None
 
-    def _build_schema(self, pdf_path: str, images: list, invoices: list, warnings: list) -> dict:
+    def _build_schema(self, pdf_path: str, images: list, invoices: list, warnings: list,
+                       columns_found: Optional[list] = None) -> dict:
         statement_total = sum(
             inv.get("outstanding_amount", 0) or 0
             for inv in invoices
@@ -364,6 +416,12 @@ class MistralClient(AIClient):
                 "column_mapping_confidence": 0.80 if invoices else 0.10,
             },
             "warnings": [{"code": "OTHER", "message": w, "severity": "MEDIUM"} for w in warnings],
+            # TEMPORARY diagnostic field — the union of column headers seen
+            # across all pages, for inspecting column-agnostic mapping
+            # quality. Not part of the standard Universal Financial Document
+            # Schema; downstream consumers (write_to_bronze etc.) ignore
+            # unknown top-level keys, so this rides along harmlessly.
+            "columns_found": columns_found or [],
         }
 
     def _try_parse_json(self, text: str) -> Optional[dict]:
@@ -426,7 +484,9 @@ class MistralClient(AIClient):
                                 obj_text = rows_text[start:j + 1]
                                 try:
                                     obj = json.loads(obj_text)
-                                    if isinstance(obj, dict) and obj.get('invoice_number'):
+                                    # A valid row is {"raw": {...}, "mapped": {...}} —
+                                    # accept it if either half parsed cleanly.
+                                    if isinstance(obj, dict) and (obj.get('raw') or obj.get('mapped')):
                                         salvaged.append(obj)
                                 except (json.JSONDecodeError, TypeError):
                                     pass

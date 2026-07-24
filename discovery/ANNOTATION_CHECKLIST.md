@@ -51,7 +51,7 @@ Six `[STAGE-2-DIVERGENCE]`-tagged findings exist across the artifact set (dedupl
 | # | Finding | Resolved? |
 |---|---|---|
 | 1 | Confidence fabrication (IC-15/R-001) | **RESOLVED (accepted-as-risk)** — engineer accepted the gap as-is, tracked as R-001 (Critical), to be prioritized against Sprint 1 planning; Azure SQL provenance confirmed test/dev. → **P1-S3-001**, closed 2026-07-24. |
-| 2 | AI-provider-chain contradiction, 6 stale doc locations (IC-4) | **RESOLVED (doc sweep applied)** — engineer confirmed Claude Sonnet 4.6 as intentional primary; all 6 locations corrected. → **P1-S3-002**, closed 2026-07-24. |
+| 2 | AI-provider-chain contradiction, 9 stale doc locations (IC-4) | **RESOLVED (doc sweep applied)** — engineer confirmed Claude Sonnet 4.6 as intentional primary; all 9 locations corrected across three passes (6 initially, then `document_understanding_engine.py` and `mistral_client.py` on a later verification pass, then `claude_sonnet_client.py`'s own docstring last). → **P1-S3-002**, closed 2026-07-24. |
 | 3 | Blob Storage "not wired" claim, corrected | **RESOLVED** — a factual correction (confirmed via code trace that it is wired), not an open engineer decision; consistently reflected in TOPOLOGY.md and INTEGRATION_CONTRACTS.md since. See Resolution Log. |
 | 4 | Stale-job requeue gap (IC-19/R-004) | **RESOLVED (accepted-as-risk)** — engineer accepted the gap, tracked as R-004 (Medium), deferred to Sprint 1 enhancement #5. → **P1-S3-003**, closed 2026-07-24. |
 | 5 | RULE-07 enforcement-citation staleness (IC-7) | **RESOLVED (citation updated)** — engineer approved; RULE-07 now cites `claude_sonnet_client.py:_map_columns()`. → **P1-S3-004**, closed 2026-07-24. |
@@ -112,12 +112,13 @@ Reviewed all 6 RISK_REGISTER.md entries against their cited fragility/invariant 
 **Surfaced by:** CD
 **Artifact:** TOPOLOGY (A02 Section 4 #2); INVARIANT_CATALOGUE (IC-4)
 **Section:** A02 Section 4, item 2; IC-4
-**Observation:** Six locations (RULES.md RULE-04, Implementation Context, `gemini_client.py`, `client_factory.py`'s own comments, `ocr_extractor.py`, `document_understanding_engine.py` + `04_generate_report.py` docstrings) each name a different provider as primary; the code-confirmed actual primary is Claude Sonnet 4.6.
+**Observation:** Nine locations (RULES.md RULE-04; `docs/VIVE_Implementation_Context.md` Section 3; `src/ai/gemini_client.py`'s docstring; `src/ai/client_factory.py`'s own inline comments; `src/ai/ocr_extractor.py`'s docstring; `src/ai/document_understanding_engine.py`'s docstring; `notebooks/04_generate_report.py`'s docstring; `src/ai/mistral_client.py`'s docstring; `src/ai/claude_sonnet_client.py`'s own docstring) each named a different provider as primary — the last two were found in later independent verification passes, not in the original review that surfaced the first seven. The code-confirmed actual primary is Claude Sonnet 4.6.
 **Risk for planning:** Any future engineer trusting these comments/docs over the actual `provider_chain` config would misdiagnose the extraction path.
-**Recommended action:** Engineer confirms Claude Sonnet 4.6 is intentionally the current primary, then a single documentation/comment sweep corrects all six locations in one pass.
+**Recommended action:** Engineer confirms Claude Sonnet 4.6 is intentionally the current primary, then a documentation/comment sweep corrects every affected location.
 **Engineer action required:** Explicit confirmation of intent, then authorize the doc sweep.
-**Engineer decision (2026-07-24):** Confirmed — Claude Sonnet 4.6 is intentionally the current primary. Signed off on the documentation sweep; all 6 locations corrected (RULES.md RULE-04, `docs/VIVE_Implementation_Context.md` Section 3, `gemini_client.py`, `client_factory.py`'s comments, `ocr_extractor.py`, `notebooks/04_generate_report.py`) to state the accurate current chain.
-**STATUS:** SIGNED-OFF — documentation sweep applied across all 6 locations.
+**Engineer decision (2026-07-24):** Confirmed — Claude Sonnet 4.6 is intentionally the current primary. Signed off on the documentation sweep.
+**Completion history (updated 2026-07-24, across three passes the same day):** The initial sweep corrected 6 locations (RULES.md RULE-04, `docs/VIVE_Implementation_Context.md` Section 3, `gemini_client.py`, `client_factory.py`'s comments, `ocr_extractor.py`, `notebooks/04_generate_report.py`). A later independent verification pass found `document_understanding_engine.py`'s docstring still stale (missed by the original sweep despite being named in `INVARIANT_CATALOGUE.md` IC-4's own divergence description) and separately discovered `mistral_client.py`'s docstring carried the same class of error, previously unreported — both corrected. `claude_sonnet_client.py`'s own docstring, deliberately left uncorrected during the original sweep out of caution about blast radius on the active provider's own file, was corrected in a final pass once that caution no longer applied. All nine locations are now confirmed corrected.
+**STATUS:** SIGNED-OFF — documentation sweep applied across all 9 locations.
 
 ---
 
@@ -208,7 +209,7 @@ Reviewed all 6 RISK_REGISTER.md entries against their cited fragility/invariant 
 | STAGE-2-DIVERGENCE-3 (Blob Storage wiring) | RESOLVED-CODE | CD (code trace) | 2026-07-24 | Confirmed via `notebooks/01_document_intake.py`'s `run_intake()` Step 8 call trace; consistently reflected in TOPOLOGY.md and INTEGRATION_CONTRACTS.md since Session A. |
 | TOPOLOGY A01 #5 (dashboard KPI empty-DB behavior) | RESOLVED-CODE | CD (code trace) | 2026-07-24 | `get_kpis()`'s `COALESCE(..., 0)`/`COUNT(DISTINCT ...)` pattern, confirmed via the full-body read performed during the IC-16 investigation. TOPOLOGY.md updated in place. |
 | P1-S3-001 (confidence-fabrication remediation) | FAIL-ACCEPTED | Engineer | 2026-07-24 | Accepted as-is, tracked as R-001 (Critical); Azure SQL provenance confirmed test/dev directly by engineer. RISK_REGISTER.md R-001 updated with both statements. |
-| P1-S3-002 (AI-provider-chain doc contradiction) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer confirmed Claude Sonnet 4.6 as intentional primary; doc/comment sweep applied across all 6 locations. |
+| P1-S3-002 (AI-provider-chain doc contradiction) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer confirmed Claude Sonnet 4.6 as intentional primary; doc/comment sweep applied across all 9 locations (see P1-S3-002's completion history for the three-pass breakdown). |
 | P1-S3-003 (stale-job requeue gap) | FAIL-ACCEPTED | Engineer | 2026-07-24 | Accepted as-is, tracked as R-004 (Medium), deferred to Sprint 1 enhancement #5. RISK_REGISTER.md R-004 updated. |
 | P1-S3-004 (RULE-07 citation staleness) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer approved; RULE-07 citation updated to `claude_sonnet_client.py:_map_columns()`. |
 | P1-S3-005 (RULE-08 build-status staleness) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer approved; RULE-08 text updated to reflect built per-user logins, flat-permission intent confirmed unchanged. |

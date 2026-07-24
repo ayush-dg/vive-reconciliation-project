@@ -4,11 +4,12 @@ document_understanding_engine.py
 The core AI stage. Takes a PDF path, calls the AI provider chain, and
 returns a Universal Financial Document Schema dict.
 
-Final chain (see RULES.md RULE-04 — Azure OpenAI gpt-5-mini + pdfplumber/OCR
-is the settled decision, no other AI providers active):
+Final chain (see RULES.md RULE-04 — Claude Sonnet 4.6 + pdfplumber/OCR is
+the current chain; superseded three times, see RULE-04 for the full
+history):
   Primary:  Whichever provider client_factory.get_ai_client() resolves from
-            active_provider.json's provider_chain (currently Azure OpenAI
-            gpt-5-mini) — send the PDF file directly as a document content
+            active_provider.json's provider_chain (currently Claude Sonnet
+            4.6) — send the PDF file directly as a document content
             block. Handles text-based, scanned, thin-text-layer, and hybrid
             PDFs identically, since the model reads the PDF natively
             regardless of what's underneath.
@@ -18,6 +19,10 @@ is the settled decision, no other AI providers active):
             now handles scanned pages internally via per-page OCR (see its
             module docstring), so this fallback needs no OCR-vs-text
             branching here — it's a single call either way.
+[Corrected 2026-07-24, BCE Stage 3 documentation sweep follow-up — this
+docstring previously named Azure OpenAI gpt-5-mini as primary, and was
+missed by the original six-location sweep despite being one of the
+locations INVARIANT_CATALOGUE.md's IC-4 itself named as stale.]
 
 There is deliberately no character-count heuristic deciding between a
 "text PDF path" and a "scanned PDF path" up front for the primary path —

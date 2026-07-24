@@ -126,13 +126,15 @@ Synthesized entirely from `discovery/INVARIANT_CATALOGUE.md`, `discovery/MODULE_
 
 **Description:** `web/routers/auth.py` (M-001) contains a hardcoded fallback admin credential, used when no matching row exists in the `users` table. Per the standing rule established this session, the literal value is not reproduced in this or any other `discovery/` artifact — see the source file directly for the exact value. This is a production auth-bypass path: anyone with knowledge of the fallback credential (or who obtains it by reading the source, a config diff, or a leaked build artifact) can authenticate as an admin, regardless of what's actually provisioned in the `users` table.
 
+**Second location carrying the same value (confirmed 2026-07-24, verification pass):** `migrations/004_add_users_table.sql`'s own header comment also states the literal credential, explaining why the fallback is kept ("kept deliberately until database-backed users are confirmed working"). This means removing the fallback from `auth.py` alone would not purge the literal value from the repository/git history — the migration file would need the same treatment (redact or remove the literal from the comment, keep the rationale).
+
 **Threatened invariant:** No formal IC-N currently covers authentication enforcement directly — a candidate for a future invariant, recorded here first as the concrete risk it represents.
 
-**Affected modules:** M-001 (`web/routers/auth.py`)
+**Affected modules:** M-001 (`web/routers/auth.py`); also `migrations/004_add_users_table.sql` (not a registered M-NNN module — a schema/migration file — but a second source location carrying the identical literal credential value in its header comment)
 
 **Mitigation (current):** None. The fallback is live in the authentication path as of this session; it is not gated behind an environment flag or disabled in any deployment-specific config that was found during this extraction.
 
-**Recommended action:** Remove the hardcoded fallback entirely, or at minimum gate it behind an explicit `DEBUG`/`DEV_MODE` environment check that defaults to off, so it cannot be reached in a production deployment even if the `users` table is empty or misconfigured.
+**Recommended action:** Remove the hardcoded fallback entirely, or at minimum gate it behind an explicit `DEBUG`/`DEV_MODE` environment check that defaults to off, so it cannot be reached in a production deployment even if the `users` table is empty or misconfigured. When doing so, also update `migrations/004_add_users_table.sql`'s header comment to drop the literal value (the rationale for keeping the fallback can stay; the credential itself doesn't need to remain in the comment).
 
 **Engineer decision (2026-07-24):** Signed off as a new formal risk entry (Stage 3, P2-S3-002). Severity confirmed High — "production auth bypass path, even if intended as temporary."
 
@@ -142,15 +144,17 @@ Synthesized entirely from `discovery/INVARIANT_CATALOGUE.md`, `discovery/MODULE_
 
 **Severity:** High
 
-**Description:** `web/app.py` (M-009) sets `WEB_SESSION_SECRET` to a hardcoded literal value used to sign session cookies, rather than reading it from an environment variable or secret store. Per the standing rule established this session, the literal value is not reproduced in this or any other `discovery/` artifact — see the source file directly. If this value is known or leaked (e.g. via source access, a public repo, or a shared build image), anyone can forge a valid session cookie for any user, including admin accounts — this is the same class of risk as R-007, but at the session-integrity layer rather than the login-credential layer.
+**Description:** `web/app.py` (M-009) reads `WEB_SESSION_SECRET` from the environment via `os.getenv("WEB_SESSION_SECRET", "<hardcoded literal>")` — the mechanism itself does attempt an environment-variable override before falling back to a hardcoded literal default. **The gap is that nothing actually sets `WEB_SESSION_SECRET` today**: confirmed absent from both `.env` and `.env.example` (not even documented there as a variable to configure), so the hardcoded fallback is what's genuinely in effect in every environment that runs this code unmodified, right now — functionally equivalent to a hardcoded secret in practice, even though the code isn't structurally incapable of reading one. Nothing warns or fails loudly when the variable is missing, so this is easy to overlook. If this value is known or leaked (e.g. via source access, a public repo, or a shared build image), anyone can forge a valid session cookie for any user, including admin accounts — this is the same class of risk as R-007, but at the session-integrity layer rather than the login-credential layer.
+
+**Correction (2026-07-24, verification pass):** An earlier version of this entry stated the code "sets `WEB_SESSION_SECRET` to a hardcoded literal value... rather than reading it from an environment variable" — that overstated the gap. The code does read the environment variable first; the real problem is that the variable is never configured or documented, not that the override path doesn't exist. Corrected here to match the actual code, per direct re-verification of `web/app.py`.
 
 **Threatened invariant:** No formal IC-N currently covers session-secret management directly — a candidate for a future invariant, recorded here first as the concrete risk it represents.
 
 **Affected modules:** M-009 (`web/app.py`)
 
-**Mitigation (current):** None found. The value is a fixed literal in source, identical across every environment that runs this code unmodified.
+**Mitigation (current):** None found. The environment-variable override path exists in the code but is unused — `WEB_SESSION_SECRET` is unset in `.env` and undocumented in `.env.example`, so the hardcoded literal is what's actually in effect, identical across every environment that runs this code unmodified.
 
-**Recommended action:** Move `WEB_SESSION_SECRET` to an environment variable or secret store, generated uniquely per deployment, with no hardcoded default (or a default that only applies to local/dev and is loudly rejected in anything resembling a production config).
+**Recommended action:** Actually set `WEB_SESSION_SECRET` to a unique, generated value per deployment (the read path already supports this — it just needs to be configured), document it in `.env.example`, and make the hardcoded default loudly rejected (e.g. refuse to start, or log a prominent warning) in anything resembling a production config, rather than silently falling back.
 
 **Engineer decision (2026-07-24):** Signed off as a new formal risk entry (Stage 3, P2-S3-002). Severity confirmed High — "if compromised, forges any user's session; same class of risk as R-007."
 
@@ -166,7 +170,7 @@ Synthesized entirely from `discovery/INVARIANT_CATALOGUE.md`, `discovery/MODULE_
 | R-004 | No worker liveness/watchdog, no stale-job requeue | Medium | IC-19 | M-013, M-011 |
 | R-005 | Fragile "Statement ID:" string contract | Medium | IC-18 | M-018, M-013 |
 | R-006 | Azure SQL schema provisioning outside tracked migrations | Medium | IC-12 | M-034, M-035 |
-| R-007 | Hardcoded fallback admin credential in auth.py | High | — (candidate for future invariant) | M-001 |
+| R-007 | Hardcoded fallback admin credential in auth.py (also in migrations/004 comment) | High | — (candidate for future invariant) | M-001, migrations/004_add_users_table.sql |
 | R-008 | Hardcoded session secret in web/app.py | High | — (candidate for future invariant) | M-009 |
 
 Session E Part 2 (RISK_REGISTER.md) complete, plus Stage 3 additions (R-007, R-008) per engineer sign-off, 2026-07-24. All P1/P2 Stage 3 items are now closed — see `discovery/ANNOTATION_CHECKLIST.md`.

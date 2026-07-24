@@ -3,9 +3,15 @@ claude_sonnet_client.py
 
 Claude Sonnet 4.6 implementation of AIClient, via Azure Foundry
 (anthropic.AnthropicFoundry — same routing as claude_client.py). Registered
-in client_factory.py as "claude_sonnet" — an alternate extraction provider,
-NOT part of the active provider chain (gemini remains primary; see
-active_provider.json).
+in client_factory.py as "claude_sonnet" — **the confirmed active primary
+extraction provider**, `provider_chain[0]` in active_provider.json (see
+RULES.md RULE-04).
+[Corrected 2026-07-24, BCE Stage 3 documentation sweep follow-up — this
+docstring previously said "NOT part of the active provider chain (gemini
+remains primary)," stale relative to active_provider.json's provider_chain.
+Deliberately left uncorrected during the original fix pass out of caution
+about blast radius on the active provider's own file; revisited and
+corrected once that caution was no longer a reason to leave it wrong.]
 
 Sends the whole PDF as ONE base64 document block + ONE streaming
 messages call — no page splitting, same whole-document approach as
