@@ -10,7 +10,7 @@
 > flagged here, not silently smoothed over.
 
 **System:** VIVE Reconciliation
-**Master index status:** 2 enhancements tracked (1 in backlog stub, 1 in sprint with no brief yet) — 1 sprint OPEN
+**Master index status:** 2 enhancements tracked (1 in backlog stub, 1 in sprint with a signed-off brief, pending Prompt 2) — 1 sprint OPEN
 
 ---
 
@@ -23,14 +23,13 @@
 
 Status values: IN BACKLOG \| IN SPRINT \| IN EXECUTION \| COMPLETE \| CANCELLED
 
-**ENH-001:** Status shown as IN SPRINT per Sprint CC Initiation instruction, but this
-is a process gap, not a clean state — the standard flow is brief-in-backlog →
-brief signed off → moved into sprint. ENH-001 has **no `ENH-001_BRIEF.md` yet** in
-`enhancements/backlog/` or `enhancements/SPRINT-001/`; it was named directly in the
-sprint initiation instruction. Brief authoring and the Prompt 1 review gate are still
-required before Prompt 2 (collision surface analysis) can run. See
-`enhancements/SPRINT-001/SPRINT-001_LOG.md` Sprint CC Initiation section for the
-same flag.
+**ENH-001:** Status IN SPRINT. `ENH-001_BRIEF.md` (`enhancements/SPRINT-001/ENH-001-automated-batch-intake/`)
+is authored, passed the Prompt 1 brief review gate (PASS WITH ADVISORIES — one open
+advisory: Enhancement Intent doesn't state business motivation, non-blocking), and is
+**Signed Off** (2026-07-24). The out-of-order gap noted at Sprint CC Initiation
+(ENH-001 named in sprint scope before its brief existed) is resolved — the brief now
+exists and is reviewed. Classification/Depends On/Collision Surfaces remain pending
+Prompt 2 (collision surface analysis), which can now run.
 
 **ENH-007:** brief is a Draft stub (`enhancements/backlog/ENH-007-match-confidence-score/ENH-007_BRIEF.md`) —
 held per engineer instruction, not part of Sprint 1's first task group. Sprint/Classification/

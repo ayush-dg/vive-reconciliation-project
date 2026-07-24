@@ -50,13 +50,12 @@ None — no `verification/HARNESS.sh` exists yet, so no drift could be detected.
 |---|---|---|
 | ENH-001 | [ ] Yes | [ ] Yes |
 
-> **Open gap, flagged at initiation:** `enhancements/backlog/ENH-001-*/ENH-001_BRIEF.md`
-> does not exist yet. ENH-001 was named directly in this sprint's initiation
-> instruction, not pulled from an already-authored backlog brief. Per
-> `pbvi_sprint.md` B.3, the brief must be authored and pass the brief review gate
-> (Prompt 1) before collision surface analysis (Prompt 2) or sprint constraints
-> generation (Prompt 3) can run. **Pre-sprint remains incomplete until this brief
-> exists, is reviewed, and is signed off.**
+> **Gap flagged at initiation — now resolved (2026-07-24):**
+> `enhancements/SPRINT-001/ENH-001-automated-batch-intake/ENH-001_BRIEF.md` has
+> been authored, passed the Prompt 1 brief review gate (PASS WITH ADVISORIES —
+> one non-blocking open advisory: Enhancement Intent doesn't state business
+> motivation), and is **Signed Off**. Collision surface analysis (Prompt 2) and
+> sprint constraints generation (Prompt 3) can now proceed.
 
 ---
 

@@ -8,9 +8,10 @@
 > **Placeholder — created at Sprint CC Initiation (Step 2), not yet the real manifest.**
 > Collision surface analysis (Prompt 2) has not run. This file exists only so the
 > sprint directory structure is complete at initiation, per `pbvi_sprint.md` Prompt 0
-> Step 2. Do not treat anything below as adjudicated. **Blocked on ENH-001's brief
-> being authored and passing the brief review gate (Prompt 1) first** — collision
-> surface analysis needs a signed-off brief to analyze.
+> Step 2. Do not treat anything below as adjudicated. **No longer blocked** —
+> `ENH-001_BRIEF.md` is authored, passed the Prompt 1 brief review gate (PASS WITH
+> ADVISORIES), and is Signed Off (2026-07-24). Collision surface analysis (Prompt 2)
+> can now run.
 
 ---
 
@@ -69,8 +70,8 @@ and is signed off.]
 
 ## Sprint Lead Sign-Off
 
-[ ] All Enhancement Briefs signed off — brief review gate passed for each
-    **NOT MET — ENH-001_BRIEF.md does not exist yet**
+[x] All Enhancement Briefs signed off — brief review gate passed for each
+    **MET — ENH-001_BRIEF.md signed off 2026-07-24, gate status PASS WITH ADVISORIES**
 [ ] All DRIFT-NNN_BRIEF.md signed off — N/A, none this sprint
 [ ] All briefs included in analysis
 [ ] DRIFT items included in collision surface analysis — N/A
