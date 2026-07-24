@@ -26,6 +26,17 @@ def _make_client(transport=None, download_transport=None):
     )
 
 
+def _make_dropzone_client(download_transport=None):
+    """Mirrors how web/routers/intake_trigger.py constructs its client --
+    container_name pinned to the dropzone container, matching the blob_url
+    host/container used throughout TestBlobStorageClientDownloadPdf."""
+    return BlobStorageClient(
+        container_name="incoming-statements",
+        connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING",
+        download_transport=download_transport,
+    )
+
+
 class TestSlugifyVendorName(unittest.TestCase):
 
     def test_lowercases_and_replaces_non_alphanumeric(self):
@@ -160,7 +171,7 @@ class TestBlobStorageClientDownloadPdf(unittest.TestCase):
             captured["dest_path"] = dest_path
             return True, None
 
-        client = _make_client(download_transport=fake_download_transport)
+        client = _make_dropzone_client(download_transport=fake_download_transport)
         result = client.download_pdf(self.blob_url, self.dest_path)
 
         self.assertTrue(result)
@@ -172,7 +183,7 @@ class TestBlobStorageClientDownloadPdf(unittest.TestCase):
         def fake_download_transport(container_name, blob_name, dest_path, connection_string):
             return False, "simulated network error"
 
-        client = _make_client(download_transport=fake_download_transport)
+        client = _make_dropzone_client(download_transport=fake_download_transport)
         result = client.download_pdf(self.blob_url, self.dest_path)
 
         self.assertFalse(result)
@@ -181,7 +192,7 @@ class TestBlobStorageClientDownloadPdf(unittest.TestCase):
         def fake_download_transport(container_name, blob_name, dest_path, connection_string):
             raise RuntimeError("boom")
 
-        client = _make_client(download_transport=fake_download_transport)
+        client = _make_dropzone_client(download_transport=fake_download_transport)
         result = client.download_pdf(self.blob_url, self.dest_path)
 
         self.assertFalse(result)
@@ -196,10 +207,45 @@ class TestBlobStorageClientDownloadPdf(unittest.TestCase):
         self.assertFalse(result)
 
     def test_url_without_container_and_blob_segments_returns_false(self):
-        client = _make_client(download_transport=lambda *a: (True, None))
+        client = _make_dropzone_client(download_transport=lambda *a: (True, None))
         result = client.download_pdf("https://viverecondropzone.blob.core.windows.net/", self.dest_path)
 
         self.assertFalse(result)
+
+    def test_url_naming_a_different_container_is_refused(self):
+        """The container segment of blob_url must never be trusted to pick
+        which container gets read -- a URL naming any container other than
+        the client's configured one is rejected outright, and the
+        transport (which would perform the real download) must never even
+        be invoked."""
+        transport_called = []
+
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            transport_called.append((container_name, blob_name))
+            return True, None
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        other_container_url = "https://viverecondropzone.blob.core.windows.net/vendor-statements/statement.pdf"
+        result = client.download_pdf(other_container_url, self.dest_path)
+
+        self.assertFalse(result)
+        self.assertEqual(transport_called, [])
+
+    def test_download_always_targets_configured_container_not_parsed_one(self):
+        """Even when the URL's container matches, the transport must be
+        called with self.container_name (the configured value), not
+        whatever string happened to be parsed out of the URL -- guards
+        against a future refactor silently reintroducing caller control."""
+        captured = {}
+
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            captured["container_name"] = container_name
+            return True, None
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertEqual(captured["container_name"], client.container_name)
 
 
 if __name__ == "__main__":

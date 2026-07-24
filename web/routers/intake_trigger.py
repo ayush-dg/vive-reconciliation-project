@@ -11,16 +11,25 @@ Event Grid also POSTs a one-time SubscriptionValidationEvent when the
 subscription is first created, which must be echoed back verbatim to
 prove endpoint ownership -- see
 https://learn.microsoft.com/azure/event-grid/webhook-event-delivery.
+That echo is a delivery-handshake formality, not authentication -- it
+proves nothing about who sent the request, since anyone can read
+validationCode out of their own forged payload and echo it right back.
 
 No login is required on this route -- it is called by Azure Event Grid,
-not a signed-in user.
+not a signed-in user -- so it instead requires a shared secret configured
+on the Event Grid subscription as a static delivery header (see
+https://learn.microsoft.com/azure/event-grid/delivery-properties),
+checked in _is_authorized() before anything else in the handler runs.
+VIVE_EVENTGRID_WEBHOOK_SECRET must be set for any request to be accepted
+-- there is deliberately no "unconfigured means open" fallback.
 """
 
+import hmac
 import os
 import uuid
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from src.storage.blob_client import BlobStorageClient
 from web import queries
@@ -35,6 +44,29 @@ DROPZONE_CONNECTION_STRING_ENV_VAR = "AZURE_BLOB_DROPZONE_CONNECTION_STRING"
 
 VALIDATION_EVENT_TYPE = "Microsoft.EventGrid.SubscriptionValidationEvent"
 BLOB_CREATED_EVENT_TYPE = "Microsoft.Storage.BlobCreated"
+
+WEBHOOK_SECRET_ENV_VAR = "VIVE_EVENTGRID_WEBHOOK_SECRET"
+WEBHOOK_SECRET_HEADER = "x-vive-webhook-secret"
+
+# Hard cap on events accepted per delivery -- Event Grid batches deliveries
+# itself (typically well under this), so a legitimate delivery never gets
+# near it; this exists solely to bound the cost of a single unauthenticated
+# (or credential-leaked) request before auth/size checks, not to reflect
+# any real expected batch size.
+MAX_EVENTS_PER_REQUEST = 100
+
+
+def _is_authorized(request: Request) -> bool:
+    """Constant-time comparison of the configured shared secret against
+    the caller-supplied header -- avoids leaking a timing side-channel on
+    a byte-by-byte string compare. Returns False (never raises) if the
+    secret isn't configured at all; that is a fail-closed misconfiguration,
+    not an "auth disabled" mode."""
+    configured_secret = os.environ.get(WEBHOOK_SECRET_ENV_VAR)
+    if not configured_secret:
+        return False
+    supplied_secret = request.headers.get(WEBHOOK_SECRET_HEADER, "")
+    return hmac.compare_digest(configured_secret, supplied_secret)
 
 
 def _validation_response(events: list):
@@ -85,9 +117,15 @@ def _intake_blob_created_event(event: dict, batch_id: str) -> None:
 
 @router.post("/api/intake-trigger")
 async def intake_trigger(request: Request):
+    if not _is_authorized(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     events = await request.json()
     if isinstance(events, dict):
         events = [events]
+
+    if len(events) > MAX_EVENTS_PER_REQUEST:
+        raise HTTPException(status_code=413, detail="Too many events in one delivery")
 
     validation_response = _validation_response(events)
     if validation_response is not None:

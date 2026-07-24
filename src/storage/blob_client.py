@@ -139,26 +139,42 @@ class BlobStorageClient:
 
     def download_pdf(self, blob_url: str, dest_path: str) -> bool:
         """
-        Downloads blob_url to dest_path. Returns True on success, False on
-        any failure -- never raises.
+        Downloads the blob named by blob_url's path to dest_path. Returns
+        True on success, False on any failure -- never raises.
+
+        blob_url is caller/webhook-supplied (see
+        web/routers/intake_trigger.py, which passes through whatever
+        `data.url` an inbound request claims) and must never be trusted to
+        pick which container gets read. The container segment of the URL
+        is only used to verify it names self.container_name -- any other
+        container is refused outright -- and the actual download always
+        targets self.container_name (never the parsed string) so a bug in
+        that comparison can't reopen the door to an arbitrary container.
         """
         if not self.connection_string:
             print(f"[blob_client] Skipping download -- {self.connection_string_env_var} not set")
             return False
 
         try:
-            container_name, blob_name = _parse_blob_url(blob_url)
+            url_container_name, blob_name = _parse_blob_url(blob_url)
         except ValueError as e:
             print(f"[blob_client] Skipping download -- {e}")
+            return False
+
+        if url_container_name != self.container_name:
+            print(
+                f"[blob_client] Refusing download -- blob URL names container "
+                f"'{url_container_name}', expected '{self.container_name}'"
+            )
             return False
 
         try:
             if self._download_transport:
                 success, error = self._download_transport(
-                    container_name, blob_name, dest_path, self.connection_string
+                    self.container_name, blob_name, dest_path, self.connection_string
                 )
             else:
-                success, error = self._real_download(container_name, blob_name, dest_path)
+                success, error = self._real_download(self.container_name, blob_name, dest_path)
         except Exception as e:
             print(f"[blob_client] Unexpected error downloading {blob_name}: {e}")
             return False
