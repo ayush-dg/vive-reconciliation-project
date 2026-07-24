@@ -301,7 +301,8 @@ TABLES = {
             completed_at NVARCHAR(MAX),
             error_message NVARCHAR(MAX),
             vendor_name NVARCHAR(MAX),
-            claim_token NVARCHAR(255)
+            claim_token NVARCHAR(255),
+            batch_id NVARCHAR(36)
         )
     """,
 }
@@ -330,6 +331,7 @@ INDEXES = {
 COLUMNS = {
     "jobs": [
         ("claim_token", "ALTER TABLE jobs ADD claim_token NVARCHAR(255)"),
+        ("batch_id", "ALTER TABLE jobs ADD batch_id NVARCHAR(36)"),
     ],
 }
 
