@@ -433,15 +433,17 @@ def _insert_gold_summary(execute_sql, *, statement_id, total_invoice_count):
     )
 
 
-def _insert_gold_exception(execute_sql, *, statement_id, exception_id, status="OPEN"):
+def _insert_gold_exception(execute_sql, *, statement_id, exception_id, status="OPEN",
+                            ai_confidence_score=None, invoice_number="INV-1"):
     execute_sql(
         """
         INSERT INTO gold_exceptions (
             exception_id, vendor_id, invoice_number, statement_amount, erp_amount,
-            match_status, exception_reason, exception_status, statement_id, date_raised
-        ) VALUES (?, 'V1', 'INV-1', 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, '2026-07-24T00:00:00+00:00')
+            match_status, exception_reason, exception_status, statement_id, date_raised,
+            ai_confidence_score
+        ) VALUES (?, 'V1', ?, 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, '2026-07-24T00:00:00+00:00', ?)
         """,
-        [exception_id, status, statement_id],
+        [exception_id, invoice_number, status, statement_id, ai_confidence_score],
     )
 
 
@@ -569,6 +571,91 @@ class TestBatchQueries(unittest.TestCase):
         recent = queries.get_recent_completed_batches(limit=3)
 
         self.assertEqual(len(recent), 3)
+
+
+class TestBulkApproveExceptions(unittest.TestCase):
+    """get_high_confidence_exception_count()/bulk_approve_exceptions()
+    (see web/routers/exceptions.py's POST /exceptions/{vendor}/bulk-approve).
+    Uses _make_jobs_db() (not _make_db()) because bulk_approve_exceptions()
+    calls resolve_exception(), which writes to exception_dispositions --
+    a table only present once every migration (002 onward) is applied."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-BA", total_invoice_count=3)
+
+    def test_count_excludes_null_and_below_threshold_confidence(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
+                                invoice_number="INV-1", ai_confidence_score=None)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-2",
+                                invoice_number="INV-2", ai_confidence_score=0.85)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-3",
+                                invoice_number="INV-3", ai_confidence_score=0.995)
+
+        count = queries.get_high_confidence_exception_count("Vendor One", threshold=0.99)
+
+        self.assertEqual(count, 1)
+
+    def test_count_excludes_already_resolved_exceptions(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
+                                invoice_number="INV-1", ai_confidence_score=0.999, status="RESOLVED")
+
+        count = queries.get_high_confidence_exception_count("Vendor One", threshold=0.99)
+
+        self.assertEqual(count, 0)
+
+    def test_count_is_zero_for_unknown_vendor(self):
+        count = queries.get_high_confidence_exception_count("Nobody", threshold=0.99)
+
+        self.assertEqual(count, 0)
+
+    def test_bulk_approve_resolves_only_qualifying_exceptions(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
+                                invoice_number="INV-1", ai_confidence_score=0.995)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-2",
+                                invoice_number="INV-2", ai_confidence_score=0.999)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-3",
+                                invoice_number="INV-3", ai_confidence_score=0.50)
+
+        approved = queries.bulk_approve_exceptions("Vendor One", threshold=0.99, reviewed_by="reviewer@vive.com")
+
+        self.assertEqual(approved, 2)
+
+        total, resolved = queries.get_exception_counts("STMT-BA")
+        self.assertEqual(total, 3)
+        self.assertEqual(resolved, 2)
+
+        low_confidence_row = self.execute_query(
+            "SELECT exception_status FROM gold_exceptions WHERE exception_id = 'EXC-3'"
+        )[0]
+        self.assertEqual(low_confidence_row["exception_status"], "OPEN")
+
+    def test_bulk_approve_writes_a_disposition_row_per_exception(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
+                                invoice_number="INV-1", ai_confidence_score=0.995)
+
+        queries.bulk_approve_exceptions("Vendor One", threshold=0.99, reviewed_by="reviewer@vive.com")
+
+        dispositions = self.execute_query(
+            "SELECT * FROM exception_dispositions WHERE exception_id = 'EXC-1'"
+        )
+        self.assertEqual(len(dispositions), 1)
+        self.assertEqual(dispositions[0]["disposition_status"], "ACCEPTED")
+        self.assertEqual(dispositions[0]["disposed_by"], "reviewer@vive.com")
+
+    def test_bulk_approve_returns_zero_for_unknown_vendor(self):
+        approved = queries.bulk_approve_exceptions("Nobody", threshold=0.99, reviewed_by="reviewer@vive.com")
+
+        self.assertEqual(approved, 0)
 
 
 if __name__ == "__main__":

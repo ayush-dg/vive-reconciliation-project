@@ -24,6 +24,12 @@ REASON_BADGE = {
     "DUPLICATE_RECORD": {"label": "Duplicate record", "css": "info"},
 }
 
+# Bulk approve only ever targets exceptions the AI extraction pipeline
+# marked very high confidence — see queries.get_high_confidence_exception_count()
+# and Step 7 (match confidence scoring), which will populate
+# ai_confidence_score more broadly than it is today.
+BULK_APPROVE_THRESHOLD = 0.99
+
 
 @router.get("/exceptions")
 def exceptions_vendors(request: Request, user: str = Depends(require_login)):
@@ -100,9 +106,29 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "progress_pct": progress_pct,
         "filter": filter,
         "reason_badge": REASON_BADGE,
+        "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
+        "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
+
+
+@router.post("/exceptions/{vendor_name}/bulk-approve")
+def exceptions_bulk_approve(vendor_name: str, request: Request, user: str = Depends(require_login),
+                             threshold: float = BULK_APPROVE_THRESHOLD):
+    """Approves every OPEN exception for this vendor with
+    ai_confidence_score >= threshold in one pass — see
+    queries.bulk_approve_exceptions(). Registered ahead of the
+    {vendor_name:path} POST action route below: Starlette's "path"
+    converter matches greedily (regex .*), so if that route were checked
+    first it would swallow "/bulk-approve" into vendor_name itself and
+    this route would never be reached. A plain (non-":path") converter is
+    safe here because every link to this route is built from
+    quote(vendor_name, safe="") (see vendor_url_name below), which never
+    leaves a literal "/" in the URL segment."""
+    vendor_name = unquote(vendor_name)
+    approved = queries.bulk_approve_exceptions(vendor_name, threshold, reviewed_by=user)
+    return {"approved": approved}
 
 
 @router.post("/exceptions/{vendor_name:path}")

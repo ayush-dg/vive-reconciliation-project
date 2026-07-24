@@ -465,6 +465,82 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
     )
 
 
+def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.99) -> int:
+    """Count of OPEN exceptions for this vendor with ai_confidence_score
+    >= threshold — drives whether the "Bulk approve" button shows on the
+    exceptions review page. Most exceptions today have ai_confidence_score
+    = NULL (raised by the deterministic matching engine, not AI
+    extraction) — NULL >= threshold is false in SQL, so those rows are
+    excluded with no special-casing needed here.
+
+    Mirrors the same statement-vs-exceptions-only-vendor branching as
+    exceptions_review() in web/routers/exceptions.py."""
+    statement = get_vendor_latest_statement(vendor_name)
+    if statement:
+        rows = execute_query(
+            """
+            SELECT COUNT(*) AS c FROM gold_exceptions
+            WHERE statement_id = ? AND exception_status = 'OPEN' AND ai_confidence_score >= ?
+            """,
+            [statement["statement_id"], threshold],
+        )
+        return rows[0]["c"] or 0
+
+    statement = get_exceptions_only_vendor(vendor_name)
+    if not statement:
+        return 0
+    rows = execute_query(
+        f"""
+        SELECT COUNT(*) AS c FROM gold_exceptions ge
+        WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.ai_confidence_score >= ?
+        """,
+        [statement["source_file"], threshold],
+    )
+    return rows[0]["c"] or 0
+
+
+def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str) -> int:
+    """Marks every OPEN exception for this vendor with ai_confidence_score
+    >= threshold as RESOLVED/ACCEPTED, via the same disposition write
+    (exception_dispositions insert + gold_exceptions update) a single
+    Accept click uses — see resolve_exception(). Returns the number of
+    exceptions approved."""
+    statement = get_vendor_latest_statement(vendor_name)
+    if statement:
+        candidates = execute_query(
+            """
+            SELECT * FROM gold_exceptions
+            WHERE statement_id = ? AND exception_status = 'OPEN' AND ai_confidence_score >= ?
+            """,
+            [statement["statement_id"], threshold],
+        )
+    else:
+        statement = get_exceptions_only_vendor(vendor_name)
+        if not statement:
+            return 0
+        candidates = execute_query(
+            f"""
+            SELECT ge.* FROM gold_exceptions ge
+            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.ai_confidence_score >= ?
+            """,
+            [statement["source_file"], threshold],
+        )
+
+    for exc in candidates:
+        resolve_exception(
+            exception_id=exc["exception_id"],
+            statement_id=exc["statement_id"],
+            vendor_name=vendor_name,
+            invoice_number=exc["invoice_number"],
+            reason_code=exc["exception_reason"],
+            disposition_status="ACCEPTED",
+            notes=f"Bulk approved — confidence >= {threshold}",
+            disposed_by=reviewed_by,
+        )
+
+    return len(candidates)
+
+
 # ---------------------------------------------------------------------------
 # Upload
 # ---------------------------------------------------------------------------

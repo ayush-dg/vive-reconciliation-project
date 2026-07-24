@@ -25,6 +25,14 @@
     <div class="list-header">
       <div class="list-title">{{ vendor_name }} <span style="color:var(--text-secondary);font-weight:400">({{ exceptions | length }})</span></div>
     </div>
+    {% if high_confidence_count %}
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border)">
+      <button type="button" id="bulk-approve-btn" class="btn btn-primary" style="width:100%"
+              data-vendor-url="{{ vendor_url_name }}" data-count="{{ high_confidence_count }}">
+        Approve {{ high_confidence_count }} at 99%+ confidence
+      </button>
+    </div>
+    {% endif %}
     <div class="filter-bar">
       <a href="/exceptions/{{ vendor_url_name }}?filter=all" class="chip {{ 'active' if filter == 'all' }}">All</a>
       <a href="/exceptions/{{ vendor_url_name }}?filter=missing" class="chip {{ 'active' if filter == 'missing' }}">Missing</a>
@@ -116,5 +124,19 @@
     {% endif %}
   </div>
 </div>
+<script>
+(function () {
+  var btn = document.getElementById("bulk-approve-btn");
+  if (!btn) return;
+  btn.addEventListener("click", function () {
+    var count = btn.dataset.count;
+    if (!confirm("Approve " + count + " exceptions at 99%+ confidence? This cannot be undone.")) {
+      return;
+    }
+    fetch("/exceptions/" + btn.dataset.vendorUrl + "/bulk-approve", { method: "POST" })
+      .then(function () { window.location.reload(); });
+  });
+})();
+</script>
 {% endif %}
 {% endblock %}
