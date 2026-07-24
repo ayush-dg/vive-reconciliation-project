@@ -37,6 +37,9 @@
     <div class="vc-footer">
       {% if v.exception_count > 0 %}
       <span class="vc-footer-note">
+        {% if v.aging %}
+        <span class="badge {{ 'neutral' if v.aging.days_open < 7 else ('warning' if v.aging.days_open <= 14 else 'danger') }}" style="margin-right:6px">Oldest: {{ v.aging.days_open }} day{{ "s" if v.aging.days_open != 1 }} open</span>
+        {% endif %}
         {%- set parts = [] -%}
         {%- for reason, count in v.reason_breakdown.items() -%}
           {%- set _ = parts.append(count|string ~ " " ~ reason) -%}

@@ -20,6 +20,7 @@ import os
 import sqlite3
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -434,16 +435,17 @@ def _insert_gold_summary(execute_sql, *, statement_id, total_invoice_count):
 
 
 def _insert_gold_exception(execute_sql, *, statement_id, exception_id, status="OPEN",
-                            ai_confidence_score=None, match_confidence=None, invoice_number="INV-1"):
+                            ai_confidence_score=None, match_confidence=None, invoice_number="INV-1",
+                            date_raised="2026-07-24T00:00:00+00:00"):
     execute_sql(
         """
         INSERT INTO gold_exceptions (
             exception_id, vendor_id, invoice_number, statement_amount, erp_amount,
             match_status, exception_reason, exception_status, statement_id, date_raised,
             ai_confidence_score, match_confidence
-        ) VALUES (?, 'V1', ?, 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, '2026-07-24T00:00:00+00:00', ?, ?)
+        ) VALUES (?, 'V1', ?, 100.0, NULL, 'EXCEPTION', 'Invoice Missing', ?, ?, ?, ?, ?)
         """,
-        [exception_id, invoice_number, status, statement_id, ai_confidence_score, match_confidence],
+        [exception_id, invoice_number, status, statement_id, date_raised, ai_confidence_score, match_confidence],
     )
 
 
@@ -656,6 +658,101 @@ class TestBulkApproveExceptions(unittest.TestCase):
         approved = queries.bulk_approve_exceptions("Nobody", threshold=0.99, reviewed_by="reviewer@vive.com")
 
         self.assertEqual(approved, 0)
+
+
+class TestExceptionRoutingAndAging(unittest.TestCase):
+    """escalate_exception()/get_exception_aging_summary() and the
+    days_open/days_since_escalated fields _with_aging_fields() attaches
+    to get_open_exceptions() rows -- see web/routers/exceptions.py's
+    Escalate button and exceptions_vendors.html's "Oldest: N days open"
+    note."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-AGE", total_invoice_count=2)
+
+    def _raised_days_ago(self, days):
+        return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    def test_get_open_exceptions_attaches_days_open(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                date_raised=self._raised_days_ago(10))
+
+        rows = queries.get_open_exceptions("STMT-AGE")
+
+        self.assertEqual(rows[0]["days_open"], 10)
+        self.assertIsNone(rows[0]["days_since_escalated"])
+
+    def test_escalate_exception_sets_status_and_metadata(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1")
+
+        queries.escalate_exception("EXC-1", escalated_by="reviewer@vive.com")
+
+        row = self.execute_query("SELECT * FROM gold_exceptions WHERE exception_id = 'EXC-1'")[0]
+        self.assertEqual(row["escalation_status"], "ESCALATED")
+        self.assertEqual(row["escalated_by"], "reviewer@vive.com")
+        self.assertIsNotNone(row["escalated_at"])
+
+    def test_escalate_exception_does_not_resolve_it(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1")
+
+        queries.escalate_exception("EXC-1", escalated_by="reviewer@vive.com")
+
+        row = self.execute_query(
+            "SELECT exception_status FROM gold_exceptions WHERE exception_id = 'EXC-1'"
+        )[0]
+        self.assertEqual(row["exception_status"], "OPEN")
+
+    def test_get_open_exceptions_reports_days_since_escalated_once_escalated(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1")
+        self.execute_sql(
+            "UPDATE gold_exceptions SET escalation_status = 'ESCALATED', escalated_at = ? "
+            "WHERE exception_id = 'EXC-1'",
+            [self._raised_days_ago(3)],
+        )
+
+        rows = queries.get_open_exceptions("STMT-AGE")
+
+        self.assertEqual(rows[0]["days_since_escalated"], 3)
+
+    def test_aging_summary_returns_oldest_open_exception_age(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                invoice_number="INV-1", date_raised=self._raised_days_ago(3))
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-2",
+                                invoice_number="INV-2", date_raised=self._raised_days_ago(15))
+
+        summary = queries.get_exception_aging_summary("Vendor One")
+
+        self.assertEqual(summary["days_open"], 15)
+
+    def test_aging_summary_ignores_resolved_exceptions(self):
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                invoice_number="INV-1", date_raised=self._raised_days_ago(30), status="RESOLVED")
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-2",
+                                invoice_number="INV-2", date_raised=self._raised_days_ago(3))
+
+        summary = queries.get_exception_aging_summary("Vendor One")
+
+        self.assertEqual(summary["days_open"], 3)
+
+    def test_aging_summary_is_none_when_no_open_exceptions(self):
+        summary = queries.get_exception_aging_summary("Vendor One")
+
+        self.assertIsNone(summary)
+
+    def test_aging_summary_is_none_for_unknown_vendor(self):
+        summary = queries.get_exception_aging_summary("Nobody")
+
+        self.assertIsNone(summary)
 
 
 if __name__ == "__main__":

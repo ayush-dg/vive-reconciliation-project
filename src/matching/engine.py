@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.lakehouse.connection import execute_sql, execute_query
+from src.shop_owners import get_shop_owner
 
 
 def load_matching_rules(config_path: str = "config/matching/matching_rules.json") -> dict:
@@ -321,14 +322,16 @@ def run_matching(statement_id: str,
         else:
             exception_id = str(uuid.uuid4())
             match_confidence = score_exception_confidence(result["exception_reason"])
+            shop_owner = get_shop_owner(stmt.get("vendor_id"))
             execute_sql(
                 """
                 INSERT INTO gold_exceptions (
                     exception_id, vendor_id, shop, invoice_number, ro_number,
                     statement_amount, erp_amount, match_status, exception_reason,
                     exception_status, statement_record_id, source_file,
-                    statement_id, date_raised, statement_period, match_confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?)
+                    statement_id, date_raised, statement_period, match_confidence,
+                    shop_owner
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     exception_id,
@@ -345,6 +348,7 @@ def run_matching(statement_id: str,
                     now,
                     stmt.get("statement_period"),
                     match_confidence,
+                    shop_owner,
                 ]
             )
             exception_count += 1

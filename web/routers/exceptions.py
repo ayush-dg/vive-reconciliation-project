@@ -39,6 +39,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
     vendors = queries.get_vendor_summaries()
     for v in vendors:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
+        v["aging"] = queries.get_exception_aging_summary(v["vendor_name"])
 
     vendors_with_ex = [v for v in vendors if v["exception_count"] > 0]
     total_open = sum(v["exception_count"] for v in vendors_with_ex)
@@ -120,7 +121,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
 def exceptions_bulk_approve(vendor_name: str, request: Request, user: str = Depends(require_login),
                              threshold: float = BULK_APPROVE_THRESHOLD):
     """Approves every OPEN exception for this vendor with
-    ai_confidence_score >= threshold in one pass — see
+    match_confidence >= threshold in one pass — see
     queries.bulk_approve_exceptions(). Registered ahead of the
     {vendor_name:path} POST action route below: Starlette's "path"
     converter matches greedily (regex .*), so if that route were checked
@@ -132,6 +133,19 @@ def exceptions_bulk_approve(vendor_name: str, request: Request, user: str = Depe
     vendor_name = unquote(vendor_name)
     approved = queries.bulk_approve_exceptions(vendor_name, threshold, reviewed_by=user)
     return {"approved": approved}
+
+
+@router.post("/exceptions/{vendor_name}/escalate")
+def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(require_login),
+                         exception_id: str = Form(...), filter: str = Form("all")):
+    """Flags a single exception ESCALATED (see queries.escalate_exception())
+    and redirects back to the same vendor/filter. Registered ahead of the
+    {vendor_name:path} POST action route below for the same greedy-path-
+    converter reason as exceptions_bulk_approve() above."""
+    vendor_name = unquote(vendor_name)
+    queries.escalate_exception(exception_id, escalated_by=user)
+    suffix = f"?filter={filter}" if filter and filter != "all" else ""
+    return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
 
 
 @router.post("/exceptions/{vendor_name:path}")

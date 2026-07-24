@@ -73,6 +73,23 @@
         <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
       </div>
     </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-secondary)">
+      <span>
+        Raised {{ selected.date_raised | friendly_date }}
+        {% if selected.days_open is not none %}
+        <span class="badge {{ 'neutral' if selected.days_open < 7 else ('warning' if selected.days_open <= 14 else 'danger') }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
+        {% endif %}
+      </span>
+      {% if selected.escalation_status == 'ESCALATED' %}
+      <span class="badge danger">🚩 Escalated {{ selected.days_since_escalated }} day{{ "s" if selected.days_since_escalated != 1 }} ago</span>
+      {% else %}
+      <form method="post" action="/exceptions/{{ vendor_url_name }}/escalate" style="margin:0">
+        <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
+        <input type="hidden" name="filter" value="{{ filter }}">
+        <button type="submit" class="btn">🚩 Escalate</button>
+      </form>
+      {% endif %}
+    </div>
     <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">
     <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
     <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">

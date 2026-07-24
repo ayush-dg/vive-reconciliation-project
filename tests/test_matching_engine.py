@@ -191,17 +191,17 @@ class TestRunMatchingWritesMatchConfidence(unittest.TestCase):
         self.execute_sql = execute_sql
         self.execute_query = execute_query
 
-    def _insert_silver(self, *, record_id, source, invoice_number, amount, ro_number=None):
+    def _insert_silver(self, *, record_id, source, invoice_number, amount, ro_number=None, vendor_id="V1"):
         self.execute_sql(
             """
             INSERT INTO silver_reconciliation_standard (
                 record_id, record_source, statement_id, vendor_id, vendor_name,
                 invoice_number, invoice_number_normalized, ro_number,
                 outstanding_amount, statement_period, source_file, ingestion_timestamp
-            ) VALUES (?, ?, 'STMT-1', 'V1', 'Vendor One', ?, ?, ?, ?, '2026-07',
+            ) VALUES (?, ?, 'STMT-1', ?, 'Vendor One', ?, ?, ?, ?, '2026-07',
                       'statement.pdf', '2026-07-24T00:00:00+00:00')
             """,
-            [record_id, source, invoice_number, invoice_number, ro_number, amount],
+            [record_id, source, vendor_id, invoice_number, invoice_number, ro_number, amount],
         )
 
     def test_matched_row_gets_match_confidence(self):
@@ -232,6 +232,32 @@ class TestRunMatchingWritesMatchConfidence(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["exception_reason"], "Invoice Missing")
         self.assertEqual(rows[0]["match_confidence"], 0.90)
+
+    def test_exception_row_gets_shop_owner_from_config(self):
+        from src.matching.engine import run_matching
+
+        self._insert_silver(record_id="stmt-1", source="VENDOR_STATEMENT",
+                             invoice_number="INV-MISSING", amount=100.00, vendor_id="KSI_TRADING_CORP.")
+        self._insert_silver(record_id="erp-1", source="INTERNAL_ERP",
+                             invoice_number="INV-OTHER", amount=100.00, vendor_id="KSI_TRADING_CORP.")
+
+        run_matching("STMT-1")
+
+        rows = self.execute_query("SELECT * FROM gold_exceptions WHERE statement_id = 'STMT-1'")
+        self.assertEqual(rows[0]["shop_owner"], "Shop Manager <shop@vive.com>")
+
+    def test_exception_row_shop_owner_is_null_for_unmapped_vendor(self):
+        from src.matching.engine import run_matching
+
+        self._insert_silver(record_id="stmt-1", source="VENDOR_STATEMENT",
+                             invoice_number="INV-MISSING", amount=100.00, vendor_id="UNMAPPED_VENDOR")
+        self._insert_silver(record_id="erp-1", source="INTERNAL_ERP",
+                             invoice_number="INV-OTHER", amount=100.00, vendor_id="UNMAPPED_VENDOR")
+
+        run_matching("STMT-1")
+
+        rows = self.execute_query("SELECT * FROM gold_exceptions WHERE statement_id = 'STMT-1'")
+        self.assertIsNone(rows[0]["shop_owner"])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.lakehouse.connection import execute_query, execute_sql
 from src.matching.engine import score_exception_confidence
+from src.shop_owners import get_shop_owner
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -364,23 +365,49 @@ _OPEN_EXCEPTIONS_SELECT = """
 """
 
 
+def _days_since(iso_timestamp) -> int:
+    """Whole days between iso_timestamp (a UTC ISO8601 string, as every
+    gold_exceptions writer produces via datetime.now(timezone.utc).isoformat())
+    and now. Computed in Python rather than read from a stored column --
+    see migrations/009_add_routing_aging.sql's note on why SQLite can't
+    do this as a live generated column the way Azure SQL's days_open
+    computed column does."""
+    dt = datetime.fromisoformat(iso_timestamp)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).days
+
+
+def _with_aging_fields(rows: list) -> list:
+    """Attaches days_open (from date_raised) and, for already-escalated
+    rows, days_since_escalated (from escalated_at) to every exception row
+    -- see exceptions_review.html's aging/escalation display."""
+    for row in rows:
+        row["days_open"] = _days_since(row["date_raised"]) if row.get("date_raised") else None
+        row["days_since_escalated"] = (
+            _days_since(row["escalated_at"])
+            if row.get("escalation_status") == "ESCALATED" and row.get("escalated_at") else None
+        )
+    return rows
+
+
 def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
     reason = _REASON_FILTER_SQL.get(reason_filter)
     if reason:
-        return execute_query(
+        return _with_aging_fields(execute_query(
             _OPEN_EXCEPTIONS_SELECT + """
             WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
             ORDER BY ge.invoice_number
             """,
             [statement_id, reason],
-        )
-    return execute_query(
+        ))
+    return _with_aging_fields(execute_query(
         _OPEN_EXCEPTIONS_SELECT + """
         WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN'
         ORDER BY ge.invoice_number
         """,
         [statement_id],
-    )
+    ))
 
 
 def get_exception_counts(statement_id: str):
@@ -415,20 +442,20 @@ _ORPHAN_EXCEPTIONS_WHERE = """
 def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None) -> list:
     reason = _REASON_FILTER_SQL.get(reason_filter)
     if reason:
-        return execute_query(
+        return _with_aging_fields(execute_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
             WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
             ORDER BY ge.invoice_number
             """,
             [source_file, reason],
-        )
-    return execute_query(
+        ))
+    return _with_aging_fields(execute_query(
         _OPEN_EXCEPTIONS_SELECT + f"""
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
         ORDER BY ge.invoice_number
         """,
         [source_file],
-    )
+    ))
 
 
 def get_exception_counts_for_source_file(source_file: str):
@@ -464,6 +491,54 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
         "UPDATE gold_exceptions SET exception_status = 'RESOLVED', date_resolved = ? WHERE exception_id = ?",
         [now, exception_id],
     )
+
+
+def escalate_exception(exception_id: str, escalated_by: str) -> None:
+    """Marks an exception ESCALATED -- see exceptions_review.html's
+    "Escalate" button. Does not touch exception_status: an escalated
+    exception is still OPEN, just flagged for follow-up, not resolved."""
+    now = datetime.now(timezone.utc).isoformat()
+    execute_sql(
+        """
+        UPDATE gold_exceptions
+        SET escalation_status = 'ESCALATED', escalated_by = ?, escalated_at = ?
+        WHERE exception_id = ?
+        """,
+        [escalated_by, now, exception_id],
+    )
+
+
+def get_exception_aging_summary(vendor_name: str):
+    """{"oldest_date_raised": ..., "days_open": ...} for this vendor's
+    oldest OPEN exception, or None if there are none -- see
+    exceptions_vendors.html's "Oldest: N days open" vendor card note.
+    Mirrors the same statement-vs-exceptions-only-vendor branching as
+    exceptions_review() in web/routers/exceptions.py."""
+    statement = get_vendor_latest_statement(vendor_name)
+    if statement:
+        rows = execute_query(
+            """
+            SELECT MIN(date_raised) AS oldest_date_raised FROM gold_exceptions
+            WHERE statement_id = ? AND exception_status = 'OPEN'
+            """,
+            [statement["statement_id"]],
+        )
+    else:
+        statement = get_exceptions_only_vendor(vendor_name)
+        if not statement:
+            return None
+        rows = execute_query(
+            f"""
+            SELECT MIN(ge.date_raised) AS oldest_date_raised FROM gold_exceptions ge
+            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
+            """,
+            [statement["source_file"]],
+        )
+
+    oldest = rows[0]["oldest_date_raised"] if rows else None
+    if not oldest:
+        return None
+    return {"oldest_date_raised": oldest, "days_open": _days_since(oldest)}
 
 
 def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.99) -> int:
@@ -1060,8 +1135,8 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
                 exception_id, invoice_number, statement_amount, erp_amount,
                 match_status, exception_reason, exception_status,
                 source_file, statement_id, date_raised, statement_period,
-                ai_explanation, match_confidence
-            ) VALUES (?, ?, ?, NULL, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?)
+                ai_explanation, match_confidence, shop_owner
+            ) VALUES (?, ?, ?, NULL, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 str(uuid.uuid4()),
@@ -1074,5 +1149,6 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
                 item["statement_period"],
                 item["rejection_details"],
                 match_confidence,
+                get_shop_owner(item.get("vendor_id")),
             ],
         )

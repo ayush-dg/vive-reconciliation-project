@@ -154,7 +154,12 @@ TABLES = {
             ai_suggested_resolution NVARCHAR(MAX),
             ai_confidence_score FLOAT,
             ai_provider NVARCHAR(MAX),
-            match_confidence FLOAT
+            match_confidence FLOAT,
+            shop_owner NVARCHAR(255),
+            escalation_status NVARCHAR(50) DEFAULT 'NONE',
+            escalated_at DATETIME2,
+            escalated_by NVARCHAR(255),
+            days_open AS (DATEDIFF(day, date_raised, GETUTCDATE()))
         )
     """,
     "gold_reconciliation_summary": """
@@ -340,6 +345,23 @@ COLUMNS = {
     ],
     "gold_exceptions": [
         ("match_confidence", "ALTER TABLE gold_exceptions ADD match_confidence FLOAT"),
+        ("shop_owner", "ALTER TABLE gold_exceptions ADD shop_owner NVARCHAR(255)"),
+        ("escalation_status", "ALTER TABLE gold_exceptions ADD escalation_status NVARCHAR(50) DEFAULT 'NONE'"),
+        ("escalated_at", "ALTER TABLE gold_exceptions ADD escalated_at DATETIME2"),
+        ("escalated_by", "ALTER TABLE gold_exceptions ADD escalated_by NVARCHAR(255)"),
+    ],
+}
+
+# Computed columns get their own registry, separate from COLUMNS above --
+# a computed column is an expression (AS (...)), not a type, so it can't
+# reuse the simple (column_name, "ALTER TABLE t ADD col TYPE") shape, and
+# unlike a plain column it can never be written to directly (no
+# INSERT/UPDATE ever targets it) -- keeping it visually distinct from
+# COLUMNS is a reminder not to try. See migrations/009_add_routing_aging.sql
+# for why SQLite has no equivalent stored column at all.
+COMPUTED_COLUMNS = {
+    "gold_exceptions": [
+        ("days_open", "ALTER TABLE gold_exceptions ADD days_open AS (DATEDIFF(day, date_raised, GETUTCDATE()))"),
     ],
 }
 
@@ -383,6 +405,18 @@ def run_migrations():
             created_indexes.append(index_name)
 
         for table_name, column_specs in COLUMNS.items():
+            for column_name, add_column_sql in column_specs:
+                cursor.execute(
+                    "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(?) AND name = ?",
+                    [table_name, column_name],
+                )
+                if cursor.fetchone():
+                    continue
+                cursor.execute(add_column_sql)
+                conn.commit()
+                created_columns.append(f"{table_name}.{column_name}")
+
+        for table_name, column_specs in COMPUTED_COLUMNS.items():
             for column_name, add_column_sql in column_specs:
                 cursor.execute(
                     "SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(?) AND name = ?",

@@ -56,6 +56,7 @@ from src.ai.document_understanding_engine import DocumentUnderstandingEngine, ex
 from src.lakehouse.connection import execute_sql, execute_query
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
+from src.shop_owners import get_shop_owner
 from src.storage.blob_client import BlobStorageClient
 
 
@@ -255,9 +256,9 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
                 exception_id, vendor_id, invoice_number, statement_amount,
                 erp_amount, match_status, exception_reason, exception_status,
                 source_file, statement_id, date_raised, statement_period,
-                ai_explanation, match_confidence
+                ai_explanation, match_confidence, shop_owner
             ) VALUES (?, ?, ?, ?, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
-                      'OPEN', ?, ?, ?, ?, ?, ?)
+                      'OPEN', ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 str(uuid.uuid4()),
@@ -270,6 +271,7 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
                 statement_period,
                 f"{message}. Please check the original PDF manually.",
                 score_exception_confidence("EXTRACTION_INCOMPLETE"),
+                get_shop_owner(vendor_id),
             ]
         )
     except Exception as e:
