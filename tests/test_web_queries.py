@@ -354,5 +354,69 @@ class TestClaimNextPendingJobIsAtomic(unittest.TestCase):
         self.assertIsNone(queries.claim_next_pending_job())
 
 
+class TestClaimNextPendingJobAllowsDifferentFilenamesConcurrently(unittest.TestCase):
+    """ENH: parallel worker pool (2026-07-24, docs/INVARIANTS.md's amended
+    INV-05) -- claim_next_pending_job() no longer refuses to claim
+    anything while any job is PROCESSING; it only holds back jobs that
+    share a pdf_filename with something already in flight."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+    def test_different_filenames_can_both_be_processing_at_once(self):
+        queries.create_job(job_id="job-a", pdf_filename="vendor_a.pdf",
+                            pdf_path="sample_data/vendor_a.pdf", submitted_by="tester")
+        queries.create_job(job_id="job-b", pdf_filename="vendor_b.pdf",
+                            pdf_path="sample_data/vendor_b.pdf", submitted_by="tester")
+
+        first = queries.claim_next_pending_job()
+        second = queries.claim_next_pending_job()
+
+        self.assertEqual(first["job_id"], "job-a")
+        self.assertEqual(first["status"], "PROCESSING")
+        self.assertEqual(second["job_id"], "job-b")
+        self.assertEqual(second["status"], "PROCESSING")
+
+    def test_same_filename_still_serialized_even_with_other_jobs_interleaved(self):
+        queries.create_job(job_id="job-a1", pdf_filename="vendor_a.pdf",
+                            pdf_path="sample_data/vendor_a.pdf", submitted_by="tester")
+        queries.create_job(job_id="job-b", pdf_filename="vendor_b.pdf",
+                            pdf_path="sample_data/vendor_b.pdf", submitted_by="tester")
+        queries.create_job(job_id="job-a2", pdf_filename="vendor_a.pdf",
+                            pdf_path="sample_data/vendor_a.pdf", submitted_by="tester")
+
+        first = queries.claim_next_pending_job()   # job-a1 (vendor_a.pdf)
+        second = queries.claim_next_pending_job()  # job-b (different filename -- ok)
+        third = queries.claim_next_pending_job()   # job-a2 blocked -- vendor_a.pdf still PROCESSING
+
+        self.assertEqual(first["job_id"], "job-a1")
+        self.assertEqual(second["job_id"], "job-b")
+        self.assertIsNone(third)
+
+    def test_second_job_for_same_filename_claimable_once_first_completes(self):
+        queries.create_job(job_id="job-a1", pdf_filename="vendor_a.pdf",
+                            pdf_path="sample_data/vendor_a.pdf", submitted_by="tester")
+        queries.create_job(job_id="job-a2", pdf_filename="vendor_a.pdf",
+                            pdf_path="sample_data/vendor_a.pdf", submitted_by="tester")
+
+        first = queries.claim_next_pending_job()
+        self.assertIsNone(queries.claim_next_pending_job())
+
+        queries.update_job_status("job-a1", status="COMPLETED",
+                                   completed_at="2026-07-24T00:05:00+00:00",
+                                   statement_id="STMT-BBB222")
+
+        second = queries.claim_next_pending_job()
+        self.assertEqual(second["job_id"], "job-a2")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

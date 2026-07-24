@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .env
 lakehouse/*.db
+lakehouse/ai_call_slots/
 logs/*.log
 *.egg-info/
 .venv/

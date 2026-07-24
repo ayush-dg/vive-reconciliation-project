@@ -544,37 +544,52 @@ def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
 
 
 def claim_next_pending_job():
-    """Atomically claims the oldest PENDING job by flipping it straight to
-    PROCESSING in one UPDATE, then looks it up by the claim_token that
-    UPDATE just stamped on it.
+    """Atomically claims the oldest PENDING job whose pdf_filename has no
+    other job currently PROCESSING, flipping it straight to PROCESSING in
+    one UPDATE, then looks it up by the claim_token that UPDATE just
+    stamped on it. Returns None if the queue is empty or every remaining
+    PENDING job shares a filename with something already in flight.
 
-    This has to be one statement rather than a SELECT-then-UPDATE: with two
-    worker processes polling at once (e.g. a second server instance left
-    running from an earlier session), a separate SELECT and UPDATE leaves a
-    window where both can read the same PENDING row before either writes,
-    so both claim it — or each claims a different job for the same
-    just-uploaded PDF and runs it concurrently, so neither sees the other's
-    extraction_cache write in time and both re-run the full AI extraction.
-    The NOT EXISTS guard also means only one job is ever PROCESSING
-    system-wide, so a second upload of an identical PDF always waits for
-    the first run to fully commit (including its cache write) before its
-    own cache check runs. Ordering is by the unique autoincrement id
-    (submission order) rather than MIN(submitted_at) — two jobs created in
-    quick succession can land on the exact same submitted_at timestamp
-    (datetime.now() resolution isn't fine-grained enough to guarantee two
-    close-together calls differ, especially on Windows), which would make
-    that WHERE clause match both rows and claim them together. id has no
-    such tie. MIN(...) is used instead of LIMIT 1 inside the subquery so
-    this stays valid T-SQL if this ever runs against Azure SQL (see
-    src/lakehouse/connection.py)."""
+    This has to be one statement rather than a SELECT-then-UPDATE: with
+    several worker threads polling at once (see web/worker.py's worker
+    pool), a separate SELECT and UPDATE leaves a window where two workers
+    read the same eligible row before either writes, so both claim it.
+
+    Serialization is scoped to pdf_filename, not the whole table. Until
+    2026-07-24 this guard refused to claim ANYTHING while any job was
+    PROCESSING (docs/INVARIANTS.md's original INV-05) — that was broader
+    than the actual failure mode it existed to prevent: two jobs for the
+    SAME PDF running concurrently, each missing the other's
+    extraction_cache write and both re-running the full AI extraction (see
+    TestClaimNextPendingJobIsAtomic in tests/test_web_queries.py). Scoping
+    the NOT EXISTS check to pdf_filename keeps that exact protection while
+    letting the worker pool actually run different statements in parallel
+    — see docs/INVARIANTS.md's amended INV-05 entry for the engineer
+    decision behind this change.
+
+    Ordering is by the unique autoincrement id (submission order) rather
+    than MIN(submitted_at) — two jobs created in quick succession can land
+    on the exact same submitted_at timestamp (datetime.now() resolution
+    isn't fine-grained enough to guarantee two close-together calls differ,
+    especially on Windows), which would make that WHERE clause match both
+    rows and claim them together. id has no such tie. MIN(...) is used
+    instead of LIMIT 1 inside the subquery so this stays valid T-SQL if
+    this ever runs against Azure SQL (see src/lakehouse/connection.py)."""
     claim_token = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     execute_sql(
         """
         UPDATE jobs SET status = 'PROCESSING', started_at = ?, claim_token = ?
-        WHERE id = (SELECT MIN(id) FROM jobs WHERE status = 'PENDING')
-          AND status = 'PENDING'
-          AND NOT EXISTS (SELECT 1 FROM jobs WHERE status = 'PROCESSING')
+        WHERE id = (
+            SELECT MIN(p.id) FROM jobs p
+            WHERE p.status = 'PENDING'
+              AND NOT EXISTS (
+                  SELECT 1 FROM jobs busy
+                  WHERE busy.status = 'PROCESSING'
+                    AND busy.pdf_filename = p.pdf_filename
+              )
+        )
+        AND status = 'PENDING'
         """,
         [now, claim_token],
     )

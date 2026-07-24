@@ -46,6 +46,7 @@ import time
 from typing import Callable, Optional
 
 from .base_client import AIClient, AIResponse
+from .concurrency_limiter import ai_call_slot
 
 ROW_CONFIDENCE = 0.75
 
@@ -208,15 +209,16 @@ class ClaudeSonnetClient(AIClient):
 
     def _real_text_call(self, prompt, temperature, max_tokens):
         try:
-            client = self._build_client()
-            with client.messages.stream(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=self.config.get("timeout_seconds", 600),
-                messages=[{"role": "user", "content": prompt}],
-            ) as stream:
-                message = stream.get_final_message()
+            with ai_call_slot():
+                client = self._build_client()
+                with client.messages.stream(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=self.config.get("timeout_seconds", 600),
+                    messages=[{"role": "user", "content": prompt}],
+                ) as stream:
+                    message = stream.get_final_message()
             return True, message.content[0].text, None
         except Exception as e:
             return False, "", self._clean_error(str(e))
@@ -326,31 +328,32 @@ class ClaudeSonnetClient(AIClient):
         get_final_message()), required for a single whole-document
         extraction call that can run long (see module docstring)."""
         try:
-            client = self._build_client()
-            with client.messages.stream(
-                model=self.model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=self.config.get("timeout_seconds", 600),
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": pdf_b64,
+            with ai_call_slot():
+                client = self._build_client()
+                with client.messages.stream(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=self.config.get("timeout_seconds", 600),
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": pdf_b64,
+                                },
                             },
-                        },
-                        {
-                            "type": "text",
-                            "text": EXTRACTION_PROMPT,
-                        },
-                    ],
-                }],
-            ) as stream:
-                message = stream.get_final_message()
+                            {
+                                "type": "text",
+                                "text": EXTRACTION_PROMPT,
+                            },
+                        ],
+                    }],
+                ) as stream:
+                    message = stream.get_final_message()
             return True, message.content[0].text, None
         except Exception as e:
             return False, "", self._clean_error(str(e))

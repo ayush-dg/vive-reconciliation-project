@@ -25,13 +25,14 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
 from web.routers import auth, dashboard, exceptions, intake_trigger, jobs, reports, review_queue, upload, users
-from web.worker import start_worker
+from web.worker import start_worker, stop_workers
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_worker()
     yield
+    stop_workers()
 
 
 app = FastAPI(title="VIVE Reconciliation", lifespan=lifespan)
