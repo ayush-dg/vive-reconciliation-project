@@ -171,6 +171,7 @@ Known gap: Claude Sonnet still returns hardcoded 0.75 per-row extraction confide
 | fromisoformat crash on Azure SQL datetime objects | _days_since() handles both str and datetime | latest |
 | Exceptions page missing vendors with no summary | get_vendor_summaries() unions gold_exceptions for summary-less vendors | b8f2c19 |
 | Exceptions detail 500 for summary-less vendors | Fallback to derive metadata from gold_exceptions rows | f4c7b19 |
+| Event Grid webhook had no authentication at all + container not pinned | Shared-secret auth (fail-closed) + container pinning + event-count cap — see RISK_REGISTER R-009 | 1fd1b6e |
 
 ---
 
@@ -208,10 +209,10 @@ Known gap: Claude Sonnet still returns hardcoded 0.75 per-row extraction confide
 | 2026-07-23 | Review queue UI | Done | a4f9b23 |
 | 2026-07-23 | Exceptions page for summary-less vendors | Done | b8f2c19, f4c7b19 |
 | 2026-07-23 | Blob drop zone | Done | viverecondropzone + incoming-statements |
-| 2026-07-23 | /api/intake-trigger webhook | Done | 3a8f291 |
-| 2026-07-23 | Parallel worker pool (Step 5) | Done | e7f2c15 |
+| 2026-07-24 | /api/intake-trigger webhook | Done | 3a8f291 |
+| 2026-07-24 | Parallel worker pool (Step 5) | Done | e7f2c15 |
 | 2026-07-23 | Batch summary UI (Step 11) | Done | 2d4f891 |
-| 2026-07-23 | Match confidence scoring (Step 7) | Done | |
+| 2026-07-24 | Match confidence scoring (Step 7) | Done | |
 | 2026-07-23 | Routing + aging (Step 8) | Done | |
 | 2026-07-23 | Bulk approve (Step 10) | Done | |
 | 2026-07-23 | datetime handling bug fix | Done | |
