@@ -10,7 +10,7 @@
 > flagged here, not silently smoothed over.
 
 **System:** VIVE Reconciliation
-**Master index status:** 2 enhancements tracked (1 in backlog stub, 1 in sprint with a signed-off brief, pending Prompt 2) — 1 sprint OPEN
+**Master index status:** 2 enhancements tracked (1 COMPLETE, 1 CANCELLED) — 1 sprint CLOSED
 
 ---
 
@@ -18,23 +18,31 @@
 
 | ENH ID | Title | Status | Sprint | Classification | Depends On | Collision Surfaces |
 |---|---|---|---|---|---|---|
-| ENH-001 | Automated batch intake pipeline (Blob Storage + Event Grid + batch_id) | IN SPRINT | SPRINT-001 | [pending Prompt 2] | — | [pending Prompt 2] |
-| ENH-007 | Match Confidence Score | IN BACKLOG | — | — | — | — |
+| ENH-001 | Automated batch intake pipeline (Blob Storage + Event Grid + batch_id) | COMPLETE | SPRINT-001 | [pending Prompt 2] | — | [pending Prompt 2] |
+| ENH-007 | Match Confidence Score | CANCELLED | — | — | — | — |
 
 Status values: IN BACKLOG \| IN SPRINT \| IN EXECUTION \| COMPLETE \| CANCELLED
 
-**ENH-001:** Status IN SPRINT. `ENH-001_BRIEF.md` (`enhancements/SPRINT-001/ENH-001-automated-batch-intake/`)
+**ENH-001:** Status COMPLETE. `ENH-001_BRIEF.md` (`enhancements/SPRINT-001/ENH-001-automated-batch-intake/`)
 is authored, passed the Prompt 1 brief review gate (PASS WITH ADVISORIES — one open
 advisory: Enhancement Intent doesn't state business motivation, non-blocking), and is
-**Signed Off** (2026-07-24). The out-of-order gap noted at Sprint CC Initiation
-(ENH-001 named in sprint scope before its brief existed) is resolved — the brief now
-exists and is reviewed. Classification/Depends On/Collision Surfaces remain pending
-Prompt 2 (collision surface analysis), which can now run.
+**Signed Off** (2026-07-24). Build completed 2026-07-24/25; `ENH-001_BCE_IMPACT.md`
+(same directory) documents the actual build against the brief, including that the
+build's scope expanded well beyond what the brief specified (see that file's Scope
+Note, "Build Deviated From Brief"). BCE gap detection could not run formally for
+this enhancement — no `sessions/` Verification Record trail exists — so the impact
+log is a documented substitute, not a formal close-out. Classification/Depends
+On/Collision Surfaces were never resolved via Prompt 2 (collision surface analysis
+never ran) and remain `[pending Prompt 2]` — marked COMPLETE anyway per direct
+engineer instruction, not because that gap was resolved.
 
-**ENH-007:** brief is a Draft stub (`enhancements/backlog/ENH-007-match-confidence-score/ENH-007_BRIEF.md`) —
-held per engineer instruction, not part of Sprint 1's first task group. Sprint/Classification/
-Depends On/Collision Surfaces are all set once this enters a sprint and goes through
-collision surface analysis — not before.
+**ENH-007:** Status CANCELLED. Brief remains a Draft stub
+(`enhancements/backlog/ENH-007-match-confidence-score/ENH-007_BRIEF.md`), never
+signed off, never entered a sprint. Cancelled because the work it describes — a
+deterministic, rule-based per-row/per-match confidence score — already shipped
+under ENH-001 (commit `6685969`, "Step 7: Add match confidence scoring to matched
+invoices and exceptions"), per `ENH-001_BCE_IMPACT.md`'s Scope Note ("Build
+Deviated From Brief"), which documents this exact supersession.
 
 ---
 
@@ -42,6 +50,6 @@ collision surface analysis — not before.
 
 | Sprint ID | Timebox | Sprint Lead | Status | Close-Out Date |
 |---|---|---|---|---|
-| SPRINT-001 | [not yet declared] → [not yet declared] | Ayush Kumar Sinha | OPEN | — |
+| SPRINT-001 | [not yet declared] → [not yet declared] | Ayush Kumar Sinha | CLOSED | 2026-07-28 |
 
 Status values: OPEN \| INTEGRATION CHECK \| CLOSED
