@@ -2,6 +2,8 @@
 Produced by: BCE Stage 3 (CD) — Path A (Custodian-Led)
 Date: 2026-07-24
 
+> **2026-07-25 forward-pointer note (does not alter this record):** every "44 modules"/"M-001–M-044" statement below (CHECK 0, CHECK 1, CHECK 6) was correct and directly verified on 2026-07-24, the date this Stage 3 sign-off was recorded — it is a historical audit record, not a living count, and is left as-signed-off rather than retroactively edited. The roster has since been extended to 48 modules (M-001–M-048) by a 2026-07-25 scoped refresh — see `discovery/TOPOLOGY.md`'s addendum and `discovery/MODULE_CONTRACTS.md`'s 2026-07-25 note for the current count. That extension does not reopen or invalidate any item this checklist closed.
+
 All six BCE artifacts read in full before this review: `INTAKE_SUMMARY.md`, `TOPOLOGY.md`, `MODULE_CONTRACTS.md`, `INTEGRATION_CONTRACTS.md`, `INVARIANT_CATALOGUE.md`, `RISK_REGISTER.md`. `docs/INVARIANTS.md` and `docs/ARCHITECTURE.md` do not exist (non-PBVI project) — `RULES.md`/`docs/VIVE_Implementation_Context.md` served as the functional equivalent throughout, per `INTAKE_SUMMARY.md`.
 
 **Per explicit instruction: nothing below is marked RESOLVED or SIGNED-OFF unless the engineer directly did so in this conversation. Findings the engineer has discussed, formalized, or directed investigation of — but not explicitly signed off on the remediation decision for — remain STATUS: OPEN.**

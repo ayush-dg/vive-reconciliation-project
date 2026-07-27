@@ -50,6 +50,12 @@ Note: these IDs are permanent. Do not reassign at later sessions.
 | M-042 | Azure-SQL-detection probe | check_subprocess.py | infra |
 | M-043 | worker simulation (basic) | test_worker_sim.py | infra |
 | M-044 | worker simulation (path-exact) | test_worker_sim2.py | infra |
+| M-045 | batches router | web/routers/batches.py | serving |
+| M-046 | intake_trigger router (Event Grid webhook) | web/routers/intake_trigger.py | serving |
+| M-047 | AI-call concurrency limiter | src/ai/concurrency_limiter.py | infra |
+| M-048 | shop owner routing lookup | src/shop_owners.py | infra |
+
+**Roster addendum, scoped BCE refresh (2026-07-25):** M-045 through M-048 were added this pass to cover four modules built since the 2026-07-23/24 extraction — the worker pool (Step 5), Event Grid auto-intake (webhook + batch UI), match confidence scoring, and exception routing/aging. This was a targeted re-walk of what changed (8 commits, ~44 files), not a full re-extraction — every module M-001 through M-044 above is unchanged and was not re-verified this pass. See `discovery/TOPOLOGY.md`'s addendum for the full scope note and `discovery/MODULE_CONTRACTS.md` for the updated per-module contracts (C01, G03, C17, B03, G12, G11, G01, B02, C02 all received real rewrites this pass, not just additions).
 
 **Module-worthiness note (BCE-009) for M-040 through M-044:** these are not `*.unit.test.ts`-style assertion tests — each makes a real, traceable call into a registered module as its primary mechanism: M-040 instantiates real AI clients via `client_factory.get_ai_client()`; M-041 issues a real `DELETE`/`SELECT` against the live database via `connection.py`; M-042 and M-043/M-044 spawn real subprocesses that exercise `connection.py` and the full pipeline (`scripts/run_full_pipeline.py`) respectively. All five meet the module-worthiness bar and are registered under `infra`, consistent with the reconciliation.ts/resolve_golden_set.ts precedent this heuristic is modeled on. `src/pipeline/` and `src/validation/` contain only empty `__init__.py` files — no module assigned; see Session A0 note.
 
@@ -131,6 +137,20 @@ Note: these IDs are permanent. Do not reassign at later sessions.
 | M-042 --[CALLS]--> M-033 | check_subprocess.py:6 (subprocess exercises `_using_azure_sql()`) | A (subprocess) |
 | M-043 --[CALLS]--> M-018 | test_worker_sim.py:8 (subprocess) | A (subprocess) |
 | M-044 --[CALLS]--> M-018 | test_worker_sim2.py:13 (subprocess, mirrors web/worker.py's exact path construction) | A (subprocess) |
+| M-009 --[CALLS]--> M-046 | web/app.py:62 (`include_router`) | S |
+| M-009 --[CALLS]--> M-045 | web/app.py:63 (`include_router`) | S |
+| M-045 --[CALLS]--> M-010 | web/routers/batches.py:14 | S |
+| M-045 --[CALLS]--> M-011 | web/routers/batches.py:15,24-25,33 (`get_all_batches`, `get_manual_uploads`, `get_batch_detail`) | S |
+| M-046 --[CALLS]--> M-039 | web/routers/intake_trigger.py:34,102-105 (`BlobStorageClient(container_name=DROPZONE_CONTAINER, ...).download_pdf()`) | S |
+| M-046 --[CALLS]--> M-011 | web/routers/intake_trigger.py:35,109 (`create_job`) | S |
+| M-023 --[CALLS]--> M-047 | src/ai/claude_sonnet_client.py (`ai_call_slot()` context manager wraps the real Claude Sonnet API call, not the cache-hit path) | S |
+| M-036 --[CALLS]--> M-048 | src/matching/engine.py:30,325,351 (`get_shop_owner`, in `run_matching()`) | S |
+| M-014 --[CALLS]--> M-036 | notebooks/01_document_intake.py:57,273 (`score_exception_confidence`, in `write_skip_exception()`) | S |
+| M-014 --[CALLS]--> M-048 | notebooks/01_document_intake.py:59,274 (`get_shop_owner`, in `write_skip_exception()`) | S |
+| M-011 --[CALLS]--> M-048 | web/queries.py:22,1164 (`get_shop_owner`, in `action_review_item()`) | S |
+| M-011 --[CALLS]--> M-036 | web/queries.py:21,1141 (`score_exception_confidence`, in `action_review_item()`) | S |
+
+**New-edge note (scoped BCE refresh, 2026-07-25):** the twelve rows above are the only new call edges confirmed this pass, covering the four new modules (M-045–M-048) plus three existing modules (M-011, M-014, M-036) that each gained one or more new outbound calls (M-011→M-036, M-011→M-048, M-014→M-036, M-014→M-048). No existing edge from Sessions A/A0 was found to have changed or been removed.
 
 ## Section 2 — Startup Sequence
 
@@ -140,8 +160,8 @@ Note: these IDs are permanent. Do not reassign at later sessions.
 |---|---|---|---|
 | 1 | M-009 | Load `.env`, construct FastAPI app, add `SessionMiddleware` (falls back to a hardcoded dev secret if `WEB_SESSION_SECRET` unset) | NON-FATAL (dev secret fallback is a security smell, not a crash — see RISK_REGISTER) |
 | 2 | M-009 | Mount `/static`, register `LoginRequired` exception handler | STARTUP-FATAL if `web/static/` directory is missing |
-| 3 | M-009 → M-001..M-008 | Register all 8 routers | STARTUP-FATAL on any router import error |
-| 4 | M-009 → M-013 | `lifespan()` calls `start_worker()` — spawns the daemon polling thread | NON-FATAL — `start_worker()` itself has no failure path observed; the thread body catches all exceptions internally once running |
+| 3 | M-009 → M-001..M-008, M-045, M-046 | Register all 10 routers (8 original + M-045 batches, M-046 intake_trigger, added 2026-07-24) | STARTUP-FATAL on any router import error |
+| 4 | M-009 → M-013 | `lifespan()` calls `start_worker()` — spawns `VIVE_WORKER_POOL_SIZE` daemon polling threads (default 3, was 1 prior to 2026-07-24's worker-pool change); `lifespan()`'s shutdown phase now also calls `stop_workers()`, which did not exist before | NON-FATAL — `start_worker()` itself has no failure path observed; each thread body catches all exceptions internally once running |
 
 **Database schema bring-up (separate, manual operational step — not part of the web app's own startup):**
 
@@ -154,8 +174,10 @@ Note: these IDs are permanent. Do not reassign at later sessions.
 
 | Producer (M-NNN) | Consumer (M-NNN) | Mechanism | Failure behaviour |
 |---|---|---|---|
-| M-007 (upload router, HTTP request) | M-013 (background worker thread) | `jobs` table row (status PENDING), polled every 30s via `claim_next_pending_job()` | If the worker thread ever dies unexpectedly (not observed as reachable — every exception in `_worker_loop` is caught and logged), no supervisor restarts it and no liveness check exists; jobs would silently stop being claimed. **No stale-job requeue exists** — see Layer Boundary Map note below, a documented-but-unbuilt gap. |
+| M-007 (upload router, HTTP request) or M-046 (Event Grid webhook) | M-013 (background worker **pool** — `VIVE_WORKER_POOL_SIZE` threads, default 3, as of 2026-07-24) | `jobs` table row (status PENDING), polled every 30s per thread via `claim_next_pending_job()` | **Updated 2026-07-24/25:** the claim guard is now scoped to `pdf_filename`, not system-wide (see `INVARIANT_CATALOGUE.md` IC-19's rewrite) — a stuck job in PROCESSING only blocks new claims for that *same filename*, not the entire queue. Every other filename can still be claimed by an idle pool thread. No stale-job requeue still exists for the stuck filename itself — that specific gap (`RISK_REGISTER.md` R-004) is narrower in blast radius than before, not resolved. |
 | M-013 (worker thread) | M-018 (`scripts/run_full_pipeline.py`, subprocess) | `subprocess.run(..., timeout=1800)` | Non-zero exit or no `"Statement ID:"` match in output → job marked FAILED with the last 4000 chars of combined stdout/stderr. A hung subprocess is killed at the 30-minute cap. |
+| M-023 (`ClaudeSonnetClient`, in-process within the pipeline subprocess) | M-047 (AI-call concurrency limiter) | Cross-process file-lock semaphore (`lakehouse/ai_call_slots/slot_N.lock`), not an in-process primitive — necessary because each job's pipeline run is its own subprocess (see M-013), so an in-process `threading.Semaphore` couldn't coordinate across jobs claimed by different pool threads | Blocks (polls every 0.5s) until a slot frees, rather than failing fast — bounds concurrent Claude Sonnet calls to `VIVE_MAX_CONCURRENT_AI_CALLS` (default 2) regardless of `VIVE_WORKER_POOL_SIZE`. See `RISK_REGISTER.md`'s new slot-leak-on-kill entry for this mechanism's one known failure mode. |
+| M-046 (Event Grid webhook, HTTP POST from Azure) | M-013 (background worker pool) | Same `jobs` table row (status PENDING) mechanism as manual upload, tagged `submitted_by="event-grid"` and a shared `batch_id` per webhook delivery | Auth-rejected (401) or over the event-count cap (413) requests never reach `create_job()` at all — see B10's contract. A download failure for one blob in a batch is skipped silently (no partial-failure signal in the Event Grid webhook schema); other blobs in the same delivery still queue normally. |
 | M-004 (`/jobs` JSON endpoint) | Browser (`web/static/app.js`, not a Python module) | HTTP polling, client-initiated | Not a server-side async boundary between M-NNN modules — included here for completeness of the async picture, not as a CALLS edge. |
 
 ---

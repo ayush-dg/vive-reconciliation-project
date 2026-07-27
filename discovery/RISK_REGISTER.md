@@ -84,6 +84,8 @@ Synthesized entirely from `discovery/INVARIANT_CATALOGUE.md`, `discovery/MODULE_
 
 **Engineer decision (2026-07-24):** Accepted as-is for now. Will be addressed as part of Sprint 1 enhancement #5 (parallel workers), since that work touches this exact code path anyway — not worth a standalone fix ahead of it.
 
+**Update (2026-07-25) — blast radius narrowed by the worker-pool change referenced above, gap itself unchanged.** The parallel-workers enhancement this entry anticipated has now landed, and it included the exact `claim_next_pending_job()` scoping change this risk's own "Threatened invariant" (IC-19) references — see `discovery/INVARIANT_CATALOGUE.md`'s rewritten IC-19. A job stuck in PROCESSING now only blocks new claims for *that same `pdf_filename`*, not the entire queue — other filenames remain claimable by the pool's other threads. This is a real, engineer-approved improvement to this risk's severity (no longer a single point of stall for the whole system), but it does not close the underlying gap: no stale-job requeue logic was added, so a stuck job for one filename still blocks all future resubmissions of that filename indefinitely. Severity held at Medium — the specific incident this entry describes (one filename's queue wedged forever) is still fully reachable, just no longer system-wide.
+
 ---
 
 ## R-005 — The job pipeline depends on an untested, untyped string contract between the orchestrator's print output and the worker's regex parser
@@ -160,6 +162,47 @@ Synthesized entirely from `discovery/INVARIANT_CATALOGUE.md`, `discovery/MODULE_
 
 ---
 
+## R-009 — Event Grid auto-intake webhook had no authentication at all; now fixed in code, not yet deployed
+
+**Severity:** Fixed in code (2026-07-25) — was Critical/High while open. Not closed: deployment is still pending, tracked below as an action item, not treated as a resolved risk.
+
+**Description:** `web/routers/intake_trigger.py` (M-046, added 2026-07-24 as part of the Event Grid auto-intake enhancement) had no authentication mechanism whatsoever — no signature check, no shared secret, no Azure AD token. The one thing that looked like a check (`_validation_response()`, echoing back Event Grid's `validationCode`) is a delivery-handshake formality, not authentication: it proves the caller can read a value out of its own request and echo it back, which any caller — not just genuine Event Grid — can do. A second, independent finding in the same review: `src/storage/blob_client.py` (M-039) `download_pdf()` derived the *container* to download from directly out of the caller-supplied blob URL rather than pinning it to the configured dropzone container — so even setting auth aside, a crafted request could point the download at a different container than `incoming-statements` if the dropzone connection string had read access there.
+
+**Exposure while open:** Anyone who found the `/api/intake-trigger` URL could POST arbitrary JSON. Garbage payloads (fabricated blob URLs) failed harmlessly at the download step and never reached Claude Sonnet, but every request still cost a full unauthenticated Azure SDK auth handshake per event, with no size or rate limit — an unconditional compute/DoS surface. If an attacker could reference a real, existing, distinct-content PDF blob the dropzone connection string could read, each such submission would trigger one real subprocess run and one real Claude Sonnet extraction call — a genuine AI-cost-inflation vector, bounded only by `VIVE_MAX_CONCURRENT_AI_CALLS` (see R-010/IC-21), not by any request-level throttle. See the 2026-07-25 conversation record for the full threat-model writeup; not reproduced verbatim here.
+
+**Threatened invariant:** No formal IC-N covered inbound webhook authentication before this session — a gap of the same shape as R-007/R-008 (a real, externally-reachable bypass with no formal invariant tracking it), now closed at the mechanism level by IC-19/IC-21's neighboring infrastructure but not itself promoted to a numbered invariant, since it's a standard auth control rather than a system-specific behavioral guarantee.
+
+**Affected modules:** M-046 (`web/routers/intake_trigger.py`), M-039 (`src/storage/blob_client.py`)
+
+**Fix (code-complete, 2026-07-25):**
+1. **Container pinned** — `BlobStorageClient.download_pdf()` no longer trusts the URL's container segment. It parses the URL, refuses outright if the parsed container doesn't equal `self.container_name`, and even on a match passes `self.container_name` (not the parsed string) to the actual download call — a future refactor bug in the comparison can't reopen the hole.
+2. **Real authentication added** — `_is_authorized()` checks a shared secret (`VIVE_EVENTGRID_WEBHOOK_SECRET`) against an `x-vive-webhook-secret` header via `hmac.compare_digest` (constant-time), enforced before anything else in the handler runs, including the validation handshake. Fails closed: if the secret isn't configured at all, every request is rejected (401) — there is no "unconfigured means open" fallback.
+3. **Request cap added** — `MAX_EVENTS_PER_REQUEST = 100`, checked after auth but before any blob processing; closes the unconditional-DoS angle independent of the auth fix.
+
+Verified: `tests/test_blob_client.py` and `tests/test_intake_trigger.py` both pass (30 tests total, 8 new — container-mismatch rejection, auth-missing/wrong/unconfigured-fails-closed, validation-event-still-requires-auth, over-cap/at-cap). Full project test suite run clean apart from one pre-existing, unrelated Windows tempfile-locking failure in `tests/test_ai_clients.py`.
+
+**Why this isn't closed yet — deployment action item, not a resolved risk:** the fix requires `VIVE_EVENTGRID_WEBHOOK_SECRET` to be generated and configured as a static (secret) delivery header on the actual Azure Event Grid subscription — an infrastructure step, not a code step. **That configuration has not happened.** It is blocked on Azure permissions, pending Ashrith. Until it's done, the webhook will fail-closed (401) against any real Event Grid delivery, which is the correct, safe default — but it also means the auto-intake enhancement (ENH-001) cannot actually go live yet. Do not mark this risk CLOSED until (a) the secret is generated, (b) it's configured on the Event Grid subscription's delivery-attribute settings, and (c) a real end-to-end delivery has been confirmed to succeed.
+
+**Recommended action / follow-up:** Track "generate `VIVE_EVENTGRID_WEBHOOK_SECRET` and configure it on the Event Grid subscription" as an open action item against ENH-001, owned pending Ashrith's Azure permissions being resolved — not as an accepted/deferred risk in the R-001/R-004 sense, since the code-side fix is already done and waiting purely on an infra step.
+
+---
+
+## R-010 — AI-call concurrency limiter permanently loses a slot if a process holding one is killed
+
+**Severity:** Medium
+
+**Description:** `src/ai/concurrency_limiter.py` (M-047, added 2026-07-24) caps concurrent Claude Sonnet calls across the worker pool via lock files in `lakehouse/ai_call_slots/` (one per slot, exclusively created via `os.O_CREAT | os.O_EXCL`, released in a `finally` block). If the process holding a slot is killed outright — not a normal Python exception, which the `finally` still handles — rather than exiting normally (e.g. an OS-level kill, an out-of-memory kill, a hard container restart), that slot's lock file is never removed. Capacity is then permanently reduced by one, with no automatic detection or recovery — only a manual deletion of the stale file restores it.
+
+**Threatened invariant:** IC-21 (this module's own cap) — this is that invariant's one documented failure mode, not a violation of it; the cap itself still holds (concurrency never exceeds the configured limit), it just silently shrinks over time under this specific failure condition.
+
+**Affected modules:** M-047 (`src/ai/concurrency_limiter.py`)
+
+**Mitigation (current):** None automated. The module's own docstring explicitly names this as a known, accepted limitation rather than something engineered around — the same posture this register already took with R-004's stale-job gap (a real, understood tradeoff, not an oversight). Each lock file's content is just the holding process's PID, written but never checked for liveness by any other code path.
+
+**Recommended action:** If this becomes a real operational problem (repeated capacity loss observed, not just a theoretical possibility), the lowest-effort fix is a liveness check — since each lock file already stores the holding PID, a slot-acquisition attempt that finds an existing lock file could check whether that PID is still alive and reclaim the slot if not, rather than requiring a human to notice and manually delete the file. Not recommended to build ahead of an observed incident, consistent with this project's general posture on speculative hardening (see IC-9).
+
+---
+
 ## Summary Table
 
 | Risk ID | Description | Severity | Threatened Invariant | Affected Modules |
@@ -172,5 +215,7 @@ Synthesized entirely from `discovery/INVARIANT_CATALOGUE.md`, `discovery/MODULE_
 | R-006 | Azure SQL schema provisioning outside tracked migrations | Medium | IC-12 | M-034, M-035 |
 | R-007 | Hardcoded fallback admin credential in auth.py (also in migrations/004 comment) | High | — (candidate for future invariant) | M-001, migrations/004_add_users_table.sql |
 | R-008 | Hardcoded session secret in web/app.py | High | — (candidate for future invariant) | M-009 |
+| R-009 | Event Grid webhook had no auth + container not pinned — fixed in code 2026-07-25, deployment (secret config on Event Grid subscription) still pending | Fixed in code / deployment pending | — (candidate for future invariant) | M-046, M-039 |
+| R-010 | AI-call concurrency limiter permanently loses a slot if a process holding one is killed | Medium | IC-21 | M-047 |
 
-Session E Part 2 (RISK_REGISTER.md) complete, plus Stage 3 additions (R-007, R-008) per engineer sign-off, 2026-07-24. All P1/P2 Stage 3 items are now closed — see `discovery/ANNOTATION_CHECKLIST.md`.
+Session E Part 2 (RISK_REGISTER.md) complete, plus Stage 3 additions (R-007, R-008) per engineer sign-off, 2026-07-24, plus the 2026-07-25 scoped refresh additions (R-009, R-010, and the R-004 blast-radius update note) covering the worker pool, Event Grid auto-intake, and AI-call concurrency limiter built since. All P1/P2 Stage 3 items are now closed — see `discovery/ANNOTATION_CHECKLIST.md`.

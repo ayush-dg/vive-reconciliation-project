@@ -1,8 +1,10 @@
 # MODULE_CONTRACTS.md — VIVE Reconciliation
 Produced by: BCE Stage 2 Sessions B, C, G (CC) — Path A (Custodian-Led)
-Date: 2026-07-23
+Date: 2026-07-23; scoped refresh 2026-07-25
 
-No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 entries below are fresh, produced directly from source per the standing verification rule: every claim traces to the actual function body, not docstrings. Full per-module detail lives in `discovery/components/`; this file indexes all 44 and rolls up the cross-cutting findings that recur across multiple contracts.
+No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 original entries were fresh, produced directly from source per the standing verification rule: every claim traces to the actual function body, not docstrings. Full per-module detail lives in `discovery/components/`; this file indexes all 48 (44 original + 4 added 2026-07-25) and rolls up the cross-cutting findings that recur across multiple contracts.
+
+**2026-07-25 scoped refresh note:** 8 commits landed since the 2026-07-23/24 extraction (worker pool, Event Grid auto-intake + batch UI, match confidence scoring, bulk-approve/escalate, routing/aging). This pass added 4 new module contracts (M-045–M-048, marked below) and rewrote 9 existing contracts whose actual behavior changed (C01, G03, C17, B03, G12, G11, G01, B02, C02 — see each file's own updated content). The other 35 contracts were not re-verified this pass and are carried forward unchanged.
 
 **Methodology note:** Sessions B/C/G/U were run as a single combined pass across serving, pipeline, and infra layers only — no UI-layer (U) modules exist in this system, per the engineer-confirmed methodology adaptation (server-rendered FastAPI/Jinja2, no SPA/component architecture to justify the PBVI-011 route/page/layout/component/store split — see TOPOLOGY.md).
 
@@ -10,7 +12,7 @@ No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 entries below are 
 
 ## Index
 
-### Serving layer (8 modules)
+### Serving layer (10 modules)
 
 | ID | Module | Component file |
 |---|---|---|
@@ -22,6 +24,8 @@ No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 entries below are 
 | M-006 | review_queue router | [B06_review_queue_router.md](components/B06_review_queue_router.md) |
 | M-007 | upload router | [B07_upload_router.md](components/B07_upload_router.md) |
 | M-008 | users router | [B08_users_router.md](components/B08_users_router.md) |
+| M-045 | batches router *(added 2026-07-25)* | [B09_batches_router.md](components/B09_batches_router.md) |
+| M-046 | intake_trigger router — Event Grid webhook *(added 2026-07-25)* | [B10_intake_trigger_router.md](components/B10_intake_trigger_router.md) |
 
 ### Pipeline layer (19 modules)
 
@@ -47,7 +51,7 @@ No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 entries below are 
 | M-037 | mock ERP generator | [C18_mock_erp_generator.md](components/C18_mock_erp_generator.md) |
 | M-038 | invoice normalization | [C19_invoice_normalization.md](components/C19_invoice_normalization.md) |
 
-### Infra layer (17 modules)
+### Infra layer (19 modules)
 
 | ID | Module | Component file |
 |---|---|---|
@@ -68,6 +72,8 @@ No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 entries below are 
 | M-042 | Azure-SQL-detection probe | [G15_azure_sql_detection_probe.md](components/G15_azure_sql_detection_probe.md) |
 | M-043 | worker simulation (basic) | [G16_worker_simulation_basic.md](components/G16_worker_simulation_basic.md) |
 | M-044 | worker simulation (path-exact) | [G17_worker_simulation_path_exact.md](components/G17_worker_simulation_path_exact.md) |
+| M-047 | AI-call concurrency limiter *(added 2026-07-25)* | [G18_ai_concurrency_limiter.md](components/G18_ai_concurrency_limiter.md) |
+| M-048 | shop owner routing lookup *(added 2026-07-25)* | [G19_shop_owner_lookup.md](components/G19_shop_owner_lookup.md) |
 
 ---
 
@@ -88,6 +94,12 @@ No Stage 1 skeletons exist (Path A has no Stage 1) — all 44 entries below are 
 **7. `WEB_SESSION_SECRET` (M-009) defaults to a hardcoded, source-visible string if unset** — a second hardcoded-secret-adjacent finding alongside M-001's fallback login credential, both RISK_REGISTER candidates from the same root cause category (dev conveniences left enabled).
 
 **8. `web/deps.py`'s (M-010) `friendly_dt()` hardcodes India Standard Time for all displayed timestamps** — confirmed by source, not yet confirmed against the actual AP team's location; flag for engineer confirmation at Session D/E, not assumed to be a defect.
+
+**9. [2026-07-25] Match confidence scoring (M-036) is confirmed deterministic — IC-3/RULE-03 still holds.** `score_match_confidence()`/`score_exception_confidence()` (`src/matching/engine.py`) are pure lookup-table functions keyed on `match_level`/amount-exactness/`exception_reason` — no model call, no import of any AI client. Worth stating explicitly rather than assuming, since "confidence score" elsewhere in this codebase (M-023/M-025/M-026's fabricated `line_confidence`, see finding #1) is a loaded term in this project's history; this is a genuinely different, deterministic mechanism on a different table column.
+
+**10. [2026-07-25] `web/queries.py` (M-011) has grown a second real dependency — on M-036 and M-048 — that its "Calls: M-033 only" line no longer reflects.** `action_review_item()` now calls `score_exception_confidence()` (M-036) and `get_shop_owner()` (M-048) directly. This is a genuine new coupling, not a doc-staleness artifact — M-011 was infra-only calling only the DB layer before this session's work; it now also depends on a pipeline module's scoring table and a second infra module's config-file lookup. Reflected in G03's rewritten Callers/Calls section.
+
+**11. [2026-07-25] The Event Grid webhook (M-046) was unauthenticated end-to-end until this session — found during this pass's scoped security review, not by a prior BCE session.** Full writeup in `discovery/RISK_REGISTER.md` R-009 and `discovery/components/B10_intake_trigger_router.md`. Now fixed in code (shared secret, pinned container, event-count cap) but not yet deployed — the fix's value is contingent on `VIVE_EVENTGRID_WEBHOOK_SECRET` actually being generated and configured on the Azure Event Grid subscription, which is a separate infra step blocked on Azure permissions.
 
 ---
 

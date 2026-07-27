@@ -2,15 +2,16 @@
 ID: M-014
 Layer: pipeline
 Source file: notebooks/01_document_intake.py
+Rewritten: 2026-07-25 scoped BCE refresh (shop_owner routing wired into write_skip_exception, 2026-07-24)
 
 **Module** — document intake pipeline
 **ID** — M-014
 **Layer** — pipeline
 **Primary Responsibility** — Main intake pipeline: cache check → AI extraction → validation → Bronze → Silver → intake log → Blob archival → cache update, for one vendor statement PDF.
 
-**Inputs** — `run_intake(pdf_path: str, statement_id: str = None, statement_period: str = None) -> dict` — CLI via `--pdf`/`--statement-id`/`--period`, or called directly (e.g. by `scripts/run_full_pipeline.py`).
+**Inputs** — `run_intake(pdf_path: str, statement_id: str = None, statement_period: str = None) -> dict` — CLI via `--pdf`/`--statement-id`/`--period`, or called directly (e.g. by `scripts/run_full_pipeline.py`). Unchanged.
 
-**Outputs** — Writes to `bronze_vendor_statement_raw`, `silver_reconciliation_standard`, `document_intake_log`, `extraction_cache`, `validation_document_review_queue`, `gold_exceptions` (for `EXTRACTION_INCOMPLETE` skip rows), `ai_audit_log` (via M-032, for row-skip logging). Uploads the PDF to Blob Storage. Returns a summary dict.
+**Outputs** — Writes to `bronze_vendor_statement_raw`, `silver_reconciliation_standard`, `document_intake_log`, `extraction_cache`, `validation_document_review_queue`, `gold_exceptions` (for `EXTRACTION_INCOMPLETE` skip rows — **now also carrying `match_confidence` (via `score_exception_confidence("EXTRACTION_INCOMPLETE")`) and `shop_owner` (via M-048's `get_shop_owner()`), neither of which this write site set before 2026-07-24**), `ai_audit_log` (via M-032, for row-skip logging). Uploads the PDF to Blob Storage. Returns a summary dict.
 
 **Public Interface**
 - `run_intake(pdf_path, statement_id=None, statement_period=None) -> dict`
@@ -27,8 +28,8 @@ Source file: notebooks/01_document_intake.py
 - **`derive_vendor_name_from_filename()`'s fallback is the sole guarantee that `vendor_name` is never null on the VENDOR_STATEMENT side** — confirmed by this session's investigation that the only 424 null-`vendor_name` Silver rows are orphaned test-seed data that bypassed this function entirely (never went through `run_intake()`), not evidence of a bug in the fallback itself.
 - **Auto-suggested exception targets printed after intake** (`SUGGESTED EXCEPTION TARGETS` block) reads real extracted invoice numbers/amounts and prints a ready-to-paste JSON snippet for `scenario_config.json` — this is plain deterministic Python (sorting by amount), not an AI call, confirmed by direct source read despite the "SUGGESTED" phrasing potentially reading as AI-driven.
 
-**Change Impact** — The auto-suggestion block, the Blob upload step, and the cache-check step are each independently wrapped for failure isolation — changing any one should preserve that isolation given how central this module is to the whole pipeline (called by every full pipeline run).
+**Change Impact** — The auto-suggestion block, the Blob upload step, and the cache-check step are each independently wrapped for failure isolation — changing any one should preserve that isolation given how central this module is to the whole pipeline (called by every full pipeline run). **New:** `write_skip_exception()` is now a fourth `gold_exceptions` write site expected to populate `shop_owner` at write time (alongside M-036's `run_matching()` and M-011's `action_review_item()`, see G19's Change Impact) — any future refactor of this function must preserve that call to `get_shop_owner()` or the resulting exception row would permanently lack routing information.
 
 **Callers** — M-018 (`scripts/run_full_pipeline.py`, via dynamic module load + `run_intake()` call)
-**Calls** — M-020 (`DocumentUnderstandingEngine`, `extract_pdf_text`), M-033 (`execute_sql`, `execute_query`), M-038 (`normalize_invoice_number`), M-039 (`BlobStorageClient`)
+**Calls** — M-020 (`DocumentUnderstandingEngine`, `extract_pdf_text`), M-033 (`execute_sql`, `execute_query`), M-038 (`normalize_invoice_number`), M-039 (`BlobStorageClient`), **M-036 (`score_exception_confidence`, new), M-048 (`get_shop_owner`, new)**
 **Integration Points Used** — IP-001 through IP-006 (indirectly, via M-020's provider resolution), IP-008 (Lakehouse database), IP-009 (Azure Blob Storage)

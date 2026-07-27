@@ -216,15 +216,17 @@ RULES.md's 13 numbered rules are the primary candidate source (this project's fu
 
 ---
 
-## IC-19 — At most one job may be in `PROCESSING` status system-wide at any time
+## IC-19 — At most one job per distinct `pdf_filename` may be in `PROCESSING` status at any time
 **Scope:** GLOBAL
 **Source:** Code-observed only
-**Currently enforced:** YES
-**Enforcement point:** `web/queries.py:claim_next_pending_job()` — single atomic `UPDATE` with a `NOT EXISTS (SELECT 1 FROM jobs WHERE status = 'PROCESSING')` guard.
+**Currently enforced:** YES — **rewritten 2026-07-25 to match an engineer-approved amendment made 2026-07-24**, prior wording below is now historical, not current.
+**Enforcement point:** `web/queries.py:claim_next_pending_job()` — single atomic `UPDATE` with a `NOT EXISTS (SELECT 1 FROM jobs busy WHERE busy.status = 'PROCESSING' AND busy.pdf_filename = p.pdf_filename)` guard — scoped to `pdf_filename`, not the whole `jobs` table.
 **Owning module:** M-011
-**Enforcing modules:** M-011, M-013
-**Rationale:** Prevents two worker processes (or a leftover dev server) from claiming the same job or racing concurrently-uploaded jobs against each other's cache/extraction writes.
-**Related gap (cross-reference, not a violation):** this same guard is exactly what makes the already-documented missing stale-job-requeue logic a single point of stall for the *entire* queue — if one job never leaves `PROCESSING`, this invariant's own guard blocks every subsequent job indefinitely.
+**Enforcing modules:** M-011, M-013 (now a **pool** of `VIVE_WORKER_POOL_SIZE` threads, default 3, each independently polling and calling this same guard — see `web/worker.py`)
+**Rationale:** Prevents two jobs for the SAME pdf_filename from being claimed and processed concurrently — they would race the same `extraction_cache` row, each missing the other's write and both re-running the full AI extraction. This is the exact, narrower failure mode the guard exists to prevent; it is not a general "only one job at a time, full stop" rule.
+**Amendment history (2026-07-24, engineer decision, direct instruction — Ayush Kumar Sinha):** until 2026-07-24 this invariant read "at most one job may be in `PROCESSING` status **system-wide** at any time," enforced by a `NOT EXISTS (SELECT 1 FROM jobs WHERE status = 'PROCESSING')` guard with no `pdf_filename` scoping at all — meaning only one job could process at a time across the *entire* system, regardless of filename. That was broader than the actual failure mode it existed to prevent (see Rationale above), and it is what made a worker pool pointless: extra threads would just poll and find nothing claimable, since only one job total could ever be PROCESSING. The engineer explicitly narrowed the guard to `pdf_filename` scope specifically to unblock the worker-pool enhancement (see `docs/Claude.md` v1.1's changelog entry and `docs/INVARIANTS.md`'s own amended INV-05 entry, both dated 2026-07-24) — different filenames may now process concurrently, up to `VIVE_WORKER_POOL_SIZE` at once. This BCE artifact is catching up to a decision already made and already documented in `docs/`, not flagging a new open question.
+**Related gap (cross-reference, not a violation) — blast radius updated 2026-07-25:** this same guard is exactly what makes the already-documented missing stale-job-requeue logic (`RISK_REGISTER.md` R-004) a point of stall — but as of the 2026-07-24 narrowing, a job stuck in PROCESSING now only blocks new claims for *that same pdf_filename*, not every job in the queue. Other filenames remain claimable by an idle pool thread. R-004's underlying gap (no requeue logic exists) is unchanged; its blast radius is narrower than when this invariant was first cataloged.
+**See also:** IC-21 (the AI-call concurrency limiter, `VIVE_MAX_CONCURRENT_AI_CALLS`) is a separate, independent cap on concurrent Claude Sonnet calls across the same worker pool — this invariant governs job-claiming, IC-21 governs the AI-call rate once a job is already running.
 
 ---
 
@@ -239,4 +241,18 @@ RULES.md's 13 numbered rules are the primary candidate source (this project's fu
 
 ---
 
-Sessions D and Stage 3 (Cross-Artifact Review) are both reflected in this artifact. `discovery/INVARIANT_CATALOGUE.md` must remain committed and current before Graph Construction (`discovery/SYSTEM_GRAPH.json`) runs.
+## New Implicit Invariant Surfaced in the 2026-07-25 Scoped Refresh (not documented anywhere in RULES.md or docs/INVARIANTS.md)
+
+## IC-21 — No more than `VIVE_MAX_CONCURRENT_AI_CALLS` Claude Sonnet extraction calls may run concurrently system-wide
+**Scope:** GLOBAL
+**Source:** Code-observed only — added 2026-07-25, following the worker-pool change that made this cap necessary
+**Currently enforced:** YES, with one known, accepted limitation (see Rationale)
+**Enforcement point:** `src/ai/concurrency_limiter.py:ai_call_slot()` — a cross-process file-lock semaphore (`lakehouse/ai_call_slots/slot_0.lock` … `slot_{N-1}.lock`, exclusive-create via `os.O_CREAT | os.O_EXCL`, atomic on both POSIX and Windows). Wraps only the real network call in `src/ai/claude_sonnet_client.py` (`_real_file_call`/`_real_text_call`) — a cache hit never acquires a slot.
+**Owning module:** M-047
+**Enforcing modules:** M-047, M-023 (the only current caller)
+**Rationale:** Each job runs in its own subprocess (`web/worker.py`'s pool shells out to `scripts/run_full_pipeline.py` per job — see IC-19), so an in-process `threading.Semaphore` cannot coordinate across jobs claimed by different pool threads; this is why a cross-process, disk-based lock is used instead of a simpler in-memory primitive. Exists because `VIVE_WORKER_POOL_SIZE` (IC-19) can now run several jobs at once, each independently calling Claude Sonnet, which could otherwise exceed Azure Foundry's Claude Sonnet 4.6 deployment rate limit. **Known limitation, accepted by design rather than engineered around (module's own docstring makes this explicit, same posture as `RISK_REGISTER.md` R-004's accepted stale-job gap):** if a process holding a slot is killed outright (not a normal exception, which the `finally` block still cleans up after), that slot's lock file is never removed, and capacity is permanently reduced by one until the stale file is manually deleted from `lakehouse/ai_call_slots/`. See `discovery/RISK_REGISTER.md` R-010 for the risk writeup.
+**Related invariant:** IC-19 governs *job claiming* (which jobs may run concurrently); this invariant governs a narrower resource (concurrent Claude Sonnet API calls) once jobs are already running — the two caps are independent and can each be sized differently (`VIVE_WORKER_POOL_SIZE` vs. `VIVE_MAX_CONCURRENT_AI_CALLS`).
+
+---
+
+Sessions D and Stage 3 (Cross-Artifact Review) are both reflected in this artifact, plus the 2026-07-25 scoped refresh (IC-19 rewrite, IC-21 addition). `discovery/INVARIANT_CATALOGUE.md` must remain committed and current before Graph Construction (`discovery/SYSTEM_GRAPH.json`) runs.

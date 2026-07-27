@@ -48,6 +48,10 @@ Single sequential log of every ID assigned across SYSTEM_GRAPH.json and DOMAIN_M
 | M-042 | Module | Azure-SQL-detection probe | SYSTEM_GRAPH.json | Session A |
 | M-043 | Module | worker simulation (basic) | SYSTEM_GRAPH.json | Session A |
 | M-044 | Module | worker simulation (path-exact) | SYSTEM_GRAPH.json | Session A |
+| M-045 | Module | batches router | SYSTEM_GRAPH.json | Scoped BCE refresh, 2026-07-25 |
+| M-046 | Module | intake_trigger router (Event Grid webhook) | SYSTEM_GRAPH.json | Scoped BCE refresh, 2026-07-25 |
+| M-047 | Module | AI-call concurrency limiter | SYSTEM_GRAPH.json | Scoped BCE refresh, 2026-07-25 |
+| M-048 | Module | shop owner routing lookup | SYSTEM_GRAPH.json | Scoped BCE refresh, 2026-07-25 |
 | IP-001 | IntegrationPoint | Claude Sonnet 4.6 (Anthropic, Azure AI Foundry) — active primary | SYSTEM_GRAPH.json | Session A |
 | IP-002 | IntegrationPoint | Claude Haiku 4.5 (Anthropic, Azure AI Foundry) — explanation service | SYSTEM_GRAPH.json | Session A |
 | IP-003 | IntegrationPoint | Azure OpenAI (gpt-5-mini/nano/5.1) — registered, inactive | SYSTEM_GRAPH.json | Session A |
@@ -57,6 +61,7 @@ Single sequential log of every ID assigned across SYSTEM_GRAPH.json and DOMAIN_M
 | IP-007 | IntegrationPoint | Tesseract OCR + Poppler (local binaries) | SYSTEM_GRAPH.json | Session A |
 | IP-008 | IntegrationPoint | Lakehouse database (SQLite / Azure SQL) | SYSTEM_GRAPH.json | Session A |
 | IP-009 | IntegrationPoint | Azure Blob Storage (vendor-statements container) | SYSTEM_GRAPH.json | Session A |
+| IP-010 | IntegrationPoint | Azure Event Grid webhook (auto-intake dropzone, viverecondropzone/incoming-statements) | SYSTEM_GRAPH.json | Scoped BCE refresh, 2026-07-25 |
 | E-001 | Entity | Invoice | DOMAIN_MODEL.json | Session F03 |
 | A-001 | Attribute | record_id | DOMAIN_MODEL.json | Session F03 |
 | A-002 | Attribute | record_source | DOMAIN_MODEL.json | Session F03 |
