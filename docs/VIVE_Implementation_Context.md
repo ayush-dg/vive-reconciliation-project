@@ -1,187 +1,217 @@
 # VIVE Reconciliation — Implementation Context & Progress Tracker
+Updated: 2026-07-27
 
-*This document is the complete context for implementing the planned VIVE Reconciliation improvements. Read this fully before writing any code. Treat every decision below as final and settled — these were arrived at deliberately, through direct architecture comparison against a sister project (Scrutin), not guesses.*
+*This document is the complete context for the VIVE Reconciliation project. All phases through Phase 4 are complete. The system is now in active feature expansion (Steps 1-11 of the Final Plan). Read this fully before writing any code.*
 
 ---
 
 ## 0. How to Use This Document
 
-- This is a **living tracker**. As each item is implemented and verified working, update its status in the tables below from `Not Started` → `In Progress` → `Done`, and add a one-line note (date, PR link, anything relevant).
-- Implement in the phase order given in Section 4 — do not skip ahead to later-phase items unless explicitly asked.
-- If something here seems ambiguous or you're about to make an assumption that changes architecture, ask before proceeding rather than guessing.
-- Act as a senior data engineer would: prioritize correctness, idempotency, and not breaking what already works over speed. VIVE's existing pipeline (extraction, caching, matching) is already solid — the goal is to add reliability and multi-user support around it, not rewrite it.
+- Status is always current as of the date above.
+- Do not skip ahead without explicit instruction.
+- Act as a senior data engineer: correctness, idempotency, never break what works.
 
 ---
 
 ## 1. What VIVE Reconciliation Is
 
-A Python-based tool built for VIVE Collision (multi-shop auto body repair company, ~79 shops, Northeast US). Vendor suppliers (parts distributors, sublet shops, towing companies) send monthly PDF statements. VIVE extracts the data from each PDF, compares it against VIVE's ERP records, and surfaces discrepancies for the AP team to review — replacing what used to be an hours-long manual cross-check per vendor.
-
-## 2. What Exists Today (Do Not Break These)
-
-- **Four-stage pipeline**: document intake/extraction → mock ERP generation → deterministic matching → report generation, run via numbered scripts (`notebooks/01_...` through `04_...`)
-- **⚠️ Mock ERP data is a temporary placeholder, not the permanent design.** VIVE does not currently have access to VIVE Collision's real NetSuite ERP. `02_generate_mock_erp.py` clones the extracted vendor statement data and deliberately injects known errors (missing invoices, wrong amounts, duplicates) via `scenario_config.json`, purely so the matching engine has something to reconcile against for testing. **The real production comparison is always meant to be PDF vs. actual NetSuite data** — mock data only exists because NetSuite API access isn't available yet. This was anticipated in the original design: both the mock ERP side and the vendor statement side already share the same normalized Silver schema, distinguished only by a `record_source` field (`VENDOR_STATEMENT` vs `INTERNAL_ERP`). When NetSuite access becomes available, the intended change is narrow: replace what feeds into Silver on the ERP side with a real NetSuite API adapter — extraction, matching, and reporting should not need to change. **Building the live NetSuite integration itself is not currently scoped or planned** — it depends on VIVE Collision granting API access, and is a separate future project, not part of the phases below. Do not attempt to build a NetSuite integration as part of this work unless explicitly asked — the current task is implementing the Phase 1-4 items with the existing mock-data setup left exactly as-is.
-- **The mock-data workflow stays CLI-only and separate from the dashboard.** `01_document_intake.py` automatically picks a few real invoice numbers/amounts from the just-extracted data and prints a ready-to-paste JSON suggestion for `scenario_config.json` (this is plain deterministic Python — sorting by amount — not an AI/LLM call, despite feeling "suggested"). A developer then manually copies this into `scenario_config.json` before running the mock ERP step. **This entire suggestion-and-configure workflow must NOT be exposed in the Streamlit dashboard.** It is a developer/QA tool for validating that the matching engine correctly catches deliberately-planted errors — not something any of the 5-10 real dashboard users should ever see or interact with. Keeping this strictly CLI-only, fully separate from the dashboard's real reconciliation flow, is what preserves a clean swap-in point for the future NetSuite adapter — the dashboard should only ever know "there is ERP data in Silver to match against," never how it got there.
-- **Extraction caching**: SHA-256 hash of every PDF checked against `extraction_cache` before re-running expensive AI extraction — cache hit requires `row_count > 0` from a prior *successful* run (deliberate, don't relax this check)
-- **Matching engine**: 2-level deterministic hierarchy (Level 1: exact invoice number match; Level 2: RO number + amount match), configurable tolerances in `config/matching/matching_rules.json`, **zero AI involvement by design** — this is a hard invariant, not a limitation
-- **Invoice number handling**: stored exactly as extracted, whitespace-trimmed only — no suffix stripping (previously removed on purpose; it was hiding real discrepancies)
-- **Partial-JSON salvage**: brace-counting logic recovers usable data from a truncated AI response — kept as a backup strategy, not the first thing tried (see Section 3)
-- **Bronze/Silver/Gold layering** in SQLite (`lakehouse/reconciliation.db`) — Bronze (raw AI output) → Silver (typed/normalized, shared schema for both vendor and ERP sides) → Gold (`gold_matched_invoices`, `gold_exceptions`, `gold_reconciliation_summary`)
-- **Existing logging tables**: `ai_audit_log` (every AI call, with `ai_provider`, `model`, `success`, `attempt_count`, `error_message` columns) and `document_intake_log` (one row per PDF, with `extraction_method`, `extraction_model`, `extraction_confidence_overall` columns) — **both already exist in the schema**, no new tables needed for basic provenance tracking
-- **45 tests** across 6 pytest files (AI clients, Azure OpenAI client, Document Intelligence client, document understanding engine, matching engine, explanation service) — 44 passing; 1 pre-existing failure (`test_ai_clients.py::TestClaudeClient::test_generate_with_file_parses_json`, a Windows file-locking quirk unrelated to any AI provider switch)
-
-## 3. Final AI Extraction Decision
-
-**Corrected 2026-07-24 (BCE Stage 3 documentation sweep, engineer-confirmed):** this section previously described Azure Document Intelligence as the current extraction engine — stale. Claude Sonnet 4.6 has since superseded it as `provider_chain[0]`; see RULES.md RULE-04 for the full three-era history. Bullets below updated to reflect the current chain.
-
-- **Claude Sonnet 4.6, via Azure AI Foundry, is the extraction engine.** Sends the whole PDF as one streaming call — validated across all 4 sample vendor statements (69-602 rows), with column-agnostic mapping that correctly disambiguates vendors with multiple invoice-number-like columns, and reliable document-level `vendor_name` extraction.
-- **History:** Claude (Haiku 4.5) → Azure OpenAI gpt-5-mini (vendor consolidation) → Azure Document Intelligence `prebuilt-layout` (speed) → Claude Sonnet 4.6 (current). See RULES.md RULE-04 for the full history (now superseded three times), including exact numbers from each era.
-- **pdfplumber + Tesseract OCR remains the last-resort fallback** if the primary provider is unavailable — free, no AI, no per-call cost. Unaffected by this switch.
-- **Final chain: Claude Sonnet 4.6 (Azure AI Foundry) → pdfplumber+OCR.** `src/ai/azure_openai_client.py`, `src/ai/document_intelligence_client.py`, `src/ai/gemini_client.py`, and `src/ai/mistral_client.py` all remain in the repo, registered for direct `get_ai_client()` access, but are not part of the active chain.
-- **One call for the whole document, not per-page** — same whole-document approach as the Document Intelligence era, via streaming (required because a single whole-document extraction call can run long enough to risk a non-streaming read timeout).
-- **Column mapping is done in Python, after the model returns raw column-name-keyed rows** — `claude_sonnet_client.py`'s own `_map_columns()`/`_row_to_invoice()`, keyword-based, with a value-based fallback for `invoice_number`/`outstanding_amount` only. This is a different mechanism from both the Document Intelligence era (pure geometry, no LLM) and the original gpt-5-mini/Haiku era (LLM-side semantic reasoning via `VISION_PROMPT`) — `VISION_PROMPT` is not read by Claude Sonnet at all; it sends its own shorter, self-contained prompt.
-- **Known gap (tracked, not yet fixed — see `discovery/RISK_REGISTER.md` R-001):** unlike the eras that used `VISION_PROMPT`, Claude Sonnet does not request or receive a genuine per-row confidence value — every row gets a hardcoded `0.75`, which always clears the `0.60` human-review threshold regardless of actual extraction quality. Accepted as a known Critical risk as of 2026-07-24, prioritized against Sprint 1 planning.
-- **The optional `--explain` narrative step uses Claude Haiku 4.5 directly, not the extraction chain.** `explanation_service.py` calls `client_factory.get_ai_client("claude")` (hardcoded `EXPLANATION_PROVIDER`), independent of whatever's in `provider_chain` — explanations are a small, low-frequency, text-only task, deliberately decoupled from whichever provider handles extraction.
-- **pdfplumber's "confidence" is fake/manual, not a real self-assessment** — the code assigns 0.65 if it found table-like rows, 0.20 if not. Since the validation gate threshold is 0.60, a 0.65 "pass" is really just "found something table-shaped," not a genuine quality signal. Be aware of this when touching validation logic — a messy but table-shaped extraction could slide through as "valid" when it shouldn't.
-- **Which extraction method processed a given document is already loggable** via the existing `document_intake_log.extraction_method` and `ai_audit_log.ai_provider` columns — the current clean provider value is `"claude_sonnet"` (was `"azure_document_intelligence"` in the prior era); make sure any new code writing to these columns uses that value, not a leftover string from a prior chain.
-
-## 4. Implementation Phases (Priority Order)
-
-Work through phases in order. Each item below maps to a row in the Priority Table from the Improvement Plan PDF.
-
-### Phase 1 — Foundation
-| Item | What it does | Status |
-|---|---|---|
-| Docker | Whole pipeline runs in a container — one command reproduces the exact same environment on any machine | Done |
-| Rules doc | A file (e.g. `RULES.md`) cataloguing every deliberate "don't undo this" decision already made (no suffix stripping, cache hit requires `row_count > 0`, matching stays 100% deterministic, etc.), with an ID per rule referenced in code comments at the enforcement point | Done |
-| Migration tooling | A `schema_version` table plus numbered, versioned SQL migration scripts — every future schema change tracked, no more manual undocumented edits | Done |
-
-### Phase 2 — Reliability & Multi-User Foundation
-| Item | What it does | Status |
-|---|---|---|
-| Disposition model | `exception_dispositions` table (`migrations/002_exception_dispositions.sql`): `(id, exception_id, statement_id, vendor_name, invoice_number, reason_code, disposition_status, disposition_notes, disposed_by, disposed_at, created_at)`, indexed on `(vendor_name, invoice_number, reason_code)`. `disposition_status` is a CHECK-constrained enum (`ACCEPTED`/`DISPUTED`/`DUPLICATE`/`WRITE_OFF`/`PENDING`) rather than the originally-sketched free-text `resolution`. Lookup key is still vendor+invoice+reason_code (not `statement_id`, which changes every period) so a recurring exception can be recognized across statement runs — the "before generating a report, look up whether this was already resolved" consumption logic itself is not yet wired into the report generation flow | Schema Done |
-| Audit log (human actions) | Bundled into the same `exception_dispositions` table — `disposed_by` + `disposed_at` double as the human-action audit trail. No separate table needed | Schema Done |
-| Object storage (Blob) | Every PDF saved to Azure Blob Storage at path `{vendor_slug}/{yyyy}/{mm}/{document_hash}.pdf`, reusing the same SHA-256 hash already computed for extraction caching — this prevents ever storing the same file twice. Metadata stored alongside: `original_filename`, `uploaded_by`, `uploaded_at`, `vendor_name`. Add a new `blob_storage_path` column to `document_intake_log` linking each processed statement to its stored file | Client Built |
-
-### Phase 3 — Multi-User Infrastructure (Confirmed Requirement: 5-10 users, mixed frequent/occasional use)
-| Item | What it does | Status |
-|---|---|---|
-| Real shared database | Azure SQL Database (Basic tier, ~$5/month) replacing SQLite — SQLite's single-writer limitation is a real, not theoretical, problem once multiple people use the system regularly | Not Started |
-| Job queue + background worker | New table: `(job_id, document_hash, uploaded_by, status[QUEUED/PROCESSING/DONE/FAILED], created_at, started_at, completed_at, attempts, worker_id, error_message)`. A separate, always-running Python worker script polls for `QUEUED` jobs, claims one atomically (row-level locking so two workers never grab the same job), runs the pipeline, updates status. **Stale-job recovery**: any job stuck in `PROCESSING` past a timeout (e.g. 10 minutes) gets automatically re-queued, so a crashed worker doesn't leave a job stuck forever. Reuses the existing document-hash check for idempotency — the same file is never processed twice even if queued twice | Not Started |
-| Per-user logins | Each of the 5-10 users gets their own login on the dashboard — needed so `resolved_by` on the disposition table means something real. **No separate permission tiers** (no Admin vs. Reviewer distinction) — everyone using the dashboard does the same job today, so this is intentionally a single flat access level, not a gap | Not Started |
-| Shared hosting | Azure App Service (Basic tier, ~$13/month) — the dashboard needs to run somewhere all 5-10 users can reach at any time, not on one person's laptop | Not Started |
-| Reviewer dashboard (Streamlit) | A **complete** interface, not read-only: upload a PDF directly in the browser, which triggers the existing pipeline functions directly (same code the CLI calls — no duplicate logic, no separate REST API layer). Also shows run history, exception list with disposition status, and a form to record a new disposition. The CLI continues to work as an alternative entry point | Not Started |
-
-### Phase 4 — Smaller Reliability Polish
-| Item | What it does | Status |
-|---|---|---|
-| Dependency-skip check | If a row is missing a required field (e.g. amount), tag it explicitly as `NOT_CHECKED` rather than guessing, crashing, or letting it silently fail a comparison — visibly distinct in the report from a row that was genuinely checked and didn't match | Not Started |
-| Retry/truncation fix | Covered above in Section 3 — primary provider truncation detected explicitly, falls back to pdfplumber+OCR immediately, salvage kept only as backup | Not Started |
-| Config cleanup | Move the two remaining hardcoded values (extraction confidence threshold, currently 0.60; any provider-specific text trim limits) out of source code and into config, consolidated alongside the existing `matching_rules.json` | Not Started |
-
-### Phase 5 — Deferred (Only If a Real Trigger Occurs — Do Not Build Preemptively)
-| Item | Trigger condition |
-|---|---|
-| Document-level confidence gate | Only build if a real observed case shows a bad partial extraction (low confidence on one row) is letting a wrong MATCHED result slip through elsewhere in the same document. Today, only the specific low-confidence row is held back; the rest of the document proceeds normally — this is believed sufficient until proven otherwise |
-| AI "looks odd" advisory flag | Only revisit after the Disposition model (Phase 2) is stable, and only if there's real evidence pure deterministic matching is missing genuine miscoding/mismatched-category issues. Also has an unresolved data gap: there's currently no vendor-type/category field to compare a line item's description against, which would need to be added first |
-
-## 5. Explicitly Not Suitable — Do Not Build These
-
-| Item | Why not |
-|---|---|
-| Full role-based permissions (Admin vs. Reviewer tiers) | Everyone using the dashboard does the same job today — per-user logins (who did what) are sufficient without needing separate permission levels |
-| Full multi-role web app matching Scrutin's stack (React + FastAPI + full auth system) | Streamlit already covers the need at VIVE's scale; building Scrutin's heavier stack would be solving a problem VIVE doesn't have |
-| Heavy formal process documentation (requirements briefs, phase-gate sign-offs, etc.) | Appropriate for Scrutin's multi-stakeholder, externally-facing, legally-sensitive context; pure overhead for VIVE's internal, single-team tool |
-
-## 6. Scrutin Backend Coverage — What VIVE Needs vs. Doesn't
-
-*This table was produced by directly comparing Scrutin's actual backend folder structure against VIVE's current and planned architecture. Use it to sanity-check that nothing is being over-built or under-built relative to what VIVE actually needs.*
-
-| Scrutin backend piece | VIVE's status | Notes |
-|---|---|---|
-| 1. API layer | **Not needed** | Streamlit runs server-side and calls VIVE's Python functions directly — no HTTP layer needed between UI and logic |
-| 2. Auth & authorization | **Partially covered** | Per-user logins planned (Phase 3), but deliberately only one permission level — no Reviewer/Admin split, since everyone does the same job |
-| 3. Extraction pipeline orchestration | **Covered** | `document_understanding_engine.py` already does this — call AI, check confidence, route to review if needed. One real gap: confidence is checked per-row, not per-document (see Phase 5, Confidence gate) |
-| 4. Validation logic | **Covered, deliberately simpler** | VIVE's matching stays 100% deterministic by design — no AI judgment calls like Scrutin's semantic modules. This is correct design for a reconciliation tool, not a shortcoming |
-| 5. Job queue + background worker | **Not built yet — the one genuine gap** | Planned for Phase 3. This is the most important piece to actually build before multi-user use is real, not just planned on paper |
-| 6. Database access | **Covered, migrating to Azure SQL** | Simpler than Scrutin's SQLAlchemy ORM — VIVE uses direct SQL — but functionally equivalent |
-| 7. File storage handling | **Covered — planned Phase 2** | Azure Blob Storage retention does the same job as Scrutin's S3/MinIO |
-| 8. Disposition/outcome logic | **Covered, simpler** | VIVE's version is "was this resolved before, yes/no" rather than Scrutin's full Accept/Reject-per-finding plus 4-state outcome derivation. Appropriate for VIVE's simpler matching problem — do not over-build this into Scrutin's full complexity |
-| 9. Reference data management | **Correctly not needed** | Exists in Scrutin because firms need onboarded rate tables/rosters. VIVE deliberately has no per-vendor onboarding — nothing to manage here, and this should stay that way |
-| 10. Report generation | **Covered** | Already exists (`04_generate_report.py`), continues unchanged |
-
-**Bottom line: 7 of 10 pieces are handled** (several correctly simpler than Scrutin's version, which is by design, not a gap). **2 are deliberately not applicable** to VIVE's problem. **1 is a genuine, currently-unbuilt gap: the job queue + worker.**
-
-## 7. Cost Summary (For Reference — Already Approved)
-
-| Item | Estimated cost |
-|---|---|
-| Azure SQL Database (Basic tier) | ~$5/month |
-| Azure App Service (Basic tier) | ~$13/month |
-| Azure Blob Storage | A few cents/month at VIVE's volume |
-| **Total new recurring cost** | **~$18-20/month combined** |
-
-## 8. Things a Senior Data Engineer Should Also Insist On (Additions Beyond What's in the Plan PDFs)
-
-These weren't explicitly itemized in the Priority Table but are standard production practice and should be applied while implementing the above, not treated as optional extras:
-
-- **Idempotent processing everywhere**, not just at the queue level — reprocessing the same `document_hash` should never create duplicate Bronze/Silver/Gold rows. Partially true already via the extraction cache; verify it holds end-to-end once the job queue is added.
-- **Index the hash/lookup columns** — `document_hash` in both the new job queue table and `document_intake_log`, and the `(vendor_name, invoice_number, reason_code)` combination on `exception_dispositions` — without these, lookups get slower as tables grow.
-- **Structured logging in the worker process**, not print statements — the worker runs unattended; when something fails at 2am, whoever checks logs later needs structured, searchable output (timestamp, job_id, error type), not free-text prints.
-- **Secrets management**: as this moves to Azure App Service, move API keys and DB credentials out of local `.env` files and into Azure Key Vault (or App Service's built-in application settings, encrypted) — don't let production secrets live in a file that could end up in version control.
-- **Confirm encryption at rest is enabled** on the Blob Storage container — Azure enables this by default, but confirm explicitly rather than assuming.
-- **Private, non-public Blob container** — vendor PDFs should never be reachable via a public URL; confirm container access level is set to private.
-- **Basic alerting on repeated job failures** — if the same document fails processing multiple times in a row, someone should be notified rather than the job silently sitting in a failed state indefinitely.
-- **A rollback plan for the Docker image** — tag images with versions, not just `latest`, so a bad deploy can be rolled back quickly.
-- **Backup verification for Azure SQL** — confirm automated backups are actually enabled and (ideally) that a restore has been test-run at least once, not just assumed to work.
-
-## 9. What NOT to Do (Explicit Guardrails)
-
-- Do not introduce any AI judgment calls into the matching engine — matching must remain 100% deterministic, always.
-- Do not re-add invoice number suffix stripping or normalization — this was deliberately removed because it was hiding real discrepancies.
-- Do not relax the cache-hit condition (`row_count > 0`) — a failed run must never be treated as a valid cache hit.
-- Do not build per-vendor onboarding/configuration — VIVE's universal column-mapping approach is deliberate and should stay that way.
-- Do not build the Phase 5 items preemptively — they are gated behind specific trigger conditions, not a fixed timeline.
-- Do not add Gemini, Groq, or Mistral back into the extraction chain, and do not swap the primary away from Claude Sonnet 4.6 without an explicit decision — Claude Sonnet 4.6 (via Azure AI Foundry) + pdfplumber/OCR is the current chain (see RULES.md RULE-04 and Section 3 above; superseded three times: Claude Haiku → Azure OpenAI gpt-5-mini → Azure Document Intelligence → Claude Sonnet 4.6). Azure OpenAI gpt-5-mini/gpt-5-nano/gpt-5.1, Azure Document Intelligence, and Gemini are all evaluated-and-retired or dormant, no longer the active chain, though their clients and configs remain in the repo pending a separate cleanup pass.
-  **[Corrected 2026-07-24, BCE Stage 3 documentation sweep — this line previously named Azure Document Intelligence as "the final decision," a leftover from before the switch to Claude Sonnet 4.6 that Section 3's own correction missed.]**
-- Do not build full Admin/Reviewer role separation — a flat permission model is correct for VIVE's current team structure.
-- Do not modify, replace, or attempt to automate away the mock ERP generator, and do not build a live NetSuite integration — this is explicitly out of scope for the current phases (see Section 2). The mock data setup stays exactly as it is until NetSuite API access is available and a separate project is scoped for it.
-- Do not expose the mock ERP generator's suggestion workflow (`scenario_config.json`, the auto-suggested exception targets) in the Streamlit dashboard — it is a CLI-only developer/QA tool and must stay fully separate from the real dashboard used by the 5-10 end users.
+A Python-based AI-powered AP automation tool for VIVE Collision (multi-shop auto body repair, ~79 shops, Northeast US). Vendors send monthly PDFs; the system extracts invoice data, compares against ERP records, surfaces discrepancies for the AP team. Replaces hours-long manual reconciliation.
 
 ---
 
-## Progress Log
+## 2. Current State — What Is Built
 
-*Add an entry here every time an item's status changes.*
+### Core Pipeline (All Complete)
+- **Four-stage pipeline**: document intake/extraction → mock ERP generation → deterministic matching → report generation (`notebooks/01_...` through `04_...`, orchestrated by `scripts/run_full_pipeline.py`)
+- **Extraction**: Claude Sonnet 4.6 (Azure AI Foundry) primary → pdfplumber + Tesseract OCR fallback
+- **Caching**: SHA-256 hash → `extraction_cache` lookup (cache hit requires `row_count > 0`)
+- **Matching**: 2-level deterministic hierarchy (Level 1: exact invoice; Level 2: RO + amount), zero AI involvement, configurable tolerances
+- **Match confidence**: Every match and exception now carries a `match_confidence` score (0.0–1.0), computed deterministically by match type
+- **Row-level validation**: missing invoice ID or amount → `EXTRACTION_INCOMPLETE` exception; low confidence → `validation_document_review_queue`
 
-**Note:** Live pipeline testing now runs against the real Azure Document
-Intelligence endpoint (`AZURE_DOC_INTEL_ENDPOINT`/`AZURE_DOC_INTEL_KEY` in
-`.env`) — see RULES.md RULE-04 for the full history (Claude → Azure OpenAI
-gpt-5-mini → Azure Document Intelligence) and the reasoning behind each
-switch. The Azure OpenAI endpoint variables (`AZURE_OPENAI_ENDPOINT`/
-`AZURE_OPENAI_API_KEY`/`AZURE_OPENAI_DEPLOYMENT_GPT5_MINI`) are still
-present in `.env` for the now-inactive client but are no longer read by
-the active chain.
+### Web Application (FastAPI + Jinja2, not Streamlit)
+- Home dashboard (4 KPI cards, active jobs, recent batches, reconciliation runs table)
+- Upload PDF page (web UI upload → job queue → worker → dashboard update, confirmed working end-to-end)
+- Exceptions page (vendor cards with live counts, oldest-open aging)
+- Exception detail page (Accept / Dispute / Write off / Escalate, bulk approve for ≥0.99 confidence)
+- Review queue page (Approve or Flag as exception for validation_document_review_queue rows)
+- Batches page (auto-intake batches grouped by batch_id, manual uploads by date)
+- Reports page, Users page, Settings (placeholder)
 
-**Note:** `tests/test_document_understanding_engine.py` and
-`tests/test_explanation_service.py` mock the AI client but not
-`audit_logger.log_ai_call`, so every pytest run writes a small number of
-real rows into `ai_audit_log` in whatever database is active. Not a
-correctness issue, just a known quirk — periodically clear `ai_audit_log`
-in dev if the row count looks odd, don't assume it means something broke.
+### Infrastructure
+- Azure SQL (serverless free tier) as shared production database
+- Azure Blob Storage (vivereconciliation) for PDF archival
+- Azure Blob Storage (viverecondropzone) as auto-intake drop zone
+- 3-worker thread pool (configurable via VIVE_WORKER_POOL_SIZE)
+- Atomic job claiming — no race conditions
+- batch_id grouping on jobs table
+- Per-user logins (bcrypt)
+- Migration runner supports ALTER TABLE column additions for Azure SQL
+
+### Exception Types
+- MISSING — invoice on statement, not in ERP
+- AMOUNT_MISMATCH — amount differs
+- EXTRACTION_INCOMPLETE — missing invoice ID or amount on PDF
+- DUPLICATE_RECORD — same invoice appeared more than once
+
+### Routing & Aging
+- `shop_owner` on `gold_exceptions` from `config/shop_owners.json`
+- `days_open` computed column (auto-updates daily)
+- Escalation: `escalation_status`, `escalated_at`, `escalated_by`
+
+---
+
+## 3. Final AI Extraction Decision
+
+**Claude Sonnet 4.6, via Azure AI Foundry, is the extraction engine.** Whole-document streaming call. Column-agnostic mapping.
+
+Chain history:
+1. Claude Haiku 4.5 → Azure OpenAI gpt-5-mini (vendor consolidation) → Azure Document Intelligence prebuilt-layout (speed) → **Claude Sonnet 4.6 (current)**
+
+**pdfplumber + Tesseract OCR** remains the last-resort fallback.
+
+**Claude Haiku 4.5** is used only for the optional `--explain` narrative step (explanation_service.py), hardcoded and independent of provider_chain.
+
+Known gap: Claude Sonnet still returns hardcoded 0.75 per-row extraction confidence (not genuine). `match_confidence` (separate field) is now genuine.
+
+---
+
+## 4. Implementation Phases — Status
+
+### Phase 1 — Foundation ✅ Complete
+| Item | Status |
+|---|---|
+| Docker | Done |
+| Rules doc (RULES.md) | Done |
+| Migration tooling | Done |
+
+### Phase 2 — Reliability ✅ Complete
+| Item | Status |
+|---|---|
+| Disposition model | Done — exception_dispositions table, Accept/Dispute/Write off wired to web app |
+| Audit log (human actions) | Done — disposed_by + disposed_at in exception_dispositions |
+| Object storage (Blob) | Done — PDF archival to vivereconciliation, viverecondropzone drop zone created |
+
+### Phase 3 — Multi-User Infrastructure ✅ Complete
+| Item | Status |
+|---|---|
+| Real shared database (Azure SQL) | Done |
+| Job queue + background worker | Done — 3-worker pool, atomic claiming, graceful shutdown |
+| Per-user logins | Done — bcrypt, session-based auth |
+| Shared hosting (App Service) | Blocked — Ashrith subscription quota pending |
+| Reviewer dashboard | Done — FastAPI + Jinja2 (not Streamlit) |
+
+### Phase 4 — Reliability Polish ✅ Complete
+| Item | Status |
+|---|---|
+| Dependency-skip check (EXTRACTION_INCOMPLETE) | Done |
+| Retry/truncation fix | Done |
+| Config cleanup | Done |
+| Azure SQL connection retry | Done |
+
+---
+
+## 5. Final Plan — Steps 1-11 Status
+
+| Step | Description | Status |
+|---|---|---|
+| 1 | Blob drop zone (viverecondropzone, incoming-statements container) | ✅ Done |
+| 2 | Event Grid trigger | ❌ Blocked — Azure RBAC (Ashrith) |
+| 3 | batch_id grouping | ✅ Done — column on jobs, Batches page |
+| 4 | Jobs from Event Grid | ✅ Code done — /api/intake-trigger built; untestable until Step 2 unblocked |
+| 5 | Parallel workers (3-thread pool, AI rate limiting) | ✅ Done |
+| 6 | Fault isolation per file | ❌ Not built |
+| 7 | Match confidence score | ✅ Done |
+| 8 | Routing + aging per exception | ✅ Done |
+| 9 | Email alerts per batch | ⏳ Deferred — email provider not decided |
+| 10 | Bulk approve high-confidence | ✅ Done |
+| 11 | Batch summary UI | ✅ Done |
+
+---
+
+## 6. What NOT to Do
+
+- Do not add AI judgment to matching — matching is always 100% deterministic.
+- Do not re-add invoice number normalization/suffix stripping.
+- Do not relax cache hit condition (row_count > 0).
+- Do not build per-vendor column mapping.
+- Do not expose mock ERP generator in the dashboard — CLI-only.
+- Do not build live NetSuite integration — out of scope until VIVE provides API access.
+- Do not use bare `load_dotenv()` in pipeline scripts — always use explicit path: `load_dotenv(os.path.join(PROJECT_ROOT, ".env"))`.
+- Do not use two-step SELECT then UPDATE for job claiming — always use atomic claim query.
+
+---
+
+## 7. Open Items / Blockers
+
+| Item | Notes |
+|---|---|
+| App Service deployment | Blocked on Ashrith's subscription quota |
+| Event Grid System Topic | Blocked on Azure RBAC permissions (reported to Ashrith) |
+| Email alerts (Step 9) | Email provider not decided — SendGrid vs Azure Communication Services vs SMTP |
+| Tekion PDF vs Azure SQL | Never run through full pipeline against live database |
+| Fault isolation (Step 6) | Not built — one failed file in batch could affect others |
+| Genuine per-row extraction confidence | Claude Sonnet still returns hardcoded 0.75 |
+| Stale job requeue | Hung job for a given filename stalls that filename's future jobs — no auto-requeue |
+| NetSuite integration | Needs VIVE API credentials — separate future project |
+
+---
+
+## 8. Key Bugs Fixed (Session Jul 22-27, 2026)
+
+| Bug | Fix | Commit |
+|---|---|---|
+| Race condition — two workers claiming same job | Atomic job claiming with NOT EXISTS guard | dc7e64a |
+| Azure SQL migration runner couldn't add columns | ALTER TABLE support added | 8668960 |
+| Pipeline subprocess using SQLite not Azure SQL | Explicit load_dotenv path in all notebooks + scripts | 9c3e012 |
+| Stale snapshot — exceptions page showed "Reconciled" despite open exceptions | Live-count via gold_exceptions instead of gold_reconciliation_summary snapshot | 65d89f8 |
+| "Invoice #None" display | Template shows "Unknown" for null invoice_number | 88f383e |
+| [FAIL] label for ROW_SKIP | Changed to [SKIP] in CLI report | 88f383e |
+| AI Analysis (via None) on EXTRACTION_INCOMPLETE | Section hidden when ai_provider is null | 88f383e |
+| fromisoformat crash on Azure SQL datetime objects | _days_since() handles both str and datetime | latest |
+| Exceptions page missing vendors with no summary | get_vendor_summaries() unions gold_exceptions for summary-less vendors | b8f2c19 |
+| Exceptions detail 500 for summary-less vendors | Fallback to derive metadata from gold_exceptions rows | f4c7b19 |
+
+---
+
+## 9. Test Suite Status
+
+- **Current:** 189+ passing, 1 pre-existing Windows tempfile failure (unrelated)
+- Branch: phase-1-foundation (local only, never pushed)
+
+---
+
+## 10. Progress Log
 
 | Date | Item | Status change | Notes |
 |---|---|---|---|
-| 2026-07-13 | Docker | Not Started → Done | Dockerfile + docker-compose.yml + DOCKER.md added on branch phase-1-foundation. Verified: image builds clean, 30/30 tests pass in container, full 4-stage pipeline runs end-to-end on a real sample PDF. Added pytest to requirements.txt (was missing, untracked). Note: config/ is baked into the image, not volume-mounted — edits there require rebuild or docker exec. |
-| 2026-07-13 | Gemini/Groq removal | N/A → Done | Deleted gemini_client.py, groq_client.py, config/ai/gemini.json, config/ai/groq.json. Added src/ai/claude_client.py (retry/truncation logic ported from gemini_client.py). Rewrote client_factory.py and document_understanding_engine.py — Claude Vision primary (generate_with_file), pdfplumber+OCR fallback. Updated requirements.txt, .env/.env.example, active_provider.json, config/ai/claude.json. Tests: TestGeminiClient/TestGroqClient replaced with TestClaudeClient; fallback tests now assert routing to pdfplumber. 30 → 28 tests, all passing. |
-| 2026-07-13 | OCR fallback fix | N/A → Done | Fixed pre-existing gap: pdfplumber_fallback.py's extract_with_pdfplumber() never actually consumed OCR output (OCR text previously only fed Groq, now removed). Added per-page scanned-page detection, new ocr_extractor.ocr_page() helper, OCR-text-to-pseudo-table conversion feeding the existing column-mapping pipeline. OCR-derived rows tagged line_confidence=0.50 (below the 0.60 validation threshold) so OCR-extracted invoices always route to human review, never auto-pass. |
-| 2026-07-13 | Rules doc | Not Started → Done | RULES.md created with 11 numbered rules covering invoice handling, cache semantics, matching determinism, Claude-only extraction chain, mock ERP CLI-only boundary, NetSuite placeholder, universal column mapping, flat permission model, deferred Phase 5 items, OCR confidence tagging, and no fuzzy-prefix matching. Reference comments added at each enforcement point in code. |
-| 2026-07-13 | Matching Level 3 → Level 2 rename | N/A → Done | Fixed standing inconsistency: matching_rules.json declared a 3-level hierarchy but classify_match() only ever implemented 2 real branches. Removed the never-built phantom "Level 2" (Invoice + Amount) config entry, merged its key into Level 1, renumbered RO+Amount from Level 3 to Level 2 throughout code/tests/config/docs. |
-| 2026-07-13 | Lakehouse database reset | N/A → Done | Backed up lakehouse/reconciliation.db to backup/ (gitignored) before deleting, due to Gemini→Claude provider change making prior cached/extracted data stale. Re-ran 00_setup_lakehouse_schema.py for a fresh, empty schema (10 tables, 0 rows each, individually verified). |
-| 2026-07-13 | Migration tooling | Not Started → Done | Added migrations/001_initial_schema.sql (10 existing tables, pulled verbatim) and src/lakehouse/migrations.py runner: schema_version bookkeeping insert combined into the same transaction as each migration's DDL, so they can never drift apart on a crash; comments stripped before splitting statements; failures raise MigrationError, never swallowed. Rewrote 00_setup_lakehouse_schema.py to call the runner instead of containing DDL directly. Verified: clean apply against pre-existing tables, true no-op on re-run, a non-trivial ALTER TABLE migration commits correctly, a deliberately-failing migration rolls back cleanly with nothing recorded, and a from-scratch database builds correctly via the migration path alone. Added RULES.md RULE-12 (schema changes go through numbered migrations only). Phase 1 is now fully complete except the live Claude API test (parked on billing). |
-| 2026-07-13 | Phase 2/3 doc correction | N/A → Done | Moved "Reviewer dashboard (Streamlit)" from the Phase 2 table to Phase 3, matching the Improvement Plan roadmap (dashboard listed in Phase 3 alongside Real shared database, Job queue, Per-user logins, Shared hosting) and its own description ("sits on top of the real database, job queue, and per-user logins"). Caught before starting Phase 2 work — Phase 2 now lists only Disposition model, Audit log (human actions), and Object storage (Blob). |
-| 2026-07-14 | Azure OpenAI provider switch (pre-Phase-2 cleanup) | Claude → Azure OpenAI gpt-5-mini, Done | Built AzureOpenAIClient (src/ai/azure_openai_client.py) supporting gpt-5-mini/gpt-5-nano/gpt-5.1 via the Responses API. Ran a real 3-model comparison against sample vendor statements using the production VISION_PROMPT schema; gpt-5-mini selected (see RULES.md RULE-04) for vendor consolidation, having passed the accuracy gate. Validated architecture before committing to it: single-call-per-document was tested directly against all 3 sample PDFs and rejected — it times out on text PDFs (300s+), corrupts extracted data on scanned PDFs, and silently narrows scope to one page on large scanned PDFs (self-disclosed via the model's own warnings). Per-page extraction (one Responses API call per PDF page, results aggregated afterward) is the confirmed, deliberate architecture, not a workaround. Fixed two contributing issues found during per-page validation: (1) scanned pages were relying on Azure's own opaque server-side PDF-to-image conversion — now rasterized locally via pdf2image at 300 DPI before sending, giving controlled resolution (verified visually crisp at this DPI); (2) VISION_PROMPT strengthened with explicit exact-transcription, mixed-prefix-independence, and confidence-calibration instructions after testing showed the model would confidently (0.85+ confidence) substitute a nearby row's letter prefix onto an unrelated row despite a clearly legible image. Known residual limitation, accepted as correct system behavior: on scanned pages with mixed prefix patterns (e.g. Order vs. Return rows sharing one document-number column), some rows can still get a wrong prefix even after these fixes — this is expected to route to human review via the existing 0.60 confidence validation gate rather than silently pass, which is the intended failure mode for this system, not a defect to keep chasing. document_understanding_engine.py rewired to call get_ai_client() (reads the active provider from provider_chain) instead of hardcoding "claude". Full documentation sweep completed (README.md, DOCKER.md, notebooks, ocr_extractor.py, pdfplumber_fallback.py, this doc) removing stale Claude/Gemini/Groq references, leaving only intentional historical mentions. Pre-Phase-2 cleanup is complete; ready to begin Phase 2. |
-| 2026-07-14 | Document Intelligence extraction switch | Azure OpenAI gpt-5-mini → Azure Document Intelligence (prebuilt-layout), Done | Built DocumentIntelligenceClient (src/ai/document_intelligence_client.py) as the new primary in provider_chain (see RULES.md RULE-04, superseded a second time), motivated purely by speed: a live test of prebuilt-layout against sample_data/ASTCollex0526.pdf completed the full 4-page statement in ~14s vs. gpt-5-mini's 90-180s per page. prebuilt-invoice (Document Intelligence's other prebuilt model) was evaluated and rejected first — it's built for one invoice per document with a single header-level InvoiceId/AmountDue, not a table of many invoices per page, and has no field at all for dealer-specific ro_number/work_order_number. Went with prebuilt-layout (generic table geometry, no semantic field labels) instead, reusing the pdfplumber fallback's existing column-header interpreter (_find_header_row/_map_columns/_extract_invoice_row — see RULE-07) rather than duplicating it. Fixed a real pre-existing gap in that shared code while touching it: work_order_number was never mapped by _map_columns (no keyword branch existed) and was hardcoded to null in _extract_invoice_row — both were live bugs affecting the pdfplumber fallback path too, not just the new client. Two problems were found and fixed only by live-testing against all 3 real sample PDFs (ASTCollex, KSI_Noakers, Fred_Beans), not just the one used for the initial speed check: (1) an initial design assumed the header is detected once (from the first table) and reused for every later table — correct for ASTCollex (one logical ledger split across 4 pages, header only on page 1) but wrong for KSI/Fred Beans, where each page holds a structurally different table; this silently discarded most of both documents' data (KSI 41 invoices, Fred Beans 44 out of 39 pages) until changed to attempt header detection independently per table first, falling back to reusing the last col_map only when a table has no header of its own and its column count matches (KSI → 69, Fred Beans → 599); (2) that per-table header detection then surfaced a second, previously-dormant bug — a trailing "Total Outstanding Invoices: ... $13,860.79 USD" footer row on ASTCollex's last page tripped the same broad keyword scan used to detect headers (it contains both "outstanding" and "invoice"), and being the only row anywhere in that headerless continuation table to match, got misread as the header — discarding all 33 real rows before it (203 → 169 regression). Fixed by rejecting any header match not found at/near the top of a table (HEADER_MAX_DATA_START guard in document_intelligence_client.py, not a change to the shared keyword list, since pdfplumber's own per-page path never had this failure mode) rather than editing pdfplumber_fallback.py's keyword logic itself. Final live-tested results: ASTCollex 203 invoices (0 warnings), KSI 69 (2 warnings), Fred Beans 599 across 39 pages (14 warnings — some tables still skipped on column-count mismatch, likely genuine per-shop subtotal/summary sections; not fully investigated, worth a follow-up if Fred Beans totals need to reconcile exactly). 8 new/changed files (client, config/ai/azure_doc_intel.json, client_factory.py registration, active_provider.json chain flip, pdfplumber_fallback.py fixes, new test file, RULES.md, .env.example) committed as 59847be; 3 unrelated pre-existing working-tree changes (requirements.txt pypdf addition, azure_openai_client.py per-page pipeline, VISION_PROMPT robustness wording) committed separately as 2e1b1ca to clean up the tree without conflating them with the Document Intelligence work. azure_openai_client.py and its gpt-5-mini/nano/5.1 configs are left in place, out of the active chain, pending a separate cleanup pass. 44/45 tests passing — the 1 failure (test_ai_clients.py::TestClaudeClient::test_generate_with_file_parses_json) is a pre-existing Windows file-locking issue in the Claude client's test, unrelated to this change. **Note: Section 3 ("Final AI Extraction Decision") above still describes gpt-5-mini as the extraction engine and has not been updated to reflect this switch — flagged, not yet revised.** |
-| 2026-07-15 | Phase 2: Disposition model + audit log (schema only) | Not Started → Schema Done | Added migrations/002_exception_dispositions.sql: `exception_dispositions` table `(id, exception_id, statement_id, vendor_name, invoice_number, reason_code, disposition_status, disposition_notes, disposed_by, disposed_at, created_at)` plus an index on `(vendor_name, invoice_number, reason_code)` per Section 8's indexing note. Column names/enum (`disposition_status` CHECK-constrained to ACCEPTED/DISPUTED/DUPLICATE/WRITE_OFF/PENDING) deviate from this doc's original sketch (`resolution`, no CHECK, plus `statement_hash`) after a clarifying question — merged design keeps the vendor+invoice+reason_code lookup key (required for cross-statement recurrence detection, since statement_id changes every period) while adopting the enum-based status and explicit exception_id/statement_id linkage back to gold_exceptions (by convention, no enforced FOREIGN KEY, matching migrations/001's pattern). No FK constraint used despite `PRAGMA foreign_keys=ON` in connection.py, consistent with existing tables. Verified: migration applies cleanly via 00_setup_lakehouse_schema.py, all 11 columns present via PRAGMA table_info, sample row round-trips correctly, CHECK constraint correctly rejects an invalid status value, full test suite still 45/45 (same pre-existing unrelated Windows file-locking failure as before). No UI/API layer built yet — schema only. Report-generation lookup/suppression logic (the actual "don't re-flag a resolved exception" behavior) is not yet wired in. |
-| 2026-07-15 | Phase 2: Object storage (Blob) client | Not Started → Client Built | Added migrations/003_add_blob_storage_path.sql (`blob_storage_path`, `original_filename`, `uploaded_by`, `uploaded_at` on `document_intake_log`; `vendor_name` already existed) and src/storage/blob_client.py — `BlobStorageClient.upload_pdf(pdf_path, vendor_name, year, month, document_hash, original_filename=None, uploaded_by=None)`, path `{vendor_slug}/{yyyy}/{mm}/{document_hash}.pdf` in the `vendor-statements` container, per this doc's spec (confirmed over a differently-shaped ad hoc request — `blob_url` column / `{vendor_name}/{year}/{month}/{statement_id}_{original_filename}` path with no hash-based dedup — before writing any code). Real azure-storage-blob SDK call is lazily imported and only used when no transport is injected; an injectable transport callable (same pattern as DocumentIntelligenceClient) makes tests fully offline. Never raises — missing connection string, missing document_hash, missing file, invalid year/month, or any transport failure/exception all return `None` rather than crashing the pipeline. 9 new tests in tests/test_blob_client.py, full suite 56/57 (same pre-existing unrelated Windows file-locking failure as before). **Not wired into the pipeline yet** — client and schema only, per instructions; `azure-storage-blob` also not yet added to requirements.txt, consistent with `azure-ai-documentintelligence` also being absent despite being lazily imported by document_intelligence_client.py (pre-existing gap, not introduced here). Not pushed. |
-| | | | |
+| 2026-07-13 | Docker | Not Started → Done | Dockerfile + docker-compose.yml verified end-to-end |
+| 2026-07-13 | Rules doc | Not Started → Done | RULES.md with 11+ rules |
+| 2026-07-13 | Migration tooling | Not Started → Done | schema_version + numbered migrations runner |
+| 2026-07-14 | Azure OpenAI switch | Claude → gpt-5-mini | Vendor consolidation |
+| 2026-07-14 | Document Intelligence switch | gpt-5-mini → DocIntel | Speed |
+| 2026-07-15 | Phase 2: Disposition model | Not Started → Schema Done | exception_dispositions table |
+| 2026-07-15 | Phase 2: Blob client | Not Started → Client Built | src/storage/blob_client.py |
+| 2026-07-17 | Phase 3: Azure SQL | Not Started → Done | Shared production database |
+| 2026-07-17 | Phase 3: Job queue + worker | Not Started → Done | Single worker initially |
+| 2026-07-17 | Phase 3: Per-user logins | Not Started → Done | bcrypt auth |
+| 2026-07-17 | Phase 3: Reviewer dashboard | Not Started → Done | FastAPI + Jinja2 (not Streamlit) |
+| 2026-07-18 | Phase 4: Complete | Not Started → Done | EXTRACTION_INCOMPLETE, retry, config |
+| 2026-07-19 | Claude Sonnet 4.6 switch | DocIntel → Claude Sonnet 4.6 | Column-mapping quality |
+| 2026-07-19 | EXTRACTION_INCOMPLETE web UI | Done | Badge, detail page, fixes |
+| 2026-07-22 | Race condition fix | Done | dc7e64a — atomic job claiming |
+| 2026-07-22 | Azure SQL migration column support | Done | 8668960 |
+| 2026-07-22 | Pipeline subprocess SQLite bug | Done | 9c3e012 — explicit load_dotenv path |
+| 2026-07-22 | Exception resolution end-to-end | Verified | Accept tested, KPI + vendor card updated live |
+| 2026-07-22 | Web upload end-to-end | Verified | Full path confirmed working |
+| 2026-07-22 | Cosmetic fixes | Done | 88f383e |
+| 2026-07-23 | Review queue UI | Done | a4f9b23 |
+| 2026-07-23 | Exceptions page for summary-less vendors | Done | b8f2c19, f4c7b19 |
+| 2026-07-23 | Blob drop zone | Done | viverecondropzone + incoming-statements |
+| 2026-07-23 | /api/intake-trigger webhook | Done | 3a8f291 |
+| 2026-07-23 | Parallel worker pool (Step 5) | Done | e7f2c15 |
+| 2026-07-23 | Batch summary UI (Step 11) | Done | 2d4f891 |
+| 2026-07-23 | Match confidence scoring (Step 7) | Done | |
+| 2026-07-23 | Routing + aging (Step 8) | Done | |
+| 2026-07-23 | Bulk approve (Step 10) | Done | |
+| 2026-07-23 | datetime handling bug fix | Done | |

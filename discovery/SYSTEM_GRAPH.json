@@ -1,7 +1,7 @@
 {
   "system": "VIVE Reconciliation",
-  "generated": "2026-07-24",
-  "bce_version": "v2.6",
+  "generated": "2026-07-28",
+  "bce_version": "v2.7",
   "nodes": [
     { "id": "M-001", "type": "Module", "name": "auth router", "layer": "serving" },
     { "id": "M-002", "type": "Module", "name": "dashboard router", "layer": "serving" },
@@ -81,8 +81,9 @@
     { "id": "IC-16", "type": "Invariant", "statement": "Reprocessing the same document should never create duplicate reconciliation data", "scope": "GLOBAL" },
     { "id": "IC-17", "type": "Invariant", "statement": "Every registered AI provider client must implement generate_with_file(), not just the ABC's formal generate()", "scope": "GLOBAL" },
     { "id": "IC-18", "type": "Invariant", "statement": "The job pipeline depends on an exact, untyped string contract between the orchestrator's output and the worker's parser", "scope": "TASK-SCOPED" },
-    { "id": "IC-19", "type": "Invariant", "statement": "At most one job may be in PROCESSING status system-wide at any time", "scope": "GLOBAL" },
+    { "id": "IC-19", "type": "Invariant", "statement": "At most one job per distinct pdf_filename may be in PROCESSING status at any time", "scope": "GLOBAL" },
     { "id": "IC-20", "type": "Invariant", "statement": "No totals/summary row may be ingested as an invoice line", "scope": "GLOBAL" },
+    { "id": "IC-21", "type": "Invariant", "statement": "No more than VIVE_MAX_CONCURRENT_AI_CALLS Claude Sonnet extraction calls may run concurrently system-wide", "scope": "GLOBAL" },
 
     { "id": "R-001", "type": "RiskItem", "description": "Confidence gate defeated for 4/6 providers incl. active primary", "severity": "Critical" },
     { "id": "R-002", "type": "RiskItem", "description": "Missing totals-row filter in 3 LLM clients", "severity": "High" },
@@ -91,7 +92,10 @@
     { "id": "R-005", "type": "RiskItem", "description": "Fragile \"Statement ID:\" string contract", "severity": "Medium" },
     { "id": "R-006", "type": "RiskItem", "description": "Azure SQL schema provisioning outside tracked migrations", "severity": "Medium" },
     { "id": "R-007", "type": "RiskItem", "description": "Hardcoded fallback admin credential in auth.py", "severity": "High" },
-    { "id": "R-008", "type": "RiskItem", "description": "Hardcoded session secret in web/app.py", "severity": "High" }
+    { "id": "R-008", "type": "RiskItem", "description": "Hardcoded session secret in web/app.py", "severity": "High" },
+    { "id": "R-009", "type": "RiskItem", "description": "Event Grid webhook had no auth + container not pinned — fixed in code 2026-07-25, deployment (secret config on Event Grid subscription) still pending", "severity": "Fixed in code / deployment pending" },
+    { "id": "R-010", "type": "RiskItem", "description": "AI-call concurrency limiter permanently loses a slot if a process holding one is killed", "severity": "Medium" },
+    { "id": "R-011", "type": "RiskItem", "description": "friendly_dt() (web/deps.py) hardcodes IST for all displayed timestamps", "severity": "High" }
   ],
   "edges": [
     { "from": "M-009", "to": "M-013", "type": "CALLS" },
@@ -196,6 +200,7 @@
     { "from": "M-018", "to": "IC-18", "type": "OWNS" },
     { "from": "M-011", "to": "IC-19", "type": "OWNS" },
     { "from": "M-028", "to": "IC-20", "type": "OWNS" },
+    { "from": "M-047", "to": "IC-21", "type": "OWNS" },
 
     { "from": "M-038", "to": "IC-1", "type": "ENFORCES" },
     { "from": "M-014", "to": "IC-2", "type": "ENFORCES" },
@@ -221,12 +226,16 @@
     { "from": "M-014", "to": "IC-15", "type": "ENFORCES" },
     { "from": "M-021", "to": "IC-15", "type": "ENFORCES" },
     { "from": "M-022", "to": "IC-15", "type": "ENFORCES" },
+    { "from": "M-023", "to": "IC-15", "type": "ENFORCES" },
     { "from": "M-028", "to": "IC-15", "type": "ENFORCES" },
     { "from": "M-013", "to": "IC-18", "type": "ENFORCES" },
     { "from": "M-011", "to": "IC-19", "type": "ENFORCES" },
     { "from": "M-013", "to": "IC-19", "type": "ENFORCES" },
     { "from": "M-028", "to": "IC-20", "type": "ENFORCES" },
     { "from": "M-024", "to": "IC-20", "type": "ENFORCES" },
+    { "from": "M-023", "to": "IC-20", "type": "ENFORCES" },
+    { "from": "M-047", "to": "IC-21", "type": "ENFORCES" },
+    { "from": "M-023", "to": "IC-21", "type": "ENFORCES" },
 
     { "from": "M-023", "to": "IP-001", "type": "CALLS_INTEGRATION" },
     { "from": "M-022", "to": "IP-002", "type": "CALLS_INTEGRATION" },
@@ -283,6 +292,10 @@
     { "from": "R-006", "to": "M-035", "type": "AFFECTS" },
     { "from": "R-007", "to": "M-001", "type": "AFFECTS" },
     { "from": "R-008", "to": "M-009", "type": "AFFECTS" },
+    { "from": "R-009", "to": "M-046", "type": "AFFECTS" },
+    { "from": "R-009", "to": "M-039", "type": "AFFECTS" },
+    { "from": "R-010", "to": "M-047", "type": "AFFECTS" },
+    { "from": "R-011", "to": "M-010", "type": "AFFECTS" },
 
     { "from": "R-001", "to": "IC-15", "type": "THREATENS" },
     { "from": "R-002", "to": "IC-20", "type": "THREATENS" },
@@ -290,6 +303,7 @@
     { "from": "R-004", "to": "IC-19", "type": "THREATENS" },
     { "from": "R-005", "to": "IC-18", "type": "THREATENS" },
     { "from": "R-006", "to": "IC-12", "type": "THREATENS" },
+    { "from": "R-010", "to": "IC-21", "type": "THREATENS" },
 
     { "from": "M-014", "to": "E-001", "type": "OWNS_ENTITY" },
     { "from": "M-037", "to": "E-001", "type": "OWNS_ENTITY" },
