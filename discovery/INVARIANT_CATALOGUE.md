@@ -167,10 +167,10 @@ RULES.md's 13 numbered rules are the primary candidate source (this project's fu
 ## IC-15 — A row whose confidence falls below the configured threshold must be routed to human review, never silently pass
 **Scope:** GLOBAL in mechanism, but only genuinely protective for a subset of providers
 **Source:** Code-observed only — the general principle RULE-10 is one specific application of
-**Currently enforced:** PARTIAL — mechanically enforced for every row (the check always runs), but **functionally defeated for the four providers that fabricate a flat `0.75` confidence** (M-023, M-024, M-025, M-026), which always clears the `0.60` threshold regardless of actual extraction quality. Only genuinely protective where the input signal is real: M-021, M-022 (model-elicited), and M-028 (geometry/OCR-differentiated).
+**Currently enforced:** PARTIAL — mechanically enforced for every row (the check always runs). **Fixed for the active primary (M-023, Claude Sonnet) on 2026-07-24** — it now returns a genuine per-row confidence value instead of a fabricated constant (see `discovery/RISK_REGISTER.md` R-001). Still **functionally defeated for the three remaining providers that fabricate a flat `0.75` confidence** (M-024, M-025, M-026) — `GeminiClient`/`MistralClient` (M-025/M-026) remain broken but dormant; M-024 has no model self-assessment to elicit in the first place (a structurally different case). Genuinely protective for M-021, M-022 (model-elicited), M-023 (fixed 2026-07-24), and M-028 (geometry/OCR-differentiated).
 **Enforcement point:** `notebooks/01_document_intake.py:validate_invoice()` — `confidence_threshold` check.
 **Owning module:** M-014
-**Enforcing modules:** M-014 (mechanism), M-021, M-022, M-028 (providers supplying a genuine input)
+**Enforcing modules:** M-014 (mechanism), M-021, M-022, M-023 (fixed 2026-07-24), M-028 (providers supplying a genuine input)
 **Rationale:** This is this session's central finding, now formalized as an invariant: the code enforcing "low confidence never silently succeeds" is correct, but is starved of real signal for the majority of currently-registered extraction providers — including the active primary. See `discovery/components/A02_module_call_map.md` and `discovery/MODULE_CONTRACTS.md` for the full cross-provider audit. Priority RISK_REGISTER candidate at Session E.
 
 ---
@@ -233,10 +233,10 @@ RULES.md's 13 numbered rules are the primary candidate source (this project's fu
 ## IC-20 — No totals/summary row may be ingested as an invoice line
 **Scope:** GLOBAL in intent, currently enforced only on 2 of 5 extraction paths
 **Source:** Code-observed only — added at Stage 3 (2026-07-24), engineer-signed-off, per `discovery/ANNOTATION_CHECKLIST.md` P2-S3-001
-**Currently enforced:** PARTIAL — `pdfplumber_fallback.py` (M-028) explicitly filters rows whose invoice number contains `"total"`/`"balance"`/`"subtotal"` before they're written as invoice lines; `document_intelligence_client.py` (M-024) inherits this protection by importing the same helper directly. `ClaudeSonnetClient` (M-023, active primary), `GeminiClient` (M-025), and `MistralClient` (M-026) have no equivalent filter at either the prompt or code level.
-**Enforcement point:** `src/ai/pdfplumber_fallback.py:_extract_invoice_row()` (the only real enforcement); absent from `claude_sonnet_client.py`/`gemini_client.py`/`mistral_client.py`'s own `_row_to_invoice()`/`_rows_to_invoices()`.
+**Currently enforced:** PARTIAL — `pdfplumber_fallback.py` (M-028) explicitly filters rows whose invoice number contains `"total"`/`"balance"`/`"subtotal"` before they're written as invoice lines; `document_intelligence_client.py` (M-024) inherits this protection by importing the same helper directly. **`ClaudeSonnetClient` (M-023, active primary) received the same filter on 2026-07-24** — a new `_is_totals_row()` check ports the identical keyword logic (see `discovery/RISK_REGISTER.md` R-002). `GeminiClient` (M-025) and `MistralClient` (M-026) remain broken but dormant — no equivalent filter at either the prompt or code level.
+**Enforcement point:** `src/ai/pdfplumber_fallback.py:_extract_invoice_row()`, and, as of 2026-07-24, `src/ai/claude_sonnet_client.py:_is_totals_row()`; still absent from `gemini_client.py`/`mistral_client.py`'s own `_row_to_invoice()`/`_rows_to_invoices()`.
 **Owning module:** M-028
-**Enforcing modules:** M-028, M-024 (via import)
+**Enforcing modules:** M-028, M-024 (via import), M-023 (fixed 2026-07-24)
 **Rationale:** A vendor statement's grand-total or subtotal row typically carries a dollar amount and sometimes a number-like reference in the same position an invoice number would occupy — without this filter, such a row can be silently extracted and validated as if it were a real invoice, corrupting the statement total and the reconciliation itself. Formalizes the gap already tracked as `discovery/RISK_REGISTER.md` R-002 (High severity) and cross-referenced from IC-15's provider audit.
 
 ---

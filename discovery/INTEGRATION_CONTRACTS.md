@@ -20,8 +20,8 @@ Synthesized entirely from `discovery/TOPOLOGY.md` (A03), `discovery/MODULE_CONTR
 
 **Known divergences:**
 - **[RESOLVED — Stage 3, 2026-07-24, engineer sign-off (P1-S3-002), corrected across three passes]** Nine separate code/doc locations (RULES.md RULE-04; Implementation Context; `gemini_client.py`'s docstring; `client_factory.py`'s own inline comments; `ocr_extractor.py`; `document_understanding_engine.py`'s docstring; `04_generate_report.py`'s docstring; `mistral_client.py`'s docstring; and `claude_sonnet_client.py`'s own docstring) each named a *different* provider as primary — all stale relative to this being the code-confirmed, currently-resolved primary. All nine are now corrected; see `discovery/ANNOTATION_CHECKLIST.md` P1-S3-002 for the three-pass completion history.
-- `line_confidence` is fabricated (`ROW_CONFIDENCE = 0.75` constant), never elicited from the model — see IC-15, RISK_REGISTER R-001.
-- No totals-row exclusion in either the prompt or the code — see RISK_REGISTER R-002.
+- **[RESOLVED — 2026-07-24]** `line_confidence` was fabricated (`ROW_CONFIDENCE = 0.75` constant), never elicited from the model — fixed 2026-07-24: this client now elicits and parses a genuine per-row confidence value instead (see IC-15, `discovery/RISK_REGISTER.md` R-001).
+- **[RESOLVED — 2026-07-24]** No totals-row exclusion existed in either the prompt or the code — fixed 2026-07-24: a new `_is_totals_row()` check now filters these rows before they're ingested as invoice lines (see `discovery/RISK_REGISTER.md` R-002).
 
 **Gaps:** No document-level unreadable-page handling exists in this client's own prompt (unlike `VISION_PROMPT`'s explicit instruction for that case). `page_number` is hardcoded to `1` for every row — no per-page tracking exists for this whole-document-call architecture.
 
@@ -174,6 +174,24 @@ Synthesized entirely from `discovery/TOPOLOGY.md` (A03), `discovery/MODULE_CONTR
 **Known divergences:** Implementation Context's Progress Log (dated 2026-07-15) states this is "not wired into the pipeline yet" — confirmed false; the actual call happens inside `notebooks/01_document_intake.py`'s `run_intake()` Step 8.
 
 **Gaps:** No reader of Blob Storage exists anywhere in the traced codebase — archival is write-only from the pipeline's perspective; nothing currently retrieves an archived PDF back for display or audit.
+
+---
+
+## IP-010 — Azure Event Grid (auto-intake webhook, `viverecondropzone` storage account / `incoming-statements` container) — added 2026-07-25, code-complete but not yet deployed
+
+**Called by:** M-046 (inbound HTTP POST from Azure Event Grid, not called by our code)
+
+**What the application promises to send:** This is an inbound trigger — Event Grid initiates, not our code. On a valid, authorized delivery, M-046 calls M-039 (`BlobStorageClient`, a different container/connection-string than IP-009) to pull the referenced PDF down, then queues it as a job identically to a manual upload, tagged `submitted_by="event-grid"` with a shared `batch_id` per delivery (see M-045).
+
+**What the application assumes it will receive:** Either a one-time Event Grid `SubscriptionValidationEvent` or a batch of `Microsoft.Storage.BlobCreated` events.
+
+**Auth mechanism:** As of 2026-07-25, code-complete but not yet deployed: a shared secret (`VIVE_EVENTGRID_WEBHOOK_SECRET`), checked via constant-time comparison against a static delivery header, before anything else in the handler runs. Until this session, there was no authentication at all — see `discovery/RISK_REGISTER.md` R-009 for the full history and the still-open deployment action item (secret not yet generated/configured on the actual Event Grid subscription — blocked on Azure permissions).
+
+**Error handling assumptions:** The download side is hard-pinned to the configured dropzone container regardless of what container the inbound event's blob URL names (see M-039's rewritten contract) — previously the URL's own container segment was trusted, a second finding fixed alongside the auth gap. A hard cap of 100 events per delivery was also added (no cap existed before).
+
+**Known divergences:** None recorded — this integration point was added in the same 2026-07-25 pass that documents it; no stale prior claims exist about it.
+
+**Gaps:** None beyond what's captured above.
 
 ---
 

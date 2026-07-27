@@ -16,7 +16,7 @@ Updated: 2026-07-27
 
 Any row whose extraction confidence falls below the configured threshold (`0.60`) must be routed to human review — never silently pass into Bronze/Silver as if it were a fully-trusted extraction. Rows that fail this gate are written to `validation_document_review_queue` with `rejection_category = MISSING_MANDATORY_FIELD` or handled via the row-skip path depending on failure mode.
 
-**Current enforcement status:** PARTIAL. The mechanical check always runs (`notebooks/01_document_intake.py:validate_invoice()`). Claude Sonnet 4.6 (active primary) still returns a hardcoded `0.75` per-row confidence — always clears the `0.60` gate regardless of actual extraction quality. `GeminiClient` and `MistralClient` (both dormant) also hardcode `0.75`. `match_confidence` (a separate field on `gold_matched_invoices` and `gold_exceptions`) is now genuine, but that is a different signal from extraction confidence.
+**Current enforcement status:** PARTIAL. The mechanical check always runs (`notebooks/01_document_intake.py:validate_invoice()`). Claude Sonnet 4.6 (active primary) was fixed 2026-07-24 — it now returns a genuine per-row confidence value instead of the old hardcoded `0.75` constant. `GeminiClient` and `MistralClient` remain broken but dormant, still hardcoding `0.75`. `match_confidence` (a separate field on `gold_matched_invoices` and `gold_exceptions`) is now genuine, but that is a different signal from extraction confidence.
 
 **This is never negotiable.**
 

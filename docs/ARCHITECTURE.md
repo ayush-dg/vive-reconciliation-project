@@ -124,6 +124,7 @@ Three concurrent worker threads start when the app starts (configurable via `VIV
 - `incoming-statements` container as the drop zone
 - `POST /api/intake-trigger` webhook — handles Event Grid validation handshake and BlobCreated events, downloads PDF, creates job with `batch_id`
 - `batch_id` column on `jobs` table
+- **Security fix (2026-07-25):** webhook was unauthenticated end-to-end until this date; now fixed in code (shared secret, pinned container, event-count cap) — see `discovery/RISK_REGISTER.md` R-009
 
 **Blocked:**
 - Event Grid System Topic creation requires Azure RBAC permissions not held by current account. Reported to Ashrith.
@@ -162,5 +163,5 @@ Three concurrent worker threads start when the app starts (configurable via `VIV
 | App Service deployment | Blocked on Ashrith's subscription quota. Files are ready. |
 | Event Grid System Topic | Blocked on Azure RBAC permissions. |
 | Stale job requeue | A job stuck PROCESSING past a timeout is never automatically re-queued. Tracked in original RISK_REGISTER as R-004. Now narrower — only stalls that one filename, not the whole queue. |
-| Per-row genuine confidence from Claude Sonnet | Claude Sonnet currently returns 0.75 for all rows. Match confidence (a separate field) is now genuine; extraction confidence is still hardcoded. |
+| Per-row genuine confidence from Claude Sonnet | Fixed 2026-07-24 — Claude Sonnet now returns genuine per-row confidence (see `discovery/RISK_REGISTER.md` R-001). Gemini/Mistral remain broken (still hardcoded at 0.75) but dormant. |
 | GeminiClient/MistralClient confidence hardcoding | Both dormant — not in active chain. Still hardcode 0.75 confidence and lack totals-row filtering. Not a live risk. |

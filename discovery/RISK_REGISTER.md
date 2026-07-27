@@ -203,6 +203,26 @@ Verified: `tests/test_blob_client.py` and `tests/test_intake_trigger.py` both pa
 
 ---
 
+## R-011 — `friendly_dt()` (`web/deps.py`) hardcodes IST for all displayed timestamps
+
+**Severity:** High — real, confirmed, user-facing; not theoretical.
+
+**Description:** Every timestamp rendered through the `friendly_dt` Jinja2 filter converts it to a hardcoded `IST = timezone(timedelta(hours=5, minutes=30))` before display, regardless of where the AP team viewing the page actually is. Storage itself is correct — every timestamp is written as UTC (`datetime.now(timezone.utc).isoformat()`, per `queries.py`) — only the display layer is wrong.
+
+**How this was surfaced:** During the 2026-07-27 Stage 3 reconciliation, via direct source read (`web/deps.py:118-137`) and a template call-site trace — not from a user-reported incident. This is `discovery/MODULE_CONTRACTS.md`'s cross-cutting finding #8 ("`web/deps.py`'s (M-010) `friendly_dt()` hardcodes India Standard Time for all displayed timestamps — confirmed by source, not yet confirmed against the actual AP team's location; flag for engineer confirmation at Session D/E, not assumed to be a defect"), now formally resolved into this risk entry rather than left dangling.
+
+**Threatened invariant:** None formal — no IC-N currently covers display-timezone correctness.
+
+**Affected modules:** M-010 (`web/deps.py`)
+
+**Mitigation (current):** None.
+
+**Recommended action:** Make the display timezone configurable via an env var (e.g. `VIVE_DISPLAY_TIMEZONE`, default US Eastern given VIVE Collision's Northeast US location) rather than hardcoding a replacement timezone.
+
+**Status:** Open — not fixed. This entry is a paperwork/tracking step only; no code change made.
+
+---
+
 ## Summary Table
 
 | Risk ID | Description | Severity | Threatened Invariant | Affected Modules |
@@ -217,5 +237,6 @@ Verified: `tests/test_blob_client.py` and `tests/test_intake_trigger.py` both pa
 | R-008 | Hardcoded session secret in web/app.py | High | — (candidate for future invariant) | M-009 |
 | R-009 | Event Grid webhook had no auth + container not pinned — fixed in code 2026-07-25, deployment (secret config on Event Grid subscription) still pending | Fixed in code / deployment pending | — (candidate for future invariant) | M-046, M-039 |
 | R-010 | AI-call concurrency limiter permanently loses a slot if a process holding one is killed | Medium | IC-21 | M-047 |
+| R-011 | friendly_dt() (web/deps.py) hardcodes IST for all displayed timestamps | High | — (no formal invariant) | M-010 |
 
-Session E Part 2 (RISK_REGISTER.md) complete, plus Stage 3 additions (R-007, R-008) per engineer sign-off, 2026-07-24, plus the 2026-07-25 scoped refresh additions (R-009, R-010, and the R-004 blast-radius update note) covering the worker pool, Event Grid auto-intake, and AI-call concurrency limiter built since. All P1/P2 Stage 3 items are now closed — see `discovery/ANNOTATION_CHECKLIST.md`.
+Session E Part 2 (RISK_REGISTER.md) complete, plus Stage 3 additions (R-007, R-008) per engineer sign-off, 2026-07-24, plus the 2026-07-25 scoped refresh additions (R-009, R-010, and the R-004 blast-radius update note) covering the worker pool, Event Grid auto-intake, and AI-call concurrency limiter built since, plus the 2026-07-27 Stage 3 reconciliation addition (R-011, resolving MODULE_CONTRACTS.md cross-cutting finding #8). All P1/P2 Stage 3 items are now closed — see `discovery/ANNOTATION_CHECKLIST.md`; the 2026-07-27 Stage 3 second pass (see ANNOTATION_CHECKLIST.md) resolved P1-S3-006/007/008 and added R-011, which remains OPEN pending a code fix.

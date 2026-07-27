@@ -253,3 +253,181 @@ Consistency check: PASS — 0 failures (1 N/A, justified)
 **Stage 3 is complete.** All 5 P1 items and both P2 items carry a direct, explicit engineer decision (accept-as-tracked-risk, sign-off-on-fix, or sign-off-on-new-entry), recorded verbatim in each item's "Engineer decision" line above, in the Resolution Log, and reflected in the underlying artifacts (RISK_REGISTER.md R-001/R-004/R-007/R-008, RULES.md RULE-04/07/08, `docs/VIVE_Implementation_Context.md` Section 3, INVARIANT_CATALOGUE.md IC-20, and the 4 corrected source-code docstrings/comments). Zero P1/P2 items remain OPEN. The mandatory Stage 3 Close-Out step (Graph Construction — `discovery/SYSTEM_GRAPH.json`) proceeds next.
 
 Engineer sign-off: Confirmed in conversation, 2026-07-24 — all 7 Stage 3 items reviewed and decided as recorded above.
+
+---
+
+## Stage 3 — Second Pass, 2026-07-27 (Post-Scoped-Refresh Reconciliation)
+
+> **Forward-pointer note (does not alter the 2026-07-24 record above):** the
+> 2026-07-25 scoped refresh (worker pool, Event Grid auto-intake, match confidence
+> scoring, IC-21) introduced new cross-artifact drift that the original Stage 3 pass
+> could not have caught, since it predates that refresh by a day. This second pass
+> covers only findings from re-running Checks 0/1/4 against the current artifact set
+> as of 2026-07-27 — Checks 2, 3, 5, and 6 were not re-run in full this pass and
+> should not be assumed clean beyond what's stated below.
+
+**Artifacts read this pass:** `TOPOLOGY.md`, `MODULE_CONTRACTS.md`,
+`INTEGRATION_CONTRACTS.md`, `INVARIANT_CATALOGUE.md`, `RISK_REGISTER.md`,
+`docs/INVARIANTS.md`, `docs/ARCHITECTURE.md` — all as of their 2026-07-27 state.
+
+### CHECK 0 — Schema Validation Gate (re-run, scoped to 2026-07-25 additions)
+
+IP-010 (Event Grid integration point) is correctly ID-formatted and registered in
+`ID_REGISTRY.md` and `TOPOLOGY.md`'s A03 — but was **entirely absent** from
+`INTEGRATION_CONTRACTS.md`, which had no addendum at all for the 2026-07-25 refresh
+unlike the other four living artifacts. Not a format violation (no prose name
+substituted for a missing ID) — a completeness gap, handled under Check 1 below,
+not re-classified as SCHEMA_VIOLATION.
+
+**PASS with one completeness note — proceeding to Check 1.**
+
+### CHECK 1 — Cross-Artifact Contradiction Detection (re-run against 2026-07-25 additions)
+
+- **TOPOLOGY.md vs INTEGRATION_CONTRACTS.md** — IP-010 present in one, absent from
+  the other. → **P1-S3-006**
+- **RISK_REGISTER.md vs {docs/INVARIANTS.md, docs/ARCHITECTURE.md,
+  INVARIANT_CATALOGUE.md IC-15, MODULE_CONTRACTS.md finding #1}** — R-001's fix note
+  (Claude Sonnet confidence fabrication, fixed 2026-07-24) was never propagated to
+  four other locations, all of which still described the bug as currently active.
+  → **P1-S3-007**
+- **RISK_REGISTER.md vs INVARIANT_CATALOGUE.md IC-20** — R-002's fix note (Claude
+  Sonnet totals-row filter, fixed 2026-07-24) was never propagated to IC-20, which
+  still listed M-023 among the unfiltered clients. → **P1-S3-008**
+
+### CHECK 4 — Missing Invariant Candidates (partial re-check)
+
+- MODULE_CONTRACTS.md's cross-cutting finding #8 (`friendly_dt()`'s hardcoded IST,
+  M-010) was flagged during the original extraction for "engineer confirmation at
+  Session D/E" and never followed up — the same completeness-gap pattern as the
+  original P2-S3-002, not caught the first time. → **P2-S3-003**
+
+---
+
+### P1-S3-006 · IP-010 missing from INTEGRATION_CONTRACTS.md ([TOPOLOGY, INTEGRATION_CONTRACTS])
+**Severity:** P1
+**Type:** CONTRADICTION
+**Source:** STAGE3_REVIEW
+**Surfaced by:** CD
+**Artifact:** TOPOLOGY (A03); INTEGRATION_CONTRACTS
+**Section:** A03 IP-010 row; INTEGRATION_CONTRACTS.md (entire file — no addendum existed)
+**Observation:** TOPOLOGY.md's 2026-07-25 addendum registers IP-010 (Azure Event
+Grid webhook) with a full A03 record. INTEGRATION_CONTRACTS.md was never updated in
+that refresh — no IP-010 entry, no addendum header, unlike the other four living
+artifacts.
+**Risk for planning:** A reader consulting INTEGRATION_CONTRACTS.md alone would not
+know this integration point exists at all.
+**Recommended action:** Add an IP-010 entry to INTEGRATION_CONTRACTS.md, sourced
+from TOPOLOGY.md's A03 row, matching the file's existing entry format.
+**Engineer action required:** Approve the addition.
+**Engineer decision (2026-07-28):** Approved — IP-010 entry added to
+INTEGRATION_CONTRACTS.md.
+**STATUS:** RESOLVED — IP-010 entry added.
+
+---
+
+### P1-S3-007 · Claude Sonnet confidence fix not propagated to four locations ([INVARIANTS, ARCHITECTURE, INVARIANT_CATALOGUE, MODULE_CONTRACTS])
+**Severity:** P1
+**Type:** CONTRADICTION
+**Source:** STAGE3_REVIEW
+**Surfaced by:** CD
+**Artifact:** docs/INVARIANTS.md (INV-01); docs/ARCHITECTURE.md (§8); INVARIANT_CATALOGUE (IC-15); MODULE_CONTRACTS (cross-cutting finding #1)
+**Section:** As listed
+**Observation:** RISK_REGISTER.md's R-001 documents, with verified evidence
+(cross-checked against 3 real sample PDFs), that Claude Sonnet's fabricated `0.75`
+confidence constant was fixed 2026-07-24. Four other artifacts still stated the bug
+as currently active — the inverse of a false-completeness claim: a false-brokenness
+claim, capable of causing someone to distrust a working signal or duplicate
+already-done work.
+**Risk for planning:** Anyone consulting these four locations independently of
+RISK_REGISTER.md would reasonably conclude the confidence gate is still broken for
+the active extraction provider.
+**Recommended action:** Update all four locations to state the fix, consistent
+with R-001's evidence; preserve the fact that Gemini/Mistral remain broken but
+dormant.
+**Engineer action required:** Approve the four updates.
+**Engineer decision (2026-07-28):** Approved — all four locations updated.
+**STATUS:** RESOLVED — all four locations corrected.
+
+---
+
+### P1-S3-008 · Claude Sonnet totals-row fix not propagated to IC-20 ([INVARIANT_CATALOGUE])
+**Severity:** P1
+**Type:** CONTRADICTION
+**Source:** STAGE3_REVIEW
+**Surfaced by:** CD
+**Artifact:** INVARIANT_CATALOGUE
+**Section:** IC-20
+**Observation:** RISK_REGISTER.md's R-002 documents Claude Sonnet's totals-row
+filter fix (`_is_totals_row()`, added 2026-07-24). IC-20 still listed M-023 among
+the three clients with no equivalent filter.
+**Risk for planning:** Same class of risk as P1-S3-007, narrower scope.
+**Recommended action:** Update IC-20's "Currently enforced," "Enforcement point,"
+and "Enforcing modules" fields to reflect the fix.
+**Engineer action required:** Approve the update.
+**Engineer decision (2026-07-28):** Approved — IC-20 updated.
+**STATUS:** RESOLVED — IC-20 corrected.
+
+---
+
+### P2-S3-003 · friendly_dt() hardcodes IST for all displayed timestamps ([MODULE_CONTRACTS, RISK_REGISTER])
+**Severity:** P2
+**Type:** OPEN_QUESTION → escalated to tracked risk (see below)
+**Source:** STAGE3_REVIEW
+**Surfaced by:** CD
+**Artifact:** MODULE_CONTRACTS (cross-cutting finding #8); RISK_REGISTER (R-011, new)
+**Section:** Cross-cutting finding #8; R-011
+**Observation:** `web/deps.py:friendly_dt()` hardcodes IST for every displayed
+timestamp system-wide. Storage is correctly UTC throughout — confirmed via direct
+source read (`web/deps.py:118-137`) and a template call-site trace (6 templates
+affected: home, batches, jobs_history, reports, report_detail, users). VIVE
+Collision operates in the Northeast US — every displayed timestamp is
+approximately 9.5-10.5 hours off from the AP team's actual local time, depending
+on DST.
+**Risk for planning:** Not cosmetic — a real operational-trust risk. Staff could
+misjudge whether the pipeline is current or lagging based on incorrect displayed
+times.
+**Recommended action:** Make the display timezone configurable via an env var
+(e.g. `VIVE_DISPLAY_TIMEZONE`, default US Eastern) rather than hardcoding a
+replacement timezone. This is a real code fix, not a documentation correction —
+deliberately not made during this reconciliation pass.
+**Engineer action required:** Decide whether to fix now or track for a future
+sprint.
+**Engineer decision (2026-07-28):** Tracked as R-011 in RISK_REGISTER.md
+(Severity: High) rather than fixed immediately — deliberately deferred, code
+change requires a design decision (timezone-config approach) better handled as
+its own task than folded into a documentation-reconciliation session.
+**STATUS:** PARTIALLY_RESOLVED — tracking/documentation complete (R-011 added);
+the underlying code defect remains open, tracked in RISK_REGISTER.md, not yet
+scheduled.
+
+---
+
+## Resolution Log — 2026-07-27 Second Pass Additions
+
+| Item ID | Resolution type | Resolved by | Date | Evidence |
+|---|---|---|---|---|
+| P1-S3-006 (IP-010 missing) | RESOLVED-ANNOTATION | Engineer | 2026-07-28 | IP-010 entry added to INTEGRATION_CONTRACTS.md. |
+| P1-S3-007 (confidence fix not propagated) | RESOLVED-ANNOTATION | Engineer | 2026-07-28 | All four locations (docs/INVARIANTS.md, docs/ARCHITECTURE.md, IC-15, MODULE_CONTRACTS finding #1) corrected. |
+| P1-S3-008 (totals-row fix not propagated) | RESOLVED-ANNOTATION | Engineer | 2026-07-28 | IC-20 corrected. |
+| P2-S3-003 (friendly_dt IST hardcoding) | RESOLVED-INFORMATIONAL (tracking only — code fix remains open) | Engineer | 2026-07-28 | R-011 added to RISK_REGISTER.md; code itself not modified this pass. |
+
+---
+
+## Stage 3 Completeness Summary — 2026-07-27, Second Pass
+Produced by: BCE Stage 3 (CD)
+
+P1 items: 3 — all RESOLVED (P1-S3-006, 007, 008)
+P2 items: 1 — PARTIALLY_RESOLVED (P2-S3-003 — tracking done, code fix still open)
+P3 items: 0
+Total items this pass: 4
+
+**This second pass does not supersede or re-open the 2026-07-24 Stage 3 close-out
+above.** It is an independent reconciliation triggered by the 2026-07-25 scoped
+refresh's drift, run 2026-07-27/28. Checks 2, 3, 5, and 6 were not re-run in full
+this pass — do not assume they remain clean without re-verification at the next
+full Stage 3 pass.
+
+**One item remains genuinely open going forward: P2-S3-003 / R-011 (friendly_dt IST
+hardcoding) — tracked, not fixed.** Everything else from this pass is closed.
+
+Engineer sign-off: Confirmed in conversation, 2026-07-28.
