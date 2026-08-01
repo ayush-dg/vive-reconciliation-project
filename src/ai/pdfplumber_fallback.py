@@ -196,6 +196,18 @@ def _find_header_row(table):
     return None, 1
 
 
+# A standalone "ref"/"reference" word (e.g. "Txn Ref", "Reference #") is as
+# valid an invoice-identifier header as "Invoice #" -- claude_sonnet_client.py's
+# own fallback column mapping already treats "reference" as a synonym
+# (INVOICE_NUMBER_KEYWORDS); this deterministic fallback didn't, which left
+# it unable to recognize a real, plausible header wording. Matched as a
+# whole word (not a bare substring) so it doesn't fire on unrelated words
+# like "preferred", and excluded whenever "date" is also present so a
+# "Reference Date" column still falls through to the date branch below
+# instead of being misread as the invoice identifier.
+_REF_WORD_RE = re.compile(r"\bref\b")
+
+
 def _map_columns(header_row):
     """Map column header strings to their indices.
 
@@ -209,7 +221,12 @@ def _map_columns(header_row):
             continue
         cell_lower = str(cell).lower().strip()
 
-        if any(kw in cell_lower for kw in ["invoice #", "invoice no", "invoice number", "inv #", "inv no"]):
+        is_invoice_number_header = "date" not in cell_lower and (
+            any(kw in cell_lower for kw in
+                ["invoice #", "invoice no", "invoice number", "inv #", "inv no", "reference"])
+            or _REF_WORD_RE.search(cell_lower)
+        )
+        if is_invoice_number_header:
             col_map["invoice_number"] = i
         elif "invoice" in cell_lower and "date" in cell_lower:
             col_map["invoice_date"] = i
@@ -329,9 +346,19 @@ def _ocr_text_to_pseudo_table(ocr_text: str) -> list:
 
     Splits each non-blank line on runs of 2+ whitespace characters — a
     standard heuristic for column-aligned text from Tesseract's --psm 6
-    mode. Best-effort: less reliable than geometry-based extraction, which
-    is why OCR-derived rows get a lower line_confidence (see
-    extract_with_pdfplumber).
+    mode, when the source table had wide enough visual gaps between columns
+    for that spacing to survive OCR. Some documents' OCR output collapses
+    those gaps down to a single space instead (columns still line up
+    visually in the scanned image, but Tesseract's text output doesn't
+    preserve the extra whitespace) — when that leaves an entire line
+    un-split (one cell), fall back to splitting on any whitespace run for
+    that line specifically. Scoped to exactly that degenerate case so a
+    real multi-word value a 2+-space split correctly kept together (e.g. a
+    free-text description) isn't shredded into one cell per word on a
+    document where 2+-space splitting is already working.
+
+    Best-effort: less reliable than geometry-based extraction, which is why
+    OCR-derived rows get a lower line_confidence (see extract_with_pdfplumber).
     """
     rows = []
     for line in ocr_text.split("\n"):
@@ -339,6 +366,8 @@ def _ocr_text_to_pseudo_table(ocr_text: str) -> list:
         if not line:
             continue
         cells = re.split(r'\s{2,}', line)
+        if len(cells) == 1 and len(cells[0].split()) > 1:
+            cells = cells[0].split()
         rows.append(cells)
     return rows
 
