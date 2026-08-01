@@ -72,7 +72,7 @@ Chain history:
 
 **Claude Haiku 4.5** is used only for the optional `--explain` narrative step (explanation_service.py), hardcoded and independent of provider_chain.
 
-Known gap: Claude Sonnet still returns hardcoded 0.75 per-row extraction confidence (not genuine). `match_confidence` (separate field) is now genuine.
+Fixed 2026-07-24: Claude Sonnet now returns a genuine, model-elicited per-row extraction confidence (previously a hardcoded 0.75 — see `discovery/RISK_REGISTER.md` R-001). `match_confidence` (separate field) is also genuine. Gemini/Mistral (both dormant) still hardcode 0.75.
 
 ---
 
@@ -151,7 +151,7 @@ Known gap: Claude Sonnet still returns hardcoded 0.75 per-row extraction confide
 | Email alerts (Step 9) | Email provider not decided — SendGrid vs Azure Communication Services vs SMTP |
 | Tekion PDF vs Azure SQL | Never run through full pipeline against live database |
 | Fault isolation (Step 6) | Not built — one failed file in batch could affect others |
-| Genuine per-row extraction confidence | Claude Sonnet still returns hardcoded 0.75 |
+| Genuine per-row extraction confidence | Fixed 2026-07-24 for Claude Sonnet (active primary). Gemini/Mistral (dormant) still hardcode 0.75 |
 | Stale job requeue | Hung job for a given filename stalls that filename's future jobs — no auto-requeue |
 | NetSuite integration | Needs VIVE API credentials — separate future project |
 

@@ -76,14 +76,50 @@ registered in `provider_config_paths` as alternate/fallback options,
 directly accessible via `get_ai_client()`, but are not part of the active
 chain.
 
-**Known gap, tracked separately (see `discovery/RISK_REGISTER.md` R-001,
-`discovery/INVARIANT_CATALOGUE.md` IC-15):** unlike the Document
-Intelligence and gpt-5-mini eras, `ClaudeSonnetClient` does not request or
-elicit a genuine per-row confidence value — `line_confidence` is a
-hardcoded `0.75` constant, which always clears the `0.60` human-review
-threshold regardless of actual extraction quality. Accepted as a known
-risk as of 2026-07-24 (Critical severity, tracked against Sprint 1
-planning), not fixed as part of this rule update.
+**Per-row confidence is genuine, not hardcoded (fixed 2026-07-24 for the
+active primary — see `discovery/RISK_REGISTER.md` R-001,
+`discovery/components/C10_claude_sonnet_client.md`):**
+`ClaudeSonnetClient`'s `EXTRACTION_PROMPT` explicitly asks the model for a
+per-row `"confidence"` field (0.0-1.0) with calibration guidance, and
+`_row_to_invoice()` parses it via `_parse_confidence()` — `line_confidence`
+is the model's own self-assessment, not the `ROW_CONFIDENCE = 0.75`
+constant (that constant now feeds only the document-level
+`extraction_confidence.overall` field, never per-row `line_confidence`).
+Confirmed with live data: pre-fix statements (before 2026-07-24) show
+`extraction_confidence` exactly `0.75` with zero variance across every row
+(e.g. `STMT-6C0D52DA`, 202/202 rows); post-fix statements show genuine
+variance — `KSI Noakers 053126.pdf` (`STMT-928FF303`, 2026-08-01) came back
+with 4 distinct confidence values across 69 rows (0.91-0.95), and a
+genuinely degraded scanned document (`Very_Dirty_Scanned_Reconciliation.pdf`)
+came back at 0.35-0.60 across 132 rows — a real, model-elicited signal that
+discriminates by document difficulty rather than a habitual default. If the
+model omits the field or returns something unparseable/out-of-range,
+`_parse_confidence()` falls back to `FALLBACK_LINE_CONFIDENCE = 0.40`
+(below the `0.60` threshold), so an untrustworthy signal still routes to
+human review per RULE-10. `GeminiClient` and `MistralClient` (both dormant,
+not in the active provider chain) still hardcode `ROW_CONFIDENCE = 0.75`
+for `line_confidence` — this fix applies only to the active primary.
+
+**Superseded text (kept for history — fabricated-confidence era, accurate
+until 2026-07-24):** "**Known gap, tracked separately (see
+`discovery/RISK_REGISTER.md` R-001, `discovery/INVARIANT_CATALOGUE.md`
+IC-15):** unlike the Document Intelligence and gpt-5-mini eras,
+`ClaudeSonnetClient` does not request or elicit a genuine per-row
+confidence value — `line_confidence` is a hardcoded `0.75` constant, which
+always clears the `0.60` human-review threshold regardless of actual
+extraction quality. Accepted as a known risk as of 2026-07-24 (Critical
+severity, tracked against Sprint 1 planning), not fixed as part of this
+rule update."
+
+**Corrected 2026-08-01** (pipeline verification follow-up,
+`PIPELINE_VERIFICATION_REPORT.md` Finding 7): the gap above was fixed the
+same day it was logged (2026-07-24, per `discovery/RISK_REGISTER.md` R-001)
+but this rule's wording was never updated afterward, so it kept describing
+already-fixed code as broken for over a week. Caught when a real end-to-end
+pipeline run showed genuine per-row confidence variance (0.91-0.95 across
+69 rows) rather than a flat constant. `docs/VIVE_Implementation_Context.md`
+Section 3 and its Section 7 open-items table had the identical stale claim
+and were corrected in the same pass.
 
 **Superseded text (kept for history — Document Intelligence era):** "No
 other AI providers in the extraction chain. Primary: Azure Document
