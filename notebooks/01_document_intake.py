@@ -52,7 +52,9 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-from src.ai.document_understanding_engine import DocumentUnderstandingEngine, extract_pdf_text
+from src.ai.document_understanding_engine import (
+    CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
+)
 from src.lakehouse.connection import execute_sql, execute_query
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
@@ -814,10 +816,14 @@ if __name__ == "__main__":
     parser.add_argument("--period", help="Statement period override, e.g. 2026-05")
     args = parser.parse_args()
 
-    result = run_intake(
-        pdf_path=args.pdf,
-        statement_id=args.statement_id,
-        statement_period=args.period,
-    )
+    try:
+        result = run_intake(
+            pdf_path=args.pdf,
+            statement_id=args.statement_id,
+            statement_period=args.period,
+        )
+    except CorruptedPDFError as e:
+        print(f"\nIntake failed — {e}")
+        sys.exit(1)
 
     print(f"Done. Statement ID for next steps: {result['statement_id']}")

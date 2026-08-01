@@ -43,6 +43,13 @@ from src.ai import client_factory
 from src.ai.pdfplumber_fallback import extract_with_pdfplumber
 from src.ai.audit_logger import log_ai_call
 
+
+class CorruptedPDFError(Exception):
+    """Raised by extract_pdf_text() when the file can't be opened as a PDF
+    at all (invalid structure, not just a hard-to-parse layout) — a
+    corrupted upload or a non-PDF file saved with a .pdf extension."""
+
+
 VISION_PROMPT = """You are a financial document understanding system.
 
 Analyze this vendor statement PDF and extract ALL invoice/line-item data.
@@ -240,13 +247,24 @@ def extract_pdf_text(pdf_path: str):
 
     Still used by notebooks/01_document_intake.py for its own char/page-count
     logging, ahead of calling DocumentUnderstandingEngine.understand().
+
+    Raises CorruptedPDFError (not the raw pdfminer/pdfplumber exception) if
+    the file can't be opened as a PDF at all — see that class's docstring.
     """
     import pdfplumber
+    from pdfplumber.utils.exceptions import PdfminerException
+    from pdfminer.pdfparser import PDFSyntaxError
+
     pages_text = []
-    with pdfplumber.open(pdf_path) as pdf:
-        page_count = len(pdf.pages)
-        for i, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
-            pages_text.append(f"--- PAGE {i} ---\n{text}")
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            page_count = len(pdf.pages)
+            for i, page in enumerate(pdf.pages, start=1):
+                text = page.extract_text() or ""
+                pages_text.append(f"--- PAGE {i} ---\n{text}")
+    except (PdfminerException, PDFSyntaxError):
+        raise CorruptedPDFError(
+            "File is not a valid PDF or is corrupted — could not be opened"
+        ) from None
 
     return "\n\n".join(pages_text), page_count

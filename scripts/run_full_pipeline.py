@@ -38,6 +38,8 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+from src.ai.document_understanding_engine import CorruptedPDFError
+
 
 def load_notebook(name, relative_path):
     """
@@ -71,11 +73,18 @@ def main():
     # Phase 1: Document Intake
     print(f"\n>>> PHASE 1: Document Intake")
     intake_mod = load_notebook("intake", "notebooks/01_document_intake.py")
-    intake_result = intake_mod.run_intake(
-        pdf_path=args.pdf,
-        statement_id=args.statement_id,
-        statement_period=args.period,
-    )
+    try:
+        intake_result = intake_mod.run_intake(
+            pdf_path=args.pdf,
+            statement_id=args.statement_id,
+            statement_period=args.period,
+        )
+    except CorruptedPDFError as e:
+        print(f"\n{'#'*65}")
+        print(f"  PIPELINE FAILED — {e}")
+        print(f"  PDF: {args.pdf}")
+        print(f"{'#'*65}\n")
+        sys.exit(1)
     statement_id = intake_result["statement_id"]
     print(f"    Statement ID: {statement_id}")
 

@@ -6,7 +6,9 @@ No network calls, no real PDFs.
 """
 
 import os
+import sqlite3
 import sys
+import tempfile
 import unittest
 import json
 
@@ -287,6 +289,79 @@ class TestDocumentUnderstandingEngine(unittest.TestCase):
         intake = self._load_intake_module()
         row = {"invoice_number": "INV-001", "outstanding_amount": 100.0}
         self.assertEqual(intake.get_skip_reason(row), "")
+
+
+class TestCorruptedPDFHandling(unittest.TestCase):
+    """A corrupted/non-PDF file must fail with a clean, specific error —
+    not a raw pdfminer/pdfplumber traceback — and must never reach Bronze.
+    See PIPELINE_VERIFICATION_REPORT.md Finding 5."""
+
+    SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "migrations", "001_initial_schema.sql")
+
+    def _make_garbage_pdf(self):
+        f = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        f.write(b"This is not a valid PDF file at all, just plain garbage bytes." * 10)
+        f.close()
+        self.addCleanup(os.remove, f.name)
+        return f.name
+
+    def test_extract_pdf_text_raises_corrupted_pdf_error_not_raw_exception(self):
+        from src.ai.document_understanding_engine import CorruptedPDFError, extract_pdf_text
+
+        garbage_path = self._make_garbage_pdf()
+        with self.assertRaises(CorruptedPDFError) as ctx:
+            extract_pdf_text(garbage_path)
+        self.assertEqual(
+            str(ctx.exception),
+            "File is not a valid PDF or is corrupted — could not be opened",
+        )
+
+    def test_run_intake_fails_cleanly_and_writes_nothing_to_bronze(self):
+        """Real intake path (run_intake(), same code the worker calls),
+        against a real (in-memory) SQLite DB — not just the isolated
+        extract_pdf_text() unit above."""
+        from src.ai.document_understanding_engine import CorruptedPDFError
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        with open(self.SCHEMA_PATH) as f:
+            conn.executescript(f.read())
+
+        def execute_sql(sql, params=None):
+            cur = conn.execute(sql, params or [])
+            conn.commit()
+            return cur
+
+        def execute_query(sql, params=None):
+            cur = conn.execute(sql, params or [])
+            return [dict(row) for row in cur.fetchall()]
+
+        intake = self._load_intake_module_fresh()
+        intake.execute_sql = execute_sql
+        intake.execute_query = execute_query
+
+        garbage_path = self._make_garbage_pdf()
+        with self.assertRaises(CorruptedPDFError):
+            intake.run_intake(pdf_path=garbage_path)
+
+        bronze_rows = execute_query("SELECT COUNT(*) AS c FROM bronze_vendor_statement_raw")
+        self.assertEqual(bronze_rows[0]["c"], 0)
+        cache_rows = execute_query("SELECT COUNT(*) AS c FROM extraction_cache")
+        self.assertEqual(cache_rows[0]["c"], 0)
+
+    @staticmethod
+    def _load_intake_module_fresh():
+        # Load under a distinct module name from _load_intake_module()'s
+        # "intake" so patching execute_sql/execute_query here can't leak
+        # into (or be affected by) any other test's separately-loaded copy.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "intake_corrupted_pdf_test",
+            os.path.join(os.path.dirname(__file__), "..", "notebooks", "01_document_intake.py")
+        )
+        intake = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(intake)
+        return intake
 
 
 if __name__ == "__main__":
