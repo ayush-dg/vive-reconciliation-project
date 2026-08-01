@@ -108,7 +108,8 @@ def main():
     print(f"    Silver ERP: {erp_silver} rows")
     print(f"    Exceptions planted: {counts['missing']} missing, "
           f"{counts['amount_mismatch']} mismatches, "
-          f"{counts['duplicate']} duplicates")
+          f"{counts['duplicate']} duplicates, "
+          f"{counts['renumbered']} renumbered")
 
     # Phase 3: Matching
     print(f"\n>>> PHASE 3: Matching Engine")

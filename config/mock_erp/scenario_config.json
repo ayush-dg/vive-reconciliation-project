@@ -7,6 +7,7 @@
     "missing_invoices": [],
     "amount_mismatches": {},
     "duplicate_invoices": [],
-    "pending_posting": []
+    "pending_posting": [],
+    "renumbered_invoices": {"SIN12200241": "SIN12200241-ERP-ALT"}
   }
 }

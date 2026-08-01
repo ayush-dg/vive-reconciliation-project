@@ -53,6 +53,16 @@ def generate_mock_erp(statement_id: str, config_path: str = "config/mock_erp/sce
     amount_mismatches = controlled.get("amount_mismatches", {})  # {invoice_number: new_amount}
     duplicate_invoices = controlled.get("duplicate_invoices", [])
     pending_posting = set(controlled.get("pending_posting", []))
+    # {statement_invoice_number: erp_invoice_number} -- the ERP side's
+    # invoice_number genuinely differs from the vendor statement's, while
+    # ro_number/amount are left alone. This is the only controlled
+    # exception that can make Level 1 (exact invoice_number) fail while
+    # Level 2 (RO + amount) still succeeds -- see src/matching/engine.py's
+    # classify_match(). Without this, Level 2 is provably correct only in
+    # isolated unit tests (classify_match() called directly) and has never
+    # been exercised through a real intake -> mock ERP -> matching run --
+    # see PIPELINE_VERIFICATION_REPORT.md Finding 4.
+    renumbered_invoices = controlled.get("renumbered_invoices", {})
 
     # Read Silver VENDOR_STATEMENT rows for this statement
     silver_rows = execute_query(
@@ -74,6 +84,7 @@ def generate_mock_erp(statement_id: str, config_path: str = "config/mock_erp/sce
     print(f"    Amount mismatches:   {amount_mismatches or 'none'}")
     print(f"    Duplicate invoices:  {duplicate_invoices or 'none'}")
     print(f"    Pending posting:     {list(pending_posting) or 'none'}")
+    print(f"    Renumbered invoices: {renumbered_invoices or 'none'}")
 
     # Get next ERP version
     erp_version = get_next_erp_version(statement_id)
@@ -98,6 +109,7 @@ def generate_mock_erp(statement_id: str, config_path: str = "config/mock_erp/sce
         "amount_mismatch": 0,
         "duplicate": 0,
         "pending": 0,
+        "renumbered": 0,
         "exact_match": 0,
         "erp_version": erp_version,
     }
@@ -139,12 +151,17 @@ def generate_mock_erp(statement_id: str, config_path: str = "config/mock_erp/sce
             except (ValueError, TypeError):
                 posting_date = None
 
+        erp_invoice_num = invoice_num
+        if invoice_num in renumbered_invoices:
+            erp_invoice_num = renumbered_invoices[invoice_num]
+            counts["renumbered"] += 1
+
         erp_row = {
             "vendor_id": row["vendor_id"],
             "statement_id": statement_id,
             "statement_period": row["statement_period"],
             "ingestion_timestamp": now,
-            "raw_invoice_number": invoice_num,
+            "raw_invoice_number": erp_invoice_num,
             "raw_invoice_date": row.get("invoice_date"),
             "raw_posting_date": posting_date,
             "raw_amount": str(row["amount"]) if row.get("amount") is not None else str(outstanding),

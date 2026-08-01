@@ -56,6 +56,7 @@ def run(statement_id: str):
     print(f"    Amount mismatches: {counts['amount_mismatch']}")
     print(f"    Duplicates added:  {counts['duplicate']}")
     print(f"    Pending posting:   {counts['pending']}")
+    print(f"    Renumbered:        {counts['renumbered']}")
 
     print(f"\n[Step 2] Normalizing ERP Bronze → Silver (INTERNAL_ERP)...")
     silver_count = normalize_erp_to_silver(statement_id)
@@ -72,6 +73,7 @@ def run(statement_id: str):
     print(f"    Mismatch:  {counts['amount_mismatch']}")
     print(f"    Duplicate: {counts['duplicate']}")
     print(f"    Pending:   {counts['pending']}")
+    print(f"    Renumbered: {counts['renumbered']}")
     print(f"{'='*60}")
     print(f"\nNext step: python notebooks/03_run_matching.py --statement-id {statement_id}")
 
