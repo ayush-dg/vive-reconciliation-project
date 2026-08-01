@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.matching.engine import (
     classify_match, amounts_match, score_match_confidence, score_exception_confidence,
+    score_overall_status,
 )
 
 
@@ -157,6 +158,25 @@ class TestScoreExceptionConfidence(unittest.TestCase):
 
     def test_unrecognized_reason_falls_back_to_0_50(self):
         self.assertEqual(score_exception_confidence("DUPLICATE_RECORD"), 0.50)
+
+
+class TestScoreOverallStatus(unittest.TestCase):
+    """gold_reconciliation_summary.overall_status tiering -- extracted out
+    of run_matching() so web/queries.py's _recompute_summary_counts() (see
+    resolve_exception()) can apply the identical thresholds when keeping
+    this table's cached counts from going stale. See
+    PIPELINE_VERIFICATION_REPORT.md Finding 2."""
+
+    def test_zero_exceptions_is_reconciled(self):
+        self.assertEqual(score_overall_status(0), "RECONCILED")
+
+    def test_up_to_three_exceptions_is_minor(self):
+        self.assertEqual(score_overall_status(1), "MINOR_EXCEPTIONS")
+        self.assertEqual(score_overall_status(3), "MINOR_EXCEPTIONS")
+
+    def test_more_than_three_exceptions_is_exceptions_present(self):
+        self.assertEqual(score_overall_status(4), "EXCEPTIONS_PRESENT")
+        self.assertEqual(score_overall_status(50), "EXCEPTIONS_PRESENT")
 
 
 class TestRunMatchingWritesMatchConfidence(unittest.TestCase):

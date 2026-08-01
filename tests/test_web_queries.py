@@ -659,6 +659,186 @@ class TestBulkApproveExceptions(unittest.TestCase):
 
         self.assertEqual(approved, 0)
 
+    def test_bulk_approve_recomputes_summary_exception_count(self):
+        """bulk_approve_exceptions() resolves each candidate through
+        resolve_exception(), which recomputes gold_reconciliation_summary --
+        confirms that recompute survives the bulk path too, not just a
+        single Accept click."""
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-1",
+                                invoice_number="INV-1", match_confidence=0.995)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-BA", exception_id="EXC-2",
+                                invoice_number="INV-2", match_confidence=0.50)
+        self.execute_sql(
+            "UPDATE gold_reconciliation_summary SET exception_count = 2, overall_status = 'MINOR_EXCEPTIONS' "
+            "WHERE statement_id = 'STMT-BA'"
+        )
+
+        queries.bulk_approve_exceptions("Vendor One", threshold=0.99, reviewed_by="reviewer@vive.com")
+
+        summary = self.execute_query(
+            "SELECT exception_count, overall_status FROM gold_reconciliation_summary WHERE statement_id = 'STMT-BA'"
+        )[0]
+        # EXC-1 (0.995, qualifies) got approved; EXC-2 (0.50) stayed OPEN --
+        # live OPEN count drops from 2 to 1, still MINOR_EXCEPTIONS.
+        self.assertEqual(summary["exception_count"], 1)
+        self.assertEqual(summary["overall_status"], "MINOR_EXCEPTIONS")
+
+
+class TestResolveExceptionRecomputesSummaryCounts(unittest.TestCase):
+    """resolve_exception() must keep gold_reconciliation_summary's cached
+    exception_count/overall_status truthful -- reproduces and fixes
+    PIPELINE_VERIFICATION_REPORT.md Finding 2 (confirmed live: after
+    resolving one of 3 OPEN exceptions, the raw summary row still said 3
+    while gold_exceptions' live OPEN count had already dropped to 2)."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-RS", total_invoice_count=5)
+        self.execute_sql(
+            "UPDATE gold_reconciliation_summary SET exception_count = 3, overall_status = 'MINOR_EXCEPTIONS' "
+            "WHERE statement_id = 'STMT-RS'"
+        )
+        for exc_id in ("EXC-1", "EXC-2", "EXC-3"):
+            _insert_gold_exception(self.execute_sql, statement_id="STMT-RS", exception_id=exc_id,
+                                    invoice_number=exc_id)
+
+    def _summary(self):
+        return self.execute_query(
+            "SELECT exception_count, overall_status FROM gold_reconciliation_summary WHERE statement_id = 'STMT-RS'"
+        )[0]
+
+    def test_resolving_one_exception_drops_count_by_one_same_tier(self):
+        queries.resolve_exception(
+            exception_id="EXC-1", statement_id="STMT-RS", vendor_name="Vendor One",
+            invoice_number="EXC-1", reason_code="Invoice Missing", disposition_status="ACCEPTED",
+            notes="test", disposed_by="tester@vive.com",
+        )
+
+        summary = self._summary()
+        self.assertEqual(summary["exception_count"], 2)
+        self.assertEqual(summary["overall_status"], "MINOR_EXCEPTIONS")
+
+        live_open = self.execute_query(
+            "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = 'STMT-RS' AND exception_status = 'OPEN'"
+        )[0]["c"]
+        self.assertEqual(summary["exception_count"], live_open)
+
+    def test_resolving_all_exceptions_drops_status_to_reconciled(self):
+        for exc_id in ("EXC-1", "EXC-2", "EXC-3"):
+            queries.resolve_exception(
+                exception_id=exc_id, statement_id="STMT-RS", vendor_name="Vendor One",
+                invoice_number=exc_id, reason_code="Invoice Missing", disposition_status="ACCEPTED",
+                notes="test", disposed_by="tester@vive.com",
+            )
+
+        summary = self._summary()
+        self.assertEqual(summary["exception_count"], 0)
+        self.assertEqual(summary["overall_status"], "RECONCILED")
+
+    def test_resolve_exception_is_a_noop_when_no_summary_row_exists(self):
+        """An exceptions-only vendor (see _get_exceptions_only_vendors())
+        has no gold_reconciliation_summary row at all -- the recompute's
+        UPDATE must not raise even though it matches zero rows."""
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-ORPHAN", exception_id="EXC-ORPHAN",
+                                invoice_number="EXC-ORPHAN")
+
+        queries.resolve_exception(
+            exception_id="EXC-ORPHAN", statement_id="STMT-ORPHAN", vendor_name="Orphan Vendor",
+            invoice_number="EXC-ORPHAN", reason_code="Invoice Missing", disposition_status="ACCEPTED",
+            notes="test", disposed_by="tester@vive.com",
+        )
+
+        resolved = self.execute_query(
+            "SELECT exception_status FROM gold_exceptions WHERE exception_id = 'EXC-ORPHAN'"
+        )[0]
+        self.assertEqual(resolved["exception_status"], "RESOLVED")
+
+
+def _insert_review_queue_item(execute_sql, *, review_id, statement_id, rejection_category="MISSING_MANDATORY_FIELD",
+                               source_file="vendor.pdf", raw_payload='{"invoice_number": "INV-1", "outstanding_amount": 100.0}'):
+    execute_sql(
+        """
+        INSERT INTO validation_document_review_queue (
+            review_id, source_file, statement_id, pipeline_stage, rejection_category,
+            rejection_details, raw_payload, review_status, flagged_timestamp
+        ) VALUES (?, ?, ?, 'AI_EXTRACTION', ?, 'test rejection', ?, 'PENDING_REVIEW', '2026-07-24T00:00:00+00:00')
+        """,
+        [review_id, source_file, statement_id, rejection_category, raw_payload],
+    )
+
+
+class TestActionReviewItemRecomputesSummaryCounts(unittest.TestCase):
+    """Flagging a review-queue row raises a NEW OPEN gold_exceptions row --
+    the opposite direction of resolve_exception(), but the same staleness
+    risk: it can undercount an existing gold_reconciliation_summary row.
+    See PIPELINE_VERIFICATION_REPORT.md Finding 2."""
+
+    def setUp(self):
+        self.conn = _make_jobs_db()
+        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+    def test_flagging_a_review_item_increments_an_existing_summary_row(self):
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-RQ", total_invoice_count=5)
+        _insert_gold_exception(self.execute_sql, statement_id="STMT-RQ", exception_id="EXC-PRE-EXISTING")
+        self.execute_sql(
+            "UPDATE gold_reconciliation_summary SET exception_count = 1, overall_status = 'MINOR_EXCEPTIONS' "
+            "WHERE statement_id = 'STMT-RQ'"
+        )
+        _insert_review_queue_item(self.execute_sql, review_id="RQ-1", statement_id="STMT-RQ")
+
+        queries.action_review_item(review_id="RQ-1", action="flag", reviewed_by="tester@vive.com")
+
+        summary = self.execute_query(
+            "SELECT exception_count, overall_status FROM gold_reconciliation_summary WHERE statement_id = 'STMT-RQ'"
+        )[0]
+        self.assertEqual(summary["exception_count"], 2)
+        self.assertEqual(summary["overall_status"], "MINOR_EXCEPTIONS")
+
+    def test_flagging_a_review_item_is_a_noop_when_no_summary_row_exists(self):
+        """The common case: a review-queue item flagged before its
+        statement ever reached a full pipeline run has no summary row."""
+        _insert_review_queue_item(self.execute_sql, review_id="RQ-2", statement_id="STMT-NOSTMT")
+
+        queries.action_review_item(review_id="RQ-2", action="flag", reviewed_by="tester@vive.com")
+
+        raised = self.execute_query(
+            "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = 'STMT-NOSTMT'"
+        )[0]["c"]
+        self.assertEqual(raised, 1)
+
+    def test_approving_a_review_item_does_not_touch_the_summary(self):
+        """Approve never raises a gold_exceptions row -- no recompute is
+        expected (or needed) on this branch."""
+        _insert_gold_summary(self.execute_sql, statement_id="STMT-RQ2", total_invoice_count=5)
+        self.execute_sql(
+            "UPDATE gold_reconciliation_summary SET exception_count = 1, overall_status = 'MINOR_EXCEPTIONS' "
+            "WHERE statement_id = 'STMT-RQ2'"
+        )
+        _insert_review_queue_item(self.execute_sql, review_id="RQ-3", statement_id="STMT-RQ2")
+
+        queries.action_review_item(review_id="RQ-3", action="approve", reviewed_by="tester@vive.com")
+
+        summary = self.execute_query(
+            "SELECT exception_count FROM gold_reconciliation_summary WHERE statement_id = 'STMT-RQ2'"
+        )[0]
+        self.assertEqual(summary["exception_count"], 1)
+
 
 class TestExceptionRoutingAndAging(unittest.TestCase):
     """escalate_exception()/get_exception_aging_summary() and the

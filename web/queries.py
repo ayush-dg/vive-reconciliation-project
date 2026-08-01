@@ -18,7 +18,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.lakehouse.connection import execute_query, execute_sql
-from src.matching.engine import score_exception_confidence
+from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 
 REASON_LABELS = {
@@ -485,6 +485,40 @@ def get_exception_counts_for_source_file(source_file: str):
     return total, resolved
 
 
+def _recompute_summary_counts(statement_id: str) -> None:
+    """Keeps gold_reconciliation_summary.exception_count/overall_status
+    truthful whenever the live OPEN count for statement_id changes --
+    called by resolve_exception() (and so, transitively, by
+    bulk_approve_exceptions(), which resolves each candidate through that
+    same function) right after RESOLVING one, and by action_review_item()
+    right after RAISING a new one (a flagged review-queue row can
+    undercount an existing summary just as easily as a resolution can
+    overcount it).
+
+    Without this, the summary row keeps whatever count matching wrote at
+    reconciliation time forever, even once a later event makes it wrong --
+    see PIPELINE_VERIFICATION_REPORT.md Finding 2 (reproduced live: after
+    calling resolve_exception(), the raw table still showed the old count
+    while the real OPEN count had already dropped by one). Every UI-facing
+    read already works around this by live-querying gold_exceptions
+    instead (Claude.md Rule 3) -- this fixes the table itself at the
+    source, for the one real reader that doesn't apply that workaround
+    (notebooks/04_generate_report.py). A statement_id with no
+    gold_reconciliation_summary row (e.g. an exceptions-only vendor -- see
+    _get_exceptions_only_vendors(), or a review-queue item flagged before
+    its statement ever reached a full pipeline run) makes this UPDATE a
+    harmless no-op.
+    """
+    live_count = execute_query(
+        "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = ? AND exception_status = 'OPEN'",
+        [statement_id],
+    )[0]["c"] or 0
+    execute_sql(
+        "UPDATE gold_reconciliation_summary SET exception_count = ?, overall_status = ? WHERE statement_id = ?",
+        [live_count, score_overall_status(live_count), statement_id],
+    )
+
+
 def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
                        invoice_number: str, reason_code: str, disposition_status: str,
                        notes: str, disposed_by: str) -> None:
@@ -503,6 +537,7 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
         "UPDATE gold_exceptions SET exception_status = 'RESOLVED', date_resolved = ? WHERE exception_id = ?",
         [now, exception_id],
     )
+    _recompute_summary_counts(statement_id)
 
 
 def escalate_exception(exception_id: str, escalated_by: str) -> None:
@@ -1164,3 +1199,10 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
                 get_shop_owner(item.get("vendor_id")),
             ],
         )
+        # A newly-raised OPEN exception can undercount an existing
+        # gold_reconciliation_summary row the same way a resolution can
+        # overcount it — see _recompute_summary_counts()'s docstring. A
+        # no-op if this statement_id has no summary row yet (the common
+        # case: review-queue items are usually raised before a statement
+        # ever reaches a full pipeline run).
+        _recompute_summary_counts(item["statement_id"])

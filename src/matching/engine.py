@@ -115,6 +115,19 @@ def score_match_confidence(match_level: int, stmt_amount, erp_amount) -> float:
     return MATCH_CONFIDENCE[(match_type, _amount_status(stmt_amount, erp_amount))]
 
 
+def score_overall_status(exception_count: int) -> str:
+    """gold_reconciliation_summary.overall_status for a given OPEN exception
+    count. Extracted so run_matching() and web/queries.py's
+    _recompute_summary_counts() (which keeps this table's cached
+    exception_count/overall_status from going stale after an exception is
+    resolved — see resolve_exception()) apply the identical tiering."""
+    if exception_count == 0:
+        return "RECONCILED"
+    if exception_count <= 3:
+        return "MINOR_EXCEPTIONS"
+    return "EXCEPTIONS_PRESENT"
+
+
 def score_exception_confidence(exception_reason: str) -> float:
     """match_confidence for a row about to be written to gold_exceptions --
     see EXCEPTION_MATCH_CONFIDENCE above. Falls back to the
@@ -357,12 +370,7 @@ def run_matching(statement_id: str,
     match_pct = round((matched_count / len(stmt_rows)) * 100, 2) if stmt_rows else 0.0
     difference = round(total_statement_amount - total_erp_amount, 2)
 
-    if exception_count == 0:
-        overall_status = "RECONCILED"
-    elif exception_count <= 3:
-        overall_status = "MINOR_EXCEPTIONS"
-    else:
-        overall_status = "EXCEPTIONS_PRESENT"
+    overall_status = score_overall_status(exception_count)
 
     # Get ERP version
     erp_version_rows = execute_query(
