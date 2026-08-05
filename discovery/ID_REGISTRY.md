@@ -68,4 +68,35 @@ Single sequential log of every ID assigned across this fresh Path A extraction (
 | IP-010 | IntegrationPoint | Azure Event Grid (auto-intake webhook) | TOPOLOGY.md | Session A |
 | IP-011 | IntegrationPoint | Microsoft Fabric Warehouse (get_fabric_connection) | TOPOLOGY.md | Session A |
 
-**Totals:** 50 modules (M-001–M-050), 11 integration points (IP-001–IP-011).
+| E-001 | Entity | Invoice | DOMAIN_MODEL.json | Session F03 |
+| A-001 | Attribute | id | DOMAIN_MODEL.json | Session F03 |
+| A-002 | Attribute | record_id | DOMAIN_MODEL.json | Session F03 |
+| A-003 | Attribute | record_source | DOMAIN_MODEL.json | Session F03 |
+| A-004 | Attribute | document_type | DOMAIN_MODEL.json | Session F03 |
+| A-005 | Attribute | statement_id | DOMAIN_MODEL.json | Session F03 |
+| A-006 | Attribute | statement_date | DOMAIN_MODEL.json | Session F03 |
+| A-007 | Attribute | vendor_id | DOMAIN_MODEL.json | Session F03 |
+| A-008 | Attribute | vendor_name | DOMAIN_MODEL.json | Session F03 |
+| A-009 | Attribute | shop | DOMAIN_MODEL.json | Session F03 |
+| A-010 | Attribute | invoice_number | DOMAIN_MODEL.json | Session F03 |
+| A-011 | Attribute | invoice_number_normalized | DOMAIN_MODEL.json | Session F03 |
+| A-012 | Attribute | invoice_date | DOMAIN_MODEL.json | Session F03 |
+| A-013 | Attribute | ro_number | DOMAIN_MODEL.json | Session F03 |
+| A-014 | Attribute | po_number | DOMAIN_MODEL.json | Session F03 |
+| A-015 | Attribute | work_order_number | DOMAIN_MODEL.json | Session F03 |
+| A-016 | Attribute | amount | DOMAIN_MODEL.json | Session F03 |
+| A-017 | Attribute | credit | DOMAIN_MODEL.json | Session F03 |
+| A-018 | Attribute | outstanding_amount | DOMAIN_MODEL.json | Session F03 |
+| A-019 | Attribute | due_date | DOMAIN_MODEL.json | Session F03 |
+| A-020 | Attribute | posting_date | DOMAIN_MODEL.json | Session F03 |
+| A-021 | Attribute | status | DOMAIN_MODEL.json | Session F03 |
+| A-022 | Attribute | description | DOMAIN_MODEL.json | Session F03 |
+| A-023 | Attribute | currency | DOMAIN_MODEL.json | Session F03 |
+| A-024 | Attribute | statement_period | DOMAIN_MODEL.json | Session F03 |
+| A-025 | Attribute | source_file | DOMAIN_MODEL.json | Session F03 |
+| A-026 | Attribute | ingestion_timestamp | DOMAIN_MODEL.json | Session F03 |
+| SV-001 | StatusVocabulary | record_source | DOMAIN_MODEL.json | Session F03 |
+| SVV-001 | StatusValue | VENDOR_STATEMENT | DOMAIN_MODEL.json | Session F03 |
+| SVV-002 | StatusValue | INTERNAL_ERP | DOMAIN_MODEL.json | Session F03 |
+
+**Totals:** 50 modules (M-001–M-050), 11 integration points (IP-001–IP-011), 1 entity (E-001), 26 attributes (A-001–A-026), 1 status vocabulary (SV-001) with 2 values (SVV-001–SVV-002). No REL-NNN or MT-NNN — single-entity canonical boundary, no relationships to name; no metrics layer detected.
