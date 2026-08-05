@@ -1,67 +1,67 @@
 ## Module Roster — VIVE Reconciliation
-Generated: 2026-07-23 by BCE Stage 2 Session A (CC)
+Generated: 2026-08-05 by BCE Stage 2 Session A (CC)
 Note: these IDs are permanent. Do not reassign at later sessions.
 
-**Methodology adaptation note (flagged for engineer confirmation):** VIVE's UI is server-rendered Jinja2 templates behind FastAPI routes — there is no client-side routing, no client-side component tree, and no client-side state store (session state lives server-side). The PBVI-011 UI taxonomy (`route`/`page`/`layout`/`component`/`store`) is designed for SPA frontends and doesn't map cleanly here. Judgment call applied: FastAPI routers are classified `serving` (they are the request entry points *and* the render boundary — the route handler IS the "page"), `web/worker.py` is `pipeline` (background batch processing), and `web/app.py`/`deps.py`/`queries.py`/`start.py` are `infra` (bootstrap, shared utilities, data-access layer). `web/static/app.js` is treated as a page-local UI resource, not a separate module, since it has no independent responsibility beyond one page's upload UX. Templates (`web/templates/*.html`) are presentation artifacts bundled with their owning router, not independently modeled. Flagged as **P2 open item** for engineer sign-off — if this project later adds a client-side framework, the standard U-prefix taxonomy should apply then.
+Fresh Path A extraction — full source read of every file in `discovery/components/A00_codebase_map.md`, superseding the archived roster's numbering entirely (not an incremental refresh). 50 modules, M-001–M-050.
 
 | ID | Module Name | Source File | Layer |
 |---|---|---|---|
-| M-001 | auth router | web/routers/auth.py | serving |
-| M-002 | dashboard router | web/routers/dashboard.py | serving |
-| M-003 | exceptions router | web/routers/exceptions.py | serving |
-| M-004 | jobs router | web/routers/jobs.py | serving |
-| M-005 | reports router | web/routers/reports.py | serving |
-| M-006 | review_queue router | web/routers/review_queue.py | serving |
-| M-007 | upload router | web/routers/upload.py | serving |
-| M-008 | users router | web/routers/users.py | serving |
-| M-009 | web app entry | web/app.py | infra |
-| M-010 | web shared deps | web/deps.py | infra |
-| M-011 | web query layer | web/queries.py | infra |
-| M-012 | web launcher | web/start.py | infra |
-| M-013 | background job worker | web/worker.py | pipeline |
-| M-014 | document intake pipeline | notebooks/01_document_intake.py | pipeline |
-| M-015 | mock ERP CLI entry | notebooks/02_generate_mock_erp.py | pipeline |
-| M-016 | matching CLI entry | notebooks/03_run_matching.py | pipeline |
-| M-017 | report CLI entry | notebooks/04_generate_report.py | pipeline |
-| M-018 | full pipeline orchestrator | scripts/run_full_pipeline.py | pipeline |
-| M-019 | lakehouse schema setup | notebooks/00_setup_lakehouse_schema.py | infra |
-| M-020 | document understanding engine | src/ai/document_understanding_engine.py | pipeline |
-| M-021 | Azure OpenAI client | src/ai/azure_openai_client.py | pipeline |
-| M-022 | Claude (Haiku 4.5) client | src/ai/claude_client.py | pipeline |
-| M-023 | Claude Sonnet 4.6 client | src/ai/claude_sonnet_client.py | pipeline |
-| M-024 | Azure Document Intelligence client | src/ai/document_intelligence_client.py | pipeline |
-| M-025 | Gemini client | src/ai/gemini_client.py | pipeline |
-| M-026 | Mistral client | src/ai/mistral_client.py | pipeline |
-| M-027 | OCR extractor | src/ai/ocr_extractor.py | pipeline |
-| M-028 | pdfplumber fallback | src/ai/pdfplumber_fallback.py | pipeline |
-| M-029 | explanation service | src/ai/explanation_service.py | pipeline |
-| M-030 | AI client contract | src/ai/base_client.py | infra |
-| M-031 | AI client factory | src/ai/client_factory.py | infra |
-| M-032 | AI audit logger | src/ai/audit_logger.py | infra |
-| M-033 | lakehouse connection | src/lakehouse/connection.py | infra |
-| M-034 | SQLite migration runner | src/lakehouse/migrations.py | infra |
-| M-035 | Azure SQL schema creator | src/lakehouse/azure_sql_migrations.py | infra |
-| M-036 | matching engine | src/matching/engine.py | pipeline |
-| M-037 | mock ERP generator | src/mock_erp/generator.py | pipeline |
-| M-038 | invoice normalization | src/normalization.py | pipeline |
-| M-039 | Blob Storage client | src/storage/blob_client.py | infra |
-| M-040 | provider-chain smoke test | scripts/test_provider_chain.py | infra |
-| M-041 | review-queue cleanup script | check_queue.py | infra |
-| M-042 | Azure-SQL-detection probe | check_subprocess.py | infra |
-| M-043 | worker simulation (basic) | test_worker_sim.py | infra |
-| M-044 | worker simulation (path-exact) | test_worker_sim2.py | infra |
-| M-045 | batches router | web/routers/batches.py | serving |
-| M-046 | intake_trigger router (Event Grid webhook) | web/routers/intake_trigger.py | serving |
-| M-047 | AI-call concurrency limiter | src/ai/concurrency_limiter.py | infra |
-| M-048 | shop owner routing lookup | src/shop_owners.py | infra |
+| M-001 | FastAPI entry point | `web/app.py` | serving |
+| M-002 | Shared web dependencies (templates, auth, filters) | `web/deps.py` | serving |
+| M-003 | Web query layer | `web/queries.py` | serving |
+| M-004 | Uvicorn launcher | `web/start.py` | serving |
+| M-005 | Background worker pool | `web/worker.py` | serving |
+| M-006 | Auth router | `web/routers/auth.py` | serving |
+| M-007 | Dashboard router | `web/routers/dashboard.py` | serving |
+| M-008 | Exceptions router | `web/routers/exceptions.py` | serving |
+| M-009 | Jobs router | `web/routers/jobs.py` | serving |
+| M-010 | Reports router | `web/routers/reports.py` | serving |
+| M-011 | Review queue router | `web/routers/review_queue.py` | serving |
+| M-012 | Upload router | `web/routers/upload.py` | serving |
+| M-013 | Users router | `web/routers/users.py` | serving |
+| M-014 | Batches router | `web/routers/batches.py` | serving |
+| M-015 | Intake trigger router (Event Grid webhook) | `web/routers/intake_trigger.py` | serving |
+| M-016 | Lakehouse schema setup entry point | `notebooks/00_setup_lakehouse_schema.py` | pipeline |
+| M-017 | Document intake pipeline | `notebooks/01_document_intake.py` | pipeline |
+| M-018 | Mock ERP generation entry point | `notebooks/02_generate_mock_erp.py` | pipeline |
+| M-019 | Matching engine entry point | `notebooks/03_run_matching.py` | pipeline |
+| M-020 | Report generation entry point | `notebooks/04_generate_report.py` | pipeline |
+| M-021 | Full pipeline orchestrator | `scripts/run_full_pipeline.py` | pipeline |
+| M-022 | AI client contract (`AIClient`/`AIResponse`) | `src/ai/base_client.py` | pipeline |
+| M-023 | AI client factory | `src/ai/client_factory.py` | pipeline |
+| M-024 | Document understanding engine | `src/ai/document_understanding_engine.py` | pipeline |
+| M-025 | Claude Sonnet 4.6 client (active primary) | `src/ai/claude_sonnet_client.py` | pipeline |
+| M-026 | Claude Haiku 4.5 client | `src/ai/claude_client.py` | pipeline |
+| M-027 | Azure OpenAI client (dormant) | `src/ai/azure_openai_client.py` | pipeline |
+| M-028 | Azure Document Intelligence client (dormant) | `src/ai/document_intelligence_client.py` | pipeline |
+| M-029 | Gemini client (dormant) | `src/ai/gemini_client.py` | pipeline |
+| M-030 | Mistral client (dormant) | `src/ai/mistral_client.py` | pipeline |
+| M-031 | pdfplumber fallback extraction | `src/ai/pdfplumber_fallback.py` | pipeline |
+| M-032 | OCR extractor (Tesseract) | `src/ai/ocr_extractor.py` | pipeline |
+| M-033 | Exception explanation service | `src/ai/explanation_service.py` | pipeline |
+| M-034 | Matching engine | `src/matching/engine.py` | pipeline |
+| M-035 | Mock ERP generator | `src/mock_erp/generator.py` | pipeline |
+| M-036 | Invoice number normalization | `src/normalization.py` | pipeline |
+| M-037 | Lakehouse connection (storage backend abstraction) | `src/lakehouse/connection.py` | infra |
+| M-038 | SQLite migration runner | `src/lakehouse/migrations.py` | infra |
+| M-039 | Azure SQL schema creator | `src/lakehouse/azure_sql_migrations.py` | infra |
+| M-040 | AI audit logger | `src/ai/audit_logger.py` | infra |
+| M-041 | AI-call concurrency limiter | `src/ai/concurrency_limiter.py` | infra |
+| M-042 | Shop owner routing lookup | `src/shop_owners.py` | infra |
+| M-043 | Blob Storage client | `src/storage/blob_client.py` | infra |
+| M-044 | Provider chain smoke test | `scripts/test_provider_chain.py` | infra |
+| M-045 | Fabric Warehouse connection smoke test | `scripts/test_fabric_connection.py` | infra |
+| M-046 | Review queue cleanup script | `check_queue.py` | infra |
+| M-047 | Azure SQL detection probe | `check_subprocess.py` | infra |
+| M-048 | Worker simulation (basic) | `test_worker_sim.py` | infra |
+| M-049 | Worker simulation (exact path replication) | `test_worker_sim2.py` | infra |
+| M-050 | Level 2 matching real-pipeline integration test | `tests/test_level2_matching_integration.py` | infra |
 
-**Roster addendum, scoped BCE refresh (2026-07-25):** M-045 through M-048 were added this pass to cover four modules built since the 2026-07-23/24 extraction — the worker pool (Step 5), Event Grid auto-intake (webhook + batch UI), match confidence scoring, and exception routing/aging. This was a targeted re-walk of what changed (8 commits, ~44 files), not a full re-extraction — every module M-001 through M-044 above is unchanged and was not re-verified this pass. See `discovery/TOPOLOGY.md`'s addendum for the full scope note and `discovery/MODULE_CONTRACTS.md` for the updated per-module contracts (C01, G03, C17, B03, G12, G11, G01, B02, C02 all received real rewrites this pass, not just additions).
+**Module-worthiness notes (BCE-009):** M-044–M-050 are test/harness files registered as modules because each makes a real, traceable call into other registered modules as its primary mechanism (a real DB read/write, a real subprocess pipeline run, a real client instantiation) rather than merely asserting against already-modeled behavior via mocks. M-050 specifically runs the real `run_intake()` → `generate_mock_erp()` → `run_matching()` chain against a real temporary SQLite database — only the AI network call is faked.
 
-**Module-worthiness note (BCE-009) for M-040 through M-044:** these are not `*.unit.test.ts`-style assertion tests — each makes a real, traceable call into a registered module as its primary mechanism: M-040 instantiates real AI clients via `client_factory.get_ai_client()`; M-041 issues a real `DELETE`/`SELECT` against the live database via `connection.py`; M-042 and M-043/M-044 spawn real subprocesses that exercise `connection.py` and the full pipeline (`scripts/run_full_pipeline.py`) respectively. All five meet the module-worthiness bar and are registered under `infra`, consistent with the reconciliation.ts/resolve_golden_set.ts precedent this heuristic is modeled on. `src/pipeline/` and `src/validation/` contain only empty `__init__.py` files — no module assigned; see Session A0 note.
+**Not registered as modules (assessed, excluded):** the remaining 20 files under `tests/` were not individually re-read this session (see `discovery/INTAKE_SUMMARY.md`'s Documents Reviewed) — by naming convention and the archived roster's precedent, these are unit-level tests against mocked/offline fixtures for a single already-modeled component, not independent dispatch mechanisms. This is a carried-forward assessment, not a fresh verification — flagged as a Session A follow-up if any of these turn out to run real cross-module chains the way M-050 does.
 
-**`azure_claude_sonnet.json` correction:** Session A0 flagged `config/ai/azure_claude_sonnet.json` as possibly orphaned. Confirmed orphaned during Session A — a repo-wide grep for `azure_claude_sonnet` returns zero references outside the codebase map itself. `client_factory.py`'s `provider_config_paths` only registers `claude_sonnet_extraction.json` under the `claude_sonnet` key. This file is dead configuration, not read by any code path. Recorded as a RISK_REGISTER cleanup candidate, not carried forward as an open question.
-
-**Duplicate sample PDF correction:** Session A0 flagged `sample_data/KSI Noakers 053126.pdf` vs `sample_data/KSI_Noakers_053126.pdf` as a likely duplicate. Confirmed via SHA-256 checksum — both files are byte-identical. The spaced-filename version (mtime 2026-07-22) postdates the underscored original (mtime 2026-07-17) and matches the exact filename `test_worker_sim2.py` uses to mimic the web upload router's filename-preserving save behavior — this is testing residue, not two distinct vendor statements. No code defect; noted for housekeeping only.
+**Empty packages (confirmed, not modules):** `src/pipeline/__init__.py` and `src/validation/__init__.py` contain no code — verified this session (`ls` shows `__init__.py` only in each, 0 bytes of logic). Same open question as the archived map: dead scaffolding or an unbuilt placeholder — Session A cannot resolve intent from source alone.
 
 ---
 
@@ -69,147 +69,109 @@ Note: these IDs are permanent. Do not reassign at later sessions.
 
 | Edge | Call Site (file:line) | Sync/Async |
 |---|---|---|
-| M-009 --[CALLS]--> M-013 | web/app.py:33 (`start_worker()` in `lifespan()`) | S |
-| M-009 --[CALLS]--> M-001 | web/app.py:53 (`include_router`) | S |
-| M-009 --[CALLS]--> M-002 | web/app.py:54 | S |
-| M-009 --[CALLS]--> M-003 | web/app.py:55 | S |
-| M-009 --[CALLS]--> M-006 | web/app.py:56 | S |
-| M-009 --[CALLS]--> M-007 | web/app.py:57 | S |
-| M-009 --[CALLS]--> M-005 | web/app.py:58 | S |
-| M-009 --[CALLS]--> M-008 | web/app.py:59 | S |
-| M-009 --[CALLS]--> M-004 | web/app.py:60 | S |
-| M-009 --[CALLS]--> M-010 | web/app.py:26 (imports `LoginRequired`) | S |
-| M-001 --[CALLS]--> M-010 | web/routers/auth.py:16 (`render`) | S |
-| M-001 --[CALLS]--> M-011 | web/routers/auth.py:17,29 (`get_user_by_email`) | S |
-| M-002 --[CALLS]--> M-010 | web/routers/dashboard.py:12 | S |
-| M-002 --[CALLS]--> M-011 | web/routers/dashboard.py:13 (`get_kpis`, `get_recent_runs`, `get_active_jobs`) | S |
-| M-003 --[CALLS]--> M-010 | web/routers/exceptions.py:15 | S |
-| M-003 --[CALLS]--> M-011 | web/routers/exceptions.py:16 (`get_vendor_summaries`, `resolve_exception`, etc.) | S |
-| M-004 --[CALLS]--> M-010 | web/routers/jobs.py:12 | S |
-| M-004 --[CALLS]--> M-011 | web/routers/jobs.py:13 (`get_active_jobs`, `get_job_history`) | S |
-| M-005 --[CALLS]--> M-010 | web/routers/reports.py:12 | S |
-| M-005 --[CALLS]--> M-011 | web/routers/reports.py:13 (`get_all_runs`, `get_statement_report`) | S |
-| M-006 --[CALLS]--> M-010 | web/routers/review_queue.py:22 | S |
-| M-006 --[CALLS]--> M-011 | web/routers/review_queue.py:23 (`get_review_queue_vendors`, `action_review_item`) | S |
-| M-007 --[CALLS]--> M-010 | web/routers/upload.py:18 | S |
-| M-007 --[CALLS]--> M-011 | web/routers/upload.py:19,72 (`create_job`) | S |
-| M-008 --[CALLS]--> M-010 | web/routers/users.py:13 | S |
-| M-008 --[CALLS]--> M-011 | web/routers/users.py:14 (`list_users`, `create_user`, `delete_user_by_email`) | S |
-| M-010 --[CALLS]--> M-011 | web/deps.py:33 (`sidebar_context` — `get_open_exceptions_count`, `get_pending_review_count`) | S |
-| M-013 --[CALLS]--> M-011 | web/worker.py:42,77,89,104 (`claim_next_pending_job`, `update_job_status`, `get_vendor_name_for_statement`) | S |
-| M-013 --[CALLS]--> M-018 | web/worker.py:53 (`subprocess.run(["scripts/run_full_pipeline.py", ...])`) | A (subprocess, polled every 30s) |
-| M-018 --[CALLS]--> M-014 | scripts/run_full_pipeline.py:73 (`load_notebook` exec of `01_document_intake.py`, then `run_intake()`) | S |
-| M-018 --[CALLS]--> M-037 | scripts/run_full_pipeline.py:95-97 (`generate_mock_erp`, `normalize_erp_to_silver`) | S |
-| M-018 --[CALLS]--> M-036 | scripts/run_full_pipeline.py:106 (`run_matching`) | S |
-| M-018 --[CALLS]--> M-017 | scripts/run_full_pipeline.py:115 (`load_notebook` exec of `04_generate_report.py`, then `generate_report()`) | S |
-| M-014 --[CALLS]--> M-020 | notebooks/01_document_intake.py:55 (`DocumentUnderstandingEngine`, `extract_pdf_text`) | S |
-| M-014 --[CALLS]--> M-033 | notebooks/01_document_intake.py:56 (`execute_sql`, `execute_query`) | S |
-| M-014 --[CALLS]--> M-038 | notebooks/01_document_intake.py:57 (`normalize_invoice_number`) | S |
-| M-014 --[CALLS]--> M-039 | notebooks/01_document_intake.py:58,530 (`BlobStorageClient().upload_pdf()`) — **confirmed wired at Step 8 of `run_intake()`; corrects Session A0's provisional note that this looked unwired** | S |
-| M-015 --[CALLS]--> M-037 | notebooks/02_generate_mock_erp.py:37 | S |
-| M-016 --[CALLS]--> M-036 | notebooks/03_run_matching.py:32 | S |
-| M-016 --[CALLS]--> M-033 | notebooks/03_run_matching.py:33 | S |
-| M-017 --[CALLS]--> M-033 | notebooks/04_generate_report.py:34 | S |
-| M-017 --[CALLS]--> M-029 | notebooks/04_generate_report.py:35,106-107 (`ExplanationService(...).explain_all_open_exceptions()`, only under `--explain`) | S |
-| M-020 --[CALLS]--> M-031 | src/ai/document_understanding_engine.py:37,188 (`client_factory.get_ai_client()`, no provider arg) | S |
-| M-020 --[CALLS]--> M-028 | src/ai/document_understanding_engine.py:38,226 (`extract_with_pdfplumber`) | S |
-| M-020 --[CALLS]--> M-032 | src/ai/document_understanding_engine.py:39,195 (`log_ai_call`) | S |
-| M-031 --[CALLS]--> M-022 | src/ai/client_factory.py:39 (conditional: `provider_name == "claude"`) | S |
-| M-031 --[CALLS]--> M-026 | src/ai/client_factory.py:48 (conditional: `"mistral"`) | S |
-| M-031 --[CALLS]--> M-023 | src/ai/client_factory.py:56 (conditional: `"claude_sonnet"` — **this is the branch taken by default given `active_provider.json`'s `provider_chain[0]`**) | S |
-| M-031 --[CALLS]--> M-025 | src/ai/client_factory.py:67 (conditional: `"gemini"`) | S |
-| M-031 --[CALLS]--> M-021 | src/ai/client_factory.py:76 (conditional: `"azure_gpt5_mini"/"azure_gpt5_nano"/"azure_gpt5_1"`) | S |
-| M-031 --[CALLS]--> M-024 | src/ai/client_factory.py:85 (conditional: `"azure_doc_intel"`) | S |
-| M-024 --[CALLS]--> M-028 | src/ai/document_intelligence_client.py:39-44 (imports `_extract_header_info`, `_extract_invoice_row`, `_find_header_row`, `_map_columns`) | S |
-| M-028 --[CALLS]--> M-027 | src/ai/pdfplumber_fallback.py:49 (`is_ocr_available`, `ocr_page`) | S |
-| M-032 --[CALLS]--> M-033 | src/ai/audit_logger.py:14 (`execute_sql`) | S |
-| M-029 --[CALLS]--> M-031 | src/ai/explanation_service.py:26,148 (`client_factory.get_ai_client("claude")` — hardcoded, independent of `provider_chain`) | S |
-| M-029 --[CALLS]--> M-032 | src/ai/explanation_service.py:27,162 (`log_ai_call`) | S |
-| M-029 --[CALLS]--> M-033 | src/ai/explanation_service.py:28 (`execute_sql`, `execute_query`) | S |
-| M-037 --[CALLS]--> M-033 | src/mock_erp/generator.py:24 (`execute_sql`, `execute_query`) | S |
-| M-037 --[CALLS]--> M-038 | src/mock_erp/generator.py:223 (`normalize_invoice_number`, inside `normalize_erp_to_silver`) | S |
-| M-036 --[CALLS]--> M-033 | src/matching/engine.py:29 (`execute_sql`, `execute_query`) | S |
-| M-019 --[CALLS]--> M-033 | notebooks/00_setup_lakehouse_schema.py (obtains connection before running migrations) | S |
-| M-019 --[CALLS]--> M-034 | notebooks/00_setup_lakehouse_schema.py (`apply_pending_migrations`) | S |
-| M-035 --[CALLS]--> M-033 | src/lakehouse/azure_sql_migrations.py:32 (`get_connection`) | S |
-| M-040 --[CALLS]--> M-031 | scripts/test_provider_chain.py:6 (`get_ai_client`, `get_provider_chain`) | S |
-| M-041 --[CALLS]--> M-033 | check_queue.py:5,8,12 (`execute_sql`, `execute_query`) | S |
-| M-042 --[CALLS]--> M-033 | check_subprocess.py:6 (subprocess exercises `_using_azure_sql()`) | A (subprocess) |
-| M-043 --[CALLS]--> M-018 | test_worker_sim.py:8 (subprocess) | A (subprocess) |
-| M-044 --[CALLS]--> M-018 | test_worker_sim2.py:13 (subprocess, mirrors web/worker.py's exact path construction) | A (subprocess) |
-| M-009 --[CALLS]--> M-046 | web/app.py:62 (`include_router`) | S |
-| M-009 --[CALLS]--> M-045 | web/app.py:63 (`include_router`) | S |
-| M-045 --[CALLS]--> M-010 | web/routers/batches.py:14 | S |
-| M-045 --[CALLS]--> M-011 | web/routers/batches.py:15,24-25,33 (`get_all_batches`, `get_manual_uploads`, `get_batch_detail`) | S |
-| M-046 --[CALLS]--> M-039 | web/routers/intake_trigger.py:34,102-105 (`BlobStorageClient(container_name=DROPZONE_CONTAINER, ...).download_pdf()`) | S |
-| M-046 --[CALLS]--> M-011 | web/routers/intake_trigger.py:35,109 (`create_job`) | S |
-| M-023 --[CALLS]--> M-047 | src/ai/claude_sonnet_client.py (`ai_call_slot()` context manager wraps the real Claude Sonnet API call, not the cache-hit path) | S |
-| M-036 --[CALLS]--> M-048 | src/matching/engine.py:30,325,351 (`get_shop_owner`, in `run_matching()`) | S |
-| M-014 --[CALLS]--> M-036 | notebooks/01_document_intake.py:57,273 (`score_exception_confidence`, in `write_skip_exception()`) | S |
-| M-014 --[CALLS]--> M-048 | notebooks/01_document_intake.py:59,274 (`get_shop_owner`, in `write_skip_exception()`) | S |
-| M-011 --[CALLS]--> M-048 | web/queries.py:22,1164 (`get_shop_owner`, in `action_review_item()`) | S |
-| M-011 --[CALLS]--> M-036 | web/queries.py:21,1141 (`score_exception_confidence`, in `action_review_item()`) | S |
+| M-001 --[CALLS]--> M-005 | `web/app.py:33,35` (`lifespan()` — `start_worker()`/`stop_workers()`) | S |
+| M-001 --[CALLS]--> M-006 through M-015 | `web/app.py:54-63` (`app.include_router(...)`, all 10 routers) | S |
+| M-002 --[CALLS]--> M-003 | `web/deps.py:33-36` (`sidebar_context()` → `get_open_exceptions_count()`/`get_pending_review_count()`) | S |
+| M-005 --[CALLS]--> M-003 | `web/worker.py:56,82,91,93,103,114,118` (`queries.claim_next_pending_job()`, `update_job_status()`, `get_vendor_name_for_statement()`) | S |
+| M-005 --[CALLS]--> M-021 | `web/worker.py:67-75` (`subprocess.run([...scripts/run_full_pipeline.py...])`) | **A** (process boundary — see Async Boundaries #1) |
+| M-006 --[CALLS]--> M-003 | `web/routers/auth.py:29` (`queries.get_user_by_email()`) | S |
+| M-007 --[CALLS]--> M-003 | `web/routers/dashboard.py:22-25` (`get_kpis()`, `get_recent_runs()`, `get_active_jobs()`, `get_recent_completed_batches()`) | S |
+| M-008 --[CALLS]--> M-003 | `web/routers/exceptions.py:39,42,62,71,85-90,113,134,146,158` (vendor summaries, aging, open exceptions, bulk-approve, escalate, resolve) | S |
+| M-009 --[CALLS]--> M-003 | `web/routers/jobs.py:29,36` (`get_active_jobs()`, `get_job_history()`) | S |
+| M-010 --[CALLS]--> M-003 | `web/routers/reports.py:22,30` (`get_all_runs()`, `get_statement_report()`) | S |
+| M-011 --[CALLS]--> M-003 | `web/routers/review_queue.py:35,55,79` (review queue vendors/detail/action) | S |
+| M-012 --[CALLS]--> M-003 | `web/routers/upload.py:72` (`queries.create_job()`) | S |
+| M-013 --[CALLS]--> M-003 | `web/routers/users.py:22,42,47,59` (list/get/create/delete user) | S |
+| M-014 --[CALLS]--> M-003 | `web/routers/batches.py:24,25,33` (`get_all_batches()`, `get_manual_uploads()`, `get_batch_detail()`) | S |
+| M-015 --[CALLS]--> M-003 | `web/routers/intake_trigger.py:109` (`queries.create_job()`) | S |
+| M-015 --[CALLS]--> M-043 | `web/routers/intake_trigger.py:102-106` (`BlobStorageClient(...).download_pdf()`) | S |
+| M-021 --[CALLS]--> M-017 | `scripts/run_full_pipeline.py:75,77` (dynamic `load_notebook()` + `intake_mod.run_intake()`) | S (in-process, via `importlib`) |
+| M-021 --[CALLS]--> M-035 | `scripts/run_full_pipeline.py:104-106` (`generate_mock_erp()`, `normalize_erp_to_silver()`) | S |
+| M-021 --[CALLS]--> M-034 | `scripts/run_full_pipeline.py:116-117` (`run_matching()`) | S |
+| M-021 --[CALLS]--> M-020 | `scripts/run_full_pipeline.py:125-126` (dynamic `load_notebook()` + `report_mod.generate_report()`) | S |
+| M-017 --[CALLS]--> M-024 | `notebooks/01_document_intake.py:56-57,695-696` (`extract_pdf_text()`, `DocumentUnderstandingEngine().understand()`) | S |
+| M-017 --[CALLS]--> M-036 | `notebooks/01_document_intake.py:373` (`normalize_invoice_number()`) | S |
+| M-017 --[CALLS]--> M-042 | `notebooks/01_document_intake.py:283,338` (`get_shop_owner()`) | S |
+| M-017 --[CALLS]--> M-043 | `notebooks/01_document_intake.py:570` (`BlobStorageClient().upload_pdf()`) | S |
+| M-017 --[CALLS]--> M-034 | `notebooks/01_document_intake.py:59,282` (`score_exception_confidence()`) | S |
+| M-017 --[CALLS]--> M-037 | `notebooks/01_document_intake.py:58` + throughout (`execute_sql`/`execute_query`/`execute_sql_fabric`/`execute_query_fabric`) | S |
+| M-024 --[CALLS]--> M-023 | `src/ai/document_understanding_engine.py:200` (`client_factory.get_ai_client()`) | S |
+| M-024 --[CALLS]--> M-031 | `src/ai/document_understanding_engine.py:43,238` (`extract_with_pdfplumber()` — fallback path) | S |
+| M-024 --[CALLS]--> M-040 | `src/ai/document_understanding_engine.py:44,207-218` (`log_ai_call()`) | S |
+| M-023 --[CALLS]--> M-025/M-026/M-027/M-028/M-029/M-030 | `src/ai/client_factory.py:38-98` (lazy per-branch `import` + instantiate — exactly one selected at runtime by `provider_chain[0]`) | S |
+| M-025 --[CALLS]--> M-041 | `src/ai/claude_sonnet_client.py:49,212,331` (`ai_call_slot()` context manager around the real network call) | S |
+| M-025 --[CALLS]--> M-031 | `src/ai/claude_sonnet_client.py:401` (`extract_with_pdfplumber()` — truncation row-count cross-check only) | S |
+| M-028 --[CALLS]--> M-031 | `src/ai/document_intelligence_client.py:39-44` (`_extract_header_info`/`_extract_invoice_row`/`_find_header_row`/`_map_columns` — shared column-mapping helpers) | S |
+| M-029 --[CALLS]--> M-031 | `src/ai/gemini_client.py:435` (`extract_with_pdfplumber()` — truncation row-count cross-check only) | S |
+| M-031 --[CALLS]--> M-032 | `src/ai/pdfplumber_fallback.py:49,314` (`is_ocr_available()`, `ocr_page()`) | S |
+| M-035 --[CALLS]--> M-036 | `src/mock_erp/generator.py:240,268` (`normalize_invoice_number()`) | S |
+| M-035 --[CALLS]--> M-037 | `src/mock_erp/generator.py:24` + throughout (`execute_sql`/`execute_query`) | S |
+| M-034 --[CALLS]--> M-037 | `src/matching/engine.py:29` + throughout (`execute_sql`/`execute_query`) | S |
+| M-034 --[CALLS]--> M-042 | `src/matching/engine.py:30,338` (`get_shop_owner()`) | S |
+| M-020 --[CALLS]--> M-033 | `notebooks/04_generate_report.py:42,118` (`ExplanationService().explain_all_open_exceptions()`) | S |
+| M-020 --[CALLS]--> M-037 | `notebooks/04_generate_report.py:41` + throughout (`execute_query`/`execute_query_fabric`) | S |
+| M-033 --[CALLS]--> M-023 | `src/ai/explanation_service.py:26,148` (`client_factory.get_ai_client("claude")`) | S |
+| M-033 --[CALLS]--> M-040 | `src/ai/explanation_service.py:27,162` (`log_ai_call()`) | S |
+| M-033 --[CALLS]--> M-037 | `src/ai/explanation_service.py:28` + throughout (`execute_sql`/`execute_query`) | S |
+| M-040 --[CALLS]--> M-037 | `src/ai/audit_logger.py:14,37` (`execute_sql()`) | S |
+| M-003 --[CALLS]--> M-037 | `web/queries.py:20` + throughout (`execute_query`/`execute_sql`/`execute_query_fabric`/`execute_sql_fabric`) | S |
+| M-003 --[CALLS]--> M-034 | `web/queries.py:21,137,1192-1193` (`score_exception_confidence()`, `score_overall_status()`) | S |
+| M-003 --[CALLS]--> M-042 | `web/queries.py:22,1216` (`get_shop_owner()`) | S |
+| M-016 --[CALLS]--> M-037 | `notebooks/00_setup_lakehouse_schema.py:21,26,46` (`get_connection()`) | S |
+| M-016 --[CALLS]--> M-038 | `notebooks/00_setup_lakehouse_schema.py:22,28` (`apply_pending_migrations()`) | S |
+| M-039 --[CALLS]--> M-037 | `src/lakehouse/azure_sql_migrations.py:32,381,438` (`get_connection()`) | S |
+| M-044 --[CALLS]--> M-023 | `scripts/test_provider_chain.py:6,16` (`get_ai_client()`, `get_provider_chain()`) | S |
+| M-045 --[CALLS]--> M-037 | `scripts/test_fabric_connection.py:11,14` (`get_fabric_connection()`) | S |
+| M-046 --[CALLS]--> M-037 | `check_queue.py:5,11,15` (`execute_sql_fabric()`, `execute_query_fabric()`) | S |
+| M-047 --[CALLS]--> M-037 | `check_subprocess.py:4-8` (imports `_using_azure_sql` inside a spawned subprocess) | **A** (process boundary) |
+| M-048 --[CALLS]--> M-021 | `test_worker_sim.py:8-16` (`subprocess.run([...run_full_pipeline.py...])`) | **A** (process boundary) |
+| M-049 --[CALLS]--> M-021 | `test_worker_sim2.py:13-21` (`subprocess.run([...run_full_pipeline.py...])`, reproducing `web/worker.py`'s exact path construction) | **A** (process boundary) |
+| M-050 --[CALLS]--> M-017 | `tests/test_level2_matching_integration.py:146-158` (dynamic-load `run_intake()`) | S |
+| M-050 --[CALLS]--> M-035 | `tests/test_level2_matching_integration.py:161-164` (`generate_mock_erp()`, `normalize_erp_to_silver()`) | S |
+| M-050 --[CALLS]--> M-034 | `tests/test_level2_matching_integration.py:179-180` (`run_matching()`) | S |
+| M-050 --[CALLS]--> M-038 | `tests/test_level2_matching_integration.py:31,109` (`apply_pending_migrations()`) | S |
 
-**New-edge note (scoped BCE refresh, 2026-07-25):** the twelve rows above are the only new call edges confirmed this pass, covering the four new modules (M-045–M-048) plus three existing modules (M-011, M-014, M-036) that each gained one or more new outbound calls (M-011→M-036, M-011→M-048, M-014→M-036, M-014→M-048). No existing edge from Sessions A/A0 was found to have changed or been removed.
+External-system call sites (see A03 in `discovery/TOPOLOGY.md` for the full IP-NNN records):
+
+| Edge | Call Site | Sync/Async |
+|---|---|---|
+| M-025 --[CALLS]--> IP-001 (Claude Sonnet 4.6) | `src/ai/claude_sonnet_client.py:214-221,333-356` (`client.messages.stream()`) | S (streaming, in-process wait) |
+| M-026 --[CALLS]--> IP-002 (Claude Haiku 4.5) | `src/ai/claude_client.py:116-123,430-451` (`client.messages.create()`) | S |
+| M-027 --[CALLS]--> IP-003 (Azure OpenAI) | `src/ai/azure_openai_client.py:172,666` (`client.responses.create()`) | S |
+| M-028 --[CALLS]--> IP-004 (Azure Document Intelligence) | `src/ai/document_intelligence_client.py:173-176` (`client.begin_analyze_document()`) | S |
+| M-029 --[CALLS]--> IP-005 (Gemini) | `src/ai/gemini_client.py:227-231,297-306` (`client.models.generate_content()`) | S |
+| M-030 --[CALLS]--> IP-006 (Mistral) | `src/ai/mistral_client.py:186-193,312-324` (`client.chat.completions.create()`) | S |
+| M-032 --[CALLS]--> IP-007 (Tesseract/Poppler) | `src/ai/ocr_extractor.py:67-74,97-103` (`pytesseract.image_to_string()`, `convert_from_path()`, local binaries) | S |
+| M-037 --[CALLS]--> IP-008 (Azure SQL/SQLite) | `src/lakehouse/connection.py:126-150` (`pyodbc.connect()`/`sqlite3.connect()`) | S |
+| M-043 --[CALLS]--> IP-009 (Azure Blob Storage) | `src/storage/blob_client.py:127-136,190-196` (`BlobServiceClient`) | S |
+| IP-010 (Azure Event Grid) --[CALLS]--> M-015 | `web/routers/intake_trigger.py:118-138` (inbound `POST /api/intake-trigger`) | **A** (external, inbound HTTP) |
+| M-037 --[CALLS]--> IP-011 (Fabric Warehouse) | `src/lakehouse/connection.py:75-119` (`get_fabric_connection()`, `pyodbc.connect()` via `AzureCliCredential`) | S |
+
+---
 
 ## Section 2 — Startup Sequence
 
-**Web application (`uvicorn web.app:app`, via `web/start.py` locally or `startup.sh` in Azure App Service):**
-
-| Step | Module (M-NNN) | Action | Failure Mode |
+| Step | Module (M-NNN) | Action | Failure Mode (STARTUP-FATAL / NON-FATAL) |
 |---|---|---|---|
-| 1 | M-009 | Load `.env`, construct FastAPI app, add `SessionMiddleware` (falls back to a hardcoded dev secret if `WEB_SESSION_SECRET` unset) | NON-FATAL (dev secret fallback is a security smell, not a crash — see RISK_REGISTER) |
-| 2 | M-009 | Mount `/static`, register `LoginRequired` exception handler | STARTUP-FATAL if `web/static/` directory is missing |
-| 3 | M-009 → M-001..M-008, M-045, M-046 | Register all 10 routers (8 original + M-045 batches, M-046 intake_trigger, added 2026-07-24) | STARTUP-FATAL on any router import error |
-| 4 | M-009 → M-013 | `lifespan()` calls `start_worker()` — spawns `VIVE_WORKER_POOL_SIZE` daemon polling threads (default 3, was 1 prior to 2026-07-24's worker-pool change); `lifespan()`'s shutdown phase now also calls `stop_workers()`, which did not exist before | NON-FATAL — `start_worker()` itself has no failure path observed; each thread body catches all exceptions internally once running |
+| 1 | M-001 | `load_dotenv(PROJECT_ROOT/.env)` — explicit path (Rule 4) | NON-FATAL — missing `.env` silently leaves env vars unset; downstream connection code then falls back to SQLite/dormant-provider defaults rather than crashing here |
+| 2 | M-001 | Import all 10 router modules (M-006–M-015) | **STARTUP-FATAL** — a Python import error in any router (e.g. a syntax error, a missing dependency) prevents the ASGI app object from being constructed at all |
+| 3 | M-001 | `FastAPI(lifespan=lifespan)` constructed, `SessionMiddleware` added with `WEB_SESSION_SECRET` (falls back to a hardcoded dev default if unset) | NON-FATAL — app starts regardless; an unset secret is a silent security downgrade, not a crash (see archived `RISK_REGISTER.md` R-008) |
+| 4 | M-001 | Static files mounted at `/static` | **STARTUP-FATAL** if the static directory path is invalid; otherwise NON-FATAL |
+| 5 | M-001 → M-005 | `lifespan()` startup phase calls `start_worker()` | NON-FATAL — `start_worker()` itself has no failure path that halts app startup; if `threading.Thread.start()` somehow failed the exception would propagate and abort startup (STARTUP-FATAL), but no such case is observed in source |
+| 6 | M-005 | Worker pool threads (`VIVE_WORKER_POOL_SIZE`, default 3) begin polling `jobs` every 30s (`POLL_INTERVAL_SECONDS`) | NON-FATAL — each worker's loop catches all exceptions internally (`traceback.print_exc()`) and continues |
+| 7 | — | App ready to serve requests | — |
 
-**Database schema bring-up (separate, manual operational step — not part of the web app's own startup):**
-
-| Step | Module (M-NNN) | Action | Failure Mode |
-|---|---|---|---|
-| 1 | M-019 | Run `notebooks/00_setup_lakehouse_schema.py` | STARTUP-FATAL for that script's own run — raises `MigrationError` on first failing migration, does not proceed |
-| 2 | M-019 → M-034 (SQLite) or manual M-035 run (Azure SQL) | Apply all pending numbered migrations / create Azure SQL schema | Same as above — migration failure rolls back and halts |
+Router registration order (step 2) also matters for two POST routes on `web/routers/exceptions.py` — `/exceptions/{vendor_name}/bulk-approve` and `/exceptions/{vendor_name}/escalate` must be declared before the generic `/exceptions/{vendor_name:path}` POST handler, or Starlette's greedy path converter would swallow both suffixes into `vendor_name` and those two routes would never be reached (confirmed directly in `web/routers/exceptions.py:120-149` — the file itself declares them in this order with an explicit comment explaining why).
 
 ## Section 3 — Async Boundaries
 
 | Producer (M-NNN) | Consumer (M-NNN) | Mechanism | Failure behaviour |
 |---|---|---|---|
-| M-007 (upload router, HTTP request) or M-046 (Event Grid webhook) | M-013 (background worker **pool** — `VIVE_WORKER_POOL_SIZE` threads, default 3, as of 2026-07-24) | `jobs` table row (status PENDING), polled every 30s per thread via `claim_next_pending_job()` | **Updated 2026-07-24/25:** the claim guard is now scoped to `pdf_filename`, not system-wide (see `INVARIANT_CATALOGUE.md` IC-19's rewrite) — a stuck job in PROCESSING only blocks new claims for that *same filename*, not the entire queue. Every other filename can still be claimed by an idle pool thread. No stale-job requeue still exists for the stuck filename itself — that specific gap (`RISK_REGISTER.md` R-004) is narrower in blast radius than before, not resolved. |
-| M-013 (worker thread) | M-018 (`scripts/run_full_pipeline.py`, subprocess) | `subprocess.run(..., timeout=1800)` | Non-zero exit or no `"Statement ID:"` match in output → job marked FAILED with the last 4000 chars of combined stdout/stderr. A hung subprocess is killed at the 30-minute cap. |
-| M-023 (`ClaudeSonnetClient`, in-process within the pipeline subprocess) | M-047 (AI-call concurrency limiter) | Cross-process file-lock semaphore (`lakehouse/ai_call_slots/slot_N.lock`), not an in-process primitive — necessary because each job's pipeline run is its own subprocess (see M-013), so an in-process `threading.Semaphore` couldn't coordinate across jobs claimed by different pool threads | Blocks (polls every 0.5s) until a slot frees, rather than failing fast — bounds concurrent Claude Sonnet calls to `VIVE_MAX_CONCURRENT_AI_CALLS` (default 2) regardless of `VIVE_WORKER_POOL_SIZE`. See `RISK_REGISTER.md`'s new slot-leak-on-kill entry for this mechanism's one known failure mode. |
-| M-046 (Event Grid webhook, HTTP POST from Azure) | M-013 (background worker pool) | Same `jobs` table row (status PENDING) mechanism as manual upload, tagged `submitted_by="event-grid"` and a shared `batch_id` per webhook delivery | Auth-rejected (401) or over the event-count cap (413) requests never reach `create_job()` at all — see B10's contract. A download failure for one blob in a batch is skipped silently (no partial-failure signal in the Event Grid webhook schema); other blobs in the same delivery still queue normally. |
-| M-004 (`/jobs` JSON endpoint) | Browser (`web/static/app.js`, not a Python module) | HTTP polling, client-initiated | Not a server-side async boundary between M-NNN modules — included here for completeness of the async picture, not as a CALLS edge. |
+| M-012 (upload router) | M-005 (worker pool) | `jobs` table row (status=PENDING), polled every 30s | None at the producer — fire-and-forget; a stuck/never-claimed job simply sits PENDING (no dead-letter or alert) |
+| M-015 (intake_trigger router) | M-005 (worker pool) | `jobs` table row (status=PENDING, tagged `batch_id`, `submitted_by="event-grid"`), polled every 30s | Same as above — no per-event failure signal back to Event Grid beyond the initial 401/413 |
+| IP-010 (Azure Event Grid, external) | M-015 (intake_trigger router) | Inbound `POST /api/intake-trigger`, shared-secret header auth | Fails closed: 401 if `VIVE_EVENTGRID_WEBHOOK_SECRET` unset or header mismatch; 413 if event batch exceeds `MAX_EVENTS_PER_REQUEST` (100) |
+| M-005 (worker pool) | M-021 (`scripts/run_full_pipeline.py`) | `subprocess.run([...], timeout=1800)` — one OS process per job | Non-zero exit code or missing `"Statement ID:"` marker in captured stdout/stderr → job marked FAILED, last 4000 chars of output stored as `error_message`. 30-minute hard timeout kills the subprocess. |
+| M-047 (`check_subprocess.py`) | (ad hoc probe) | `subprocess.run([sys.executable, "-c", ...])` — one-off diagnostic subprocess | Captured stdout/stderr printed directly; no retry, no timeout guard in this dev script |
+| M-048/M-049 (worker simulation scripts) | M-021 (`scripts/run_full_pipeline.py`) | `subprocess.run([...], timeout=60/600)` | Same shape as the real worker's boundary — these scripts exist specifically to reproduce it outside the actual worker thread |
 
----
-
-## Section 4 — Layer Boundary Reconciliation (A01 input)
-
-See discovery/TOPOLOGY.md Section A01 for the assembled Layer Boundary Map. Key findings from source reads that inform it:
-
-1. **VISION_PROMPT is dead code for the currently active provider — confirmed to be a real extraction-quality risk, not cosmetic (engineer-requested follow-up, 2026-07-23).** `document_understanding_engine.py` builds a detailed, carefully-tuned `VISION_PROMPT` (column-mapping semantics, mixed-prefix handling, confidence calibration) and passes it to `primary_client.generate_with_file(pdf_path, VISION_PROMPT)`. The actual active primary, `ClaudeSonnetClient` (M-023), ignores the passed `prompt` parameter entirely and always sends its own much shorter, self-contained `EXTRACTION_PROMPT` instead (same pattern for `GeminiClient`/`MistralClient` — only `ClaudeClient` (Haiku) and `AzureOpenAIClient` honor the passed prompt). Side-by-side comparison found concrete regressions, not just a shorter prompt:
-   - **Confidence is fabricated, not measured.** VISION_PROMPT asks the model for a genuine per-row `line_confidence` with explicit calibration rules, which is what routes a doubtful row to human review via the 0.60 threshold (RULE-10's "never silently succeed" principle). EXTRACTION_PROMPT never asks for confidence at all, and `claude_sonnet_client.py:521` hardcodes `"line_confidence": ROW_CONFIDENCE` (`ROW_CONFIDENCE = 0.75`, a constant) on every row regardless of actual legibility. Since 0.75 > 0.60, every row Claude Sonnet extracts always passes validation — including a row it was genuinely unsure about. This defeats the safety net for the two specific failure modes VISION_PROMPT's "MIXED PREFIX PATTERNS" and "UNREADABLE PAGES" clauses were written to catch (both real, previously-observed bugs per the Implementation Context history) — EXTRACTION_PROMPT has no equivalent instructions, and there is no confidence field for the model to express doubt in even if it wanted to. `page_number` is also hardcoded to `1` for every row (single whole-document call, no per-page tracking), so page-level unreadability has no signal path at all on this provider.
-   - **No totals-row exclusion.** VISION_PROMPT explicitly tells the model to capture the grand total separately, never as an invoice line. EXTRACTION_PROMPT has no such instruction, and — unlike `pdfplumber_fallback.py`'s explicit `"total"/"balance"/"subtotal"` keyword skip in `_extract_invoice_row` — `claude_sonnet_client.py` has no equivalent filter. A summary/total row with a number-like value and an amount could be ingested as a fake invoice.
-
-   **Cross-checked against `gemini_client.py` and `mistral_client.py` (engineer-requested, 2026-07-23):** grepped both files for `total`/`balance`/`subtotal` and inspected every hit's actual role. **Filter absent in both — confirmed definitively, not just by analogy to Sonnet:**
-   - `gemini_client.py`: 4 matches, all incidental. `OUTSTANDING_KEYWORDS` (line 124) includes `"balance"` as a *column-header* keyword for mapping a header like "Balance" to the `outstanding_amount` field — a mapping concern, not a row-content filter. The other three matches are a token-usage log line (`usage.total_token_count`) and two occurrences of a computed `statement_total = sum(...)` used only to populate `statement_total_as_printed` in the output schema — an aggregate the code calculates itself, not a detector for a totals row printed in the source PDF. `_rows_to_invoices()` converts every dict-shaped row into an invoice unconditionally (its only skip condition is `if not isinstance(row, dict): continue`) — no keyword check, no exclusion of any kind.
-   - `mistral_client.py`: 6 matches, all incidental. Two are prompt text (`"Balance, Outstanding, Net etc"` — a column-mapping hint for the model, not a row filter); the rest are an unrelated `total_attempts` retry counter and the same self-computed `statement_total = sum(...)` pattern as Gemini. The row loop in `generate_with_file()` appends every row via `self._row_to_invoice(row, page_num, row_num)` with no conditional skip at all — not even a type check.
-   - **Verdict for RISK_REGISTER: all three fabricating LLM clients (ClaudeSonnetClient, GeminiClient, MistralClient) share the identical gap — zero totals/summary-row exclusion, at both the prompt level and the code level.** Only `pdfplumber_fallback.py` (and, by extension, `document_intelligence_client.py`, which reuses `pdfplumber_fallback`'s `_extract_invoice_row` and therefore inherits its `"total"/"balance"/"subtotal"` skip) has this protection. This is a systemic gap across the three newer whole-document-JSON clients, not a Sonnet-specific defect — same shape as the confidence-fabrication finding above.
-   - **Column mapping is narrower, not absent.** `_map_columns`'s keyword lists cover common cases, with a value-based fallback — but only for `invoice_number` and `outstanding_amount`. An unfamiliar header for `ro_number`/`po_number`/`work_order_number`/`description`/`shop`/`due_date` gets no fallback and returns `null`, where VISION_PROMPT told the model to reason semantically about unfamiliar columns for every field. The one instruction that did carry over intact: preferring the invoice-number column without account-code prefixes.
-   **[STAGE-2-DIVERGENCE — 2026-07-23]:** upgraded from an initial "possibly cosmetic" read to a confirmed RISK_REGISTER candidate (recommend P1 or P2, not P3) — the currently-active provider silently defeats the confidence-gated human-review mechanism the rest of the system is designed around. Flagged as a MODULE_CONTRACTS.md Known Fragility candidate for Session B/C/G, and as a priority RISK_REGISTER item for Session E.
-
-   **Live-data confirmation (engineer-requested, 2026-07-23):** queried `lakehouse/reconciliation.db` (local SQLite dev/test — `AZURE_SQL_SERVER` is configured in `.env` but was not checked; a separate Azure SQL check may be warranted). Four statements have been processed via `claude_sonnet` since it became active (`STMT-5596CFFF`, `STMT-0E8900BE`, `STMT-63ED4C76`, `STMT-6C0D52DA`); only `STMT-6C0D52DA` (asTech/ASTCollex0526.pdf, 202 invoices) has reached Gold. All 202 `gold_matched_invoices` rows for it trace back to Bronze rows with `extraction_confidence` exactly `0.75` — 100%. Across all 1,510 Bronze rows ever written under `claude_sonnet/claude-sonnet-4-6` (all 4 statements), every single one is exactly `0.75` — zero variance, confirming the hardcoded constant with production/test data, not just static analysis. That one reconciled statement came back 100% matched with zero exceptions — not evidence the gap is safe, since no signal ever existed to have caught a genuinely-uncertain-but-wrong row in the first place.
-
-   **Cross-provider audit extending this finding beyond ClaudeSonnetClient (engineer-requested, 2026-07-23):** checked all six registered provider clients for whether `line_confidence` is genuinely model-elicited or fabricated. Confirmed via grep + call trace (`_try_parse_json`/`_row_to_invoice` paths), not inference:
-   - **Genuine, model-elicited confidence (honors `VISION_PROMPT`, no hardcoding):** `ClaudeClient` (Haiku 4.5, IP-002) and `AzureOpenAIClient` (gpt-5-mini/nano/5.1, IP-003). Both call `_try_parse_json()` → `json.loads(text)` and return the model's parsed JSON unmodified — no `ROW_CONFIDENCE` constant, no per-row line_confidence assignment anywhere in either file. AzureOpenAIClient only overwrites `page_number` per page; `line_confidence` passes through untouched.
-   - **Fabricated — hardcoded constant, model never asked for confidence at all:** `ClaudeSonnetClient` (IP-001, active primary), `GeminiClient` (IP-005), `MistralClient` (IP-006) — all three define `ROW_CONFIDENCE = 0.75` and assign it to every row; all three send an `EXTRACTION_PROMPT`-style prompt that never requests a confidence field from the model.
-   - **Fabricated for a structurally different, more defensible reason:** `DocumentIntelligenceClient` (IP-004, a prior primary) — also `ROW_CONFIDENCE = 0.75` hardcoded, but `prebuilt-layout` is pure table-geometry extraction, not an LLM, so there is no model self-assessment to elicit in the first place (the file's own comment acknowledges this is "not a benchmarked/tuned value"). The downstream effect is identical (every row clears the 0.60 threshold regardless of table-detection ambiguity), but the "fabrication" is an assigned default rather than a discarded real signal.
-   - **Not fabricated, but coarse:** `pdfplumber_fallback.py` (always-available last resort, not a registered AI provider) genuinely varies confidence by extraction path — 0.65 for real geometry-based rows vs. 0.50 for OCR-derived rows, the latter deliberately below threshold by design (RULE-10). This is the one extraction path where the confidence gate does real work.
-   - **Severity implication:** 4 of 6 registered providers fabricate confidence (Sonnet, Gemini, Mistral, Doc Intelligence); only 2 (Haiku-Claude, Azure OpenAI gpt-5 family) have a genuine signal. Three of the four fabricating clients have each held the "active primary" role at different points in this project's history (Doc Intelligence, briefly Gemini per its own docstring, now Sonnet) — meaning the confidence gate has likely been a no-op for most of this system's operating history on the primary extraction path, not a defect specific to the current provider. Recommend RISK_REGISTER state this as a single systemic finding across providers, not a per-client bug list.
-
-   **Azure SQL confirmation, aggregate-only (engineer-requested, 2026-07-23):** the same aggregate-only check (GROUP BY extraction_model, COUNT, MIN/MAX confidence — no vendor/invoice/statement content queried) was run against the shared Azure SQL instance (`AZURE_SQL_SERVER` configured in `.env`). Findings are materially larger than the local dev database: **2,120 `gold_matched_invoices` rows and 4 `gold_exceptions` rows** (2,124 total Gold-layer rows) trace back to `claude_sonnet` Bronze rows — **100% exactly `0.75` confidence**, across **13 distinct statements** (of 23 total statements with any Gold matches in that database — more than half). Whether this Azure SQL instance holds real production traffic or shared dev/test activity was not conclusively determined (no vendor/invoice/statement content was queried, per instruction) — aggregate signals lean dev/test: a `fake`/`fake-model` value appears in `document_intake_log.extraction_method` (not a real registered provider — a test-fixture artifact), only 2 users exist and were created 10 minutes apart on the same day, and total volume (15 intake-log entries, 10 jobs, all COMPLETED) is modest for a claimed 79-shop operation. Engineer should confirm definitively before this number is finalized in RISK_REGISTER.md, but treat 2,124 affected Gold rows as the working figure pending that confirmation.
-
-2. **The AI provider chain contradiction is now confirmed at the call-site level, not just the config file.** `document_understanding_engine.py:188` calls `client_factory.get_ai_client()` with no provider argument, which resolves to `provider_chain[0]` from `active_provider.json` — `"claude_sonnet"` → `ClaudeSonnetClient` (M-023). This is the actual, executing primary. **[STAGE-2-DIVERGENCE — 2026-07-23]:** RULES.md RULE-04 and docs/VIVE_Implementation_Context.md Section 3 both state Azure Document Intelligence is primary; `gemini_client.py`'s own docstring and `client_factory.py`'s own inline comments both state Gemini is primary; `claude_sonnet_client.py`'s own docstring states it is *not* in the active chain; `ocr_extractor.py`, `document_understanding_engine.py`'s own docstring, and `notebooks/04_generate_report.py`'s docstring all state Azure OpenAI gpt-5-mini is primary. All are stale relative to the code that actually executes. Recommended resolution: engineer confirms Claude Sonnet 4.6 is intentionally the current primary, then a single documentation/comment sweep updates all six stale locations in one pass (tracked as a RISK_REGISTER item, not re-litigated file-by-file).
-
-3. **`web/routers/upload.py` and `web/worker.py` never call `BlobStorageClient` directly** — the actual call happens one layer down, inside `notebooks/01_document_intake.py`'s `run_intake()` (Step 8), which `scripts/run_full_pipeline.py` invokes for every job the worker dispatches. So Blob Storage archival **is** live end-to-end for every web-uploaded PDF, contradicting docs/VIVE_Implementation_Context.md's "Not wired into the pipeline yet" (dated 2026-07-15). **[STAGE-2-DIVERGENCE — 2026-07-23]:** corrects Session A0's own provisional note, which had flagged this as "worth confirming" based only on not finding the call in the web layer — Session A's full-pipeline trace finds it one hop further down.
-
-4. **No stale-job requeue logic exists**, despite docs/VIVE_Implementation_Context.md Phase 3 explicitly specifying it ("any job stuck in PROCESSING past a timeout... gets automatically re-queued"). `web/queries.py`'s job-related functions (`create_job`, `claim_next_pending_job`, `update_job_status`, `get_active_jobs`, `get_job_history`) contain no timeout-based requeue query. A job that reaches PROCESSING and then never completes (e.g. a killed worker process, though the 30-minute subprocess timeout mitigates most cases) would block `claim_next_pending_job()`'s `NOT EXISTS (... status = 'PROCESSING')` guard forever, since nothing else can claim while one row is stuck PROCESSING. **This is a genuine, code-confirmed gap**, not just a doc staleness — recommend a RISK_REGISTER entry (P2: no immediate incident, but a real single point of stall for the whole queue).
+**Note on M-021's own internal calls (Section 1):** `run_full_pipeline.py`'s calls into `notebooks/01_document_intake.py` and `notebooks/04_generate_report.py` use `importlib.util.spec_from_file_location()` to load them as modules (they are numbered CLI scripts, not package members) — this is a same-process, synchronous in-process call, not a subprocess boundary, despite the dynamic-loading mechanism looking unusual at a glance.

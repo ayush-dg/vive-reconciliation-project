@@ -1,31 +1,30 @@
-## C06 — full pipeline orchestrator
-ID: M-018
+## C06 — Full Pipeline Orchestrator
+ID: M-021
 Layer: pipeline
-Source file: scripts/run_full_pipeline.py
+Source file: `scripts/run_full_pipeline.py`
 
-**Module** — full pipeline orchestrator
-**ID** — M-018
+**Module** — Full Pipeline Orchestrator
+**ID** — M-021
 **Layer** — pipeline
-**Primary Responsibility** — Runs the complete reconciliation pipeline for one PDF in a single command: intake → mock ERP → matching → report. This is the script `web/worker.py` invokes as a subprocess for every queued job.
+**Primary Responsibility** — Single-command runner chaining all 4 pipeline phases (intake → mock ERP → matching → report) for one PDF; the exact script `web/worker.py` (M-005) shells out to per job.
 
-**Inputs** — `main()`, CLI via `--pdf` (required), `--statement-id` (optional), `--period` (optional), `--explain` (flag), `--max-explanations` (default 5).
+**Inputs** — `--pdf`, `--statement-id`, `--period`, `--explain`, `--max-explanations` CLI args.
 
-**Outputs** — Console output only, aggregating all four phases' own prints (each phase's actual writes happen in the modules it calls). Prints the literal `Statement ID: {statement_id}` line M-013's worker regex-extracts to determine the outcome.
+**Outputs** — Delegates all data writes to M-017/M-035/M-034/M-020; stdout progress markers, including the `"Statement ID: ..."` line M-005's regex (`STATEMENT_ID_RE`) depends on to detect success.
 
-**Public Interface**
-- `main()`
-- `load_notebook(name, relative_path)` — loads a `notebooks/*.py` script as an importable module via `importlib.util`, since those scripts "were never meant to be package members."
+**Public Interface** — `main()`, `load_notebook(name, relative_path)` — not called by any other module as a library; invoked only as a subprocess (by M-005, M-048, M-049) or directly from the CLI.
 
 **Error Behaviour**
-- **Explicit early-stop guard**: if `intake_result.get("bronze_count", 0) == 0`, prints "PIPELINE STOPPED — no invoices extracted" and returns *before* attempting mock ERP generation (M-037) or matching (M-036) — both of which would otherwise raise `ValueError` on empty Silver data. This is a deliberate, graceful degradation, not an oversight.
-- **No try/except around any of the four phase calls** — a genuine exception in intake, mock ERP, matching, or report generation propagates uncaught and unhandled all the way up to whatever invoked this script — for the worker (M-013), that means a nonzero exit code, which correctly marks the job FAILED.
-- **Explicit UTF-8 reconfiguration for stdout/stderr on Windows** (`sys.stdout.reconfigure(encoding="utf-8", errors="replace")`) — addresses a real, previously-encountered class of bug (cp1252 console encoding crashing on AI-extracted non-ASCII text), confirmed by the same pattern appearing independently in `notebooks/02/03/04`.
+- Catches `CorruptedPDFError` specifically around Phase 1, printing a clean `"PIPELINE FAILED"` block and `sys.exit(1)` — this is the exit code M-005's worker checks for a FAILED job.
+- If Phase 1 completes with `bronze_count == 0`, prints `"PIPELINE STOPPED — no invoices extracted"` and returns cleanly (exit 0, not a failure) — a genuinely empty extraction is not treated as a pipeline error.
+- No error handling around Phases 2–4 — an exception there propagates as an uncaught traceback and non-zero exit, which M-005 also correctly interprets as FAILED (any non-zero exit, not just the specific `CorruptedPDFError` case).
 
-**Known Fragility** — **This script's printed `"Statement ID: {statement_id}"` line is a load-bearing string contract with `web/worker.py`'s regex extraction (M-013)** — any reformatting of this print statement silently breaks the worker's ability to record which statement a completed job produced, without any test or type system catching it. This is the single most fragile point in the whole web-upload-to-completion chain, confirmed by tracing both sides of the contract.
-- Loads `.env` via an explicit absolute path (matching `web/app.py`'s pattern) specifically because this script is itself sometimes `exec`'d via `importlib.util.spec_from_file_location` from within another process (worker → subprocess → this script → dynamically-loaded notebook modules) — a bare `load_dotenv()` would be ambiguous across that many layers of invocation, confirmed by the code's own comment and by tracing the actual call chain.
+**Known Fragility**
+- **`web/worker.py`'s success/failure detection depends entirely on this script's stdout containing the literal string `"Statement ID: "` and on the process exit code** — any change to this print statement's exact text, or to how `run_intake()`'s result dict is surfaced, silently breaks the worker's ability to record a `statement_id` on a completed job (it would still mark COMPLETED via exit code 0, but `STATEMENT_ID_RE` would fail to match, leaving the job's `statement_id` unset).
+- `load_notebook()`'s `importlib.util.spec_from_file_location()` pattern loads `01_document_intake.py` and `04_generate_report.py` as ad hoc modules rather than package imports — a deliberate choice (they're numbered CLI scripts, not package members) but means neither module's own `if __name__ == "__main__":` block guard prevents re-execution of module-level code if either script ever adds side effects outside function definitions.
 
-**Change Impact** — Any change to the phase ordering or to the four called functions' signatures (`run_intake`, `generate_mock_erp`/`normalize_erp_to_silver`, `run_matching`, `generate_report`) must be reflected here, since this is the single top-level orchestration point for the entire pipeline.
+**Change Impact** — This is the sole subprocess boundary the entire worker pool (M-005) depends on — any behavioral change here has system-wide effect on every queued job, not just direct callers.
 
-**Callers** — M-013 (`web/worker.py`, via subprocess), M-043, M-044 (test scripts, via subprocess)
-**Calls** — M-014 (`run_intake`, via `load_notebook`), M-037 (`generate_mock_erp`, `normalize_erp_to_silver`, direct import), M-036 (`run_matching`, direct import), M-017 (`generate_report`, via `load_notebook`)
-**Integration Points Used** — IP-001 through IP-009 (transitively, everything the four phases touch)
+**Callers** — M-005 (via subprocess), M-048, M-049 (dev scripts, via subprocess)
+**Calls** — M-017 (`run_intake`, via `load_notebook`), M-035 (`generate_mock_erp`, `normalize_erp_to_silver`), M-034 (`run_matching`), M-020 (`generate_report`, via `load_notebook`)
+**Integration Points Used** — none directly (all transitive through the four phases)

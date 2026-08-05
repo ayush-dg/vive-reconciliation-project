@@ -1,35 +1,33 @@
-## C02 — document intake pipeline
-ID: M-014
+## C02 — Document Intake Pipeline
+ID: M-017
 Layer: pipeline
-Source file: notebooks/01_document_intake.py
-Rewritten: 2026-07-25 scoped BCE refresh (shop_owner routing wired into write_skip_exception, 2026-07-24)
+Source file: `notebooks/01_document_intake.py`
 
-**Module** — document intake pipeline
-**ID** — M-014
+**Module** — Document Intake Pipeline
+**ID** — M-017
 **Layer** — pipeline
-**Primary Responsibility** — Main intake pipeline: cache check → AI extraction → validation → Bronze → Silver → intake log → Blob archival → cache update, for one vendor statement PDF.
+**Primary Responsibility** — The main intake pipeline: cache check → AI extraction → validation → Bronze write → Silver normalization → intake log → Blob archival → cache update, for one PDF.
 
-**Inputs** — `run_intake(pdf_path: str, statement_id: str = None, statement_period: str = None) -> dict` — CLI via `--pdf`/`--statement-id`/`--period`, or called directly (e.g. by `scripts/run_full_pipeline.py`). Unchanged.
+**Inputs** — `pdf_path` (file), optional `statement_id`/`statement_period` overrides (CLI args or direct call params).
 
-**Outputs** — Writes to `bronze_vendor_statement_raw`, `silver_reconciliation_standard`, `document_intake_log`, `extraction_cache`, `validation_document_review_queue`, `gold_exceptions` (for `EXTRACTION_INCOMPLETE` skip rows — **now also carrying `match_confidence` (via `score_exception_confidence("EXTRACTION_INCOMPLETE")`) and `shop_owner` (via M-048's `get_shop_owner()`), neither of which this write site set before 2026-07-24**), `ai_audit_log` (via M-032, for row-skip logging). Uploads the PDF to Blob Storage. Returns a summary dict.
+**Outputs** — Rows in `bronze_vendor_statement_raw`, `silver_reconciliation_standard` (VENDOR_STATEMENT), `document_intake_log`, `extraction_cache`, `ai_audit_log`, `validation_document_review_queue`, `gold_exceptions` (EXTRACTION_INCOMPLETE only); a PDF uploaded to Blob Storage.
 
 **Public Interface**
-- `run_intake(pdf_path, statement_id=None, statement_period=None) -> dict`
-- `compute_file_hash(pdf_path) -> str`, `check_cache(document_hash)`, `validate_invoice(invoice, rules) -> (bool, str)`, `write_to_bronze(...) -> int`, `get_skip_reason(invoice) -> str`, `log_row_skip(...)`, `write_skip_exception(...)`, `write_to_review_queue(...)`, `normalize_to_silver(bronze_statement_id, silver_statement_id, vendor_id) -> int`, `write_intake_log(...)`, `update_intake_log_blob_path(...)`, `derive_vendor_slug_from_filename(pdf_path) -> Optional[str]`, `derive_vendor_name_from_filename(pdf_path) -> str`, `upload_pdf_to_blob_storage(...) -> Optional[str]`, `update_cache(...)`
+- `run_intake(pdf_path, statement_id=None, statement_period=None) -> dict` — the primary entry point, called by M-021 and M-050.
+- `compute_file_hash(pdf_path)`, `check_cache(document_hash)`, `validate_invoice(invoice, rules)`, `write_to_bronze(...)`, `get_skip_reason(invoice)`, `log_row_skip(...)`, `write_skip_exception(...)`, `write_to_review_queue(...)`, `normalize_to_silver(...)`, `write_intake_log(...)`, `update_intake_log_blob_path(...)`, `derive_vendor_slug_from_filename(pdf_path)`, `derive_vendor_name_from_filename(pdf_path)`, `upload_pdf_to_blob_storage(...)`, `update_cache(...)` — all importable individually (used directly by M-050's integration test).
 
 **Error Behaviour**
-- **`run_intake()` raises `FileNotFoundError`** if `pdf_path` doesn't exist — the one hard, unguarded failure in this module (deliberately fail-fast for a genuinely-missing input file).
-- **Row-skip logging (`log_row_skip`) and exception-writing (`write_skip_exception`) both wrap their DB writes in `try/except Exception`, printing a warning and continuing** — a logging failure never blocks intake from proceeding to the next row.
-- **`upload_pdf_to_blob_storage()` wraps its call in a further `try/except`** on top of `BlobStorageClient.upload_pdf()`'s own never-raise guarantee (G12) — "belt and suspenders," confirmed redundant but harmless by source.
-- **Cache-hit path returns early** (before Step 2 onward) if `check_cache()` finds a prior successful run — re-normalizes Silver from the cached Bronze rows but does not re-run AI extraction, re-write Bronze, or re-log intake (see A-004's disambiguation_note in DOMAIN_MODEL.json for the resulting `statement_id` semantics quirk this creates).
+- `run_intake()` raises `FileNotFoundError` if the PDF path doesn't exist, and lets `CorruptedPDFError` (from M-024's `extract_pdf_text()`) propagate uncaught to its own caller — both M-021 and the `__main__` block catch `CorruptedPDFError` specifically for a clean exit.
+- Every non-critical side effect (Blob upload, cache update, row-skip logging, EXTRACTION_INCOMPLETE exception write) is independently wrapped in its own `try/except`, printing a warning and continuing — none of these can abort the pipeline once extraction itself has succeeded.
+- A cache HIT skips Steps 2–5 and 7–9 entirely, re-running only Silver normalization under the new `statement_id` — this is the one path where Bronze and Silver disagree on which `statement_id` owns the data (Bronze keeps the original, Silver gets the new one).
 
 **Known Fragility**
-- **`get_skip_reason()` + `validate_invoice()`'s `required_fields` gate are the two-layer mechanism guaranteeing `invoice_number`/`outstanding_amount` are never null in Silver** (cited directly in DOMAIN_MODEL.json's A-009/A-017 annotations) — any future change to either function's logic directly changes what "guaranteed non-null" means for the domain model.
-- **`derive_vendor_name_from_filename()`'s fallback is the sole guarantee that `vendor_name` is never null on the VENDOR_STATEMENT side** — confirmed by this session's investigation that the only 424 null-`vendor_name` Silver rows are orphaned test-seed data that bypassed this function entirely (never went through `run_intake()`), not evidence of a bug in the fallback itself.
-- **Auto-suggested exception targets printed after intake** (`SUGGESTED EXCEPTION TARGETS` block) reads real extracted invoice numbers/amounts and prints a ready-to-paste JSON snippet for `scenario_config.json` — this is plain deterministic Python (sorting by amount), not an AI call, confirmed by direct source read despite the "SUGGESTED" phrasing potentially reading as AI-driven.
+- **The three Fabric-cut-over tables' write functions (`update_cache`, `write_to_review_queue`, `write_intake_log`) each compute `MAX(id) + 1` in Python with no transaction/lock** — confirmed not concurrency-safe by each function's own docstring. Two workers processing different PDFs whose intake happens to land on the exact same instant could compute the same next `id` for the same table. See `TOPOLOGY.md` A01 row 8.
+- `vendor_id` is derived twice with different logic at two points in `run_intake()` — once from the filename before extraction (line ~660), then overwritten from the AI-extracted or filename-derived `vendor_name` after Step 3 — the first derivation is pure dead weight for anything beyond a possible log line, easy to misread as meaningful.
+- The "Auto-suggest exception targets" block at the end of `run_intake()` queries Silver and prints a ready-to-paste `scenario_config.json` snippet purely as developer convenience — wrapped in its own bare `except Exception: pass`, so any failure there is invisible, by design, since it's optional tooling not part of the pipeline's real contract.
 
-**Change Impact** — The auto-suggestion block, the Blob upload step, and the cache-check step are each independently wrapped for failure isolation — changing any one should preserve that isolation given how central this module is to the whole pipeline (called by every full pipeline run). **New:** `write_skip_exception()` is now a fourth `gold_exceptions` write site expected to populate `shop_owner` at write time (alongside M-036's `run_matching()` and M-011's `action_review_item()`, see G19's Change Impact) — any future refactor of this function must preserve that call to `get_shop_owner()` or the resulting exception row would permanently lack routing information.
+**Change Impact** — This module's functions are individually imported and called by M-021 (orchestrator) and M-050 (integration test) — any signature change to `run_intake()` or the internal functions it calls breaks both callers, not just one.
 
-**Callers** — M-018 (`scripts/run_full_pipeline.py`, via dynamic module load + `run_intake()` call)
-**Calls** — M-020 (`DocumentUnderstandingEngine`, `extract_pdf_text`), M-033 (`execute_sql`, `execute_query`), M-038 (`normalize_invoice_number`), M-039 (`BlobStorageClient`), **M-036 (`score_exception_confidence`, new), M-048 (`get_shop_owner`, new)**
-**Integration Points Used** — IP-001 through IP-006 (indirectly, via M-020's provider resolution), IP-008 (Lakehouse database), IP-009 (Azure Blob Storage)
+**Callers** — M-021 (`run_intake`, via dynamic module load), M-050 (`run_intake`, via dynamic module load)
+**Calls** — M-024 (`extract_pdf_text`, `DocumentUnderstandingEngine().understand()`), M-036 (`normalize_invoice_number`), M-042 (`get_shop_owner`), M-043 (`BlobStorageClient().upload_pdf()`), M-034 (`score_exception_confidence`), M-037 (`execute_sql`/`execute_query`/`execute_sql_fabric`/`execute_query_fabric`)
+**Integration Points Used** — IP-008 (Azure SQL/SQLite), IP-009 (Azure Blob Storage, via M-043), IP-011 (Fabric Warehouse, via M-037's fabric functions) — all transitive, not called directly

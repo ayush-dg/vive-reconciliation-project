@@ -1,198 +1,210 @@
 # INTEGRATION_CONTRACTS.md — VIVE Reconciliation
-Produced by: BCE Stage 2 Session E (CD) — Path A (Custodian-Led)
-Date: 2026-07-24
+Produced by: BCE Stage 2 Session E, Part 1 (CC, per Path A precedent — human review gate is the enforcement mechanism) — fresh extraction
+Date: 2026-08-05
 
-Synthesized entirely from `discovery/TOPOLOGY.md` (A03), `discovery/MODULE_CONTRACTS.md`, and their component files — no new source reads performed for this artifact, per Session E's CD role.
-
----
-
-## IP-001 — Claude Sonnet 4.6 (Anthropic, via Azure AI Foundry) — **confirmed active primary extraction provider**
-
-**Called by:** M-023, reached via M-020 → M-031 → M-023 (`client_factory.get_ai_client()` with no argument, resolving `active_provider.json`'s `provider_chain[0]`)
-
-**What the application promises to send:** The whole PDF as one base64-encoded document content block, in a single **streaming** Anthropic Messages call (`client.messages.stream()` + `get_final_message()` — required because a non-streaming call risks a read timeout on a long whole-document extraction). Sends its own embedded `EXTRACTION_PROMPT` — **not** the `VISION_PROMPT` that `document_understanding_engine.py` passes in; that argument is silently ignored.
-
-**What the application assumes it will receive:** JSON `{vendor_name, statement_date, columns_found, rows: [{col: val, ...}]}`. Field-to-schema mapping (`invoice_date`, `outstanding_amount`, `ro_number`, etc.) happens afterward in Python via `_map_columns()`/`_row_to_invoice()`. **No per-row confidence field is requested at all.**
-
-**Auth mechanism:** API key (`AZURE_CLAUDE_API_KEY`) + Azure AI Foundry endpoint routing (`anthropic.AnthropicFoundry`), deployment resolved via `AZURE_CLAUDE_SONNET_DEPLOYMENT`.
-
-**Error handling assumptions:** Never raises — every failure path converts to a clean `AIResponse(success=False)`, which `document_understanding_engine.py` catches and falls through to the deterministic pdfplumber fallback (M-028). Truncation is explicitly detected and treated as an immediate fallback signal, not retried (a systematically truncated response would likely truncate again).
-
-**Known divergences:**
-- **[RESOLVED — Stage 3, 2026-07-24, engineer sign-off (P1-S3-002), corrected across three passes]** Nine separate code/doc locations (RULES.md RULE-04; Implementation Context; `gemini_client.py`'s docstring; `client_factory.py`'s own inline comments; `ocr_extractor.py`; `document_understanding_engine.py`'s docstring; `04_generate_report.py`'s docstring; `mistral_client.py`'s docstring; and `claude_sonnet_client.py`'s own docstring) each named a *different* provider as primary — all stale relative to this being the code-confirmed, currently-resolved primary. All nine are now corrected; see `discovery/ANNOTATION_CHECKLIST.md` P1-S3-002 for the three-pass completion history.
-- **[RESOLVED — 2026-07-24]** `line_confidence` was fabricated (`ROW_CONFIDENCE = 0.75` constant), never elicited from the model — fixed 2026-07-24: this client now elicits and parses a genuine per-row confidence value instead (see IC-15, `discovery/RISK_REGISTER.md` R-001).
-- **[RESOLVED — 2026-07-24]** No totals-row exclusion existed in either the prompt or the code — fixed 2026-07-24: a new `_is_totals_row()` check now filters these rows before they're ingested as invoice lines (see `discovery/RISK_REGISTER.md` R-002).
-
-**Gaps:** No document-level unreadable-page handling exists in this client's own prompt (unlike `VISION_PROMPT`'s explicit instruction for that case). `page_number` is hardcoded to `1` for every row — no per-page tracking exists for this whole-document-call architecture.
+Synthesized from `discovery/TOPOLOGY.md` A03, `discovery/MODULE_CONTRACTS.md`, and `discovery/INVARIANT_CATALOGUE.md` — no new source reads performed, per the methodology's own instruction for this session. One record per IP-NNN assigned in Session A.
 
 ---
 
-## IP-002 — Claude Haiku 4.5 (Anthropic, via Azure AI Foundry) — explanation service only
+## IP-001 — Claude Sonnet 4.6 (Azure AI Foundry)
 
-**Called by:** M-029 (`ExplanationService`), via M-022 (`ClaudeClient`)
+**Called by:** M-025
 
-**What the application promises to send:** A plain-text prompt (`EXPLANATION_PROMPT_TEMPLATE`, populated with one exception's details), via `generate()` (non-streaming), `max_output_tokens` deliberately capped at 1024 (below the client's own 65536 default — avoids tripping the SDK's own "streaming required" guard for long requests, since this is a few sentences of JSON, not a document extraction).
+**What the application promises to send:** The whole PDF as one base64-encoded document content block, plus the client's own internal `EXTRACTION_PROMPT` (not the caller-supplied `prompt` argument — see IC-11/RULE-07's note that this client ignores the passed prompt), via a streaming Messages API call.
 
-**What the application assumes it will receive:** JSON `{probable_cause, suggested_resolution, confidence_score, business_impact}`.
+**What the application assumes it will receive:** A JSON object shaped `{vendor_name, statement_date, columns_found, rows: [{...cols, confidence}]}`, with a genuine per-row `confidence` field the model is explicitly asked to calibrate (IC-01's upstream data source).
 
-**Auth mechanism:** API key (`AZURE_CLAUDE_API_KEY` — same env var name as IP-001, different deployment via `AZURE_CLAUDE_DEPLOYMENT`) + Azure AI Foundry routing.
+**Auth mechanism:** API key (`AZURE_CLAUDE_API_KEY`) routed through an Azure Foundry endpoint (`AZURE_CLAUDE_ENDPOINT`), via `anthropic.AnthropicFoundry`.
 
-**Error handling assumptions:** Retry-with-backoff (`max_retries` default 2). A failure on one exception marks that row `failed` and continues to the next — never aborts the batch.
+**Error handling assumptions:** Never allowed to raise past this client — any failure (auth, timeout, malformed response, detected truncation) becomes a clean `AIResponse(success=False)`, and the caller (M-024) falls through to the deterministic fallback (M-031) unconditionally.
 
-**Known divergences:** None — this is the one client whose documented role (decoupled explanation generation, hardcoded independent of `provider_chain`) exactly matches its actual code behavior. `ClaudeClient`'s own `generate_with_file()` capability (real, model-elicited confidence) is never exercised by this caller, which only uses plain `generate()`.
+**Known divergences:** None — confirmed this session that the model reliably returns the promised shape and a genuine confidence signal (RULE-04's corrected 2026-07-24 entry, independently re-verified against current source).
 
-**Gaps:** None identified.
-
----
-
-## IP-003 — Azure OpenAI (gpt-5-mini / gpt-5-nano / gpt-5.1, Responses API) — registered, **not in the active chain**
-
-**Called by:** M-021 — reachable only via an explicit `get_ai_client("azure_gpt5_mini"|"azure_gpt5_nano"|"azure_gpt5_1")` call; no confirmed live caller makes one.
-
-**What the application promises to send:** One Responses API call **per page** (PDF split via `pypdf`) — `input_file` (text-layer pages, inline base64) or `input_image` (scanned pages, rasterized locally at 300 DPI via `pdf2image`) content blocks, plus the real `VISION_PROMPT` — **this client is one of only two (with IP-002's sibling, M-022) that actually honors the passed prompt.**
-
-**What the application assumes it will receive:** JSON matching the Universal Financial Document Schema per page, aggregated across all pages into one document result — including a **genuine, model-reported `line_confidence`** per row, not a fabricated constant.
-
-**Auth mechanism:** API key (`AZURE_OPENAI_API_KEY`) + endpoint (`AZURE_OPENAI_ENDPOINT`) + one of three deployment-name env vars.
-
-**Error handling assumptions:** `temperature` is never forwarded (these reasoning models reject it with a 400). A `status == "incomplete"` response is explicitly detected and converted to a clean failure rather than an apparently-successful empty result. Per-page retry-once; one bad page doesn't abort the document.
-
-**Known divergences:** Several stale docs/comments (`document_understanding_engine.py`'s own docstring, `ocr_extractor.py`, `04_generate_report.py`'s docstring) name this as the *current* primary — not true as of this session; it is dormant.
-
-**Gaps:** Not reachable via the default `get_ai_client()` resolution — would require an explicit code change to re-activate.
+**Gaps:** Streaming is required specifically because a non-streaming call on a long whole-document extraction risks tripping a read timeout — this is a real operational dependency on Anthropic's streaming API remaining available/performant, not backstopped by any fallback within this client itself (a streaming-specific outage would present as a generic failure and fall through to M-031, same as any other failure — no distinct handling for "streaming broke" vs. "the model errored").
 
 ---
 
-## IP-004 — Azure Document Intelligence (`prebuilt-layout`) — registered, **a prior active primary**
+## IP-002 — Claude Haiku 4.5 (Azure AI Foundry)
 
-**Called by:** M-024 — reachable only via explicit `get_ai_client("azure_doc_intel")`; no confirmed live caller.
+**Called by:** M-026 (instantiated via M-023's `get_ai_client("claude")`, used only by M-033)
 
-**What the application promises to send:** The whole PDF in one call to the `prebuilt-layout` model — no prompt at all (not an LLM; `generate()` is a stub that always fails cleanly — only `generate_with_file()` is meaningful for this service).
+**What the application promises to send:** A text-only prompt (`EXPLANATION_PROMPT_TEMPLATE`, filled with one exception's details) via a plain Messages API call — no document/file content.
 
-**What the application assumes it will receive:** Raw table geometry (rows/cells, no semantic field labels), mapped via `pdfplumber_fallback.py`'s column-header interpreter (imported directly, not duplicated).
+**What the application assumes it will receive:** A JSON object with `probable_cause`, `suggested_resolution`, `confidence_score`, `business_impact`.
 
-**Auth mechanism:** API key (`AZURE_DOC_INTEL_KEY`) + endpoint (`AZURE_DOC_INTEL_ENDPOINT`).
+**Auth mechanism:** API key (`AZURE_CLAUDE_API_KEY`, same variable as IP-001 but a different deployment env var) routed through Azure Foundry.
 
-**Error handling assumptions:** Retry policy from config; explicit warning if zero tables are returned rather than a silent empty success; a `HEADER_MAX_DATA_START` guard specifically prevents misreading a trailing totals/summary row as a table header (a real, previously-encountered bug, now fixed).
+**Error handling assumptions:** Never raises; a failure is caught by M-033's `_explain_one()`, counted as `failed`, and the loop continues to the next exception — a partial-batch failure never blocks the rest.
 
-**Known divergences:** RULES.md RULE-04 and Implementation Context both still name this as the *current* primary — stale, per IC-4.
+**Known divergences:** None found.
 
-**Gaps:** `line_confidence` is hardcoded (`ROW_CONFIDENCE = 0.75`), same as IP-001/005/006 — but for a structurally different, more defensible reason: this is pure table-geometry extraction with no content understanding, so there is no model self-assessment to elicit in the first place (see IC-15's scoping note).
+**Gaps:** This provider choice is hardcoded independently of `active_provider.json` — if the extraction chain's primary provider is ever migrated off Anthropic entirely, this explanation path would not follow automatically and nobody would be alerted, since the two are deliberately decoupled by design.
 
 ---
 
-## IP-005 — Google Gemini 2.5 Flash — registered, **apparently a prior active primary per its own docstring**
+## IP-003 — Azure OpenAI (gpt-5-mini / gpt-5-nano / gpt-5.1, Responses API)
 
-**Called by:** M-025 — reachable only via explicit `get_ai_client("gemini")`; no confirmed live caller.
+**Called by:** M-027 (dormant — reachable only via an explicit `get_ai_client("azure_gpt5_*")` call; no current caller reaches it)
 
-**What the application promises to send:** The whole PDF via Files API upload + one `generate_content` call, the client's own `EXTRACTION_PROMPT` (not `VISION_PROMPT`).
+**What the application promises to send:** One Responses API call per PDF page — text-layer pages as an inline base64 `input_file` block, scanned (no-text-layer) pages rasterized locally and sent as `input_image` instead. `temperature` is never actually forwarded despite being accepted as a parameter (these reasoning models reject it outright).
 
-**What the application assumes it will receive:** JSON `{vendor_name, statement_date, columns_found, rows}`, mapped in Python via `_map_columns()` — no per-row confidence requested.
+**What the application assumes it will receive:** Per-page JSON matching the Universal Financial Document Schema shape, aggregated by the client into one document-level result; a `status == "incomplete"` response is treated as a distinct failure mode (token budget exhausted on internal reasoning) rather than an empty success.
+
+**Auth mechanism:** API key + endpoint + deployment name env vars.
+
+**Error handling assumptions:** Never raises; each page retries once before being recorded as a failed page — one bad page doesn't abort the document.
+
+**Known divergences:** None — dormant, no live traffic to diverge from expectation.
+
+**Gaps:** Not exercised by any current traffic — its retry/truncation-salvage logic has no production signal confirming it still works correctly against whatever version of the Responses API is live today; a real activation would need to re-validate this before trusting it in production.
+
+---
+
+## IP-004 — Azure Document Intelligence (`prebuilt-layout`)
+
+**Called by:** M-028 (dormant — reachable only via an explicit `get_ai_client("azure_doc_intel")` call)
+
+**What the application promises to send:** The whole PDF in one `begin_analyze_document()` call using the `prebuilt-layout` model (not `prebuilt-invoice` — deliberately, since the real documents are statements with many invoices per page, not one invoice per document).
+
+**What the application assumes it will receive:** Generic table geometry (rows/cells, no semantic field labels), mapped into schema fields by reusing M-031's shared column-header interpreter.
+
+**Auth mechanism:** API key + endpoint env vars.
+
+**Error handling assumptions:** Never raises; retries once on the whole-document call; a continuation table whose column count doesn't match the last detected header is skipped with a warning rather than risking a misaligned mapping.
+
+**Known divergences:** None found.
+
+**Gaps:** The continuation-table reuse logic is tuned to one confirmed real case (one logical table split across pages with a header only on page 1) — a vendor with a genuinely different multi-table-same-column-count layout would be mis-handled, with no way to distinguish the two cases from column count alone (see G03/C13's Known Fragility).
+
+---
+
+## IP-005 — Google Gemini 2.5 Flash (google-genai SDK)
+
+**Called by:** M-029 (dormant — reachable only via an explicit `get_ai_client("gemini")` call)
+
+**What the application promises to send:** The whole PDF as one Files API upload, followed by one `generate_content` call with `EXTRACTION_PROMPT`.
+
+**What the application assumes it will receive:** A JSON object shaped `{vendor_name, statement_date, columns_found, rows}` — **without** a per-row confidence field (this client's prompt, unlike M-025's, does not ask for one; every row gets a fixed `ROW_CONFIDENCE = 0.75`).
 
 **Auth mechanism:** API key (`GEMINI_API_KEY`).
 
-**Error handling assumptions:** A dedicated retry path for 503 UNAVAILABLE specifically (up to 2 retries, 60s wait) — any other error fails immediately, no retry. Two-signal truncation detection (empty `rows` with non-empty `columns_found`, or a salvaged row count suspiciously low relative to `pdfplumber`'s own count on the same document). Uploaded file always cleaned up, best-effort.
+**Error handling assumptions:** Never raises; specifically retries on a 503 UNAVAILABLE response (up to `max_retries`, 60s wait) — any other error fails immediately with no retry.
 
-**Known divergences:**
-- This client's own module docstring, **and** `client_factory.py`'s own inline comment directly above the branch that instantiates it, both claim it is "the active primary provider" — directly false as of this session; `claude_sonnet` is `provider_chain[0]`.
-- `line_confidence` is fabricated (`ROW_CONFIDENCE = 0.75` constant), never elicited from the model — same gap as IP-001; see IC-15, RISK_REGISTER R-001.
-- No totals-row exclusion in either the prompt or the code — same gap as IP-001; see RISK_REGISTER R-002.
+**Known divergences:** **Confirmed, carried forward from the archived record:** no totals/summary-row filter exists at either prompt or code level for this client (archived R-002) — re-confirmed still true this session, this client remains dormant so the exposure is real but currently unreachable by live traffic.
 
-**Gaps:** None beyond what's captured above.
+**Gaps:** Same flat-`0.75`-confidence gap as R-001 originally described — dormant, so no live risk today, but a real regression waiting if this provider is ever reactivated without first porting M-025's fix.
 
 ---
 
-## IP-006 — Mistral Medium — registered, **never confirmed active at any point**
+## IP-006 — Mistral Medium (direct Mistral API)
 
-**Called by:** M-026 — reachable only via explicit `get_ai_client("mistral")`; no confirmed live caller.
+**Called by:** M-030 (dormant — reachable only via an explicit `get_ai_client("mistral")` call)
 
-**What the application promises to send:** One chat-completions call **per page** (PDF rasterized to PNG first — Mistral's `image_url` content part rejects raw `application/pdf` data URIs outright, confirmed via diagnostic testing per the module docstring), the client's own `EXTRACTION_PROMPT`.
+**What the application promises to send:** Every page rasterized to PNG (Mistral rejects raw PDF data URIs outright) and sent as one chat-completions call per page image.
 
-**What the application assumes it will receive:** JSON `{columns_found, rows: [{raw: {...}, mapped: {...}}]}` — **deliberately does not ask for confidence or document/vendor/statement metadata at all**, a considered choice after diagnostic testing found Mistral's self-reported confidence and row counts unreliable (100% "HIGH" confidence regardless of known transcription errors; the model's own row count disagreeing with its own output on 12 of 14 test pages).
+**What the application assumes it will receive:** Per-page JSON with both a raw column-keyed dict and a mapped standard-fields dict; the raw dict is stashed into `description` as JSON (explicitly marked TEMPORARY in the source).
 
-**Auth mechanism:** API key (`MISTRAL_API_KEY`) + endpoint (`MISTRAL_ENDPOINT`).
+**Auth mechanism:** API key + endpoint + deployment env vars.
 
-**Error handling assumptions:** Per-page retry-once (matching IP-003's pattern); the whole document only fails if every page failed.
+**Error handling assumptions:** Never raises; per-page retry-once-then-record-failure, same shape as IP-003.
 
-**Known divergences:**
-- No stale "I am primary" claim anywhere — the one AI provider clean on that specific point.
-- `line_confidence` is fabricated (`ROW_CONFIDENCE = 0.75` constant) — same gap as IP-001/IP-005, though for a demonstrated-unreliable-signal rationale distinct from their cases; the downstream effect (defeats the 0.60 threshold) is identical. See IC-15, RISK_REGISTER R-001.
-- No totals-row exclusion — same gap as IP-001/IP-005; see RISK_REGISTER R-002.
+**Known divergences:** Same as IP-005 — no totals-row filter, no genuine per-row confidence (fixed `0.75`), dormant so no live exposure.
 
-**Gaps:** Stashes the raw per-column dict into the schema's `description` field as JSON — explicitly marked TEMPORARY in the code, purely so the full per-vendor column set is inspectable in Bronze/Silver after a real run.
+**Gaps:** This client's prompt deliberately omits the confidence/metadata request entirely (diagnostic testing found the model's self-reported confidence and row counts unreliable) — a design choice specific to this provider, not an oversight, but it means even a future "port the confidence fix" effort for M-029/M-030 can't simply copy M-025's prompt pattern; the underlying signal quality issue for this specific provider was never solved, only worked around by not asking.
 
 ---
 
-## IP-007 — Tesseract OCR + Poppler (local binaries) — last-resort text extraction
+## IP-007 — Tesseract OCR + Poppler (local binaries)
 
-**Called by:** M-027, invoked by M-028 (`pdfplumber_fallback`)
+**Called by:** M-032, called by M-031
 
-**What the application promises to send:** A rasterized PDF page image (default dpi=200) to the local Tesseract binary via `pytesseract`.
+**What the application promises to send:** Nothing over a network — a local binary invocation (`pytesseract`/`pdf2image`), one page rasterized and OCR'd at a time.
 
-**What the application assumes it will receive:** Raw OCR text, converted to a pseudo-table for the same column-mapping logic real pdfplumber tables use.
+**What the application assumes it will receive:** Raw OCR text for the page, converted by M-031 into a pseudo-table for the shared column-mapping logic.
 
-**Auth mechanism:** None — local binary, no network call, no API key.
+**Auth mechanism:** None — local binary, no network auth.
 
-**Error handling assumptions:** `is_ocr_available()` gracefully degrades to "unavailable" on any missing dependency or unreachable binary; per-page OCR attempted only where pdfplumber itself found no usable text layer.
+**Error handling assumptions:** `is_ocr_available()` never raises, returning `False` on any missing dependency or unreachable binary; the caller (M-031) treats unavailability as a normal, handled case.
 
-**Known divergences:** None.
+**Known divergences:** None — this is a local, deterministic path with no external contract to diverge from.
 
-**Gaps:** `_configure_tesseract_path()` hardcodes a Windows-specific fallback binary path with no equivalent for Linux/macOS — relevant since the confirmed production target (Azure App Service, per `startup.sh`) is Linux.
+**Gaps:** `_configure_tesseract_path()` hardcodes a Windows-specific default install path as its only fallback when `tesseract` isn't already on `PATH` — a non-Windows deployment or non-default install location silently degrades to "OCR unavailable" with no diagnostic pointing at the actual cause (wrong hardcoded path assumption).
 
 ---
 
-## IP-008 — Lakehouse database (SQLite local/dev/test, Azure SQL production)
+## IP-008 — Azure SQL / SQLite (lakehouse database)
 
-**Called by:** Nearly every module — M-011, M-013 (indirectly), M-014, M-016, M-017, M-019, M-032, M-033, M-034, M-035, M-036, M-037, M-041, M-042.
+**Called by:** M-003, M-016, M-017, M-020, M-034, M-035, M-039, M-040 (all via M-037)
 
-**What the application promises to send:** Parameterized SQL via `execute_sql()`/`execute_query()`, auto-translated for the Azure SQL dialect where needed (`INSERT OR REPLACE` → `MERGE`, trailing `LIMIT n` → `SELECT TOP n`) — confirmed a narrow, two-pattern translator, not a general-purpose one.
+**What the application promises to send:** Parameterized SQL (via `?` placeholders, pyodbc's default paramstyle on both backends) — never raw string-interpolated values; two SQLite-specific constructs (`INSERT OR REPLACE`, trailing `LIMIT`) are rewritten to T-SQL equivalents before reaching the driver.
 
-**What the application assumes it will receive:** Rows as `list[dict]` (`execute_query`) or a live cursor (`execute_sql`).
+**What the application assumes it will receive:** Rows as list-of-dict results (`execute_query()`) or a cursor (`execute_sql()`) — backend-agnostic from the caller's perspective, by design.
 
-**Auth mechanism:** Azure SQL — username/password (`AZURE_SQL_USERNAME`/`AZURE_SQL_PASSWORD`) via a TLS-encrypted `pyodbc` connection string (`Encrypt=yes`). SQLite — none (local file).
+**Auth mechanism:** Azure SQL — username/password via pyodbc connection string, TLS encrypted. SQLite — none (local file).
 
-**Error handling assumptions:** Dropped-connection retry specifically for pyodbc SQLSTATE `08S01`/`08001` (Azure SQL serverless auto-pause), up to 3 retries with a 5s wait — any other error propagates immediately, unretried.
+**Error handling assumptions:** Azure SQL connection drops (SQLSTATE 08S01/08001, from serverless auto-pause) are retried up to 3 times with a fresh connection; any other error propagates immediately, unretried.
 
-**Known divergences:** None regarding the connection/query mechanism itself — but per IC-12, the *schema-provisioning* path diverges: SQLite goes through the tracked, numbered migration runner (M-034); Azure SQL goes through a separate, manually-synced one-shot creator (M-035) outside that tracked system entirely. See RISK_REGISTER R-006.
+**Known divergences:** None for this path specifically — the dialect translation is confirmed narrow-but-correct for the two patterns this codebase actually uses.
 
-**Gaps:** The two-pattern SQL translator only covers the exact SQLite-only constructs this codebase currently uses — a new one (e.g. a bound `LIMIT ?` placeholder) would fail untranslated against Azure SQL; already worked around once in `web/queries.py:get_recent_runs()`.
+**Gaps:** `_translate_for_azure()` is explicitly not a general-purpose SQL dialect translator — any new SQLite-only syntax introduced elsewhere that isn't one of the two known patterns would fail differently (and possibly silently-wrong, not just loudly-erroring) on Azure SQL than on SQLite, with nothing to catch the mismatch before it reaches the driver.
 
 ---
 
 ## IP-009 — Azure Blob Storage (`vendor-statements` container)
 
-**Called by:** M-039, invoked by M-014 — **confirmed wired end-to-end this session**, correcting Implementation Context's stale "not wired into the pipeline yet" claim.
+**Called by:** M-043, called by M-017 (archival) and M-015 (drop-zone download, different container/connection-string)
 
-**What the application promises to send:** One blob upload per PDF, path `{vendor_slug}/{yyyy}/{mm}/{document_hash}.pdf` (reusing the same SHA-256 hash already computed for extraction caching), with `original_filename`/`vendor_name`/`uploaded_by` attached as metadata.
+**What the application promises to send:** One blob upload per PDF, keyed `{vendor_slug}/{yyyy}/{mm}/{document_hash}.pdf`, with `original_filename`/`vendor_name`/`uploaded_by` metadata attached.
 
-**What the application assumes it will receive:** The blob's URL on success.
+**What the application assumes it will receive:** A blob URL on successful upload; on download, the raw PDF bytes for a caller-supplied blob URL, with the container segment of that URL verified (not trusted) against the configured container before any read is attempted.
 
-**Auth mechanism:** Connection string (`AZURE_BLOB_CONNECTION_STRING`).
+**Auth mechanism:** Connection string (`AZURE_BLOB_CONNECTION_STRING` for archival; `AZURE_BLOB_DROPZONE_CONNECTION_STRING` for the drop-zone path, per-caller).
 
-**Error handling assumptions:** **Never raises, by design** — any failure (missing config, missing file, network/auth error) returns `None`; the caller logs a warning and continues without ever blocking the pipeline.
+**Error handling assumptions:** Never raises from either public method — missing config, missing file, or any SDK/network failure all return `None`/`False`; every caller logs a warning and continues, since archival/download are explicitly non-blocking for the pipeline.
 
-**Known divergences:** Implementation Context's Progress Log (dated 2026-07-15) states this is "not wired into the pipeline yet" — confirmed false; the actual call happens inside `notebooks/01_document_intake.py`'s `run_intake()` Step 8.
+**Known divergences:** None — confirmed the container-pinning fix (archived R-009) remains in place this session.
 
-**Gaps:** No reader of Blob Storage exists anywhere in the traced codebase — archival is write-only from the pipeline's perspective; nothing currently retrieves an archived PDF back for display or audit.
-
----
-
-## IP-010 — Azure Event Grid (auto-intake webhook, `viverecondropzone` storage account / `incoming-statements` container) — added 2026-07-25, code-complete but not yet deployed
-
-**Called by:** M-046 (inbound HTTP POST from Azure Event Grid, not called by our code)
-
-**What the application promises to send:** This is an inbound trigger — Event Grid initiates, not our code. On a valid, authorized delivery, M-046 calls M-039 (`BlobStorageClient`, a different container/connection-string than IP-009) to pull the referenced PDF down, then queues it as a job identically to a manual upload, tagged `submitted_by="event-grid"` with a shared `batch_id` per delivery (see M-045).
-
-**What the application assumes it will receive:** Either a one-time Event Grid `SubscriptionValidationEvent` or a batch of `Microsoft.Storage.BlobCreated` events.
-
-**Auth mechanism:** As of 2026-07-25, code-complete but not yet deployed: a shared secret (`VIVE_EVENTGRID_WEBHOOK_SECRET`), checked via constant-time comparison against a static delivery header, before anything else in the handler runs. Until this session, there was no authentication at all — see `discovery/RISK_REGISTER.md` R-009 for the full history and the still-open deployment action item (secret not yet generated/configured on the actual Event Grid subscription — blocked on Azure permissions).
-
-**Error handling assumptions:** The download side is hard-pinned to the configured dropzone container regardless of what container the inbound event's blob URL names (see M-039's rewritten contract) — previously the URL's own container segment was trusted, a second finding fixed alongside the auth gap. A hard cap of 100 events per delivery was also added (no cap existed before).
-
-**Known divergences:** None recorded — this integration point was added in the same 2026-07-25 pass that documents it; no stale prior claims exist about it.
-
-**Gaps:** None beyond what's captured above.
+**Gaps:** A silent archival failure (connection string unset, network blip) means a statement's source PDF is never actually archived, with no retry and no alert beyond a printed warning — the only signal is absence, which nothing currently monitors for.
 
 ---
 
-Session E Part 1 (INTEGRATION_CONTRACTS.md) complete.
+## IP-010 — Azure Event Grid (auto-intake webhook)
+
+**Called by:** M-015 (inbound HTTP POST, not called by this codebase — Event Grid calls in)
+
+**What the application promises to send:** A `{"validationResponse": ...}` echo on the one-time subscription validation handshake; otherwise `{"status": "ok"}` regardless of how many individual blob events actually succeeded or were skipped within the batch.
+
+**What the application assumes it will receive:** A JSON array (or single object) of Event Grid events, each either a `SubscriptionValidationEvent` or a `Microsoft.Storage.BlobCreated` event with a `data.url` field; a shared secret in the `x-vive-webhook-secret` header on every real delivery.
+
+**Auth mechanism:** Shared secret (`VIVE_EVENTGRID_WEBHOOK_SECRET`), constant-time-compared against the header — fails closed (401) if the secret isn't configured, with no "unconfigured means open" fallback.
+
+**Error handling assumptions:** 401 on auth failure, 413 if the event batch exceeds 100 events; individual blob-download or non-PDF-blob failures are silently skipped with no per-event failure signal back to Event Grid (the schema has none) — the whole batch always reports success once past auth/size checks.
+
+**Known divergences:** None new this session.
+
+**Gaps (carried forward, not re-verified this session):** Per `TOPOLOGY.md`'s Engineer Review item 5, the actual Azure Event Grid subscription's configuration status (secret generated and set as a delivery header) was not re-confirmed this session — the code-side fix (auth, container-pinning, request cap) is confirmed complete, but whether this integration point is actually live in production is unknown from source alone.
+
+---
+
+## IP-011 — Microsoft Fabric Warehouse
+
+**Called by:** M-037 itself (`get_fabric_connection()`); transitively, M-003, M-017, M-045, M-046 (every caller of `execute_sql_fabric()`/`execute_query_fabric()`)
+
+**What the application promises to send:** Parameterized SQL, written to be valid on both SQLite (the local/test fallback) and T-SQL (the real Fabric path) — no `LIMIT`/`TOP`, no `INSERT OR REPLACE` (see IC-15's PARTIAL enforcement note).
+
+**What the application assumes it will receive:** Rows as list-of-dict results, structurally identical in shape to `execute_query()`'s output — but with **no dialect translation and no connection-drop retry**, unlike the Azure SQL path.
+
+**Auth mechanism:** Azure CLI-issued token (`AzureCliCredential` + `SQL_COPT_SS_ACCESS_TOKEN`), reusing an existing `az login` session — not the ODBC driver's own interactive auth flow (confirmed abandoned after failing with FA004/0x534 on the development machine).
+
+**Error handling assumptions:** None specific to this path — any connection or query failure propagates immediately, with no retry logic equivalent to Azure SQL's `_run_with_retry()`.
+
+**Known divergences:** **New this session (see `TOPOLOGY.md`'s STAGE-2-DIVERGENCE and `INVARIANT_CATALOGUE.md` IC-15/IC-19):** the promise of full backend-agnosticism for callers (IC-15) does not fully hold for this integration point — callers must know which of the three cut-over tables is on Fabric, and the `id`-assignment concurrency gap (IC-19) is a genuine, currently-unenforced constraint on this integration point specifically.
+
+**Gaps:**
+1. **No automated schema-creation or sync mechanism exists for the Fabric side at all** — unlike Azure SQL (which has `src/lakehouse/azure_sql_migrations.py`, M-039, mirroring the SQLite migrations), nothing in this codebase creates or tracks the Fabric Warehouse's table structure. `scripts/test_fabric_connection.py` (M-045) only *queries* `INFORMATION_SCHEMA.TABLES` to confirm what's already there — there is no equivalent of M-039 for Fabric. This is a genuine, unaddressed gap, worth its own RISK_REGISTER entry.
+2. The `id`-assignment concurrency gap (IC-19) — every write to a Fabric-cut-over table computes `MAX(id) + 1` in application code, unenforced by any lock or the database itself.
+3. Requires an interactively-established `az login` session on whatever machine/process runs this code — not obviously compatible with a fully automated, headless production deployment (e.g. a container that starts fresh with no prior interactive Azure CLI session) without a separate, undocumented provisioning step to establish that session non-interactively.
+
+---
+
+Session E Part 1 (INTEGRATION_CONTRACTS.md) is complete. Part 2 (RISK_REGISTER.md) follows.

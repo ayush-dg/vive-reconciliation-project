@@ -1,433 +1,190 @@
 # ANNOTATION_CHECKLIST.md — VIVE Reconciliation
-Produced by: BCE Stage 3 (CD) — Path A (Custodian-Led)
-Date: 2026-07-24
 
-> **2026-07-25 forward-pointer note (does not alter this record):** every "44 modules"/"M-001–M-044" statement below (CHECK 0, CHECK 1, CHECK 6) was correct and directly verified on 2026-07-24, the date this Stage 3 sign-off was recorded — it is a historical audit record, not a living count, and is left as-signed-off rather than retroactively edited. The roster has since been extended to 48 modules (M-001–M-048) by a 2026-07-25 scoped refresh — see `discovery/TOPOLOGY.md`'s addendum and `discovery/MODULE_CONTRACTS.md`'s 2026-07-25 note for the current count. That extension does not reopen or invalidate any item this checklist closed.
-
-All six BCE artifacts read in full before this review: `INTAKE_SUMMARY.md`, `TOPOLOGY.md`, `MODULE_CONTRACTS.md`, `INTEGRATION_CONTRACTS.md`, `INVARIANT_CATALOGUE.md`, `RISK_REGISTER.md`. `docs/INVARIANTS.md` and `docs/ARCHITECTURE.md` do not exist (non-PBVI project) — `RULES.md`/`docs/VIVE_Implementation_Context.md` served as the functional equivalent throughout, per `INTAKE_SUMMARY.md`.
-
-**Per explicit instruction: nothing below is marked RESOLVED or SIGNED-OFF unless the engineer directly did so in this conversation. Findings the engineer has discussed, formalized, or directed investigation of — but not explicitly signed off on the remediation decision for — remain STATUS: OPEN.**
+This is the BCE backlog — items surfaced during extraction that require an engineer decision, annotation, or judgment call before they can be considered resolved. Opened during Session F03 (Domain Model Synthesis) this pass, ahead of the formal Stage 3 cross-artifact review that will run after Sessions B/C/G/U complete. Per methodology, this file is never empty on a real system — new items accumulate here as extraction proceeds.
 
 ---
 
-## CHECK 0 — Schema Validation Gate
+### P2-F03-001 · `silver_reconciliation_standard.statement_date` does not store a date ([DOMAIN_MODEL.json A-006])
 
-Verified directly, this session, via grep/read (not assumed from memory):
-- TOPOLOGY.md A02 Module Roster: all 44 modules (M-001–M-044) assigned, sequential, no gaps.
-- TOPOLOGY.md A02 Internal Call Table: every entry uses `M-NNN --[CALLS]--> M-NNN` format — spot-checked full table, no prose names found.
-- TOPOLOGY.md A03: all 9 external system records carry an `IP-NNN` field.
-- MODULE_CONTRACTS.md: all 44 component files' `Callers`/`Calls`/`Integration Points Used` fields checked exhaustively (132 field-lines reviewed) — every value is `M-NNN`, `IP-NNN`, or the literal `none`/`none directly`. Zero prose-name substitutions found.
-- INVARIANT_CATALOGUE.md: all `Owning module`/`Enforcing modules` fields reference `M-NNN` or the literal `none` (a valid "zero enforcement" value, not a prose substitute for an ID).
-- INTEGRATION_CONTRACTS.md: all 9 records begin with `IP-NNN`; all `Called by` fields reference `M-NNN`.
-- RISK_REGISTER.md: all `Affected modules` fields reference `M-NNN`; all `Threatened invariant` fields reference `IC-N` except R-002, which explicitly states no `IC-N` exists yet — not a schema violation (no prose name substituted for an existing ID), but a genuine coverage gap, handled below under Check 4.
-- DOMAIN_MODEL.json: all node IDs correctly formatted (`E-001`; `A-001`–`A-025`; `SV-001`–`SV-003`; `SVV-001`–`SVV-006`). No `REL-NNN` entries exist — correctly absent (zero relationships modeled, a direct consequence of the single-entity Silver-only scope), not a violation.
-- `SYSTEM_GRAPH.json` does not exist yet (correctly deferred to Stage 3 close-out, after this gate passes) — its cross-graph-edge sub-check is N/A until then.
+**Severity:** P2
+**Type:** OPEN_QUESTION
+**Source:** CODE_EXTRACTION
+**Surfaced by:** CC (Session F03, while extracting the `statement_date` attribute)
+**Artifact:** `DOMAIN_MODEL.json` (A-006)
+**Section:** Attribute A-006
+
+**Observation:** `notebooks/01_document_intake.py`'s `normalize_to_silver()` writes `row.get("statement_period")` into the `statement_date` column, with its own inline comment confirming this is deliberate: `"# statement_date — use period as proxy"`. A column named for a specific date (e.g. the date printed on the statement) actually holds a `YYYY-MM` period string throughout the VENDOR_STATEMENT side of this table.
+
+**Risk for planning:** Any future engineer, report, or AI-planning pass that reads `statement_date` expecting a real date (for aging calculations, date-range filtering, or display) will get a period string instead. This is exactly the class of naming-vs-content mismatch BCE annotation exists to catch before it causes a real bug — e.g., a future "statements older than N days" feature built directly against this column would silently misbehave.
+
+**Recommended action:** Engineer decides: (a) rename the column to something accurate (e.g. `statement_period_proxy` or simply drop it in favor of `statement_period`, which already exists as its own column on this same table and holds the real value) in a future migration, or (b) confirm this is intentional and acceptable as-is, with the business meaning recorded here for future readers rather than fixed.
+
+**Engineer action required:** A naming/schema decision, or an explicit acceptance with rationale.
+
+**STATUS:** OPEN — not yet reviewed by the engineer.
+
+---
+
+## Stage 3 — Cross-Artifact Review, 2026-08-05
+Produced by: BCE Stage 3 (CC, per Path A precedent — human review gate is the enforcement mechanism)
+
+All six BCE artifacts read in full before this review: `INTAKE_SUMMARY.md`, `TOPOLOGY.md`, `MODULE_CONTRACTS.md`, `INTEGRATION_CONTRACTS.md`, `INVARIANT_CATALOGUE.md`, `RISK_REGISTER.md`, plus `docs/INVARIANTS.md` and `docs/ARCHITECTURE.md` for cross-checking, per this session's earlier reads.
+
+### CHECK 0 — Schema Validation Gate
+
+Verified directly via grep (not assumed):
+- `A02_module_call_map.md` Module Roster: all 50 modules M-001–M-050 assigned, sequential, no gaps.
+- `A02_module_call_map.md` Internal Call Table: all edges use `M-NNN --[CALLS]--> M-NNN` or `M-NNN --[CALLS]--> IP-NNN` format.
+- `TOPOLOGY.md` A03: all 11 external system records carry an `IP-NNN` field (confirmed count via grep).
+- `MODULE_CONTRACTS.md`/component files: all `Callers`/`Calls`/`Integration Points Used` fields reference `M-NNN` or `IP-NNN` — one legitimate, deliberate exception: `B15_intake_trigger_router.md`'s `Callers` field reads `IP-010` rather than an `M-NNN`, correctly, since the actual caller is the external Event Grid system, not another internal module.
+- `INVARIANT_CATALOGUE.md`: all `Owning module`/`Enforcing modules` fields reference `M-NNN` or the literal `none`.
+- `INTEGRATION_CONTRACTS.md`: all 11 records begin with `IP-NNN`; all `Called by` fields reference `M-NNN`.
+- `RISK_REGISTER.md`: all `Affected modules` fields reference `M-NNN`; all `Threatened invariant` fields reference `IC-N` or the literal `None formal`.
+- `DOMAIN_MODEL.json`: all node IDs correctly formatted (`E-001`; `A-001`–`A-026`; `SV-001`; `SVV-001`–`SVV-002`). No `REL-NNN` entries — correctly absent (single-entity canonical boundary, zero relationships to name), not a violation.
+- `SYSTEM_GRAPH.json` does not exist yet — correctly deferred until after this gate passes.
 
 **Zero SCHEMA_VIOLATION items produced. Schema validation PASS — proceeding to Check 1.**
 
 ---
 
-## CHECK 1 — Cross-Artifact Contradiction Detection
+### CHECK 1 — Cross-Artifact Contradiction Detection
 
-- **TOPOLOGY.md vs MODULE_CONTRACTS.md** (module names, call relationships, layer assignments): Verified matching directly — same 44 module names, same M-NNN, same layer assignments (8 serving / 19 pipeline / 17 infra) in both. No contradiction.
-- **TOPOLOGY.md vs INTEGRATION_CONTRACTS.md** (external system names, boundary descriptions): Same 9 `IP-NNN` names and `Called by` fields in both (INTEGRATION_CONTRACTS.md was synthesized directly from TOPOLOGY.md's A03 at Session E). No contradiction.
-- **MODULE_CONTRACTS.md vs INVARIANT_CATALOGUE.md** (enforcement points, module sources): Cross-checked IC-4, IC-7, IC-8 (the three invariants with stale-citation notes) against their corresponding MODULE_CONTRACTS.md entries (C10, G07) — both describe the same underlying facts consistently; framing differs (fragility vs. invariant-enforcement lens) but no factual disagreement. No contradiction.
-- **RISK_REGISTER.md vs MODULE_CONTRACTS.md** (Known Fragility fields vs risk entries): All 6 RISK_REGISTER entries trace directly to a MODULE_CONTRACTS.md cross-cutting finding or component-file fragility, with consistent severity implication. No contradiction.
-
-**Zero CONTRADICTION items from this check** (the AI-provider-chain naming disagreement is real, but it is a docs-vs-code divergence already captured under Check 3, not an inconsistency between the BCE artifacts themselves — the BCE artifacts agree with each other throughout).
-
----
-
-## CHECK 2 — NOT DETERMINABLE Escalation
-
-Searched all five living artifacts directly for `NOT DETERMINABLE`. Found exactly one instance: TOPOLOGY.md's A01 Layer Boundary Map, item #5 (dashboard KPI query behavior on a wholly-empty `gold_reconciliation_summary`).
-
-**Resolved directly during this review** (evidence already existed from the later `get_kpis()` full-body read performed during the IC-16 blast-radius investigation, no new file opened): `get_kpis()` wraps every `SUM(...)` in `COALESCE(..., 0)` and uses `COUNT(DISTINCT ...)`, both of which degrade gracefully to zero/empty on a wholly-empty table. TOPOLOGY.md updated in place; see Resolution Log below. **No open checklist item required.**
+- **TOPOLOGY.md vs MODULE_CONTRACTS.md** (module names, call relationships, layer assignments): Verified matching — same 50 module names, same M-NNN, same layer assignments (15 serving / 21 pipeline / 14 infra) in both, since MODULE_CONTRACTS.md's index was built directly from A02's roster this session. No contradiction.
+- **TOPOLOGY.md vs INTEGRATION_CONTRACTS.md** (external system names, boundary descriptions): Same 11 `IP-NNN` records in both (INTEGRATION_CONTRACTS.md was synthesized directly from TOPOLOGY.md's A03 this session). No contradiction.
+- **MODULE_CONTRACTS.md vs INVARIANT_CATALOGUE.md** (enforcement points, module sources): Spot-checked IC-15/IC-19 (the two Fabric-related entries) against `G01_lakehouse_connection.md`'s Known Fragility — both describe the same facts consistently (PARTIAL enforcement, M-003/M-017 as the actual write sites). No contradiction found.
+- **INVARIANT_CATALOGUE.md vs docs/INVARIANTS.md** (invariant statements, coverage): **One real contradiction found.** `docs/INVARIANTS.md`'s INV-06 states `Scope: GLOBAL` outright. `INVARIANT_CATALOGUE.md`'s IC-06 (same invariant) reclassifies it as `TASK-SCOPED`, with reasoning given inline — but `docs/INVARIANTS.md` was not updated to match. → **CON-001**. Separately, **a coverage gap, not a contradiction**: 12 of `INVARIANT_CATALOGUE.md`'s 19 entries (IC-08 through IC-19) have no representation in `docs/INVARIANTS.md` at all — most were sourced from `RULES.md` or code observation, never promoted to the formal invariants document. IC-08 (RULE-01's normalization restraint) is the clearest promotion candidate, already flagged in its own entry.
+- **RISK_REGISTER.md vs MODULE_CONTRACTS.md** (Known Fragility fields vs risk entries): Cross-checked all 50 component files' Known Fragility sections against the 13 risk entries. All fragilities with genuine operational/security/data-integrity weight are covered. Two fragilities were considered and deliberately **not** promoted to a risk entry, recorded here so they aren't silently lost: `C09_document_understanding_engine.md`'s dead `VISION_PROMPT` code (a wasted-effort/tech-debt finding, not an active risk) and `B12_upload_router.md`'s silent partial-batch-upload-failure (no per-file error isolation) — the latter is closer to risk-register-worthy than the former; flagged below as **P3-S3-005** for the engineer's own judgment rather than added unilaterally.
 
 ---
 
-## CHECK 3 — STAGE-2-DIVERGENCE Resolution Status
+### CHECK 2 — NOT DETERMINABLE Escalation
 
-Six `[STAGE-2-DIVERGENCE]`-tagged findings exist across the artifact set (deduplicated — the AI-provider-chain naming issue is tagged in both `A02_module_call_map.md` and `INVARIANT_CATALOGUE.md`'s IC-4, counted once).
-
-| # | Finding | Resolved? |
-|---|---|---|
-| 1 | Confidence fabrication (IC-15/R-001) | **RESOLVED (accepted-as-risk)** — engineer accepted the gap as-is, tracked as R-001 (Critical), to be prioritized against Sprint 1 planning; Azure SQL provenance confirmed test/dev. → **P1-S3-001**, closed 2026-07-24. |
-| 2 | AI-provider-chain contradiction, 9 stale doc locations (IC-4) | **RESOLVED (doc sweep applied)** — engineer confirmed Claude Sonnet 4.6 as intentional primary; all 9 locations corrected across three passes (6 initially, then `document_understanding_engine.py` and `mistral_client.py` on a later verification pass, then `claude_sonnet_client.py`'s own docstring last). → **P1-S3-002**, closed 2026-07-24. |
-| 3 | Blob Storage "not wired" claim, corrected | **RESOLVED** — a factual correction (confirmed via code trace that it is wired), not an open engineer decision; consistently reflected in TOPOLOGY.md and INTEGRATION_CONTRACTS.md since. See Resolution Log. |
-| 4 | Stale-job requeue gap (IC-19/R-004) | **RESOLVED (accepted-as-risk)** — engineer accepted the gap, tracked as R-004 (Medium), deferred to Sprint 1 enhancement #5. → **P1-S3-003**, closed 2026-07-24. |
-| 5 | RULE-07 enforcement-citation staleness (IC-7) | **RESOLVED (citation updated)** — engineer approved; RULE-07 now cites `claude_sonnet_client.py:_map_columns()`. → **P1-S3-004**, closed 2026-07-24. |
-| 6 | RULE-08 build-status-premise staleness (IC-8) | **RESOLVED (text updated)** — engineer approved; RULE-08 now reflects built per-user logins. → **P1-S3-005**, closed 2026-07-24. |
-
-Per methodology, unresolved STAGE-2-DIVERGENCE items default to P1 regardless of underlying material severity — items #4 and #6 are P1 by this rule despite representing lower real-world urgency than #1/#2; noted explicitly in each item below so they aren't mistaken for equally urgent.
+Searched all five living Stage 2 artifacts directly for `NOT DETERMINABLE`. Found exactly 2 instances, both in `INVARIANT_CATALOGUE.md`'s CQ-001 entry (`Currently enforced` and `Enforcement point` fields) — both legitimately not determinable from source, since CQ-001 is a human code-review discipline with no linter/static-analysis backing found in this codebase. **Informational only (P3) — not an extraction gap.** No checklist item required beyond noting it here.
 
 ---
 
-## CHECK 4 — Missing Invariant Candidates
+### CHECK 3 — Stage-2-Divergence Resolution Status
 
-Compared every MODULE_CONTRACTS.md Known Fragility/Change Impact field against INVARIANT_CATALOGUE.md's 19 entries.
-
-- **R-002's own text already flags this gap directly**: "no formal IC-N currently covers" the missing totals-row-exclusion finding (Sonnet/Gemini/Mistral). Confirmed genuinely absent from INVARIANT_CATALOGUE.md. → **P2-S3-001**
-- **A second gap found during this review, not previously flagged in RISK_REGISTER.md**: MODULE_CONTRACTS.md's cross-cutting finding #7 explicitly names two fragilities as "RISK_REGISTER candidates" — the hardcoded fallback login credential (B01/M-001) and the hardcoded default `WEB_SESSION_SECRET` (G01/M-009) — but neither was ever actually added as a RISK_REGISTER.md entry. The user's Session E instruction named 6 specific risks to formalize; these two were not among them, but they were flagged as candidates earlier and never followed up on — exactly the kind of completeness gap Stage 3 exists to catch. → **P2-S3-002**
+One genuine `[STAGE-2-DIVERGENCE — 2026-08-05]` finding exists this pass (the Fabric cut-over scope/RULE-13 staleness, documented in `TOPOLOGY.md` and `INVARIANT_CATALOGUE.md` IC-15). **Not yet resolved by the engineer.** Per methodology, unresolved STAGE-2-DIVERGENCE items default to P1. → **P1-S3-002**.
 
 ---
 
-## CHECK 5 — Risk Register Severity Review
+### CHECK 4 — Missing Invariant Candidates
 
-Reviewed all 6 RISK_REGISTER.md entries against their cited fragility/invariant impact:
-
-| Risk | Severity | Consistency check |
-|---|---|---|
-| R-001 | Critical | Consistent — systemic (4/6 providers), confirmed live (2,124+ Gold rows), defeats a core safety mechanism. |
-| R-002 | High | Consistent — real, unmitigated exposure; correctly not downgraded for lack of a confirmed incident, per instruction. |
-| R-003 | Medium | Consistent — explicitly justified downgrade from an initial higher read, with precise blast-radius evidence on file. |
-| R-004 | Medium | Consistent — real single point of stall, but requires a trigger condition (crash/hang) to manifest. |
-| R-005 | Medium | Consistent — untested fragile contract, not a currently-active failure. |
-| R-006 | Medium | Consistent — confirmed currently in sync; the risk is future drift, not a present incident. |
-
-**Zero severity-inconsistency items produced.**
+Compared every `MODULE_CONTRACTS.md` Known Fragility/Change Impact field against `INVARIANT_CATALOGUE.md`'s 19 entries. Every fragility that represents a genuine "must always hold" constraint already has a corresponding IC-N entry (IC-08 for RULE-01's restraint, IC-18 for route-registration order, IC-19 for the Fabric concurrency gap). **No new invariant candidates found — check is clean.**
 
 ---
 
-## Checklist Items
+### CHECK 5 — Risk Register Severity Review
 
-### P1-S3-001 · Confidence-fabrication remediation decision pending ([RISK_REGISTER, INVARIANT_CATALOGUE])
-**Severity:** P1
-**Type:** OPEN_QUESTION
-**Source:** CODE_EXTRACTION
-**Surfaced by:** CD
-**Artifact:** RISK_REGISTER (R-001), INVARIANT_CATALOGUE (IC-15)
-**Section:** R-001; IC-15
-**Observation:** Confirmed live and systemic — 4 of 6 registered extraction providers (including the confirmed active primary) fabricate a flat `0.75` confidence value, defeating the human-review safety gate. Additionally, whether the Azure SQL instance checked during this investigation holds production or test traffic was never conclusively confirmed.
-**Risk for planning:** Any enhancement touching extraction quality, confidence handling, or the review queue is planning against a safety mechanism that doesn't currently function for the live provider.
-**Recommended action:** Engineer decides: (a) restore genuine confidence elicitation for the active primary, or (b) explicitly accept the current gap and adjust operational practice (e.g. increased manual spot-checking). Also confirm definitively whether the checked Azure SQL instance is production data.
-**Engineer action required:** A remediation decision and an Azure-SQL-provenance confirmation.
-**Engineer decision (2026-07-24):** Accept the confidence-gate gap as-is for now — not fixing today, will prioritize against Sprint 1 planning. Formally tracked as R-001 (already Critical in RISK_REGISTER.md). Azure SQL instance provenance confirmed: test/dev data (fake-model fixture, 2 test users, both stray filenames traced to test artifacts) — not production. This confirmation is recorded explicitly in R-001's evidence in RISK_REGISTER.md.
-**STATUS:** RESOLVED — engineer accepted the gap as a tracked risk (R-001) and confirmed Azure SQL provenance directly.
+Reviewed all 13 `RISK_REGISTER.md` entries against their cited fragility/invariant impact. Twelve are internally consistent (severity matches description and blast radius, downgrades/upgrades from the archived record are justified with evidence). **One presentation inconsistency found:** R-009 uses `"Fixed in code / deployment pending"` as its severity field — not one of the standard severity levels (Critical/High/Medium/Low) used everywhere else in the register, overloading a status concept into the severity field. → **P3-S3-004**.
 
 ---
 
-### P1-S3-002 · AI-provider-chain documentation contradiction unconfirmed ([TOPOLOGY, INVARIANT_CATALOGUE])
-**Severity:** P1
-**Type:** CONTRADICTION
-**Source:** CODE_EXTRACTION
-**Surfaced by:** CD
-**Artifact:** TOPOLOGY (A02 Section 4 #2); INVARIANT_CATALOGUE (IC-4)
-**Section:** A02 Section 4, item 2; IC-4
-**Observation:** Nine locations (RULES.md RULE-04; `docs/VIVE_Implementation_Context.md` Section 3; `src/ai/gemini_client.py`'s docstring; `src/ai/client_factory.py`'s own inline comments; `src/ai/ocr_extractor.py`'s docstring; `src/ai/document_understanding_engine.py`'s docstring; `notebooks/04_generate_report.py`'s docstring; `src/ai/mistral_client.py`'s docstring; `src/ai/claude_sonnet_client.py`'s own docstring) each named a different provider as primary — the last two were found in later independent verification passes, not in the original review that surfaced the first seven. The code-confirmed actual primary is Claude Sonnet 4.6.
-**Risk for planning:** Any future engineer trusting these comments/docs over the actual `provider_chain` config would misdiagnose the extraction path.
-**Recommended action:** Engineer confirms Claude Sonnet 4.6 is intentionally the current primary, then a documentation/comment sweep corrects every affected location.
-**Engineer action required:** Explicit confirmation of intent, then authorize the doc sweep.
-**Engineer decision (2026-07-24):** Confirmed — Claude Sonnet 4.6 is intentionally the current primary. Signed off on the documentation sweep.
-**Completion history (updated 2026-07-24, across three passes the same day):** The initial sweep corrected 6 locations (RULES.md RULE-04, `docs/VIVE_Implementation_Context.md` Section 3, `gemini_client.py`, `client_factory.py`'s comments, `ocr_extractor.py`, `notebooks/04_generate_report.py`). A later independent verification pass found `document_understanding_engine.py`'s docstring still stale (missed by the original sweep despite being named in `INVARIANT_CATALOGUE.md` IC-4's own divergence description) and separately discovered `mistral_client.py`'s docstring carried the same class of error, previously unreported — both corrected. `claude_sonnet_client.py`'s own docstring, deliberately left uncorrected during the original sweep out of caution about blast radius on the active provider's own file, was corrected in a final pass once that caution no longer applied. All nine locations are now confirmed corrected.
-**STATUS:** SIGNED-OFF — documentation sweep applied across all 9 locations.
-
----
-
-### P1-S3-003 · Stale-job requeue: build vs. accept decision pending ([RISK_REGISTER, INVARIANT_CATALOGUE])
-**Severity:** P1 (per unresolved-STAGE-2-DIVERGENCE default; material severity separately rated Medium in RISK_REGISTER R-004 — not a contradiction, see note)
-**Type:** OPEN_QUESTION
-**Source:** CODE_EXTRACTION
-**Surfaced by:** CD
-**Artifact:** RISK_REGISTER (R-004); INVARIANT_CATALOGUE (IC-19)
-**Section:** R-004; IC-19
-**Observation:** No stale-job requeue logic exists despite Implementation Context Phase 3 explicitly specifying it. A job stuck in `PROCESSING` blocks the entire queue indefinitely (per IC-19's own atomic single-job guard).
-**Risk for planning:** Relevant before any broader multi-user rollout — the failure mode compounds with real concurrent usage.
-**Recommended action:** Build the requeue logic Implementation Context already describes, or explicitly accept this as a known gap for the current usage scale.
-**Engineer action required:** A build-vs-accept decision.
-**Engineer decision (2026-07-24):** Accept the no-requeue gap as-is for now, tracked as R-004 (Medium) — will address as part of Sprint 1 enhancement #5 (parallel workers), since that work touches this exact code anyway.
-**STATUS:** RESOLVED — engineer accepted the gap, deferred to Sprint 1 enhancement #5.
-
----
-
-### P1-S3-004 · RULE-07 enforcement-point citation is stale ([INVARIANT_CATALOGUE])
-**Severity:** P1 (per unresolved-STAGE-2-DIVERGENCE default; low material urgency — the invariant itself holds)
-**Type:** CONTRADICTION
-**Source:** CODE_EXTRACTION
-**Surfaced by:** CD
-**Artifact:** INVARIANT_CATALOGUE
-**Section:** IC-7
-**Observation:** RULES.md RULE-07 cites `VISION_PROMPT` and `pdfplumber_fallback.py` as the enforcement point for universal column mapping; the actual live enforcement for the active primary is `claude_sonnet_client.py:_map_columns()`, which `VISION_PROMPT` is confirmed not to reach.
-**Risk for planning:** Low — the underlying no-per-vendor-config guarantee holds either way; only the citation is wrong.
-**Recommended action:** Update RULE-07's enforcement-point citation to name the current code path.
-**Engineer action required:** Approve the citation update (a documentation-only fix).
-**Engineer decision (2026-07-24):** Signed off — RULE-07's citation updated to point at Claude Sonnet's `_map_columns()` as the actual live enforcement point.
-**STATUS:** SIGNED-OFF — RULE-07 citation corrected.
-
----
-
-### P1-S3-005 · RULE-08 build-status premise is stale ([INVARIANT_CATALOGUE])
-**Severity:** P1 (per unresolved-STAGE-2-DIVERGENCE default; low material urgency — the invariant's conclusion holds)
-**Type:** CONTRADICTION
-**Source:** CODE_EXTRACTION
-**Surfaced by:** CD
-**Artifact:** INVARIANT_CATALOGUE
-**Section:** IC-8
-**Observation:** RULE-08's text states per-user logins are "unbuilt as of this writing" — confirmed false; they are fully built (`users`/`jobs` tables, M-001, M-008). The flat-permission design intent it describes is confirmed still accurate in the now-built code.
-**Risk for planning:** Low — could mislead a future reader into thinking auth doesn't exist yet.
-**Recommended action:** Update RULE-08's text to reflect that per-user logins are built, while keeping its flat-permission conclusion.
-**Engineer action required:** Approve the text update (a documentation-only fix).
-**Engineer decision (2026-07-24):** Signed off — RULE-08's text updated to reflect that per-user logins are now built; flat-permission design confirmed still intentional.
-**STATUS:** SIGNED-OFF — RULE-08 text corrected.
-
----
-
-### P2-S3-001 · No invariant covers totals-row exclusion for the three fabricating LLM clients ([RISK_REGISTER, INVARIANT_CATALOGUE])
-**Severity:** P2
-**Type:** OPEN_QUESTION
-**Source:** STAGE3_REVIEW
-**Surfaced by:** CD
-**Artifact:** RISK_REGISTER (R-002); INVARIANT_CATALOGUE
-**Section:** R-002; (candidate — no existing IC-N section)
-**Observation:** `ClaudeSonnetClient`, `GeminiClient`, `MistralClient` have no totals/summary-row filter at prompt or code level, unlike `pdfplumber_fallback.py`/`document_intelligence_client.py`. R-002 itself already flags the missing invariant.
-**Risk for planning:** A future invariant-driven review (or automated check) has nothing to catch a regression here.
-**Recommended action:** Add a new invariant candidate to INVARIANT_CATALOGUE.md formalizing "no totals/summary row may be ingested as an invoice line," citing all five extraction paths' current status.
-**Engineer action required:** Approve adding the new invariant.
-**Engineer decision (2026-07-24):** Signed off — added as IC-20 in INVARIANT_CATALOGUE.md ("No totals/summary row may be ingested as an invoice line"), referencing IC-15/R-002. RISK_REGISTER.md R-002's "Threatened invariant" field updated from "— (new, unmodeled)" to IC-20.
-**STATUS:** SIGNED-OFF — IC-20 added.
-
----
-
-### P2-S3-002 · Two previously-flagged RISK_REGISTER candidates were never added ([RISK_REGISTER, MODULE_CONTRACTS])
-**Severity:** P2 (upgraded from the OPEN_QUESTION default of P3 — involves hardcoded credential/secret material, not purely informational)
-**Type:** OPEN_QUESTION
-**Source:** STAGE3_REVIEW
-**Surfaced by:** CD
-**Artifact:** RISK_REGISTER; MODULE_CONTRACTS (cross-cutting finding #7)
-**Section:** Cross-cutting finding #7 names both; neither has a RISK_REGISTER.md entry.
-**Observation:** The hardcoded fallback login credential (`web/routers/auth.py`, M-001) and the hardcoded default `WEB_SESSION_SECRET` (`web/app.py`, M-009) were both explicitly identified as "RISK_REGISTER candidates" during Sessions A0/A and B/C/G, but the Session E risk-formalization pass covered a different, explicitly-named set of 6 risks and never circled back to these two.
-**Risk for planning:** Both are real, if lower-severity, security-hygiene findings that could otherwise be lost between sessions.
-**Recommended action:** Add both as new RISK_REGISTER.md entries (R-007, R-008) at the engineer's discretion on severity.
-**Engineer action required:** Approve adding these two entries and set their severity.
-**Engineer decision (2026-07-24):** Signed off — added as new entries in RISK_REGISTER.md: R-007 (hardcoded fallback admin credential in `auth.py`, M-001) — severity High, "production auth bypass path, even if intended as temporary"; R-008 (hardcoded session secret in `web/app.py`, M-009) — severity High, "if compromised, forges any user's session; same class of risk as R-007." Per the standing no-secrets-in-artifacts rule, neither entry reproduces the literal credential/secret value.
-**STATUS:** SIGNED-OFF — R-007 and R-008 added.
-
----
-
-## Resolution Log
-
-| Item ID | Resolution type | Resolved by | Date | Evidence |
-|---|---|---|---|---|
-| STAGE-2-DIVERGENCE-3 (Blob Storage wiring) | RESOLVED-CODE | CD (code trace) | 2026-07-24 | Confirmed via `notebooks/01_document_intake.py`'s `run_intake()` Step 8 call trace; consistently reflected in TOPOLOGY.md and INTEGRATION_CONTRACTS.md since Session A. |
-| TOPOLOGY A01 #5 (dashboard KPI empty-DB behavior) | RESOLVED-CODE | CD (code trace) | 2026-07-24 | `get_kpis()`'s `COALESCE(..., 0)`/`COUNT(DISTINCT ...)` pattern, confirmed via the full-body read performed during the IC-16 investigation. TOPOLOGY.md updated in place. |
-| P1-S3-001 (confidence-fabrication remediation) | FAIL-ACCEPTED | Engineer | 2026-07-24 | Accepted as-is, tracked as R-001 (Critical); Azure SQL provenance confirmed test/dev directly by engineer. RISK_REGISTER.md R-001 updated with both statements. |
-| P1-S3-002 (AI-provider-chain doc contradiction) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer confirmed Claude Sonnet 4.6 as intentional primary; doc/comment sweep applied across all 9 locations (see P1-S3-002's completion history for the three-pass breakdown). |
-| P1-S3-003 (stale-job requeue gap) | FAIL-ACCEPTED | Engineer | 2026-07-24 | Accepted as-is, tracked as R-004 (Medium), deferred to Sprint 1 enhancement #5. RISK_REGISTER.md R-004 updated. |
-| P1-S3-004 (RULE-07 citation staleness) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer approved; RULE-07 citation updated to `claude_sonnet_client.py:_map_columns()`. |
-| P1-S3-005 (RULE-08 build-status staleness) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer approved; RULE-08 text updated to reflect built per-user logins, flat-permission intent confirmed unchanged. |
-| P2-S3-001 (missing totals-row invariant) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer approved; IC-20 added to INVARIANT_CATALOGUE.md, referencing IC-15/R-002. |
-| P2-S3-002 (two unadded risk candidates) | RESOLVED-ANNOTATION | Engineer | 2026-07-24 | Engineer approved both entries and set severity (High/High); R-007 and R-008 added to RISK_REGISTER.md. |
-
-Resolution type vocabulary: RESOLVED-CODE — answer found in source code. RESOLVED-ANNOTATION — resolved via human annotation. CONFIRMED-CONTRADICTION / FAIL-ACCEPTED — contradiction confirmed, accepted as known gap. RESOLVED-INFORMATIONAL — item confirmed as not requiring action.
-
-**All 7 Stage 3 checklist items now carry a direct engineer sign-off or resolution decision, recorded above and in the Checklist Items section**, per explicit instruction that nothing be marked RESOLVED/SIGNED-OFF without it. The two code-trace entries remain in a separate category (CD's own factual corrections, no engineer judgment required).
-
----
-
-## Cross-Artifact Consistency Check (CHECK 6)
-**Last run:** 2026-07-24 **By:** CD
+### CHECK 6 — Cross-Artifact Consistency Check
+**Last run:** 2026-08-05 **By:** CC (per Path A precedent)
 
 | Check | Status | Notes |
 |---|---|---|
-| All invariants in INVARIANT_CATALOGUE.md match INVARIANTS.md | N/A | No `docs/INVARIANTS.md` exists (non-PBVI project); RULES.md's 13 rules were walked in full as the functional equivalent (IC-1–IC-13). |
-| All module names in MODULE_CONTRACTS.md match TOPOLOGY.md | PASS | Verified directly — same 44 names, same M-NNN, same layers. |
-| All external systems in INTEGRATION_CONTRACTS.md match TOPOLOGY.md A03 | PASS | Same 9 IP-NNN records, same names, in both. |
-| All risks in RISK_REGISTER.md reference correct source artifacts | PASS | All 8 entries (R-001–R-008) correctly cite IC-N/M-NNN or explicitly note "candidate for future invariant." The two previously-flagged candidates (P2-S3-002) have now been added as R-007/R-008. |
-| INTAKE_SUMMARY.md open questions accounted for in artifacts | PASS | All 5 open questions from `INTAKE_SUMMARY.md` (canonical layer boundary, provider-chain divergence, dead-code status of retired clients, Blob Storage/job-queue wiring, `--explain` provider) are addressed across TOPOLOGY.md, MODULE_CONTRACTS.md, and INTEGRATION_CONTRACTS.md. |
-| Entity names in DOMAIN_MODEL.json consistent with domain terminology in INVARIANT_CATALOGUE.md and MODULE_CONTRACTS.md | PASS | "Invoice" (E-001) used consistently as the domain term throughout all artifacts. |
+| All invariants in INVARIANT_CATALOGUE.md match INVARIANTS.md | FAIL | INV-06/IC-06 scope contradiction (CON-001); 12 IC entries absent from INVARIANTS.md entirely (coverage gap, not itself a failure of this check but recorded here for visibility) |
+| All module names in MODULE_CONTRACTS.md match TOPOLOGY.md | PASS | Verified directly — same 50 names, same M-NNN, same layers |
+| All external systems in INTEGRATION_CONTRACTS.md match TOPOLOGY.md A03 | PASS | Same 11 IP-NNN records, same names, in both |
+| All risks in RISK_REGISTER.md reference correct source artifacts | PASS | All 13 entries correctly cite IC-N or `None formal`, and M-NNN throughout |
+| INTAKE_SUMMARY.md open questions accounted for in artifacts | PASS | All 5 open questions from `INTAKE_SUMMARY.md` (the 3 new `.docx` files, INV-06 classification, IC-19/INV-05 re-confirmation, Fabric migration scope, PROJECT_MANIFEST/REGISTRY sign-off) are addressed or explicitly tracked across TOPOLOGY.md, INVARIANT_CATALOGUE.md, and RISK_REGISTER.md — the `.docx` files remain genuinely unread, tracked as an open item, not silently dropped |
+| Entity names in DOMAIN_MODEL.json consistent with domain terminology in INVARIANT_CATALOGUE.md and MODULE_CONTRACTS.md | PASS | "Invoice" (E-001) used consistently; `silver_reconciliation_standard` referenced identically across all artifacts |
 
 ---
 
-## Stage 3 Completeness Summary — 2026-07-24
-Produced by: BCE Adapter Pipeline Stage 3 (CD)
+## New Checklist Items — Stage 3, 2026-08-05
 
-P1 items: 5 — all SIGNED-OFF or RESOLVED (engineer decisions recorded 2026-07-24)
-P2 items: 2 — all SIGNED-OFF (engineer decisions recorded 2026-07-24)
-P3 items: 0
-CON items: 0 (folded into the P1 CONTRADICTION-type items above, not double-counted)
-Total items closed this session: 7 of 7
-Resolved this session (code-trace, no engineer sign-off needed): 2 (separate category, see Resolution Log)
-
-Consistency check: PASS — 0 failures (1 N/A, justified)
-
-**Stage 3 is complete.** All 5 P1 items and both P2 items carry a direct, explicit engineer decision (accept-as-tracked-risk, sign-off-on-fix, or sign-off-on-new-entry), recorded verbatim in each item's "Engineer decision" line above, in the Resolution Log, and reflected in the underlying artifacts (RISK_REGISTER.md R-001/R-004/R-007/R-008, RULES.md RULE-04/07/08, `docs/VIVE_Implementation_Context.md` Section 3, INVARIANT_CATALOGUE.md IC-20, and the 4 corrected source-code docstrings/comments). Zero P1/P2 items remain OPEN. The mandatory Stage 3 Close-Out step (Graph Construction — `discovery/SYSTEM_GRAPH.json`) proceeds next.
-
-Engineer sign-off: Confirmed in conversation, 2026-07-24 — all 7 Stage 3 items reviewed and decided as recorded above.
-
----
-
-## Stage 3 — Second Pass, 2026-07-27 (Post-Scoped-Refresh Reconciliation)
-
-> **Forward-pointer note (does not alter the 2026-07-24 record above):** the
-> 2026-07-25 scoped refresh (worker pool, Event Grid auto-intake, match confidence
-> scoring, IC-21) introduced new cross-artifact drift that the original Stage 3 pass
-> could not have caught, since it predates that refresh by a day. This second pass
-> covers only findings from re-running Checks 0/1/4 against the current artifact set
-> as of 2026-07-27 — Checks 2, 3, 5, and 6 were not re-run in full this pass and
-> should not be assumed clean beyond what's stated below.
-
-**Artifacts read this pass:** `TOPOLOGY.md`, `MODULE_CONTRACTS.md`,
-`INTEGRATION_CONTRACTS.md`, `INVARIANT_CATALOGUE.md`, `RISK_REGISTER.md`,
-`docs/INVARIANTS.md`, `docs/ARCHITECTURE.md` — all as of their 2026-07-27 state.
-
-### CHECK 0 — Schema Validation Gate (re-run, scoped to 2026-07-25 additions)
-
-IP-010 (Event Grid integration point) is correctly ID-formatted and registered in
-`ID_REGISTRY.md` and `TOPOLOGY.md`'s A03 — but was **entirely absent** from
-`INTEGRATION_CONTRACTS.md`, which had no addendum at all for the 2026-07-25 refresh
-unlike the other four living artifacts. Not a format violation (no prose name
-substituted for a missing ID) — a completeness gap, handled under Check 1 below,
-not re-classified as SCHEMA_VIOLATION.
-
-**PASS with one completeness note — proceeding to Check 1.**
-
-### CHECK 1 — Cross-Artifact Contradiction Detection (re-run against 2026-07-25 additions)
-
-- **TOPOLOGY.md vs INTEGRATION_CONTRACTS.md** — IP-010 present in one, absent from
-  the other. → **P1-S3-006**
-- **RISK_REGISTER.md vs {docs/INVARIANTS.md, docs/ARCHITECTURE.md,
-  INVARIANT_CATALOGUE.md IC-15, MODULE_CONTRACTS.md finding #1}** — R-001's fix note
-  (Claude Sonnet confidence fabrication, fixed 2026-07-24) was never propagated to
-  four other locations, all of which still described the bug as currently active.
-  → **P1-S3-007**
-- **RISK_REGISTER.md vs INVARIANT_CATALOGUE.md IC-20** — R-002's fix note (Claude
-  Sonnet totals-row filter, fixed 2026-07-24) was never propagated to IC-20, which
-  still listed M-023 among the unfiltered clients. → **P1-S3-008**
-
-### CHECK 4 — Missing Invariant Candidates (partial re-check)
-
-- MODULE_CONTRACTS.md's cross-cutting finding #8 (`friendly_dt()`'s hardcoded IST,
-  M-010) was flagged during the original extraction for "engineer confirmation at
-  Session D/E" and never followed up — the same completeness-gap pattern as the
-  original P2-S3-002, not caught the first time. → **P2-S3-003**
-
----
-
-### P1-S3-006 · IP-010 missing from INTEGRATION_CONTRACTS.md ([TOPOLOGY, INTEGRATION_CONTRACTS])
+### P1-S3-001 · INV-06/IC-06 GLOBAL vs. TASK-SCOPED contradiction between docs/INVARIANTS.md and INVARIANT_CATALOGUE.md
 **Severity:** P1
 **Type:** CONTRADICTION
-**Source:** STAGE3_REVIEW
-**Surfaced by:** CD
-**Artifact:** TOPOLOGY (A03); INTEGRATION_CONTRACTS
-**Section:** A03 IP-010 row; INTEGRATION_CONTRACTS.md (entire file — no addendum existed)
-**Observation:** TOPOLOGY.md's 2026-07-25 addendum registers IP-010 (Azure Event
-Grid webhook) with a full A03 record. INTEGRATION_CONTRACTS.md was never updated in
-that refresh — no IP-010 entry, no addendum header, unlike the other four living
-artifacts.
-**Risk for planning:** A reader consulting INTEGRATION_CONTRACTS.md alone would not
-know this integration point exists at all.
-**Recommended action:** Add an IP-010 entry to INTEGRATION_CONTRACTS.md, sourced
-from TOPOLOGY.md's A03 row, matching the file's existing entry format.
-**Engineer action required:** Approve the addition.
-**Engineer decision (2026-07-28):** Approved — IP-010 entry added to
-INTEGRATION_CONTRACTS.md.
-**STATUS:** RESOLVED — IP-010 entry added.
+**Source:** CODE_EXTRACTION
+**Surfaced by:** CC
+**Artifact:** `docs/INVARIANTS.md` (INV-06); `INVARIANT_CATALOGUE.md` (IC-06)
+**Section:** INV-06; IC-06
+**Observation:** `docs/INVARIANTS.md` declares INV-06 (AI-call concurrency cap) `Scope: GLOBAL` with no hedge. This session's `INVARIANT_CATALOGUE.md` reclassifies the same invariant as `TASK-SCOPED`, reasoning that no task outside `src/ai/`/`web/worker.py` plausibly interacts with AI-call concurrency, and that its category (Structural/resource-governance) differs from IC-01–05's (Domain/financial-integrity). This resolves an ambiguity that was left open earlier in this engagement (`docs/Claude.md` §2's own footnote hedges rather than resolving it) — but the resolution exists only in the fresh catalogue, not yet reflected back into `docs/INVARIANTS.md` or `Claude.md`.
+**Risk for planning:** A future build session reading `docs/INVARIANTS.md`/`Claude.md` directly (the frozen execution contract) would still see INV-06 as GLOBAL, while a session consulting the BCE catalogue would see TASK-SCOPED — two authoritative-looking sources disagreeing.
+**Recommended action:** Engineer decides whether to accept the TASK-SCOPED reclassification (in which case `docs/INVARIANTS.md`'s INV-06 scope field and `Claude.md`'s §2 footnote need updating via the amendment prompt) or explicitly reject it and keep GLOBAL (in which case `INVARIANT_CATALOGUE.md`'s IC-06 needs reverting).
+**Engineer action required:** A scope classification decision, applied consistently across both documents.
+**Engineer decision (2026-08-05):** Accept the TASK-SCOPED reclassification in principle — `docs/INVARIANTS.md` and `Claude.md` §2 will be edited in a later pass, not this session. The contradiction between the two documents is consciously deferred, not silently left unresolved: `INVARIANT_CATALOGUE.md`'s IC-06 is the currently-intended target state; `docs/INVARIANTS.md`'s INV-06 remains GLOBAL in the frozen execution contract until that later edit lands.
+**STATUS:** SIGNED-OFF — deferred, with rationale recorded. Follow-up: update `docs/INVARIANTS.md` INV-06 scope field and `Claude.md` §2's footnote to TASK-SCOPED in a future pass.
 
 ---
 
-### P1-S3-007 · Claude Sonnet confidence fix not propagated to four locations ([INVARIANTS, ARCHITECTURE, INVARIANT_CATALOGUE, MODULE_CONTRACTS])
-**Severity:** P1
-**Type:** CONTRADICTION
-**Source:** STAGE3_REVIEW
-**Surfaced by:** CD
-**Artifact:** docs/INVARIANTS.md (INV-01); docs/ARCHITECTURE.md (§8); INVARIANT_CATALOGUE (IC-15); MODULE_CONTRACTS (cross-cutting finding #1)
+### P1-S3-002 · Fabric cut-over scope/RULE-13 staleness STAGE-2-DIVERGENCE unresolved
+**Severity:** P1 (per unresolved-STAGE-2-DIVERGENCE default)
+**Type:** OPEN_QUESTION
+**Source:** CODE_EXTRACTION
+**Surfaced by:** CC
+**Artifact:** `TOPOLOGY.md` (A01 row 8); `INVARIANT_CATALOGUE.md` (IC-15); `RISK_REGISTER.md` (R-012)
 **Section:** As listed
-**Observation:** RISK_REGISTER.md's R-001 documents, with verified evidence
-(cross-checked against 3 real sample PDFs), that Claude Sonnet's fabricated `0.75`
-confidence constant was fixed 2026-07-24. Four other artifacts still stated the bug
-as currently active — the inverse of a false-completeness claim: a false-brokenness
-claim, capable of causing someone to distrust a working signal or duplicate
-already-done work.
-**Risk for planning:** Anyone consulting these four locations independently of
-RISK_REGISTER.md would reasonably conclude the confidence gate is still broken for
-the active extraction provider.
-**Recommended action:** Update all four locations to state the fix, consistent
-with R-001's evidence; preserve the fact that Gemini/Mistral remain broken but
-dormant.
-**Engineer action required:** Approve the four updates.
-**Engineer decision (2026-07-28):** Approved — all four locations updated.
-**STATUS:** RESOLVED — all four locations corrected.
+**Observation:** The Fabric Warehouse cut-over's actual 3-table scope, and the resulting partial break in `RULES.md` RULE-13's backend-agnosticism promise, is documented as a divergence in three places this session but has not been resolved by the engineer — see `TOPOLOGY.md`'s Stage 2 Completeness Summary for the full cross-reference.
+**Risk for planning:** Any enhancement touching the storage layer (including the planned broader Fabric migration) is planning against a RULE-13 description that no longer matches reality for 3 of the system's tables.
+**Recommended action:** Confirm whether `RULES.md` RULE-13 should be updated to describe the Fabric path as a documented, scoped exception, and whether IC-19 should be promoted into `docs/INVARIANTS.md` given it currently does NOT hold.
+**Engineer action required:** A documentation-update decision plus confirmation of IC-19's promotion status.
+**Engineer decision (2026-08-05):** Update `RULES.md` RULE-13 to describe the Fabric path as a documented, scoped exception (done — see RULE-13's new "Scoped exception — Fabric Warehouse cut-over" paragraph, cross-referencing R-012/IC-19/TOPOLOGY.md A01 row 8). IC-19 stays BCE-catalogue-only for now — not promoted into `docs/INVARIANTS.md` — tracked instead via `RISK_REGISTER.md` R-012 as an accepted, mitigation-pending risk.
+**STATUS:** RESOLVED — RULE-13 updated 2026-08-05.
 
 ---
 
-### P1-S3-008 · Claude Sonnet totals-row fix not propagated to IC-20 ([INVARIANT_CATALOGUE])
-**Severity:** P1
-**Type:** CONTRADICTION
-**Source:** STAGE3_REVIEW
-**Surfaced by:** CD
-**Artifact:** INVARIANT_CATALOGUE
-**Section:** IC-20
-**Observation:** RISK_REGISTER.md's R-002 documents Claude Sonnet's totals-row
-filter fix (`_is_totals_row()`, added 2026-07-24). IC-20 still listed M-023 among
-the three clients with no equivalent filter.
-**Risk for planning:** Same class of risk as P1-S3-007, narrower scope.
-**Recommended action:** Update IC-20's "Currently enforced," "Enforcement point,"
-and "Enforcing modules" fields to reflect the fix.
-**Engineer action required:** Approve the update.
-**Engineer decision (2026-07-28):** Approved — IC-20 updated.
-**STATUS:** RESOLVED — IC-20 corrected.
-
----
-
-### P2-S3-003 · friendly_dt() hardcodes IST for all displayed timestamps ([MODULE_CONTRACTS, RISK_REGISTER])
+### P2-S3-003 · docs/INVARIANTS.md coverage gap — 12 of 19 catalogued invariants absent
 **Severity:** P2
-**Type:** OPEN_QUESTION → escalated to tracked risk (see below)
+**Type:** OPEN_QUESTION
 **Source:** STAGE3_REVIEW
-**Surfaced by:** CD
-**Artifact:** MODULE_CONTRACTS (cross-cutting finding #8); RISK_REGISTER (R-011, new)
-**Section:** Cross-cutting finding #8; R-011
-**Observation:** `web/deps.py:friendly_dt()` hardcodes IST for every displayed
-timestamp system-wide. Storage is correctly UTC throughout — confirmed via direct
-source read (`web/deps.py:118-137`) and a template call-site trace (6 templates
-affected: home, batches, jobs_history, reports, report_detail, users). VIVE
-Collision operates in the Northeast US — every displayed timestamp is
-approximately 9.5-10.5 hours off from the AP team's actual local time, depending
-on DST.
-**Risk for planning:** Not cosmetic — a real operational-trust risk. Staff could
-misjudge whether the pipeline is current or lagging based on incorrect displayed
-times.
-**Recommended action:** Make the display timezone configurable via an env var
-(e.g. `VIVE_DISPLAY_TIMEZONE`, default US Eastern) rather than hardcoding a
-replacement timezone. This is a real code fix, not a documentation correction —
-deliberately not made during this reconciliation pass.
-**Engineer action required:** Decide whether to fix now or track for a future
-sprint.
-**Engineer decision (2026-07-28):** Tracked as R-011 in RISK_REGISTER.md
-(Severity: High) rather than fixed immediately — deliberately deferred, code
-change requires a design decision (timezone-config approach) better handled as
-its own task than folded into a documentation-reconciliation session.
-**STATUS:** PARTIALLY_RESOLVED — tracking/documentation complete (R-011 added);
-the underlying code defect remains open, tracked in RISK_REGISTER.md, not yet
-scheduled.
+**Surfaced by:** CC
+**Artifact:** `docs/INVARIANTS.md`; `INVARIANT_CATALOGUE.md` (IC-08 through IC-19)
+**Section:** Whole-document comparison
+**Observation:** `docs/INVARIANTS.md` (the formal, Claude.md-feeding document) contains only INV-01–06 + CQ-001. `INVARIANT_CATALOGUE.md`'s IC-08 through IC-19 — sourced from `RULES.md`'s 13 rules, `Claude.md` §5's Rules 3–5, and 2 new code-observed findings — have no representation there at all.
+**Risk for planning:** A build session that reads only `docs/INVARIANTS.md`/`Claude.md` (its actual, frozen execution contract) never sees these 12 constraints formally, even though several (IC-08 especially) are historically significant, reverted-when-violated invariants.
+**Recommended action:** Engineer selects which of IC-08–IC-19 warrant formal promotion into `docs/INVARIANTS.md` (IC-08 is the strongest candidate) versus which are fine remaining BCE-only documentation.
+**Engineer action required:** A promotion-triage decision across 12 candidate invariants.
+**STATUS:** OPEN — not yet reviewed by the engineer.
 
 ---
 
-## Resolution Log — 2026-07-27 Second Pass Additions
-
-| Item ID | Resolution type | Resolved by | Date | Evidence |
-|---|---|---|---|---|
-| P1-S3-006 (IP-010 missing) | RESOLVED-ANNOTATION | Engineer | 2026-07-28 | IP-010 entry added to INTEGRATION_CONTRACTS.md. |
-| P1-S3-007 (confidence fix not propagated) | RESOLVED-ANNOTATION | Engineer | 2026-07-28 | All four locations (docs/INVARIANTS.md, docs/ARCHITECTURE.md, IC-15, MODULE_CONTRACTS finding #1) corrected. |
-| P1-S3-008 (totals-row fix not propagated) | RESOLVED-ANNOTATION | Engineer | 2026-07-28 | IC-20 corrected. |
-| P2-S3-003 (friendly_dt IST hardcoding) | RESOLVED-INFORMATIONAL (tracking only — code fix remains open) | Engineer | 2026-07-28 | R-011 added to RISK_REGISTER.md; code itself not modified this pass. |
+### P3-S3-004 · RISK_REGISTER.md R-009's severity field overloads status and severity
+**Severity:** P3
+**Type:** OPEN_QUESTION
+**Source:** STAGE3_REVIEW
+**Surfaced by:** CC
+**Artifact:** `RISK_REGISTER.md` (R-009)
+**Section:** R-009
+**Observation:** R-009 uses `"Fixed in code / deployment pending"` in its Severity field, rather than a standard severity level — every other entry in the register uses Critical/High/Medium/Low. This makes the summary table's Severity column inconsistent for programmatic/at-a-glance scanning.
+**Risk for planning:** Low — cosmetic/consistency only, no material risk understated or overstated.
+**Recommended action:** Consider giving R-009 both a standard severity level (its severity if the deployment gap were never closed — likely High, matching its pre-fix rating) and a separate Status field, rather than conflating the two.
+**Engineer action required:** Approve the cosmetic restructuring, or accept as-is.
+**STATUS:** OPEN — not yet reviewed by the engineer.
 
 ---
 
-## Stage 3 Completeness Summary — 2026-07-27, Second Pass
-Produced by: BCE Stage 3 (CD)
+### P3-S3-005 · Two Known Fragility findings considered for RISK_REGISTER promotion, not added
+**Severity:** P3
+**Type:** OPEN_QUESTION
+**Source:** STAGE3_REVIEW
+**Surfaced by:** CC
+**Artifact:** `MODULE_CONTRACTS.md` (via `C09_document_understanding_engine.md`, `B12_upload_router.md`)
+**Section:** Known Fragility fields
+**Observation:** (1) `VISION_PROMPT` (M-024) is confirmed dead code for the active provider — a tech-debt/clarity finding, not an active risk. (2) `web/routers/upload.py` (M-012) has no per-file error isolation in its upload loop — a partial batch failure could silently leave some files queued and others not, with no indication to the user of which succeeded. The second is closer to risk-register-worthy than the first.
+**Risk for planning:** Low for (1); Medium-plausible for (2) if batch uploads are common and failure-prone in practice.
+**Recommended action:** Engineer's call on whether (2) warrants a formal R-014 entry; (1) is likely fine as a MODULE_CONTRACTS.md-only note.
+**Engineer action required:** A promotion decision on item (2) specifically.
+**STATUS:** OPEN — not yet reviewed by the engineer.
 
-P1 items: 3 — all RESOLVED (P1-S3-006, 007, 008)
-P2 items: 1 — PARTIALLY_RESOLVED (P2-S3-003 — tracking done, code fix still open)
-P3 items: 0
-Total items this pass: 4
+---
 
-**This second pass does not supersede or re-open the 2026-07-24 Stage 3 close-out
-above.** It is an independent reconciliation triggered by the 2026-07-25 scoped
-refresh's drift, run 2026-07-27/28. Checks 2, 3, 5, and 6 were not re-run in full
-this pass — do not assume they remain clean without re-verification at the next
-full Stage 3 pass.
+## Stage 3 Completeness Summary — 2026-08-05
+Produced by: BCE Stage 3 (CC, per Path A precedent)
 
-**One item remains genuinely open going forward: P2-S3-003 / R-011 (friendly_dt IST
-hardcoding) — tracked, not fixed.** Everything else from this pass is closed.
+P1 items: 2 (P1-S3-001, P1-S3-002) — must be SIGNED-OFF or RESOLVED before Stage 3 completes
+P2 items: 2 (P2-F03-001 carried from Session F, P2-S3-003) — tracked, resolve before first enhancement
+P3 items: 2 (P3-S3-004, P3-S3-005) — informational backlog
+CON items: 1 (folded into P1-S3-001 above, not double-counted)
+Total items this pass: 5 new + 1 carried forward = 6
 
-Engineer sign-off: Confirmed in conversation, 2026-07-28.
+Consistency check: FAIL at time of check — 1 failure (INV-06/IC-06 scope mismatch) — dispositioned below, same day.
+
+**Both P1 items dispositioned 2026-08-05:** P1-S3-001 SIGNED-OFF (deferred, with rationale — `docs/INVARIANTS.md`/`Claude.md` to be edited in a later pass). P1-S3-002 RESOLVED (`RULES.md` RULE-13 updated same day).
+
+**Stage 3 is complete.** Both P1 items carry a direct engineer decision, recorded above. Engineer sign-off: confirmed in conversation, 2026-08-05. Proceeding to the mandatory Stage 3 close-out step — Graph Construction (`discovery/SYSTEM_GRAPH.json`).
