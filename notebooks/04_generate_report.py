@@ -38,7 +38,7 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
-from src.lakehouse.connection import execute_query
+from src.lakehouse.connection import execute_query, execute_query_fabric
 from src.ai.explanation_service import ExplanationService
 
 
@@ -65,9 +65,14 @@ def generate_report(statement_id: str, run_explanations: bool = False,
 
     s = summary_rows[0]
 
-    # Get intake log for additional metadata
-    intake_rows = execute_query(
-        "SELECT * FROM document_intake_log WHERE statement_id = ? LIMIT 1",
+    # Get intake log for additional metadata. document_intake_log is cut
+    # over to Fabric Warehouse (see get_fabric_connection() in
+    # src/lakehouse/connection.py) — no trailing LIMIT here since
+    # execute_query_fabric() has no dialect translation; harmless to drop
+    # since write_intake_log() DELETEs any existing row for this
+    # statement_id first, so there's at most one anyway.
+    intake_rows = execute_query_fabric(
+        "SELECT * FROM document_intake_log WHERE statement_id = ?",
         [statement_id]
     )
     intake = intake_rows[0] if intake_rows else {}

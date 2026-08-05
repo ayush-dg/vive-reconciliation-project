@@ -11,7 +11,7 @@ Usage:
 What it does:
     1. Checks extraction cache (skip AI if already processed)
     2. Extracts PDF text with pdfplumber
-    3. Calls Document Understanding Engine (Azure OpenAI gpt-5-mini → pdfplumber/OCR)
+    3. Calls Document Understanding Engine (Azure Claude Sonnet 4.6 → pdfplumber/OCR)
     4. Validates extracted invoices
     5. Writes valid invoices to bronze_vendor_statement_raw
     6. Normalizes to silver_reconciliation_standard
@@ -55,7 +55,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.ai.document_understanding_engine import (
     CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
 )
-from src.lakehouse.connection import execute_sql, execute_query
+from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
@@ -73,13 +73,20 @@ def check_cache(document_hash: str):
 
     See RULES.md RULE-02 — row_count > 0 is required; a failed run must
     never be treated as a valid cache hit.
+
+    extraction_cache has been cut over to Fabric Warehouse in production
+    (see get_fabric_connection() in src/lakehouse/connection.py) — every
+    other table here still reads/writes Azure SQL via execute_query()/
+    execute_sql(). execute_query_fabric() has no SQLite/T-SQL dialect
+    translation, and falls back to local SQLite in test/dev mode, so this
+    query has to be valid on both dialects as written — no trailing LIMIT
+    or TOP; the "most recent" row is picked in Python instead.
     """
-    rows = execute_query(
+    rows = execute_query_fabric(
         """
         SELECT * FROM extraction_cache
         WHERE document_hash = ? AND row_count > 0
         ORDER BY ingestion_timestamp DESC
-        LIMIT 1
         """,
         [document_hash]
     )
@@ -282,18 +289,33 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
 
 def write_to_review_queue(invalid_invoices: list, reasons: list,
                            statement_id: str, source_file: str, stage: str):
-    """Write invalid records to the review queue."""
+    """Write invalid records to the review queue.
+
+    validation_document_review_queue is cut over to Fabric Warehouse (see
+    get_fabric_connection() in src/lakehouse/connection.py). Its `id`
+    column has no IDENTITY there — same situation as extraction_cache,
+    see update_cache()'s docstring for why — so each row gets an explicit
+    id, computed once as MAX(id)+1 and incremented locally across this
+    call's own batch of inserts (so multiple invalid rows from the same
+    call never collide with each other). Not concurrency-safe across
+    separate calls landing at the same moment — same documented caveat
+    as extraction_cache's update_cache().
+    """
     now = datetime.now(timezone.utc).isoformat()
+    next_id = execute_query_fabric(
+        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM validation_document_review_queue"
+    )[0]["next_id"]
     for inv, reason in zip(invalid_invoices, reasons):
-        execute_sql(
+        execute_sql_fabric(
             """
             INSERT INTO validation_document_review_queue (
-                review_id, source_file, statement_id,
+                id, review_id, source_file, statement_id,
                 pipeline_stage, rejection_category, rejection_details,
                 raw_payload, review_status, flagged_timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)
             """,
             [
+                next_id,
                 str(uuid.uuid4()),
                 source_file,
                 statement_id,
@@ -304,6 +326,7 @@ def write_to_review_queue(invalid_invoices: list, reasons: list,
                 now,
             ]
         )
+        next_id += 1
 
 
 def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vendor_id: str):
@@ -402,7 +425,14 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
 def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
                      schema_result: dict, statement_id: str, statement_period: str,
                      invoice_count: int, routing_decision: str):
-    """Write one row to document_intake_log."""
+    """Write one row to document_intake_log.
+
+    document_intake_log is cut over to Fabric Warehouse (see
+    get_fabric_connection() in src/lakehouse/connection.py). Its `id`
+    column has no IDENTITY there either — same situation as
+    extraction_cache/validation_document_review_queue — so the new row
+    gets an explicit id via MAX(id)+1. Same not-concurrency-safe caveat.
+    """
     now = datetime.now(timezone.utc).isoformat()
     meta = schema_result.get("document_metadata", {})
     vendor = schema_result.get("vendor_metadata", {})
@@ -410,23 +440,27 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     conf = schema_result.get("extraction_confidence", {})
     warnings = schema_result.get("warnings", [])
 
-    execute_sql(
+    execute_sql_fabric(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
         [statement_id]
     )
 
-    execute_sql(
+    next_id = execute_query_fabric(
+        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM document_intake_log"
+    )[0]["next_id"]
+    execute_sql_fabric(
         """
         INSERT INTO document_intake_log (
-            document_id, document_hash, source_file, ingestion_timestamp,
+            id, document_id, document_hash, source_file, ingestion_timestamp,
             document_type, document_type_confidence,
             vendor_name, shop_or_entity, statement_date, statement_period,
             currency, statement_total_as_printed,
             extraction_confidence_overall, extraction_model, extraction_method,
             routing_decision, statement_id, invoice_count, warnings, schema_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
+            next_id,
             document_id,
             document_hash,
             os.path.basename(pdf_path),
@@ -456,7 +490,7 @@ def update_intake_log_blob_path(statement_id: str, blob_storage_path: str):
     row already written for this statement_id — see write_intake_log(),
     which runs first and doesn't yet know the blob location."""
     now = datetime.now(timezone.utc).isoformat()
-    execute_sql(
+    execute_sql_fabric(
         "UPDATE document_intake_log SET blob_storage_path = ?, uploaded_at = ? WHERE statement_id = ?",
         [blob_storage_path, now, statement_id]
     )
@@ -544,15 +578,60 @@ def upload_pdf_to_blob_storage(pdf_path: str, vendor_name: str, statement_period
 
 def update_cache(document_hash: str, statement_id: str, source_file: str,
                  provider_used: str, row_count: int):
-    """Insert or replace a cache entry."""
+    """Insert or replace a cache entry.
+
+    extraction_cache lives on Fabric Warehouse now (see check_cache()).
+    execute_sql_fabric() has no SQLite-dialect translation, so the
+    INSERT OR REPLACE upsert that execute_sql() would normally rewrite
+    into a T-SQL MERGE (see _translate_for_azure()/AZURE_UPSERT_KEYS in
+    src/lakehouse/connection.py) is done explicitly here as a SELECT-
+    then-UPDATE-or-INSERT, keyed on (document_hash, statement_id) same
+    as that translation uses.
+
+    id assignment: the Fabric table's `id` column has no IDENTITY (the
+    9 migrated rows carry their original Azure SQL ids as plain
+    values — Fabric Warehouse's IDENTITY, confirmed separately, only
+    supports BIGINT with large non-sequential distributed values, and
+    can't be retrofitted onto an already-populated column without
+    recreating the table). New rows get `MAX(id) + 1` computed here.
+    This is NOT atomic/concurrency-safe — two workers updating the
+    cache for two different documents at the same moment could compute
+    the same next id. Low practical risk today (this function only
+    runs after a real extraction completes, so collisions require two
+    such completions landing in the same instant), but worth a
+    deliberate fix (e.g. a real sequence, or switching this column to
+    BIGINT IDENTITY on a freshly recreated table) before this table
+    sees heavier concurrent write volume.
+    """
     now = datetime.now(timezone.utc).isoformat()
-    execute_sql(
+    existing = execute_query_fabric(
+        "SELECT id FROM extraction_cache WHERE document_hash = ? AND statement_id = ?",
+        [document_hash, statement_id]
+    )
+    if existing:
+        execute_sql_fabric(
+            """
+            UPDATE extraction_cache
+            SET source_file = ?, extraction_method = ?, row_count = ?, ingestion_timestamp = ?
+            WHERE document_hash = ? AND statement_id = ?
+            """,
+            [source_file, provider_used, row_count, now, document_hash, statement_id]
+        )
+        return
+
+    # COALESCE, not ISNULL — this must stay valid on both T-SQL (real
+    # Fabric) and SQLite (local/test fallback — see get_fabric_connection()
+    # in src/lakehouse/connection.py); ISNULL is T-SQL-only.
+    next_id = execute_query_fabric(
+        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM extraction_cache"
+    )[0]["next_id"]
+    execute_sql_fabric(
         """
-        INSERT OR REPLACE INTO extraction_cache
-            (document_hash, statement_id, source_file, extraction_method, row_count, ingestion_timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO extraction_cache
+            (id, document_hash, statement_id, source_file, extraction_method, row_count, ingestion_timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        [document_hash, statement_id, source_file, provider_used, row_count, now]
+        [next_id, document_hash, statement_id, source_file, provider_used, row_count, now]
     )
 
 

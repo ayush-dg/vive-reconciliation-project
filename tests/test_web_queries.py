@@ -787,10 +787,25 @@ class TestActionReviewItemRecomputesSummaryCounts(unittest.TestCase):
         self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
         patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
         patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        # validation_document_review_queue is cut over to Fabric Warehouse
+        # (see get_fabric_connection() in src/lakehouse/connection.py) --
+        # action_review_item()/get_review_queue_item() now call
+        # execute_sql_fabric()/execute_query_fabric() for that table, which
+        # this fake-backend patch must cover too, or those calls escape to
+        # real Fabric instead of this test's in-memory DB. Same fake
+        # connection as execute_sql/execute_query above -- this test isn't
+        # exercising the SQLite-vs-Fabric split itself, just needs one
+        # consistent isolated backend for everything queries.py touches.
+        patcher3 = mock.patch("web.queries.execute_sql_fabric", self.execute_sql)
+        patcher4 = mock.patch("web.queries.execute_query_fabric", self.execute_query)
         patcher1.start()
         patcher2.start()
+        patcher3.start()
+        patcher4.start()
         self.addCleanup(patcher1.stop)
         self.addCleanup(patcher2.stop)
+        self.addCleanup(patcher3.stop)
+        self.addCleanup(patcher4.stop)
         self.addCleanup(self.conn.close)
 
     def test_flagging_a_review_item_increments_an_existing_summary_row(self):

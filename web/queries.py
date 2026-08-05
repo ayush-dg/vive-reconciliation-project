@@ -17,7 +17,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.lakehouse.connection import execute_query, execute_sql
+from src.lakehouse.connection import execute_query, execute_sql, execute_query_fabric, execute_sql_fabric
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 
@@ -680,18 +680,23 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
 # ---------------------------------------------------------------------------
 
 def get_vendor_name_for_statement(statement_id: str):
-    rows = execute_query(
-        "SELECT vendor_name FROM document_intake_log WHERE statement_id = ? LIMIT 1",
+    # document_intake_log is cut over to Fabric Warehouse — see
+    # get_fabric_connection() in src/lakehouse/connection.py.
+    # execute_query_fabric() has no dialect translation, so no trailing
+    # LIMIT here (harmless to drop: write_intake_log() DELETEs any existing
+    # row for this statement_id before inserting, so there's at most one).
+    rows = execute_query_fabric(
+        "SELECT vendor_name FROM document_intake_log WHERE statement_id = ?",
         [statement_id],
     )
     if rows and rows[0]["vendor_name"]:
         return rows[0]["vendor_name"]
-    # Falls back to gold_reconciliation_summary: on a cache hit, the
-    # pipeline's run_intake() re-normalizes Bronze->Silver under a new
-    # statement_id but never calls write_intake_log() again (see
-    # notebooks/01_document_intake.py), so document_intake_log has no row
-    # for that statement_id even though the matching engine already wrote
-    # the vendor to gold_reconciliation_summary from the Silver rows.
+    # Falls back to gold_reconciliation_summary (stays on Azure SQL): on a
+    # cache hit, the pipeline's run_intake() re-normalizes Bronze->Silver
+    # under a new statement_id but never calls write_intake_log() again
+    # (see notebooks/01_document_intake.py), so document_intake_log has no
+    # row for that statement_id even though the matching engine already
+    # wrote the vendor to gold_reconciliation_summary from the Silver rows.
     rows = execute_query(
         "SELECT vendor_name FROM gold_reconciliation_summary WHERE statement_id = ? LIMIT 1",
         [statement_id],
@@ -1035,8 +1040,13 @@ def get_statement_report(statement_id: str) -> dict:
     )
     summary = summary_rows[0] if summary_rows else None
 
-    intake_rows = execute_query(
-        "SELECT * FROM document_intake_log WHERE statement_id = ? LIMIT 1",
+    # document_intake_log is cut over to Fabric Warehouse — see
+    # get_fabric_connection() in src/lakehouse/connection.py. No trailing
+    # LIMIT (execute_query_fabric() has no dialect translation): harmless
+    # to drop since write_intake_log() DELETEs any existing row for this
+    # statement_id first, so there's at most one anyway.
+    intake_rows = execute_query_fabric(
+        "SELECT * FROM document_intake_log WHERE statement_id = ?",
         [statement_id],
     )
     intake = intake_rows[0] if intake_rows else None
@@ -1093,7 +1103,9 @@ def _parse_review_row(row: dict) -> dict:
 
 
 def get_pending_review_count() -> int:
-    rows = execute_query(
+    # validation_document_review_queue is cut over to Fabric Warehouse —
+    # see get_fabric_connection() in src/lakehouse/connection.py.
+    rows = execute_query_fabric(
         "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
     )
     return rows[0]["c"] or 0 if rows else 0
@@ -1102,7 +1114,7 @@ def get_pending_review_count() -> int:
 def get_review_queue_vendors() -> list:
     """One row per source_file with pending review rows, plus a
     rejection_category breakdown for that source_file's footer note."""
-    rows = execute_query(
+    rows = execute_query_fabric(
         """
         SELECT source_file, COUNT(*) AS pending_count
         FROM validation_document_review_queue
@@ -1112,7 +1124,7 @@ def get_review_queue_vendors() -> list:
         """
     )
     for row in rows:
-        cat_rows = execute_query(
+        cat_rows = execute_query_fabric(
             """
             SELECT rejection_category, COUNT(*) AS c
             FROM validation_document_review_queue
@@ -1126,7 +1138,7 @@ def get_review_queue_vendors() -> list:
 
 
 def get_review_queue_for_vendor(source_file: str) -> list:
-    rows = execute_query(
+    rows = execute_query_fabric(
         """
         SELECT * FROM validation_document_review_queue
         WHERE source_file = ? AND review_status = 'PENDING_REVIEW'
@@ -1138,7 +1150,7 @@ def get_review_queue_for_vendor(source_file: str) -> list:
 
 
 def get_review_queue_item(review_id: str):
-    rows = execute_query(
+    rows = execute_query_fabric(
         "SELECT * FROM validation_document_review_queue WHERE review_id = ?",
         [review_id],
     )
@@ -1150,13 +1162,18 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
     gold_exceptions row so the item surfaces on the normal exceptions page
     too -- DUPLICATE_RECORD keeps its own reason so it reads distinctly
     from EXTRACTION_INCOMPLETE (every other rejection_category, e.g.
-    MISSING_MANDATORY_FIELD, is genuinely an incomplete extraction)."""
+    MISSING_MANDATORY_FIELD, is genuinely an incomplete extraction).
+
+    Only the review-queue UPDATE below is Fabric (see get_review_queue_item()
+    above) — the gold_exceptions INSERT and _recompute_summary_counts()'s
+    gold_reconciliation_summary update stay on Azure SQL via execute_sql(),
+    untouched by validation_document_review_queue's cutover."""
     item = get_review_queue_item(review_id)
     if not item:
         return
     now = datetime.now(timezone.utc).isoformat()
     status = "APPROVED" if action == "approve" else "FLAGGED"
-    execute_sql(
+    execute_sql_fabric(
         """
         UPDATE validation_document_review_queue
         SET review_status = ?, reviewed_by = ?, reviewed_timestamp = ?

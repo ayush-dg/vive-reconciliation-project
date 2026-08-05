@@ -58,6 +58,67 @@ def _using_azure_sql():
     return bool(os.getenv("AZURE_SQL_SERVER"))
 
 
+def _using_fabric_warehouse():
+    return bool(os.getenv("FABRIC_WORKSPACE_ID"))
+
+
+SQL_COPT_SS_ACCESS_TOKEN = 1256
+
+
+# This uses an Azure CLI-issued token (AzureCliCredential + SQL_COPT_SS_ACCESS_TOKEN)
+# instead of the ODBC driver's Authentication=ActiveDirectoryInteractive keyword.
+# Interactive auth was tried first and fails on this machine with FA004/0x534 —
+# the Windows WAM broker can't complete the sign-in. The CLI-token approach
+# sidesteps the driver's own auth flow entirely and was confirmed working; it
+# requires `az login` to have been run once already in this environment — it
+# reuses that session rather than prompting for one.
+def get_fabric_connection():
+    """Returns a connection for the Fabric-cut-over tables (currently just
+    extraction_cache — see notebooks/01_document_intake.py's check_cache()/
+    update_cache()).
+
+    Mirrors get_connection()'s own SQLite-vs-cloud branching: falls back to
+    the SAME local SQLite backend (same DB_PATH) whenever _using_azure_sql()
+    is False, rather than always reaching the real Fabric Warehouse. This
+    matters because AZURE_SQL_SERVER="" (+ DB_PATH patched to a temp file)
+    is this codebase's existing, established test-isolation convention —
+    every test that already relies on it to get a clean local run (e.g.
+    tests/test_level2_matching_integration.py) would otherwise have its
+    "isolated" run silently escape to real production Fabric data the
+    moment it touched a Fabric-cut-over table, with no way to intercept it.
+    Real Fabric (Azure CLI token auth) is only used when Azure SQL is
+    genuinely configured — i.e. actually running against cloud infra."""
+    if not _using_azure_sql():
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    import struct
+
+    import pyodbc
+    from azure.identity import AzureCliCredential
+
+    endpoint = os.getenv("FABRIC_SQL_ENDPOINT")
+    database = os.getenv("FABRIC_WAREHOUSE_NAME")
+    tenant_id = os.getenv("FABRIC_TENANT_ID")
+
+    credential = AzureCliCredential(tenant_id=tenant_id)
+    token = credential.get_token("https://database.windows.net/.default")
+    token_bytes = token.token.encode("utf-16-le")
+    token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
+
+    conn_str = (
+        "Driver={ODBC Driver 18 for SQL Server};"
+        f"Server={endpoint},1433;"
+        f"Database={database};"
+        "Encrypt=yes;"
+        "TrustServerCertificate=no;"
+        "Connection Timeout=30;"
+    )
+    return pyodbc.connect(conn_str, attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct})
+
+
 def get_connection():
     """Returns a connection to the configured backend. Azure SQL (via
     pyodbc) if AZURE_SQL_SERVER is set in the environment, otherwise a
@@ -189,3 +250,40 @@ def execute_query(sql, params=None):
             return [dict(zip(columns, row)) for row in rows]
         return [dict(row) for row in rows]
     return _run_with_retry(_run)
+
+
+def execute_sql_fabric(sql, params=None):
+    """Execute a single SQL statement against get_fabric_connection() and
+    return the cursor — real Fabric Warehouse in production, the same
+    local SQLite DB_PATH as execute_sql() in local/test mode (see
+    get_fabric_connection()). No dialect translation and no drop-retry:
+    callers must write SQL that's valid on both SQLite and T-SQL (no
+    LIMIT/TOP, no INSERT OR REPLACE — see check_cache()/update_cache() in
+    notebooks/01_document_intake.py for the pattern). Additive only;
+    execute_sql() is untouched and still targets Azure SQL directly."""
+    conn = get_fabric_connection()
+    try:
+        cursor = conn.execute(sql, params or [])
+        conn.commit()
+        return cursor
+    finally:
+        conn.close()
+
+
+def execute_query_fabric(sql, params=None):
+    """Execute a SELECT against get_fabric_connection() and return all
+    rows as a list of dicts — real Fabric Warehouse in production, the
+    same local SQLite DB_PATH as execute_query() in local/test mode (see
+    get_fabric_connection()). dict(zip(columns, row)) works unchanged
+    against both a pyodbc row and a sqlite3.Row, so no backend branching
+    is needed here the way execute_query() needs for Azure SQL. Additive
+    only; execute_query() is untouched and still targets Azure SQL
+    directly."""
+    conn = get_fabric_connection()
+    try:
+        cursor = conn.execute(sql, params or [])
+        rows = cursor.fetchall()
+        columns = [col[0] for col in cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
+    finally:
+        conn.close()
