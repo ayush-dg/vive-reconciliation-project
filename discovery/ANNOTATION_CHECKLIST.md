@@ -108,7 +108,8 @@ Reviewed all 13 `RISK_REGISTER.md` entries against their cited fragility/invaria
 **Risk for planning:** A future build session reading `docs/INVARIANTS.md`/`Claude.md` directly (the frozen execution contract) would still see INV-06 as GLOBAL, while a session consulting the BCE catalogue would see TASK-SCOPED — two authoritative-looking sources disagreeing.
 **Recommended action:** Engineer decides whether to accept the TASK-SCOPED reclassification (in which case `docs/INVARIANTS.md`'s INV-06 scope field and `Claude.md`'s §2 footnote need updating via the amendment prompt) or explicitly reject it and keep GLOBAL (in which case `INVARIANT_CATALOGUE.md`'s IC-06 needs reverting).
 **Engineer action required:** A scope classification decision, applied consistently across both documents.
-**STATUS:** OPEN — not yet reviewed by the engineer.
+**Engineer decision (2026-08-05):** Accept the TASK-SCOPED reclassification in principle — `docs/INVARIANTS.md` and `Claude.md` §2 will be edited in a later pass, not this session. The contradiction between the two documents is consciously deferred, not silently left unresolved: `INVARIANT_CATALOGUE.md`'s IC-06 is the currently-intended target state; `docs/INVARIANTS.md`'s INV-06 remains GLOBAL in the frozen execution contract until that later edit lands.
+**STATUS:** SIGNED-OFF — deferred, with rationale recorded. Follow-up: update `docs/INVARIANTS.md` INV-06 scope field and `Claude.md` §2's footnote to TASK-SCOPED in a future pass.
 
 ---
 
@@ -123,7 +124,8 @@ Reviewed all 13 `RISK_REGISTER.md` entries against their cited fragility/invaria
 **Risk for planning:** Any enhancement touching the storage layer (including the planned broader Fabric migration) is planning against a RULE-13 description that no longer matches reality for 3 of the system's tables.
 **Recommended action:** Confirm whether `RULES.md` RULE-13 should be updated to describe the Fabric path as a documented, scoped exception, and whether IC-19 should be promoted into `docs/INVARIANTS.md` given it currently does NOT hold.
 **Engineer action required:** A documentation-update decision plus confirmation of IC-19's promotion status.
-**STATUS:** OPEN — not yet reviewed by the engineer.
+**Engineer decision (2026-08-05):** Update `RULES.md` RULE-13 to describe the Fabric path as a documented, scoped exception (done — see RULE-13's new "Scoped exception — Fabric Warehouse cut-over" paragraph, cross-referencing R-012/IC-19/TOPOLOGY.md A01 row 8). IC-19 stays BCE-catalogue-only for now — not promoted into `docs/INVARIANTS.md` — tracked instead via `RISK_REGISTER.md` R-012 as an accepted, mitigation-pending risk.
+**STATUS:** RESOLVED — RULE-13 updated 2026-08-05.
 
 ---
 
@@ -181,6 +183,8 @@ P3 items: 2 (P3-S3-004, P3-S3-005) — informational backlog
 CON items: 1 (folded into P1-S3-001 above, not double-counted)
 Total items this pass: 5 new + 1 carried forward = 6
 
-Consistency check: FAIL — 1 failure (INV-06/IC-06 scope mismatch, tracked as P1-S3-001)
+Consistency check: FAIL at time of check — 1 failure (INV-06/IC-06 scope mismatch) — dispositioned below, same day.
 
-**Stage 3 is not yet complete — both P1 items require engineer sign-off or resolution before Graph Construction (the mandatory Stage 3 close-out step) can run.**
+**Both P1 items dispositioned 2026-08-05:** P1-S3-001 SIGNED-OFF (deferred, with rationale — `docs/INVARIANTS.md`/`Claude.md` to be edited in a later pass). P1-S3-002 RESOLVED (`RULES.md` RULE-13 updated same day).
+
+**Stage 3 is complete.** Both P1 items carry a direct engineer decision, recorded above. Engineer sign-off: confirmed in conversation, 2026-08-05. Proceeding to the mandatory Stage 3 close-out step — Graph Construction (`discovery/SYSTEM_GRAPH.json`).

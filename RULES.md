@@ -385,6 +385,32 @@ untouched) or rewriting the SQLite-specific SQL embedded in
 `connection.py` the single place that knows the backend (RULE-06) meant
 absorbing the dialect differences there instead.
 
+**Scoped exception — Fabric Warehouse cut-over (added 2026-08-05):**
+`get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()`
+in `src/lakehouse/connection.py` are an additive, narrower path — not a
+replacement for the Azure SQL/SQLite split above. As of this update they
+cover exactly three tables (`extraction_cache`, `document_intake_log`,
+`validation_document_review_queue`). Two respects in which this path does
+**not** carry the same guarantees as `execute_sql()`/`execute_query()`,
+by design, not oversight:
+1. **No dialect translation and no connection-drop retry** — callers of
+   the Fabric functions must write SQL valid on both SQLite (the local/test
+   fallback) and T-SQL directly; `_translate_for_azure()` is never applied
+   on this path.
+2. **No `IDENTITY` column on the Fabric side for any of the three tables**
+   — each write site computes `MAX(id) + 1` in application code, which is
+   not concurrency-safe. This is a real, currently-accepted-as-tracked-risk
+   gap (`discovery/RISK_REGISTER.md` R-012, `discovery/INVARIANT_CATALOGUE.md`
+   IC-19 — IC-19 is deliberately catalogued as *not currently enforced*,
+   not as a passing invariant), not a claim that this rule's
+   backend-agnostic-callers guarantee still fully holds for these three
+   tables. See `discovery/TOPOLOGY.md` A01 row 8 for the full writeup.
+
+Any future extension of the Fabric cut-over to additional tables should
+update this note and confirm whether R-012's mitigation has since been
+built (a locking/sequence mechanism) before assuming the same gap applies
+unchanged.
+
 **Azure SQL connectivity note:** Azure SQL's default "Redirect" connection
 policy needs outbound access to ports 11000–11999 in addition to 1433 —
 some corporate/ISP networks block that range, which surfaces as a pyodbc
