@@ -67,3 +67,22 @@ Full Module Roster (50 modules, M-001–M-050), Internal Call Table, Startup Seq
 5. **[NEW — not re-verified this session]** IP-010's deployment status (Event Grid subscription configuration, blocked on Azure RBAC permissions per the archived record) was not re-confirmed as still blocked or since unblocked — flag for the engineer to state current status rather than assume either way.
 
 `TOPOLOGY.md` and `discovery/ID_REGISTRY.md` must be committed and engineer-reviewed before Session F (Domain Model) and Sessions B, C, G, and U begin.
+
+---
+
+## Stage 2 Completeness Summary — 2026-08-05
+Produced by: BCE Stage 2 Session A0–E (CC)
+
+| Artifact | Status | NOT DETERMINABLE count | Divergences from Stage 1 | Notes |
+|---|---|---|---|---|
+| TOPOLOGY.md | COMPLETE | 0 | 1 | Fabric cut-over 3-table scope (see A01 row 8 and the STAGE-2-DIVERGENCE block above) |
+| MODULE_CONTRACTS.md | COMPLETE | 0 | 0 | References the same Fabric finding in its cross-cutting findings section but declares no new divergence of its own |
+| INTEGRATION_CONTRACTS.md | COMPLETE | 0 | N/A — Stage 2 only | Same Fabric finding referenced in IP-011's Known divergences field |
+| INVARIANT_CATALOGUE.md | COMPLETE | 2 | 1 | Both NOT DETERMINABLE entries are CQ-001's enforcement fields (a human code-review discipline, not code-enforced — genuinely not determinable from source, not a gap in extraction). The 1 divergence is IC-15 — the same Fabric finding as TOPOLOGY.md's, viewed from the invariant-enforcement angle. |
+| RISK_REGISTER.md | COMPLETE | 0 | 0 | Synthesizes from the other four artifacts per Session E's own scope — no new divergence introduced at this layer |
+
+**Stage-2-Divergence items requiring engineer resolution before Stage 3:**
+1. **The Fabric Warehouse cut-over's actual scope and the resulting partial break in backend-agnosticism** — one underlying finding, documented in three places: `TOPOLOGY.md` A01 row 8 + its STAGE-2-DIVERGENCE block, `INVARIANT_CATALOGUE.md` IC-15's STAGE-2-DIVERGENCE block, and `RISK_REGISTER.md` R-012 (which already treats it as an accepted, tracked risk rather than an open question). Resolution needed: confirm whether `RULES.md` RULE-13 should be updated to describe the Fabric path as a documented, scoped exception, and whether `docs/INVARIANTS.md`/`Claude.md` should reflect IC-19 (or a promoted version of it) as a real invariant given it currently does NOT hold.
+
+Human gate required before Stage 3 begins.
+Engineer sign-off: Vaishali 
