@@ -7,8 +7,7 @@ Assembled from A01 (Layer Boundary Map), A02 (Module Call Map — full detail in
 This is a **fresh baseline**, not an update to the archived (`discovery/_archive_2026-07/`)
 TOPOLOGY.md — every field below was re-derived from a direct read of current source, not
 carried forward from the archive. Where this pass's findings differ from what
-`discovery/INTAKE_SUMMARY.md` stated (itself CC-drafted this same session from docs, not
-code), the divergence is marked explicitly below per the Divergence rule — neither source
+`discovery/INTAKE_SUMMARY.md` stated, the divergence is marked explicitly below per the Divergence rule — neither source
 is silently preferred.
 
 ---
