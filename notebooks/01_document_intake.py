@@ -122,7 +122,7 @@ def validate_invoice(invoice: dict, rules: dict):
     # so they fail this check and route to review; don't lower this threshold
     # without revisiting that rule.
     confidence = invoice.get("line_confidence")
-    threshold = rules.get("confidence_threshold", 0.60)
+    threshold = rules.get("confidence_threshold", 0.90)
     if confidence is not None and float(confidence) < threshold:
         return False, f"LOW_CONFIDENCE: line_confidence {confidence} < threshold {threshold}"
 

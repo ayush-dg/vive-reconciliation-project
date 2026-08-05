@@ -52,7 +52,7 @@ ROW_CONFIDENCE = 0.75
 
 # Applied to a row's line_confidence only when the model omits a "confidence"
 # field, or returns something unparseable/out-of-range — deliberately below
-# the 0.60 validate_invoice() threshold (config/validation/extraction_rules.json)
+# the 0.90 validate_invoice() threshold (config/validation/extraction_rules.json)
 # so a missing/untrustworthy signal always routes to human review rather than
 # silently passing (RULE-10's "never silently succeed" principle). See
 # discovery/RISK_REGISTER.md R-001.
@@ -572,7 +572,7 @@ class ClaudeSonnetClient(AIClient):
     @staticmethod
     def _parse_confidence(raw_confidence) -> float:
         """Real per-row confidence from the model's own "confidence" field.
-        Falls back to FALLBACK_LINE_CONFIDENCE (below the 0.60 validation
+        Falls back to FALLBACK_LINE_CONFIDENCE (below the 0.90 validation
         threshold) whenever the signal can't be trusted — missing, not a
         number, or outside [0.0, 1.0] — rather than defaulting to a value
         that would silently clear the review gate. See RISK_REGISTER.md R-001."""

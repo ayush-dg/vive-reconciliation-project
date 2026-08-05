@@ -206,7 +206,7 @@ class TestDocumentUnderstandingEngine(unittest.TestCase):
         rules = {
             "required_fields": ["invoice_number", "outstanding_amount"],
             "numeric_fields": ["outstanding_amount"],
-            "confidence_threshold": 0.60
+            "confidence_threshold": 0.90
         }
         bad_invoice = {"outstanding_amount": 100.0, "line_confidence": 0.9}
         is_valid, reason = intake.validate_invoice(bad_invoice, rules)
@@ -226,7 +226,7 @@ class TestDocumentUnderstandingEngine(unittest.TestCase):
         rules = {
             "required_fields": ["invoice_number", "outstanding_amount"],
             "numeric_fields": ["outstanding_amount"],
-            "confidence_threshold": 0.60
+            "confidence_threshold": 0.90
         }
         good_invoice = {
             "invoice_number": "INV-001",

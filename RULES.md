@@ -95,7 +95,7 @@ came back at 0.35-0.60 across 132 rows — a real, model-elicited signal that
 discriminates by document difficulty rather than a habitual default. If the
 model omits the field or returns something unparseable/out-of-range,
 `_parse_confidence()` falls back to `FALLBACK_LINE_CONFIDENCE = 0.40`
-(below the `0.60` threshold), so an untrustworthy signal still routes to
+(below the `0.90` threshold), so an untrustworthy signal still routes to
 human review per RULE-10. `GeminiClient` and `MistralClient` (both dormant,
 not in the active provider chain) still hardcode `ROW_CONFIDENCE = 0.75`
 for `line_confidence` — this fix applies only to the active primary.
@@ -286,7 +286,7 @@ conditions before starting either of these.
 
 ---
 
-### RULE-10 — OCR-derived invoice rows get confidence 0.50, deliberately below the 0.60 validation threshold
+### RULE-10 — OCR-derived invoice rows get confidence 0.50, deliberately below the 0.90 validation threshold
 
 **Rule:** When `extract_with_pdfplumber()`'s fallback OCRs a scanned page and
 converts the OCR text into a pseudo-table, every row extracted from that
@@ -295,7 +295,7 @@ pdfplumber's real (geometry-based) table extraction.
 
 **Why:** OCR-derived rows infer column boundaries from whitespace in flat
 text, not real table geometry — inherently less reliable. `0.50` is
-deliberately below the `0.60` confidence threshold in
+deliberately below the `0.90` confidence threshold in
 `config/validation/extraction_rules.json`, so **every OCR-extracted invoice
 always fails `validate_invoice()`'s confidence check and routes to the human
 review queue — it can never silently auto-pass into Bronze/Silver.** This is
