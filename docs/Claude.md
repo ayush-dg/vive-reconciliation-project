@@ -1,10 +1,10 @@
 ---
-version: v2.6
+version: v2.7
 METHODOLOGY_VERSION: v5.0 (pbvi_core.md)
 frozen: true
 ---
 
-# Claude.md — v2.6 · FROZEN · 2026-08-06
+# Claude.md — v2.7 · FROZEN · 2026-08-06
 
 ## Changelog
 | Version | Date | Author | Change |
@@ -18,6 +18,7 @@ frozen: true
 | v2.4 | 2026-08-05 | Ayush Kumar Sinha (verified via Claude Code) | **Implementation of v2.3 completed.** 0.90 propagated across the repo via full audit; 281 passed / 18 failed on re-run, identical to baseline. `pdfplumber_fallback.py`'s 0.65/0.50 row-confidence values were deliberately left unchanged rather than raised to compensate — real consequence: all pdfplumber-fallback rows now route to human review, not just OCR-derived ones. See `INVARIANTS.md` INV-01 v1.5 for full detail. |
 | v2.5 | 2026-08-05 | Ayush Kumar Sinha | **Missed reference caught and fixed on final consistency review.** Section 4's "Deterministic fallback" line still stated the old `0.60` gate value and the pre-amendment consequence (only OCR rows routing to review) — this line predated the v2.3/v2.4 threshold change and wasn't in Claude Code's original audit scope because `docs/Claude.md` itself wasn't included in that audit's target list. Corrected to `0.90` and the accurate consequence (all pdfplumber-fallback rows route to review). **This file has not yet been re-verified end-to-end for other similarly missed self-references — treat this fix as one instance found by manual review, not a guarantee no others remain.** |
 | v2.6 | 2026-08-06 | Ayush Kumar Sinha (verified via Claude Code) | **Removed Section 2's "Cross-reference (not a sixth GLOBAL invariant...)" footnote for INV-06.** `docs/INVARIANTS.md` INV-06 has been reclassified from GLOBAL to TASK-SCOPED (v1.6) — it no longer claims GLOBAL status, so the footnote hedging that claim against `pbvi_core.md`'s five-invariant ceiling is no longer needed. Section 2 continues to list exactly five GLOBAL invariants (INV-01 through INV-05, per `pbvi_core.md`'s hard ceiling) plus the mandatory CQ-001 complexity invariant, unchanged by this removal — INV-06 was never one of the five listed here to begin with. |
+| v2.7 | 2026-08-06 | Ayush Kumar Sinha | **INV-02 amended — narrow Pass-3-only AI exception added** (see `INVARIANTS.md` v1.7 for full basis). Section 2's INV-02 entry updated verbatim to match. Pass 1/Pass 2 remain 100% deterministic, unchanged; Pass 3 (Claude Sonnet 4.6, residual-only after Passes 1-2, ≤10-candidate SQL-retrieved set, schema-validated output only, never auto-approves at any confidence, confidence hard-capped at 0.85) is now a narrowly permitted exception, matching target architecture D4/D5 (`docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_1.md`). No Pass 3 code was written — this is a documentation-only invariant change. **Recorded honestly: this is the engineer's (Ayush's) decision alone, made without the teammate/Sprint Lead's review — she is currently on leave. Provisional pending her confirmation on return; not yet a joint or fully methodology-compliant sign-off.** |
 
 ---
 
@@ -32,8 +33,18 @@ VIVE Reconciliation extracts line-item data from vendor PDF statements, compares
 **INV-01 (amended 2026-08-05):** Any row whose extraction confidence falls below `0.90` must be routed to human review — never silently pass into Bronze/Silver. **Raised from `0.60`.** Recorded honestly as an engineer judgment call, not a data-validated decision — see `INVARIANTS.md` INV-01 for the full calibration-check basis (82% of the checked database was a stale pre-fix confidence constant; only 2 human dispositions existed in total, too few to judge accuracy). Revisit once real production disposition data exists. **Implemented and verified 2026-08-05:** propagated repo-wide (config, code, tests, docs); full suite re-run at 281 passed / 18 failed, identical to pre-change baseline, no regression. **Known consequence, deliberately not compensated for:** `pdfplumber_fallback.py`'s row-confidence values (0.65/0.50) were left unchanged, so all pdfplumber-fallback rows now route to review regardless of OCR status — see `INVARIANTS.md` INV-01 v1.5.
 This is never negotiable.
 
-**INV-02:** The matching engine makes every match/exception decision through deterministic rules only — no AI model is ever consulted inside the matching step, for any reason. `match_confidence` scoring is also deterministic (rule-based, not AI).
-This is never negotiable.
+**INV-02 (amended 2026-08-06):** The matching engine's Pass 1 and Pass 2 remain 100% deterministic — no AI model is ever consulted in these passes, for any reason. This invariant now permits a narrow, explicitly scoped exception for Pass 3 disambiguation only, matching the target architecture's D4/D5 design exactly (`docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_1.md`):
+- Pass 3 may consult Claude Sonnet 4.6 ONLY on the residual left unresolved after Passes 1-2 (target: single-digit percent of lines at steady state).
+- Pass 3 reads a SQL-retrieved candidate set capped at ≤10 records.
+- Pass 3 output must pass schema validation before use; free-form AI text may never directly drive a match or accounting action.
+- Pass 3 output NEVER auto-approves, at any confidence level — this is a permanent design constraint, not a threshold to be tuned. `review_required` must always be `true` for any Pass 3 result.
+- Pass 3 confidence is hard-capped at 0.85, strictly below any auto-approve threshold in the system.
+- Any implementation of Pass 3 that violates any of the above five constraints is out of scope for this amendment and would require a separate, new invariant decision.
+
+**Basis for this amendment — recorded honestly:** this is the engineer's (Ayush's) decision, made 2026-08-06, WITHOUT the teammate/Sprint Lead's review — she is on leave at the time of this decision. This amendment should be treated as provisional until she confirms or revises it. Do not cite this as a joint or fully methodology-compliant sign-off until that confirmation happens.
+
+**Status:** No Pass 3 code exists yet. Pass 1/Pass 2 remain confirmed deterministic (see `INVARIANTS.md` INV-02 for the 2026-08-05 code-trace verification, which predates this amendment and covers Pass 1/2 only). This amendment records the invariant ahead of implementation — per explicit instruction, no Pass 3 code was written as part of this change.
+This is never negotiable — Pass 1/2 determinism and each of the five Pass 3 constraints above are individually non-negotiable. This amendment narrows scope; it does not weaken enforcement.
 
 **INV-03:** No totals/summary row (grand total, subtotal, balance-forward) may ever be ingested and validated as if it were a real invoice line.
 This is never negotiable.

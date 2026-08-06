@@ -11,6 +11,7 @@ Updated: 2026-08-05
 | v1.4 | 2026-08-05 | Ayush Kumar Sinha | **INV-01 amended: confidence threshold raised from 0.60 to 0.90.** Recorded honestly as an engineer judgment call, not a data-validated decision — a calibration check found 82% of the live database's confidence values were a stale pre-fix constant, the 0.80–0.89 band was empty, and only 2 human dispositions existed in total (too few to judge accuracy at any band). See INV-01 for full basis. This change must be propagated to every file in the repo that references the `0.60` threshold — config, code, tests, and docs — to avoid contradictory values. Implementation tracked separately from this document. |
 | v1.5 | 2026-08-05 | Ayush Kumar Sinha (verified via Claude Code) | **Implementation of v1.4 completed and verified.** 0.90 propagated repo-wide via full audit (11 confirmed locations updated, historical/unrelated items correctly left untouched). Full test suite re-run: 281 passed / 18 failed, identical to pre-change baseline — no regression. **New consequence documented in INV-01:** pdfplumber-fallback row confidence values (0.65/0.50) were deliberately left unchanged, so all fallback rows — OCR or not — now route to review, a real behavior change worth monitoring in production. |
 | v1.6 | 2026-08-06 | Ayush Kumar Sinha (verified via Claude Code) | **INV-06 reclassified from GLOBAL to TASK-SCOPED.** Triggered by a teammate doc-review flag noting this document's "Scope: GLOBAL" on INV-06 contradicted `docs/Claude.md` Section 2's own cross-reference footnote ("not a sixth GLOBAL invariant"). Verified against `dg-os/skills/PBVI/pbvi_core.md`'s Claude.md Schema (Section 2 must contain *every* GLOBAL invariant from this document, capped at five total — no mechanism exists for a GLOBAL invariant to be excluded from Claude.md) and `pbvi_brownfield.md`'s five-GLOBAL ceiling ("the engineer cannot sign off INVARIANTS.md with more than five GLOBAL invariants"). This document already had five other GLOBAL invariants (INV-01–05); INV-06 as a sixth was the actual source of the contradiction, not Claude.md's footnote. This reclassification brings this document in line with `discovery/INVARIANT_CATALOGUE.md`'s IC-06, which had already independently resolved the identical ambiguity as TASK-SCOPED. Claude.md's now-unnecessary footnote is removed in the same pass — see Claude.md changelog. |
+| v1.7 | 2026-08-06 | Ayush Kumar Sinha | **INV-02 amended: narrow Pass-3-only AI exception added.** Pass 1/Pass 2 remain 100% deterministic, unchanged, never negotiable. Pass 3 (Claude Sonnet 4.6 disambiguation) is now permitted under five explicit constraints matching the target architecture's D4/D5 design (`docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_1.md`): residual-only after Passes 1-2, ≤10-candidate SQL-retrieved set, schema-validated output only, never auto-approves at any confidence (`review_required` always `true`), confidence hard-capped at 0.85. No Pass 3 code was written as part of this change — this records the invariant ahead of implementation, per explicit instruction. **Recorded honestly: this is the engineer's (Ayush's) decision alone, made without the teammate/Sprint Lead's review — she is currently on leave. Provisional pending her confirmation on return; do not cite as joint or fully methodology-compliant sign-off until then.** |
 
 ---
 
@@ -43,13 +44,23 @@ Updated: 2026-08-05
 
 **Scope:** GLOBAL
 
-The matching engine makes every match/exception decision through deterministic rules only — no AI model is ever consulted inside the matching step, for any reason. `match_confidence` scoring is computed by deterministic rule (match type), not by an AI model.
+**Amended 2026-08-06:** The matching engine's Pass 1 and Pass 2 remain 100% deterministic — no AI model is ever consulted in these passes, for any reason. This invariant now permits a narrow, explicitly scoped exception for Pass 3 disambiguation only, matching the target architecture's D4/D5 design exactly (`docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_1.md`):
+- Pass 3 may consult Claude Sonnet 4.6 ONLY on the residual left unresolved after Passes 1-2 (target: single-digit percent of lines at steady state).
+- Pass 3 reads a SQL-retrieved candidate set capped at ≤10 records.
+- Pass 3 output must pass schema validation before use; free-form AI text may never directly drive a match or accounting action.
+- Pass 3 output NEVER auto-approves, at any confidence level — this is a permanent design constraint, not a threshold to be tuned. `review_required` must always be `true` for any Pass 3 result.
+- Pass 3 confidence is hard-capped at 0.85, strictly below any auto-approve threshold in the system.
+- Any implementation of Pass 3 that violates any of the above five constraints is out of scope for this amendment and would require a separate, new invariant decision.
 
-**Current enforcement status:** YES — confirmed. No import of, or call into, any AI client anywhere in the matching module.
+**Basis for this amendment — recorded honestly:** this is the engineer's (Ayush's) decision, made 2026-08-06, WITHOUT the teammate/Sprint Lead's review — she is on leave at the time of this decision. This amendment should be treated as provisional until she confirms or revises it. Do not cite this as a joint or fully methodology-compliant sign-off until that confirmation happens.
 
-**Verified 2026-08-05 (Claude Code, direct trace):** `src/matching/engine.py`'s full import list is `json, os, sys, uuid, hashlib, datetime, src.lakehouse.connection, src.shop_owners` — zero AI/LLM imports. `score_match_confidence()` is a pure dictionary lookup keyed by match type, no network or model call.
+**Prior wording (superseded 2026-08-06, kept for history):** "The matching engine makes every match/exception decision through deterministic rules only — no AI model is ever consulted inside the matching step, for any reason. `match_confidence` scoring is computed by deterministic rule (match type), not by an AI model."
 
-**This is never negotiable.**
+**Current enforcement status:** Pass 1/Pass 2 — YES, confirmed (see verification below; predates this amendment). Pass 3 — NOT YET BUILT. This amendment records the invariant ahead of implementation; no Pass 3 code was written as part of this change, per explicit instruction.
+
+**Verified 2026-08-05 (Claude Code, direct trace; predates this amendment, covers Pass 1/2 only):** `src/matching/engine.py`'s full import list is `json, os, sys, uuid, hashlib, datetime, src.lakehouse.connection, src.shop_owners` — zero AI/LLM imports. `score_match_confidence()` is a pure dictionary lookup keyed by match type, no network or model call.
+
+**This is never negotiable** — Pass 1/2 determinism and each of the five Pass 3 constraints above are individually non-negotiable. This amendment narrows scope; it does not weaken enforcement.
 
 ---
 
