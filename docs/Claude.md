@@ -1,10 +1,10 @@
 ---
-version: v2.5
+version: v2.6
 METHODOLOGY_VERSION: v5.0 (pbvi_core.md)
 frozen: true
 ---
 
-# Claude.md — v2.5 · FROZEN · 2026-08-05
+# Claude.md — v2.6 · FROZEN · 2026-08-06
 
 ## Changelog
 | Version | Date | Author | Change |
@@ -17,6 +17,7 @@ frozen: true
 | v2.3 | 2026-08-05 | Ayush Kumar Sinha | **INV-01 amended: confidence threshold raised from 0.60 to 0.90**, following the same pattern as INV-05's 2026-07-24 amendment. Recorded as an engineer judgment call, explicitly not backed by accuracy/disposition data — see full basis in `INVARIANTS.md` INV-01 (v1.4). This must propagate consistently across the whole repo (config, code, tests, docs) — tracked as a separate implementation task, not embedded here. |
 | v2.4 | 2026-08-05 | Ayush Kumar Sinha (verified via Claude Code) | **Implementation of v2.3 completed.** 0.90 propagated across the repo via full audit; 281 passed / 18 failed on re-run, identical to baseline. `pdfplumber_fallback.py`'s 0.65/0.50 row-confidence values were deliberately left unchanged rather than raised to compensate — real consequence: all pdfplumber-fallback rows now route to human review, not just OCR-derived ones. See `INVARIANTS.md` INV-01 v1.5 for full detail. |
 | v2.5 | 2026-08-05 | Ayush Kumar Sinha | **Missed reference caught and fixed on final consistency review.** Section 4's "Deterministic fallback" line still stated the old `0.60` gate value and the pre-amendment consequence (only OCR rows routing to review) — this line predated the v2.3/v2.4 threshold change and wasn't in Claude Code's original audit scope because `docs/Claude.md` itself wasn't included in that audit's target list. Corrected to `0.90` and the accurate consequence (all pdfplumber-fallback rows route to review). **This file has not yet been re-verified end-to-end for other similarly missed self-references — treat this fix as one instance found by manual review, not a guarantee no others remain.** |
+| v2.6 | 2026-08-06 | Ayush Kumar Sinha (verified via Claude Code) | **Removed Section 2's "Cross-reference (not a sixth GLOBAL invariant...)" footnote for INV-06.** `docs/INVARIANTS.md` INV-06 has been reclassified from GLOBAL to TASK-SCOPED (v1.6) — it no longer claims GLOBAL status, so the footnote hedging that claim against `pbvi_core.md`'s five-invariant ceiling is no longer needed. Section 2 continues to list exactly five GLOBAL invariants (INV-01 through INV-05, per `pbvi_core.md`'s hard ceiling) plus the mandatory CQ-001 complexity invariant, unchanged by this removal — INV-06 was never one of the five listed here to begin with. |
 
 ---
 
@@ -46,8 +47,6 @@ This is never negotiable.
 
 **CQ-001:** Each function, method, or handler must have a single stateable purpose. Conditional nesting exceeding two levels is a structural violation.
 This is never negotiable.
-
-**Cross-reference (not a sixth GLOBAL invariant — see `pbvi_core.md`'s five-invariant ceiling on this section):** `VIVE_MAX_CONCURRENT_AI_CALLS` caps concurrent Claude Sonnet calls system-wide — see `docs/INVARIANTS.md` INV-06 / `discovery/INVARIANT_CATALOGUE.md` IC-21.
 
 **Note (v2.1):** none of the five hard invariants change under the Fabric migration. INV-04 in particular (`invoice_number`/`outstanding_amount` never null in Silver) applies regardless of which Fabric item Silver physically sits on — this is a data-quality rule, not a storage-location rule.
 
