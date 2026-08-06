@@ -4,8 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 from src.lakehouse.connection import execute_sql_fabric, execute_query_fabric
 
-# validation_document_review_queue is cut over to Fabric Warehouse — see
-# get_fabric_connection() in src/lakehouse/connection.py.
+# validation_document_review_queue is cut over to SQL database in Fabric
+# (repointed 2026-08-06, was Fabric Warehouse) — see get_fabric_connection()
+# in src/lakehouse/connection.py.
 
 # Delete stale review queue entries
 execute_sql_fabric("DELETE FROM validation_document_review_queue WHERE source_file = 'Very_Dirty_Scanned_Reconciliation.pdf'")

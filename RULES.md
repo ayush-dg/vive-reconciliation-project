@@ -385,30 +385,46 @@ untouched) or rewriting the SQLite-specific SQL embedded in
 `connection.py` the single place that knows the backend (RULE-06) meant
 absorbing the dialect differences there instead.
 
-**Scoped exception — Fabric Warehouse cut-over (added 2026-08-05):**
+**Scoped exception — SQL database in Fabric cut-over (added 2026-08-05 as
+Fabric Warehouse; repointed 2026-08-06 to a real SQL database in Fabric
+item):**
 `get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()`
 in `src/lakehouse/connection.py` are an additive, narrower path — not a
-replacement for the Azure SQL/SQLite split above. As of this update they
-cover exactly three tables (`extraction_cache`, `document_intake_log`,
-`validation_document_review_queue`). Two respects in which this path does
-**not** carry the same guarantees as `execute_sql()`/`execute_query()`,
+replacement for the Azure SQL/SQLite split above. They cover exactly three
+tables (`extraction_cache`, `document_intake_log`,
+`validation_document_review_queue`). One respect in which this path still
+does **not** carry the same guarantees as `execute_sql()`/`execute_query()`,
 by design, not oversight:
 1. **No dialect translation and no connection-drop retry** — callers of
    the Fabric functions must write SQL valid on both SQLite (the local/test
    fallback) and T-SQL directly; `_translate_for_azure()` is never applied
    on this path.
-2. **No `IDENTITY` column on the Fabric side for any of the three tables**
-   — each write site computes `MAX(id) + 1` in application code, which is
-   not concurrency-safe. This is a real, currently-accepted-as-tracked-risk
-   gap (`discovery/RISK_REGISTER.md` R-012, `discovery/INVARIANT_CATALOGUE.md`
-   IC-19 — IC-19 is deliberately catalogued as *not currently enforced*,
-   not as a passing invariant), not a claim that this rule's
-   backend-agnostic-callers guarantee still fully holds for these three
-   tables. See `discovery/TOPOLOGY.md` A01 row 8 for the full writeup.
+
+**Updated 2026-08-06 — R-012/IC-19 resolved for these three tables:** the
+original cut-over (2026-08-05) pointed at **Fabric Warehouse**, which does
+not support `IDENTITY` columns — every write site computed `MAX(id) + 1` in
+application code, a confirmed concurrency-unsafe gap
+(`discovery/RISK_REGISTER.md` R-012, `discovery/INVARIANT_CATALOGUE.md`
+IC-19). This has been corrected, not just documented: the three tables now
+live on a real **SQL database in Fabric** item (a transactional SQL Server
+engine, provisioned as its own Fabric item — `FABRIC_SQLDB_ENDPOINT`/
+`FABRIC_SQLDB_NAME`), created with real `IDENTITY(1,1)` primary keys via
+`scripts/create_fabric_sqldb_schema.py`. Application code no longer computes
+`MAX(id) + 1` for these three tables — the engine assigns ids. R-012/IC-19
+should be marked resolved for `extraction_cache`, `document_intake_log`, and
+`validation_document_review_queue` specifically; both remain open for the
+remaining Recon-classified tables (`jobs`, `exception_dispositions`,
+`users`, `ai_audit_log`), which are still unmigrated and still need their
+own decision. 184 existing rows (10/15/159) were migrated via
+`scripts/migrate_fabric_data_to_sqldb.py`, verified by direct `COUNT(*)` on
+the new target before and after the repoint — no data loss. The old Fabric
+Warehouse copies of these three tables were deliberately left in place as a
+rollback safety net, not dropped, pending a separate explicit decommissioning
+decision.
 
 Any future extension of the Fabric cut-over to additional tables should
-update this note and confirm whether R-012's mitigation has since been
-built (a locking/sequence mechanism) before assuming the same gap applies
+update this note and confirm the target item type (SQL database in Fabric,
+not Warehouse) before assuming the same schema-creation approach applies
 unchanged.
 
 **Azure SQL connectivity note:** Azure SQL's default "Redirect" connection

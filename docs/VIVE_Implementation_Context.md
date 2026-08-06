@@ -1,5 +1,5 @@
 # VIVE Reconciliation — Implementation Context & Progress Tracker
-Updated: 2026-07-27
+Updated: 2026-08-06 (Fabric SQL database migration completed same day, see §10)
 
 *This document is the complete context for the VIVE Reconciliation project. All phases through Phase 4 are complete. The system is now in active feature expansion (Steps 1-11 of the Final Plan). Read this fully before writing any code.*
 
@@ -27,7 +27,7 @@ A Python-based AI-powered AP automation tool for VIVE Collision (multi-shop auto
 - **Caching**: SHA-256 hash → `extraction_cache` lookup (cache hit requires `row_count > 0`)
 - **Matching**: 2-level deterministic hierarchy (Level 1: exact invoice; Level 2: RO + amount), zero AI involvement, configurable tolerances
 - **Match confidence**: Every match and exception now carries a `match_confidence` score (0.0–1.0), computed deterministically by match type
-- **Row-level validation**: missing invoice ID or amount → `EXTRACTION_INCOMPLETE` exception; low confidence → `validation_document_review_queue`
+- **Row-level validation**: missing invoice ID or amount → `EXTRACTION_INCOMPLETE` exception; low confidence → `validation_document_review_queue`. Confidence threshold **raised from 0.60 to 0.90 on 2026-08-05** (engineer judgment call, not data-validated — see `INVARIANTS.md` INV-01 v1.4/v1.5 for full basis). Known consequence: `pdfplumber_fallback.py`'s row-confidence values (0.65 native, 0.50 OCR) were left unchanged, so all pdfplumber-fallback rows — OCR-derived or not — now route to review, not just the OCR ones.
 
 ### Web Application (FastAPI + Jinja2, not Streamlit)
 - Home dashboard (4 KPI cards, active jobs, recent batches, reconciliation runs table)
@@ -39,7 +39,8 @@ A Python-based AI-powered AP automation tool for VIVE Collision (multi-shop auto
 - Reports page, Users page, Settings (placeholder)
 
 ### Infrastructure
-- Azure SQL (serverless free tier) as shared production database
+- Azure SQL (serverless free tier) as shared production database for most tables (Bronze, Silver, Gold, and four Recon-classified tables: jobs, exception_dispositions, users, ai_audit_log)
+- **SQL database in Fabric cut-over (added 2026-08-05 as Fabric Warehouse; migrated 2026-08-06 to the correct item type):** three Recon-classified tables — `extraction_cache`, `document_intake_log`, `validation_document_review_queue` — route through `get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()` in `src/lakehouse/connection.py` to a real **SQL database in Fabric** item (`FABRIC_SQLDB_ENDPOINT`/`FABRIC_SQLDB_NAME`). **Resolved gap:** these three tables now have real `IDENTITY(1,1)` columns — application code no longer computes `MAX(id) + 1`, closing `discovery/RISK_REGISTER.md` R-012 / `discovery/INVARIANT_CATALOGUE.md` IC-19 for these three specifically. 184 rows migrated (10/15/159, verified). Old Fabric Warehouse copies deliberately left in place as a rollback safety net, not dropped — decommissioning is a separate, not-yet-approved step. Bronze/Silver/Gold and the remaining four Recon tables (`jobs`, `exception_dispositions`, `users`, `ai_audit_log`) are not yet migrated to any Fabric item — R-012/IC-19 remain open for those. See `ARCHITECTURE.md` §2.3/§8 for the full current-state breakdown.
 - Azure Blob Storage (vivereconciliation) for PDF archival
 - Azure Blob Storage (viverecondropzone) as auto-intake drop zone
 - 3-worker thread pool (configurable via VIVE_WORKER_POOL_SIZE)
@@ -177,8 +178,8 @@ Fixed 2026-07-24: Claude Sonnet now returns a genuine, model-elicited per-row ex
 
 ## 9. Test Suite Status
 
-- **Current:** 189+ passing, 1 pre-existing Windows tempfile failure (unrelated)
-- Branch: phase-1-foundation (local only, never pushed)
+- **Current (corrected 2026-08-06 — this figure was stale):** 281 passed / 18 failed / 299 total, verified by live run 2026-08-05. 17 of the 18 failures are local Azure-auth environment issues (Azure CLI auth blocked by this machine's Windows Application Control policy), 1 is the known Windows tempfile lock issue — not code defects. Supersedes the previous "189+ passing, 1 pre-existing Windows tempfile failure" figure, which predated this correction.
+- Branch: phase-1-foundation (local only, never pushed) — not re-verified as part of this update
 
 ---
 
@@ -216,3 +217,8 @@ Fixed 2026-07-24: Claude Sonnet now returns a genuine, model-elicited per-row ex
 | 2026-07-23 | Routing + aging (Step 8) | Done | |
 | 2026-07-23 | Bulk approve (Step 10) | Done | |
 | 2026-07-23 | datetime handling bug fix | Done | |
+| 2026-08-05 | Fabric Warehouse cut-over | Not Started → Partial | `extraction_cache`, `document_intake_log`, `validation_document_review_queue` routed to Fabric Warehouse via `get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()`. Remaining Recon tables + Bronze/Silver/Gold still on Azure SQL/SQLite. Known gap: no IDENTITY column, `MAX(id)+1` not concurrency-safe — R-012/IC-19 |
+| 2026-08-05 | INV-01 confidence threshold | 0.60 → 0.90 | Engineer judgment call, not data-validated — propagated repo-wide; 281/18/299 test re-run confirmed no regression. pdfplumber-fallback rows (0.65/0.50) deliberately left unchanged, now all route to review |
+| 2026-08-05 | Test suite count | 189+ passing (stale) → 281 passed / 18 failed / 299 total | Corrected via live run; all 18 failures are local-environment issues, not code defects |
+| 2026-08-06 | This document | Refreshed | Confidence threshold, Fabric cut-over, and test count brought current — this file had gone stale relative to `ARCHITECTURE.md`/`Claude.md`/`INVARIANTS.md`, all updated 2026-08-05 |
+| 2026-08-06 | Fabric cut-over | Fabric Warehouse → real SQL database in Fabric | `extraction_cache`/`document_intake_log`/`validation_document_review_queue` repointed to a genuine SQL database in Fabric item (`FABRIC_SQLDB_ENDPOINT`/`FABRIC_SQLDB_NAME`), real `IDENTITY(1,1)` primary keys — R-012/IC-19 resolved for these three tables. 184 rows migrated (10/15/159, verified before/after). Old Warehouse copies left in place, not dropped. Remaining Recon tables + Bronze/Silver/Gold still unmigrated |

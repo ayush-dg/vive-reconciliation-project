@@ -71,22 +71,32 @@ SQL_COPT_SS_ACCESS_TOKEN = 1256
 # the Windows WAM broker can't complete the sign-in. The CLI-token approach
 # sidesteps the driver's own auth flow entirely and was confirmed working; it
 # requires `az login` to have been run once already in this environment — it
-# reuses that session rather than prompting for one.
+# reuses that session rather than prompting for one. Do not switch this to
+# Authentication=ActiveDirectoryInteractive — same WAM-broker failure mode.
+#
+# Repointed 2026-08-06 from Fabric Warehouse to a real "SQL database in
+# Fabric" item (FABRIC_SQLDB_ENDPOINT/FABRIC_SQLDB_NAME) — same auth
+# mechanism, different target. This is what actually resolves R-012/IC-19
+# for these three tables: SQL database in Fabric supports IDENTITY columns
+# (schema created by scripts/create_fabric_sqldb_schema.py — deliberately
+# not a migrations/ file, see that script's docstring for why), Fabric
+# Warehouse did not.
 def get_fabric_connection():
-    """Returns a connection for the Fabric-cut-over tables (currently just
-    extraction_cache — see notebooks/01_document_intake.py's check_cache()/
-    update_cache()).
+    """Returns a connection for the Fabric-cut-over tables: extraction_cache,
+    document_intake_log, validation_document_review_queue — see
+    notebooks/01_document_intake.py's check_cache()/update_cache()/
+    write_to_review_queue()/write_intake_log().
 
     Mirrors get_connection()'s own SQLite-vs-cloud branching: falls back to
     the SAME local SQLite backend (same DB_PATH) whenever _using_azure_sql()
-    is False, rather than always reaching the real Fabric Warehouse. This
-    matters because AZURE_SQL_SERVER="" (+ DB_PATH patched to a temp file)
-    is this codebase's existing, established test-isolation convention —
-    every test that already relies on it to get a clean local run (e.g.
-    tests/test_level2_matching_integration.py) would otherwise have its
-    "isolated" run silently escape to real production Fabric data the
-    moment it touched a Fabric-cut-over table, with no way to intercept it.
-    Real Fabric (Azure CLI token auth) is only used when Azure SQL is
+    is False, rather than always reaching the real SQL database in Fabric.
+    This matters because AZURE_SQL_SERVER="" (+ DB_PATH patched to a temp
+    file) is this codebase's existing, established test-isolation
+    convention — every test that already relies on it to get a clean local
+    run (e.g. tests/test_level2_matching_integration.py) would otherwise
+    have its "isolated" run silently escape to real production Fabric data
+    the moment it touched a Fabric-cut-over table, with no way to intercept
+    it. Real Fabric (Azure CLI token auth) is only used when Azure SQL is
     genuinely configured — i.e. actually running against cloud infra."""
     if not _using_azure_sql():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -99,8 +109,8 @@ def get_fabric_connection():
     import pyodbc
     from azure.identity import AzureCliCredential
 
-    endpoint = os.getenv("FABRIC_SQL_ENDPOINT")
-    database = os.getenv("FABRIC_WAREHOUSE_NAME")
+    endpoint = os.getenv("FABRIC_SQLDB_ENDPOINT")
+    database = os.getenv("FABRIC_SQLDB_NAME")
     tenant_id = os.getenv("FABRIC_TENANT_ID")
 
     credential = AzureCliCredential(tenant_id=tenant_id)
@@ -254,7 +264,8 @@ def execute_query(sql, params=None):
 
 def execute_sql_fabric(sql, params=None):
     """Execute a single SQL statement against get_fabric_connection() and
-    return the cursor — real Fabric Warehouse in production, the same
+    return the cursor — real SQL database in Fabric in production
+    (repointed 2026-08-06, was Fabric Warehouse), the same
     local SQLite DB_PATH as execute_sql() in local/test mode (see
     get_fabric_connection()). No dialect translation and no drop-retry:
     callers must write SQL that's valid on both SQLite and T-SQL (no
@@ -272,7 +283,8 @@ def execute_sql_fabric(sql, params=None):
 
 def execute_query_fabric(sql, params=None):
     """Execute a SELECT against get_fabric_connection() and return all
-    rows as a list of dicts — real Fabric Warehouse in production, the
+    rows as a list of dicts — real SQL database in Fabric in production
+    (repointed 2026-08-06, was Fabric Warehouse), the
     same local SQLite DB_PATH as execute_query() in local/test mode (see
     get_fabric_connection()). dict(zip(columns, row)) works unchanged
     against both a pyodbc row and a sqlite3.Row, so no backend branching

@@ -1,5 +1,5 @@
 # ARCHITECTURE.md — VIVE Reconciliation
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Changelog
 | Version | Date | Author | Change |
@@ -9,6 +9,8 @@ Updated: 2026-08-05
 | v2.1 | 2026-08-05 | Ayush Kumar Sinha | **Storage platform migration.** Bronze, Silver, and Gold move from Azure SQL Database to **Microsoft Fabric**: Bronze → Fabric **Lakehouse**, Silver + Gold → Fabric **Warehouse**. Operational/workflow tables (jobs, exceptions, dispositions, review queue, audit log) move to a dedicated **Recon layer on SQL database in Fabric**, kept off Lakehouse/Warehouse because this data is live, transactional, and must never be treated as rebuildable. SQLite remains the local/dev backend, unchanged. |
 | v2.2 | 2026-08-05 | Ayush Kumar Sinha (verified via Claude Code, direct code trace) | **Extraction chain and test count corrected against live code.** Confirmed active chain is Claude Sonnet 4.6 → pdfplumber (not Azure Document Intelligence). Confirmed pytesseract OCR is actively wired into the pdfplumber fallback, gated by a text-density check, with `extract_text_with_ocr()` identified as dead code. Test suite is actually 281 passed / 18 failed / 299 total — all 18 failures are local-environment issues (Azure CLI auth blocked on this machine, plus the known Windows tempfile lock), not code defects. This replaces a stale 45/46 figure. |
 | v2.3 | 2026-08-05 | Ayush Kumar Sinha | **INV-01 confidence threshold raised from 0.60 to 0.90** (see INVARIANTS.md INV-01 v1.4 for full basis — recorded as an engineer judgment call, not data-validated). Propagated to `config/validation/extraction_rules.json`, `notebooks/01_document_intake.py`, and this doc. **Real consequence surfaced by this change:** the pdfplumber-fallback path's row confidence values (0.65 native, 0.50 OCR) were deliberately left unchanged, so both now fall below the new 0.90 gate — meaning all pdfplumber-fallback rows, OCR-derived or not, now route to human review rather than only the OCR ones. This was a deliberate choice (don't silently compensate for one decision with another) — verified via full test suite: 281 passed / 18 failed, identical failing tests to the pre-change baseline, confirming no regression from the threshold change itself. |
+| v2.4 | 2026-08-06 | Ayush Kumar Sinha (verified via Claude Code, direct code trace) | **Correction: this document previously claimed the Fabric migration was "not yet implemented in code" (§2.3, §7, §8, §9) — false.** Direct re-read of `src/lakehouse/connection.py` confirms three Recon-classified tables (`extraction_cache`, `document_intake_log`, `validation_document_review_queue`) are already cut over via `get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()` (lines 75-119, 255-289) — real, env-var-configured (`FABRIC_SQL_ENDPOINT`, `FABRIC_WAREHOUSE_NAME`), not mock/test-only. Corrected: these three tables target **Fabric Warehouse**, not "SQL database in Fabric" as the target-state bullets in §2.3/§4 describe — that phrase now describes only the target end-state. The Fabric Warehouse/target mismatch is the confirmed root cause of the IDENTITY/concurrency gap tracked as `discovery/RISK_REGISTER.md` R-012 / `discovery/INVARIANT_CATALOGUE.md` IC-19. Remaining Recon-classified tables (`jobs`, `exception_dispositions`, `users`, `ai_audit_log`) and all of Bronze/Silver/Gold remain unmigrated, still on Azure SQL/SQLite. Triggered by a teammate doc-review flag, verified against live code before editing — same discipline as prior verification passes. |
+| v2.5 | 2026-08-06 | Ayush Kumar Sinha (executed via Claude Code) | **Migration completed: the three cut-over tables now live on a real SQL database in Fabric item — R-012/IC-19 resolved for these three tables.** A genuine "SQL database in Fabric" item was created in the Fabric workspace (`FABRIC_SQLDB_ENDPOINT`/`FABRIC_SQLDB_NAME`); schema created with real `IDENTITY(1,1)` primary keys via `scripts/create_fabric_sqldb_schema.py` (deliberately not a `migrations/` file — see that script's docstring for why a T-SQL file placed there broke the SQLite test-suite migration runner on the first attempt, since caught and fixed); 184 existing rows (`extraction_cache`=10, `document_intake_log`=15, `validation_document_review_queue`=159) migrated via `scripts/migrate_fabric_data_to_sqldb.py` — no FK references into these tables anywhere in the codebase (confirmed by grep before migrating), fresh IDs assigned on insert. `get_fabric_connection()` repointed to the new target (same auth mechanism — `AzureCliCredential`, no interactive/WAM-broker auth — same signature, no caller changes, per Rule 6). Verified: row counts match exactly via both a direct check and the live `execute_query_fabric()` app path; full test suite (`pytest tests/`) at 298 passed / 1 failed / 299 total (1 pre-existing Windows tempfile issue, unrelated) — better than the documented 281/18 baseline, because this session's environment has working Azure CLI auth where the original baseline's did not. **The old Fabric Warehouse copies of these three tables were deliberately left in place** as a rollback safety net — decommissioning them is a separate, not-yet-approved step. Remaining Recon tables (`jobs`, `exception_dispositions`, `users`, `ai_audit_log`) and all of Bronze/Silver/Gold are still unmigrated. |
 
 ---
 
@@ -47,14 +49,16 @@ Bronze (raw AI extraction output) → **Silver** (`silver_reconciliation_standar
 
 ### 2.3 Backend
 
-SQLite for local/dev/test, unchanged. For production, the single Azure SQL Database has been split across Fabric:
+SQLite for local/dev/test, unchanged. The **target** layout for production is the single Azure SQL Database split across Fabric as follows:
 
 - **Bronze tables** (`bronze_vendor_statement_raw`, `bronze_internal_erp_raw`) → **Fabric Lakehouse**
 - **Silver table** (`silver_reconciliation_standard`) → **Fabric Warehouse**
 - **Gold tables** (`gold_matched_invoices`, `gold_exceptions`, `gold_reconciliation_summary`) → **Fabric Warehouse**
 - **Recon / operational tables** (`jobs`, `exception_dispositions`, `validation_document_review_queue`, `ai_audit_log`, `extraction_cache`, `document_intake_log`, `users`) → **SQL database in Fabric**
 
-`src/lakehouse/connection.py` remains the single place that knows which backend to hit — it now needs to route by *layer*, not just by "SQLite vs. Azure SQL." Schema changes still go through numbered migration files only, never hand-edited DDL. **This is a live code change, not yet made — see the Claude Code prompt at the end of this document.**
+**Actual current state (corrected 2026-08-06 — see changelog v2.5):** three of the seven Recon-classified tables are cut over — `extraction_cache`, `document_intake_log`, and `validation_document_review_queue` — via `get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()` in `src/lakehouse/connection.py:75-119,255-289`. **These now correctly target a real "SQL database in Fabric" item** (`FABRIC_SQLDB_ENDPOINT`/`FABRIC_SQLDB_NAME`), matching the target bullet above exactly — repointed from Fabric Warehouse on 2026-08-06. SQL database in Fabric provides real `IDENTITY(1,1)` primary keys, so **the R-012/IC-19 concurrency gap (`MAX(id) + 1` computed in application code) is resolved for these three tables specifically** — the engine assigns ids now, not application code. Schema created via `scripts/create_fabric_sqldb_schema.py`; 184 existing rows migrated via `scripts/migrate_fabric_data_to_sqldb.py`, verified by direct `COUNT(*)` before and after (10/15/159, unchanged). The old Fabric Warehouse copies were deliberately left in place as a rollback safety net, not dropped.
+
+The remaining four Recon-classified tables (`jobs`, `exception_dispositions`, `users`, `ai_audit_log`) and all of Bronze/Silver/Gold are **still unmigrated** — they remain on Azure SQL/SQLite via the original `get_connection()`/`execute_sql()`/`execute_query()` path, and R-012/IC-19 remain open for any future cut-over of those tables specifically. `src/lakehouse/connection.py` therefore currently has two live paths side by side, not the single layer-routed design the target bullets above describe. Schema changes still go through numbered migration files only, never hand-edited DDL — the Fabric side now has a tracked provisioning mechanism for these three tables (`scripts/create_fabric_sqldb_schema.py`, deliberately not a `migrations/` file — see R-006 and that script's docstring), but no equivalent exists yet for the remaining four Recon tables or Bronze/Silver/Gold.
 
 ### 2.4 Extraction Chain
 
@@ -200,7 +204,7 @@ Unchanged by this migration.
 - **Email alerts** — email provider not yet decided (Step 9, deferred).
 - **Fault isolation per file in a batch** — not yet built (Step 6).
 - **Settings page functionality** — placeholder, build when VIVE specifies needs.
-- **Fabric migration itself (v2.1)** — this document describes the *target* storage layout. The actual data-access layer (`connection.py`), migration runners, and worker-pool polling still point at Azure SQL/SQLite as of this writing. See §8 and the Claude Code prompt below.
+- **Fabric migration — partially cut over, not deliberately-unbuilt (v2.1, corrected 2026-08-06)** — this document describes the *target* storage layout for Bronze/Silver/Gold/Recon. Three Recon-classified tables (`extraction_cache`, `document_intake_log`, `validation_document_review_queue`) are cut over, to a real **SQL database in Fabric** item — the correct target item type, since 2026-08-06 (was Fabric Warehouse). The remaining four Recon tables and all of Bronze/Silver/Gold are not yet migrated — `connection.py`'s original Azure SQL/SQLite path still serves them, and the worker-pool `jobs` table specifically is one of the four not yet migrated. See §2.3 and §8 for the full current-state breakdown.
 
 ---
 
@@ -208,11 +212,11 @@ Unchanged by this migration.
 
 | Gap | Notes |
 |---|---|
-| **Fabric migration not yet implemented in code** | This document (v2.1) describes the target layout — Bronze on Lakehouse, Silver/Gold on Warehouse, Recon on SQL database in Fabric. `connection.py`, migration runners, and the worker poll loop still target a single Azure SQL Database. Needs a dedicated migration effort — see Claude Code prompt below. |
+| **Fabric migration — 3 of 7 Recon tables done and on the correct item type (updated 2026-08-06)** | This document (v2.1) describes the target layout — Bronze on Lakehouse, Silver/Gold on Warehouse, Recon on SQL database in Fabric. `extraction_cache`, `document_intake_log`, and `validation_document_review_queue` are cut over via `get_fabric_connection()`/`execute_sql_fabric()`/`execute_query_fabric()` (`src/lakehouse/connection.py:75-119,255-289`) to a real **SQL database in Fabric** item (`FABRIC_SQLDB_ENDPOINT`/`FABRIC_SQLDB_NAME`) — repointed 2026-08-06 from Fabric Warehouse, which resolves the R-012/IC-19 IDENTITY/concurrency gap for these three tables specifically (real `IDENTITY(1,1)` columns now, no more application-level `MAX(id)+1`). 184 rows migrated, verified by `COUNT(*)` (10/15/159). Old Warehouse copies deliberately left in place, not dropped, pending a separate decommissioning decision. `jobs`, `exception_dispositions`, `users`, `ai_audit_log`, and all of Bronze/Silver/Gold still target a single Azure SQL Database (or SQLite locally) via the original `get_connection()`/`execute_sql()`/`execute_query()` path — R-012/IC-19 remain open for these. Migration runners and the worker poll loop are likewise unchanged. Completing the rest of the migration is still a dedicated effort; see the Claude Code prompt below. |
 | Live NetSuite integration | Biggest gap before real production value. Needs VIVE API credentials. |
 | App Service deployment | Blocked on Ashrith's subscription quota. Files are ready. |
 | Event Grid System Topic | Blocked on Azure RBAC permissions. |
-| Fabric workspace / item permissions | New, v2.1 — likely also blocked on Ashrith, needs confirming. |
+| Fabric workspace / item permissions | New, v2.1. **Updated 2026-08-06:** confirmed NOT blocked, at least for the identity used in this session — live check via the Fabric REST API showed Admin role on the workspace, and a new SQL database item was successfully created. Any remaining doubt is about who else besides that identity holds equivalent access, not whether Fabric-workspace-level permissions are held at all. |
 | Stale job requeue | A job stuck PROCESSING past a timeout is never automatically re-queued. Tracked in original RISK_REGISTER as R-004. Now narrower — only stalls that one filename, not the whole queue. |
 | Per-row genuine confidence from Claude Sonnet | Fixed 2026-07-24 — Claude Sonnet now returns genuine per-row confidence (see `discovery/RISK_REGISTER.md` R-001). Gemini/Mistral remain broken (still hardcoded at 0.75) but dormant. |
 | GeminiClient/MistralClient confidence hardcoding | Both dormant — not in active chain. Still hardcode 0.75 confidence and lack totals-row filtering. Not a live risk. |
@@ -221,26 +225,26 @@ Unchanged by this migration.
 
 ---
 
-## 9. Claude Code prompt — implementing the Fabric migration
+## 9. Claude Code prompt — completing the Fabric migration
 
-This document only describes the target state. To make the code match, paste this into a Claude Code session:
+This document describes the target state. **Updated 2026-08-06:** three Recon-classified tables are done and on the correct item type — `extraction_cache`, `document_intake_log`, `validation_document_review_queue` now live on a real SQL database in Fabric item, repointed from Fabric Warehouse, R-012/IC-19 resolved for these three (see §2.3, §8). What's left is the remaining four Recon tables and all of Bronze/Silver/Gold. To complete the rest of the migration, paste this into a Claude Code session:
 
 ```
-Context: VIVE Reconciliation currently uses a single Azure SQL Database (with SQLite for local dev) for all Bronze, Silver, Gold, and operational tables, selected in src/lakehouse/connection.py.
+Context: VIVE Reconciliation currently uses a single Azure SQL Database (with SQLite for local dev) for Bronze, Silver, Gold, and four operational tables (jobs, exception_dispositions, users, ai_audit_log), selected via get_connection()/execute_sql()/execute_query() in src/lakehouse/connection.py. Three operational tables (extraction_cache, document_intake_log, validation_document_review_queue) are already correctly cut over to a real SQL database in Fabric item via a separate path — get_fabric_connection()/execute_sql_fabric()/execute_query_fabric() — with real IDENTITY columns, resolving R-012/IC-19 for those three specifically (as of 2026-08-06).
 
-Task: Update the data-access layer to route by table group instead of a single backend switch:
+Task: Update the data-access layer to route by table group instead of a single backend switch, extending the pattern already proven for the three Recon tables done above:
 - Bronze tables (bronze_vendor_statement_raw, bronze_internal_erp_raw) → Fabric Lakehouse
 - Silver table (silver_reconciliation_standard) → Fabric Warehouse
 - Gold tables (gold_matched_invoices, gold_exceptions, gold_reconciliation_summary) → Fabric Warehouse
-- Operational/Recon tables (jobs, exception_dispositions, validation_document_review_queue, ai_audit_log, extraction_cache, document_intake_log, users) → SQL database in Fabric
+- Remaining operational/Recon tables (jobs, exception_dispositions, users, ai_audit_log) → SQL database in Fabric — the same item already created for extraction_cache/document_intake_log/validation_document_review_queue, or a decision to use a separate item; confirm with the engineer first
 
 Requirements:
 1. Do not change SQLite local/dev behavior — this is a production-only routing change.
-2. src/lakehouse/connection.py should expose a way to get the correct connection/client per table group, not just a single "is Azure SQL configured" boolean.
+2. src/lakehouse/connection.py should expose a way to get the correct connection/client per table group, not just a single "is Azure SQL configured" boolean. The existing get_fabric_connection()/execute_sql_fabric()/execute_query_fabric() functions and their schema-creation script (scripts/create_fabric_sqldb_schema.py) are the proven pattern to extend, not replace.
 3. Every existing caller of the connection layer must be updated to pass or infer which table group it's reading/writing, without changing its own business logic.
-4. Migration runners need to target three separate Fabric items instead of one Azure SQL Database — do not merge them into one migration file.
+4. Migration runners need to target three separate Fabric items instead of one Azure SQL Database — do not merge them into one migration file, and do not put Fabric-targeted T-SQL DDL inside migrations/ itself (that broke the SQLite test-suite migration runner during the three-table cut-over — see scripts/create_fabric_sqldb_schema.py's docstring for why).
 5. Flag, but do not attempt to fix, anything that assumes cross-table-group transactions (e.g. a single SQL transaction spanning a Bronze write and a Recon write) — that will need explicit handling since Lakehouse/Warehouse and SQL database in Fabric are different engines.
 6. Do not touch the extraction chain, matching engine, or worker pool concurrency logic — only the storage routing.
 
-Before writing code, list every file that currently imports or calls into src/lakehouse/connection.py, and confirm the plan with me before making changes.
+Before writing code, list every file that currently imports or calls into src/lakehouse/connection.py (including get_fabric_connection()/execute_sql_fabric()/execute_query_fabric() callers), and confirm the plan with me before making changes.
 ```
