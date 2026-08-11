@@ -8,3 +8,11 @@ logs/*.log
 .venv/
 venv/
 backup/
+terraform.tfvars.example
+terraform.tfvars
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan*
+crash.log
+crash.*.log
