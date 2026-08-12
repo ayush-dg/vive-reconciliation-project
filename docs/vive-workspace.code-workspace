@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../dg-os"
+		},
+		{
+			"path": "../../vive-terraform"
+		},
+		{
+			"path": "../../gl-core"
+		},
+		{
+			"path": "../../../Downloads/astech"
+		}
+	],
+	"settings": {}
+}
