@@ -3,53 +3,53 @@
 
 {% block topbar %}
 <div class="topbar">
-  <div class="topbar-title">Exceptions — current period</div>
-  <span style="font-size:12px;color:var(--text-secondary)">{{ total_open }} open across {{ vendor_count_with_ex }} vendor{{ "s" if vendor_count_with_ex != 1 }}</span>
+  <div class="topbar-title">
+    <div class="eyebrow">Vendors this period</div>
+    <h1>Exceptions</h1>
+  </div>
+  <div class="topbar-actions">
+    <span style="font-size:12px;color:var(--text-muted)">{{ total_open }} open across {{ vendor_count_with_ex }} vendor{{ "s" if vendor_count_with_ex != 1 }}</span>
+  </div>
 </div>
 {% endblock %}
 
 {% block content %}
-<div class="section-title">Vendors this period</div>
 {% if vendors %}
 <div class="vendor-grid">
   {% for v in vendors %}
-  <a href="/exceptions/{{ v.url_name }}" class="vendor-card {{ 'has-ex' if v.exception_count > 0 else 'clean' }}">
-    <div class="vc-header">
-      <div class="vc-info">
-        <div class="vc-avatar {{ 'ava-amber' if v.exception_count > 0 else 'ava-green' }}">{{ v.vendor_name | initials }}</div>
+  <a href="/exceptions/{{ v.url_name }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}">
+    <div class="vendor-card-head">
+      <div class="vendor-card-id">
+        <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--success-tint);color:var(--success)"{% endif %}>{{ v.vendor_name | initials }}</div>
         <div>
-          <div class="vc-name">{{ v.vendor_name }}</div>
-          <div class="vc-period">{{ v.statement_period | period_label }} · {{ v.total_invoice_count }} invoices</div>
+          <div class="vendor-card-name">{{ v.vendor_name }}</div>
+          <div class="vendor-card-meta">{{ v.statement_period | period_label }} · {{ v.total_invoice_count }} invoices · {{ v.statement_total | money_short }}</div>
         </div>
       </div>
       {% if v.exception_count > 0 %}
-      <span class="badge warning">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
+      <span class="badge badge-warning">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
       {% else %}
-      <span class="badge success">✓ Reconciled</span>
+      <span class="badge badge-success"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
       {% endif %}
     </div>
-    <div class="stats-row">
-      <div class="stat stat-col"><div class="stat-val">{{ v.total_invoice_count }}</div><div class="stat-lbl">Total</div></div>
-      <div class="stat stat-col"><div class="stat-val green">{{ v.matched_count }}</div><div class="stat-lbl">Matched</div></div>
-      <div class="stat stat-col"><div class="stat-val {{ 'amber' if v.exception_count > 0 else 'green' }}">{{ v.exception_count }}</div><div class="stat-lbl">Exceptions</div></div>
-      <div class="stat stat-col"><div class="stat-val">{{ v.statement_total | money_short }}</div><div class="stat-lbl">Value</div></div>
+    <div class="vendor-card-body">
+      <div class="vc-metric"><div class="num" style="color:var(--success)">{{ v.matched_count }}</div><div class="lbl">Matched</div></div>
+      <div class="vc-metric"><div class="num"{% if v.exception_count > 0 %} style="color:var(--warning)"{% endif %}>{{ v.exception_count }}</div><div class="lbl">Exceptions</div></div>
     </div>
-    <div class="vc-footer">
+    {% if v.exception_count > 0 and v.aging %}
+    <div class="aging-line{{ ' stale' if v.aging.days_open > 14 else '' }}">Oldest exception: <b>{{ v.aging.days_open }} day{{ "s" if v.aging.days_open != 1 }}</b></div>
+    {% endif %}
+    <div class="vendor-card-foot">
       {% if v.exception_count > 0 %}
-      <span class="vc-footer-note">
-        {% if v.aging %}
-        <span class="badge {{ 'neutral' if v.aging.days_open < 7 else ('warning' if v.aging.days_open <= 14 else 'danger') }}" style="margin-right:6px">Oldest: {{ v.aging.days_open }} day{{ "s" if v.aging.days_open != 1 }} open</span>
-        {% endif %}
-        {%- set parts = [] -%}
-        {%- for reason, count in v.reason_breakdown.items() -%}
-          {%- set _ = parts.append(count|string ~ " " ~ reason) -%}
-        {%- endfor -%}
-        {{ parts | join(" · ") }}
-      </span>
-      <span class="review-link">Review exceptions →</span>
+      {%- set parts = [] -%}
+      {%- for reason, count in v.reason_breakdown.items() -%}
+        {%- set _ = parts.append(count|string ~ " " ~ reason) -%}
+      {%- endfor -%}
+      <span class="breakdown">{{ parts | join(" · ") }}</span>
+      <span class="link-arrow">Review exceptions <svg class="icon"><use href="#i-arrow-right"/></svg></span>
       {% else %}
-      <span class="vc-footer-note" style="color:var(--success)">All invoices matched ✓</span>
-      <span class="review-link">View report →</span>
+      <span class="clean-note"><svg class="icon"><use href="#i-check-circle"/></svg>All invoices matched</span>
+      <span class="link-arrow">View report <svg class="icon"><use href="#i-arrow-right"/></svg></span>
       {% endif %}
     </div>
   </a>

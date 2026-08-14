@@ -3,54 +3,60 @@
 
 {% block topbar %}
 <div class="topbar">
-  <div class="topbar-title">Reports</div>
-  <span style="font-size:12px;color:var(--text-secondary)">{{ runs | length }} reconciliation run{{ "s" if runs | length != 1 }}</span>
+  <div class="topbar-title">
+    <div class="eyebrow">Reports</div>
+    <h1>Reports</h1>
+  </div>
+  <div class="topbar-actions">
+    <span style="font-size:12px;color:var(--text-muted)">{{ runs | length }} reconciliation run{{ "s" if runs | length != 1 }}</span>
+  </div>
 </div>
 {% endblock %}
 
 {% block content %}
 {% if runs %}
-<table class="table">
-  <thead>
-    <tr>
-      <th>Vendor</th>
-      <th>Period</th>
-      <th>Invoices</th>
-      <th>Matched</th>
-      <th>Exceptions</th>
-      <th>Statement total</th>
-      <th>Status</th>
-      <th>Completed</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for run in runs %}
-    <tr>
-      <td>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div class="vendor-avatar {{ 'va-green' if run.exception_count == 0 else 'va-amber' }}">{{ run.vendor_name | initials }}</div>
-          <span style="font-weight:500">{{ run.vendor_name }}</span>
+<div class="reports-layout">
+  <div class="panel" style="margin-bottom:0">
+    <div class="panel-head">
+      <div>
+        <h2>Generated reports</h2>
+        <div class="sub">Every completed reconciliation run, most recent first</div>
+      </div>
+    </div>
+    <div>
+      {% for run in runs %}
+      <div class="report-row">
+        <div class="report-icon"{% if run.exception_count == 0 %} style="background:var(--success-tint);color:var(--success)"{% endif %}>
+          <svg class="icon"><use href="#{{ 'i-check-circle' if run.exception_count == 0 else 'i-file' }}"/></svg>
         </div>
-      </td>
-      <td style="color:var(--text-secondary)">{{ run.statement_period | period_label }}</td>
-      <td>{{ run.total_invoice_count }}</td>
-      <td>{{ run.matched_count }}</td>
-      <td style="color:{{ 'var(--success)' if run.exception_count == 0 else 'var(--warning)' }}">{{ run.exception_count }}</td>
-      <td>{{ run.statement_total | money }}</td>
-      <td>
-        {% if run.overall_status == 'RECONCILED' %}
-        <span class="badge success">✓ Reconciled</span>
-        {% else %}
-        <span class="badge warning">⚠ Exceptions</span>
-        {% endif %}
-      </td>
-      <td style="color:var(--text-secondary)">{{ run.reconciliation_timestamp | friendly_dt }}</td>
-      <td><a href="/reports/{{ run.statement_id }}" class="link">View report →</a></td>
-    </tr>
+        <div class="report-main">
+          <div class="report-title">{{ run.vendor_name }} — {{ run.statement_period | period_label }}</div>
+          <div class="report-meta">{{ run.total_invoice_count }} invoices · {{ run.matched_count }} matched · {{ run.exception_count }} exception{{ "s" if run.exception_count != 1 }} · generated {{ run.reconciliation_timestamp | friendly_dt }}</div>
+        </div>
+        <div class="report-actions">
+          {% if run.exception_count > 0 %}
+          <a href="/exceptions/{{ run.vendor_name | urlname }}" class="chip-btn"><svg class="icon"><use href="#i-alert"/></svg>Review</a>
+          {% endif %}
+          <a href="/reports/{{ run.statement_id }}" class="chip-btn"><svg class="icon"><use href="#i-file"/></svg>View</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel summary-card" style="margin-bottom:0">
+    <div class="eyebrow" style="margin-bottom:14px">Match rate by vendor</div>
+    {% for vendor_name, vendor_runs in runs | groupby('vendor_name') %}
+    {% set total_inv = vendor_runs | sum(attribute='total_invoice_count') %}
+    {% set total_matched = vendor_runs | sum(attribute='matched_count') %}
+    {% set rate = ((total_matched / total_inv) * 100) if total_inv else 0 %}
+    <div class="summary-bar-row">
+      <div class="summary-bar-label"><span class="v-name">{{ vendor_name }}</span><span class="v-pct">{{ "%.1f"|format(rate) }}%</span></div>
+      <div class="summary-bar-track"><div class="summary-bar-fill{{ ' warn' if rate < 90 else '' }}" style="width:{{ rate }}%"></div></div>
+    </div>
     {% endfor %}
-  </tbody>
-</table>
+  </div>
+</div>
 {% else %}
 <div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
 {% endif %}
