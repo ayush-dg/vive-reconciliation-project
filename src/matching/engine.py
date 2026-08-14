@@ -244,20 +244,41 @@ def run_matching(statement_id: str,
         [statement_id]
     )
 
-    erp_rows = execute_query(
-        """
-        SELECT * FROM silver_reconciliation_standard
-        WHERE statement_id = ? AND record_source = 'INTERNAL_ERP'
-        ORDER BY id
-        """,
-        [statement_id]
+    # Real voucher-sourced ERP data (scripts/load_voucher_data.py) lives
+    # under a synthetic, vendor-scoped statement_id ("VOUCHER-<vendor_id>")
+    # independent of any single upload -- unlike mock-generated ERP rows,
+    # which are scoped to exactly this statement_id and regenerated per
+    # run (src/mock_erp/generator.py). This is now the ONLY source
+    # matching reads from -- no fallback to the statement-scoped mock
+    # rows. That fallback previously made matching silently succeed
+    # against src/mock_erp/generator.py's self-mirrored copy of the same
+    # statement's own invoices (see that module's docstring) whenever a
+    # vendor had no real voucher data, producing a misleadingly high
+    # match rate that looked like real reconciliation but wasn't -- see
+    # the conversation this removal came out of. Mock ERP generation
+    # itself (run_full_pipeline.py's Phase 2) is untouched and still
+    # runs/writes on every upload; its output is simply never read here
+    # anymore, for any vendor.
+    vendor_id = stmt_rows[0].get("vendor_id") if stmt_rows else None
+    erp_rows = (
+        execute_query(
+            """
+            SELECT * FROM silver_reconciliation_standard
+            WHERE statement_id = ? AND record_source = 'INTERNAL_ERP'
+            ORDER BY id
+            """,
+            [f"VOUCHER-{vendor_id}"]
+        )
+        if vendor_id else []
     )
 
     if not stmt_rows:
         raise ValueError(f"No VENDOR_STATEMENT rows in Silver for statement_id='{statement_id}'")
     if not erp_rows:
-        raise ValueError(f"No INTERNAL_ERP rows in Silver for statement_id='{statement_id}'. "
-                         f"Run 02_generate_mock_erp.py first.")
+        raise ValueError(f"No real voucher-sourced INTERNAL_ERP rows for vendor_id='{vendor_id}' "
+                         f"(statement_id='{statement_id}'). Matching no longer falls back to "
+                         f"mock-generated ERP data -- load real voucher data for this vendor "
+                         f"first (see scripts/load_voucher_data.py).")
 
     print(f"  [Matching] Statement invoices: {len(stmt_rows)}")
     print(f"  [Matching] ERP invoices: {len(erp_rows)}")

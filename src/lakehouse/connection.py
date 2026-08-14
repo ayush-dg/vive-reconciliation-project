@@ -62,6 +62,10 @@ def _using_fabric_warehouse():
     return bool(os.getenv("FABRIC_WORKSPACE_ID"))
 
 
+def _using_fabric_sqldb():
+    return bool(os.getenv("FABRIC_SQLDB_ENDPOINT"))
+
+
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 
 
@@ -87,18 +91,24 @@ def get_fabric_connection():
     notebooks/01_document_intake.py's check_cache()/update_cache()/
     write_to_review_queue()/write_intake_log().
 
-    Mirrors get_connection()'s own SQLite-vs-cloud branching: falls back to
-    the SAME local SQLite backend (same DB_PATH) whenever _using_azure_sql()
-    is False, rather than always reaching the real SQL database in Fabric.
-    This matters because AZURE_SQL_SERVER="" (+ DB_PATH patched to a temp
-    file) is this codebase's existing, established test-isolation
-    convention — every test that already relies on it to get a clean local
-    run (e.g. tests/test_level2_matching_integration.py) would otherwise
-    have its "isolated" run silently escape to real production Fabric data
-    the moment it touched a Fabric-cut-over table, with no way to intercept
-    it. Real Fabric (Azure CLI token auth) is only used when Azure SQL is
-    genuinely configured — i.e. actually running against cloud infra."""
-    if not _using_azure_sql():
+    Falls back to the SAME local SQLite backend (same DB_PATH) whenever
+    Fabric itself isn't configured (FABRIC_SQLDB_ENDPOINT unset) — this is
+    intentionally independent of _using_azure_sql(): plain Azure SQL and
+    the Fabric SQL database item are two separate cut-overs (see the
+    module docstring), and a deployment can have one configured without
+    the other. Originally this checked _using_azure_sql() instead, on the
+    assumption real Azure SQL and real Fabric would always be configured
+    together — that assumption broke the first time someone ran against a
+    real Azure SQL Database without a Fabric SQL database item also set
+    up, sending get_fabric_connection() to a real Fabric endpoint that was
+    never provided. AZURE_SQL_SERVER="" is still this codebase's
+    established test-isolation convention for get_connection() — every
+    test that already relies on it to get a clean local run (e.g.
+    tests/test_level2_matching_integration.py) is unaffected, since a test
+    environment with AZURE_SQL_SERVER unset also has FABRIC_SQLDB_ENDPOINT
+    unset. Real Fabric (Azure CLI token auth) is only used when Fabric
+    itself is genuinely configured."""
+    if not _using_fabric_sqldb():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row

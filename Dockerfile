@@ -11,10 +11,30 @@ FROM python:3.12-slim
 #                   rasterize PDF pages before OCR runs. pytesseract alone is
 #                   not enough: without poppler, pdf2image.convert_from_path()
 #                   fails at runtime even though the tesseract binary is present.
+#   msodbcsql18/unixodbc - required by pyodbc (src/lakehouse/connection.py's
+#                   Azure SQL path) at runtime, not just build time — without
+#                   libodbc.so.2 present, every pyodbc.connect() call fails
+#                   with "ImportError: libodbc.so.2: cannot open shared
+#                   object file". This image was never exercised against
+#                   real Azure SQL before (the original lightweight demo
+#                   deliberately used SQLite only), so this gap went
+#                   unnoticed until a real AZURE_SQL_SERVER was configured.
+#                   Uses Debian 12 (bookworm)'s package repo explicitly —
+#                   Microsoft doesn't yet publish one for this base image's
+#                   newer Debian release (trixie), but the bookworm packages
+#                   install and run fine on it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         poppler-utils \
+        curl \
+        gnupg \
+        ca-certificates \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
