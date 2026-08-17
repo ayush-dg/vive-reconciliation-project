@@ -25,3 +25,21 @@ output "foundry_endpoint" {
 output "storage_account_name" {
   value = azurerm_storage_account.storage.name
 }
+
+output "sql_server_fqdn" {
+  value = azurerm_mssql_server.sql.fully_qualified_domain_name
+}
+
+output "sql_database_name" {
+  value = azurerm_mssql_database.sql.name
+}
+
+output "sql_admin_username" {
+  value = azurerm_mssql_server.sql.administrator_login
+}
+
+# Sensitive -- retrieve with: terraform output -raw sql_admin_password
+output "sql_admin_password" {
+  value     = random_password.sql_admin.result
+  sensitive = true
+}

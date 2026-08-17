@@ -3,90 +3,75 @@
 
 {% block topbar %}
 <div class="topbar">
-  <div class="topbar-title">Upload vendor statement</div>
+  <div class="topbar-title">
+    <div class="eyebrow">Upload</div>
+    <h1>Upload statement</h1>
+  </div>
 </div>
 {% endblock %}
 
-{% block body %}
-<div class="upload-content">
-  <div class="left-col">
+{% block content %}
+<div class="upload-grid">
+  <div>
     {% if error %}
     <div class="upload-error">{{ error }}</div>
     {% endif %}
     {% if success %}
-    <div class="upload-success">✓ {{ success }} <a href="/jobs/history" class="link">View job history →</a></div>
+    <div class="upload-success"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> {{ success }} <a href="/jobs/history" class="link">View job history →</a></div>
     {% endif %}
 
     <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form">
-      <div class="upload-zone">
-        <div class="upload-icon">📁</div>
-        <div class="upload-title">Drop vendor PDFs here</div>
-        <div class="upload-sub">PDF files only · up to 50 MB each · text or scanned · multiple files supported</div>
-        <button class="btn" type="button">Browse files</button>
+      <div class="dropzone">
+        <div class="dropzone-icon"><svg class="icon" style="width:24px;height:24px"><use href="#i-folder"/></svg></div>
+        <h3>Drop vendor PDFs here</h3>
+        <p>PDF files only · up to 50 MB each · text or scanned · multiple files supported</p>
+        <button class="btn-secondary" type="button">Browse files</button>
         <input type="file" name="files" id="pdf-file-input" accept="application/pdf,.pdf" multiple required>
       </div>
 
-      <div class="file-card" id="file-card" style="display:none">
+      <div id="file-card" style="display:none">
         <div id="file-list"></div>
-        <div class="prog-label">✓ Ready to queue</div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Vendor <span class="form-note">auto-detected from each PDF</span></label>
-        <input type="text" value="Detected automatically during processing" disabled />
-      </div>
-      <div class="form-group">
-        <label class="form-label">Statement period</label>
-        <select name="period">
-          <option value="">Auto-detect from statement</option>
-          <option value="2026-07">July 2026</option>
-          <option value="2026-06">June 2026</option>
-          <option value="2026-05">May 2026</option>
-          <option value="2026-04">April 2026</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes <span class="form-note">optional</span></label>
-        <input type="text" name="notes" placeholder="e.g. 'Late statement — covers May + June'" />
-      </div>
-      <div class="action-row">
-        <a href="/" class="btn">Cancel</a>
-        <button class="btn btn-primary" type="submit" id="run-btn" disabled>▶ Queue for reconciliation</button>
+      <div class="form-card">
+        <div class="form-field">
+          <label>Vendor <span class="field-hint">auto-detected from each PDF</span></label>
+          <input type="text" value="Detected automatically during processing" disabled />
+        </div>
+        <div class="form-field">
+          <label>Statement period</label>
+          <select name="period">
+            <option value="">Auto-detect from statement</option>
+            <option value="2026-07">July 2026</option>
+            <option value="2026-06">June 2026</option>
+            <option value="2026-05">May 2026</option>
+            <option value="2026-04">April 2026</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Notes <span class="field-hint">optional</span></label>
+          <input type="text" name="notes" placeholder="e.g. 'Late statement — covers May + June'" />
+        </div>
+        <div class="form-actions">
+          <a href="/" class="btn-secondary">Cancel</a>
+          <button class="btn-primary" style="width:auto;flex:1" type="submit" id="run-btn" disabled>Queue for reconciliation</button>
+        </div>
       </div>
     </form>
   </div>
 
-  <div class="right-col">
-    <div class="right-col-title">How it works</div>
-    <div class="info-card">
-      <div class="step">
-        <div class="step-num">1</div>
-        <div class="step-text">Upload the vendor's PDF statement — any format, text or scanned</div>
-      </div>
-      <div class="step">
-        <div class="step-num">2</div>
-        <div class="step-text">Claude AI extracts every invoice row automatically</div>
-      </div>
-      <div class="step">
-        <div class="step-num">3</div>
-        <div class="step-text">Extracted invoices are matched against your NetSuite ERP data</div>
-      </div>
-      <div class="step">
-        <div class="step-num">4</div>
-        <div class="step-text">Exceptions (missing invoices, amount mismatches) are flagged for review</div>
-      </div>
-      <div class="step" style="margin-bottom:0">
-        <div class="step-num">5</div>
-        <div class="step-text">You review and resolve exceptions — report is generated automatically</div>
-      </div>
-    </div>
-    <div class="info-card">
-      <div class="info-card-title">⏱ Typical processing time</div>
-      <div class="info-card-body">
-        2–4 pages: ~1–2 min<br>
-        10–15 pages: ~3–5 min<br>
-        20+ pages: ~5–8 min
-      </div>
+  <div class="panel howitworks-panel">
+    <div class="eyebrow" style="margin-bottom:14px">How it works</div>
+    <div class="step-row"><div class="step-num">1</div><div class="step-text">Upload the vendor's PDF statement — any format, text or scanned.</div></div>
+    <div class="step-row"><div class="step-num">2</div><div class="step-text">Claude AI extracts every invoice row automatically.</div></div>
+    <div class="step-row"><div class="step-num">3</div><div class="step-text">Extracted invoices are matched against your <b>NetSuite</b> ERP data.</div></div>
+    <div class="step-row"><div class="step-num">4</div><div class="step-text">Exceptions — missing invoices, amount mismatches — are flagged for review.</div></div>
+    <div class="step-row" style="margin-bottom:0"><div class="step-num">5</div><div class="step-text">You resolve exceptions and a report is generated automatically.</div></div>
+    <div class="time-table">
+      <div class="eyebrow" style="margin-bottom:8px">Typical processing time</div>
+      <div class="time-row"><span>2–4 page statement</span><b>~1–2 min</b></div>
+      <div class="time-row"><span>10–15 page statement</span><b>~3–5 min</b></div>
+      <div class="time-row"><span>20+ page statement</span><b>~5–8 min</b></div>
     </div>
   </div>
 </div>

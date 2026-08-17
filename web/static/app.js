@@ -21,11 +21,11 @@ document.addEventListener("DOMContentLoaded", function () {
           const row = document.createElement("div");
           row.className = "file-row";
           row.innerHTML =
-            '<div class="file-icon">📄</div>' +
-            '<div style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:3px">' +
-            '<span class="file-name"></span><span class="file-size"></span></div></div>';
-          row.querySelector(".file-name").textContent = file.name;
-          row.querySelector(".file-size").textContent = (file.size / (1024 * 1024)).toFixed(1) + " MB";
+            '<div class="file-icon"><svg class="icon" style="width:18px;height:18px"><use href="#i-file"/></svg></div>' +
+            '<div class="file-row-main"><div class="file-row-top">' +
+            '<span class="fname"></span><span class="fsize"></span></div></div>';
+          row.querySelector(".fname").textContent = file.name;
+          row.querySelector(".fsize").textContent = (file.size / (1024 * 1024)).toFixed(1) + " MB";
           fileList.appendChild(row);
         });
       }

@@ -59,6 +59,7 @@ from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fab
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
+from src.vendor_identity import resolve_vendor_id
 from src.storage.blob_client import BlobStorageClient
 
 
@@ -716,7 +717,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         vendor_name = derive_vendor_name_from_filename(pdf_path)
         vendor_meta["vendor_name"] = vendor_name
         print(f"  No vendor name extracted — using filename-derived vendor: {vendor_name}")
-    vendor_id = vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
+    vendor_id = resolve_vendor_id(vendor_name) or vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
 
     # Update statement_period from AI-detected dates if available
     stmt_meta = schema_result.get("statement_metadata", {})

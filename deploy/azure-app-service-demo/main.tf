@@ -55,11 +55,59 @@ resource "azurerm_cognitive_account" "foundry" {
   custom_subdomain_name = "${var.name_prefix}-foundry-${local.suffix}"
 }
 
+# --- Azure SQL Database: real backing store for src/lakehouse/connection.py,
+# selected automatically once AZURE_SQL_SERVER is set (see get_connection()).
+# Replaces the ephemeral SQLite fallback for every table (Bronze/Silver/Gold
+# + all Recon tables), not just the new voucher table. ---
+resource "random_password" "sql_admin" {
+  length      = 24
+  min_upper   = 1
+  min_lower   = 1
+  min_numeric = 1
+  min_special = 1
+  # Azure SQL rejects some special characters -- keep to a known-safe set.
+  override_special = "!#$%&*-_="
+}
+
+resource "azurerm_mssql_server" "sql" {
+  name                         = "${var.name_prefix}-sql-${local.suffix}"
+  resource_group_name          = data.azurerm_resource_group.this.name
+  location                     = var.sql_location
+  version                      = "12.0"
+  administrator_login          = "viveadmin"
+  administrator_login_password = random_password.sql_admin.result
+  minimum_tls_version          = "1.2"
+}
+
+resource "azurerm_mssql_database" "sql" {
+  name        = "${var.name_prefix}-db"
+  server_id   = azurerm_mssql_server.sql.id
+  sku_name    = "Basic"
+  max_size_gb = 2
+}
+
+# Required or nothing can connect at all -- a new Azure SQL Server has zero
+# firewall rules by default. Both rules are free (access-control metadata
+# on the server, not a billable resource).
+resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
+  name             = "AllowAzureServices"
+  server_id        = azurerm_mssql_server.sql.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0"
+}
+
+resource "azurerm_mssql_firewall_rule" "allow_client" {
+  name             = "AllowClientIP"
+  server_id        = azurerm_mssql_server.sql.id
+  start_ip_address = var.sql_admin_client_ip
+  end_ip_address   = var.sql_admin_client_ip
+}
+
 # --- App Service ---
 resource "azurerm_service_plan" "plan" {
   name                = "${var.name_prefix}-plan"
   resource_group_name = data.azurerm_resource_group.this.name
-  location            = data.azurerm_resource_group.this.location
+  location            = var.app_service_location
   os_type             = "Linux"
   sku_name            = var.app_service_sku
 }
@@ -67,7 +115,7 @@ resource "azurerm_service_plan" "plan" {
 resource "azurerm_linux_web_app" "app" {
   name                = "${var.name_prefix}-${local.suffix}"
   resource_group_name = data.azurerm_resource_group.this.name
-  location            = data.azurerm_resource_group.this.location
+  location            = var.app_service_location # must match azurerm_service_plan.plan's region
   service_plan_id     = azurerm_service_plan.plan.id
 
   site_config {
@@ -112,23 +160,22 @@ resource "azurerm_linux_web_app" "app" {
 
     WEB_SESSION_SECRET = var.web_session_secret
 
-    # Note: no AZURE_SQL_* or FABRIC_SQLDB_* settings -- leaving those unset
-    # is what puts src/lakehouse/connection.py into its SQLite fallback for
-    # this lightweight demo. Do not add empty-string placeholders for them;
-    # _using_azure_sql() checks whether the var exists at all.
+    # Note: no FABRIC_SQLDB_* settings -- that's a separate connection path
+    # (get_fabric_connection()) for the Fabric SQL database item, not used
+    # here. AZURE_SQL_* below is what puts src/lakehouse/connection.py's
+    # _using_azure_sql() into the real-database path instead of SQLite.
+    AZURE_SQL_SERVER   = azurerm_mssql_server.sql.fully_qualified_domain_name
+    AZURE_SQL_DATABASE = azurerm_mssql_database.sql.name
+    AZURE_SQL_USERNAME = azurerm_mssql_server.sql.administrator_login
+    AZURE_SQL_PASSWORD = random_password.sql_admin.result
 
-    # Claude Haiku/Sonnet deployments were never created (0 quota across
-    # every region/SKU for this subscription -- see the conversation this
-    # config came out of). No AZURE_CLAUDE_* settings for the same reason
-    # as leaving AZURE_SQL_* unset: pointing them at a deployment that
-    # doesn't exist would make every extraction wait out a real network
-    # failure before falling back, instead of nothing being attempted at
-    # all. config/ai/active_provider.json's provider_chain was switched to
-    # azure_gpt5_mini as a result -- see that file's _comment for why and
-    # how to revert once Claude quota is approved.
-    AZURE_OPENAI_ENDPOINT             = azurerm_cognitive_account.foundry.endpoint
-    AZURE_OPENAI_API_KEY              = azurerm_cognitive_account.foundry.primary_access_key
-    AZURE_OPENAI_DEPLOYMENT_GPT5_MINI = var.gpt5_mini_deployment_name
+    # Claude Haiku/Sonnet deployments now exist for this subscription (see
+    # README.md step 3) -- config/ai/active_provider.json's provider_chain
+    # was reverted back to claude_sonnet accordingly (2026-08-12).
+    AZURE_CLAUDE_API_KEY           = azurerm_cognitive_account.foundry.primary_access_key
+    AZURE_CLAUDE_ENDPOINT          = "${azurerm_cognitive_account.foundry.endpoint}anthropic"
+    AZURE_CLAUDE_SONNET_DEPLOYMENT = var.claude_sonnet_deployment_name
+    AZURE_CLAUDE_DEPLOYMENT        = var.claude_haiku_deployment_name
 
     AZURE_BLOB_CONNECTION_STRING = azurerm_storage_account.storage.primary_connection_string
   }

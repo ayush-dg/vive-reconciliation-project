@@ -10,9 +10,10 @@ Usage:
 
 What it runs:
     1. Document Intake (AI extraction → Bronze → Silver)
-    2. Mock ERP Generation (Silver → Mock ERP Bronze → Silver ERP)
-    3. Matching Engine (Silver both sides → Gold tables)
-    4. Report (with optional AI exception explanations)
+    2. Matching Engine (Silver both sides → Gold tables) -- against real
+       voucher-sourced ERP data only (scripts/load_voucher_data.py); no
+       mock ERP is generated or written by this pipeline anymore.
+    3. Report (with optional AI exception explanations)
 """
 
 import argparse
@@ -95,24 +96,12 @@ def main():
         print(f"  All extraction paths (AI providers, OCR, pdfplumber) ran but")
         print(f"  produced zero usable invoice rows — see Phase 1 output above")
         print(f"  for which providers failed and why (e.g. quota exhaustion).")
-        print(f"  Nothing to generate a Mock ERP or match against.")
+        print(f"  Nothing to match against.")
         print(f"{'#'*65}\n")
         return
 
-    # Phase 2: Mock ERP Generation
-    print(f"\n>>> PHASE 2: Mock ERP Generation")
-    from src.mock_erp.generator import generate_mock_erp, normalize_erp_to_silver
-    counts = generate_mock_erp(statement_id)
-    erp_silver = normalize_erp_to_silver(statement_id)
-    print(f"    ERP rows: {counts['erp_rows_written']} (version {counts['erp_version']})")
-    print(f"    Silver ERP: {erp_silver} rows")
-    print(f"    Exceptions planted: {counts['missing']} missing, "
-          f"{counts['amount_mismatch']} mismatches, "
-          f"{counts['duplicate']} duplicates, "
-          f"{counts['renumbered']} renumbered")
-
-    # Phase 3: Matching
-    print(f"\n>>> PHASE 3: Matching Engine")
+    # Phase 2: Matching
+    print(f"\n>>> PHASE 2: Matching Engine")
     from src.matching.engine import run_matching
     summary = run_matching(statement_id)
     print(f"    Matched: {summary['matched_count']}/{summary['total_invoices']} "
@@ -120,8 +109,8 @@ def main():
     print(f"    Exceptions: {summary['exception_count']}")
     print(f"    Status: {summary['overall_status']}")
 
-    # Phase 4: Report
-    print(f"\n>>> PHASE 4: Report")
+    # Phase 3: Report
+    print(f"\n>>> PHASE 3: Report")
     report_mod = load_notebook("report", "notebooks/04_generate_report.py")
     report_mod.generate_report(
         statement_id=statement_id,

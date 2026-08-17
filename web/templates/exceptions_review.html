@@ -3,13 +3,14 @@
 
 {% block topbar %}
 <div class="topbar">
-  <div class="breadcrumb">
-    <a href="/exceptions">← Exceptions</a>
-    <span>/</span>
-    <span style="color:var(--text);font-weight:500">{{ vendor_name }}</span>
+  <div class="topbar-title">
+    <div class="eyebrow"><a href="/exceptions" style="color:var(--navy-2)">Exceptions</a> / {{ vendor_name }}</div>
+    <h1>{{ vendor_name }}</h1>
   </div>
   {% if not not_found %}
-  <span style="font-size:11px;color:var(--text-secondary);margin-left:auto">{{ total }} exceptions · {{ resolved }} resolved</span>
+  <div class="topbar-actions">
+    <span style="font-size:12px;color:var(--text-muted)">{{ total }} exceptions · {{ resolved }} resolved</span>
+  </div>
   {% endif %}
 </div>
 {% endblock %}
@@ -20,38 +21,43 @@
   <div class="empty-state">No reconciliation run found for "{{ vendor_name }}".</div>
 </div>
 {% else %}
-<div class="body-split">
-  <div class="list">
-    <div class="list-header">
-      <div class="list-title">{{ vendor_name }} <span style="color:var(--text-secondary);font-weight:400">({{ exceptions | length }})</span></div>
+<div class="content">
+<div class="detail-layout">
+  <div class="detail-list">
+    <div class="detail-list-head">
+      <h3>{{ exceptions | length }} exception{{ "s" if exceptions | length != 1 }}</h3>
+      <div class="filter-tabs">
+        <a href="/exceptions/{{ vendor_url_name }}?filter=all" class="filter-tab {{ 'active' if filter == 'all' }}">All</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=missing" class="filter-tab {{ 'active' if filter == 'missing' }}">Missing</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch" class="filter-tab {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+      </div>
+      <div class="resolve-track">
+        <div class="progress-track"><div class="progress-fill" style="width:{{ progress_pct }}%"></div></div>
+        <span class="resolve-pct">{{ progress_pct }}%</span>
+      </div>
+      <div class="resolve-count">{{ resolved }} / {{ total }} resolved</div>
     </div>
+
     {% if high_confidence_count %}
-    <div style="padding:10px 14px;border-bottom:1px solid var(--border)">
-      <button type="button" id="bulk-approve-btn" class="btn btn-primary" style="width:100%"
+    <div style="padding:12px 18px;border-bottom:1px solid var(--border)">
+      <button type="button" id="bulk-approve-btn" class="btn-primary" style="width:100%"
               data-vendor-url="{{ vendor_url_name }}" data-count="{{ high_confidence_count }}">
         Approve {{ high_confidence_count }} at 99%+ confidence
       </button>
     </div>
     {% endif %}
-    <div class="filter-bar">
-      <a href="/exceptions/{{ vendor_url_name }}?filter=all" class="chip {{ 'active' if filter == 'all' }}">All</a>
-      <a href="/exceptions/{{ vendor_url_name }}?filter=missing" class="chip {{ 'active' if filter == 'missing' }}">Missing</a>
-      <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch" class="chip {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
-    </div>
-    <div class="progress">
-      <span>{{ resolved }} / {{ total }} resolved</span>
-      <div class="prog-bar"><div class="prog-fill" style="width:{{ progress_pct }}%"></div></div>
-      <span>{{ progress_pct }}%</span>
-    </div>
-    <div class="exc-list">
+
+    <div class="list-scroll">
       {% for exc in exceptions %}
       <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}&selected={{ exc.exception_id }}"
-         class="exc-item {{ 'sel' if selected and selected.exception_id == exc.exception_id }}">
-        <div class="exc-inv">Invoice #{{ exc.invoice_number or "Unknown" }}</div>
-        <div class="exc-date">{{ exc.invoice_date | friendly_date }}</div>
-        <div class="exc-row">
-          <span class="badge {{ reason_badge.get(exc.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(exc.exception_reason, {}).label or exc.exception_reason }}</span>
-          <span style="font-size:12px;font-weight:600">{{ exc.statement_amount | money }}</span>
+         class="exception-row {{ 'active' if selected and selected.exception_id == exc.exception_id }}">
+        <div class="exception-row-top">
+          <div class="exception-row-main">
+            <div class="einv">Invoice #{{ exc.invoice_number or "Unknown" }}</div>
+            <div class="edate">{{ exc.invoice_date | friendly_date }}</div>
+            <span class="badge {{ reason_badge.get(exc.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(exc.exception_reason, {}).label or exc.exception_reason }}</span>
+          </div>
+          <div class="exception-row-amt">{{ exc.statement_amount | money }}</div>
         </div>
       </a>
       {% else %}
@@ -60,33 +66,33 @@
     </div>
   </div>
 
-  <div class="detail">
+  <div class="detail-view-panel">
     {% if selected %}
-    <div class="detail-header">
-      <div class="detail-title">Invoice #{{ selected.invoice_number or "Unknown" }} — {{ vendor_name }}</div>
-      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+    <div class="detail-view-head">
+      <h2>Invoice #{{ selected.invoice_number or "Unknown" }}</h2>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         {% if selected.match_confidence is not none %}
-        <span class="badge {{ 'success' if selected.match_confidence >= 0.95 else ('warning' if selected.match_confidence >= 0.80 else 'danger') }}">
+        <span class="badge {{ 'badge-success' if selected.match_confidence >= 0.95 else ('badge-warning' if selected.match_confidence >= 0.80 else 'badge-danger') }}">
           Match confidence: {{ (selected.match_confidence * 100) | round | int }}%
         </span>
         {% endif %}
         <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
       </div>
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-secondary)">
+    <div class="detail-view-sub">
       <span>
         Raised {{ selected.date_raised | friendly_date }}
         {% if selected.days_open is not none %}
-        <span class="badge {{ 'neutral' if selected.days_open < 7 else ('warning' if selected.days_open <= 14 else 'danger') }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
+        <span class="badge {{ 'badge-neutral' if selected.days_open < 7 else ('badge-warning' if selected.days_open <= 14 else 'badge-danger') }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
         {% endif %}
       </span>
       {% if selected.escalation_status == 'ESCALATED' %}
-      <span class="badge danger">🚩 Escalated {{ selected.days_since_escalated }} day{{ "s" if selected.days_since_escalated != 1 }} ago</span>
+      <span class="badge badge-danger"><svg class="icon" style="width:12px;height:12px"><use href="#i-flag"/></svg>Escalated {{ selected.days_since_escalated }} day{{ "s" if selected.days_since_escalated != 1 }} ago</span>
       {% else %}
       <form method="post" action="/exceptions/{{ vendor_url_name }}/escalate" style="margin:0">
         <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
         <input type="hidden" name="filter" value="{{ filter }}">
-        <button type="submit" class="btn">🚩 Escalate</button>
+        <button type="submit" class="btn-ghost"><svg class="icon" style="width:13px;height:13px"><use href="#i-flag"/></svg> Escalate</button>
       </form>
       {% endif %}
     </div>
@@ -96,57 +102,62 @@
     <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
     <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
     <input type="hidden" name="filter" value="{{ filter }}">
-    <div class="detail-body">
-      <div class="sec-label">Invoice details</div>
-      <div class="field-grid">
-        <div class="field"><div class="fl">Invoice number</div><div class="fv">{{ selected.invoice_number }}</div></div>
-        <div class="field"><div class="fl">Vendor</div><div class="fv">{{ vendor_name }}</div></div>
-        <div class="field"><div class="fl">Invoice date</div><div class="fv">{{ selected.invoice_date | friendly_date }}</div></div>
-        <div class="field"><div class="fl">Statement amount</div><div class="fv">{{ selected.statement_amount | money }}</div></div>
-        <div class="field">
-          <div class="fl">ERP amount</div>
-          {% if selected.erp_amount is not none %}
-          <div class="fv">{{ selected.erp_amount | money }}</div>
-          {% else %}
-          <div class="fv red">Not found</div>
-          {% endif %}
-        </div>
-        <div class="field">
-          <div class="fl">Difference</div>
-          {% if selected.erp_amount is not none %}
-          <div class="fv red">{{ ((selected.statement_amount or 0) - (selected.erp_amount or 0)) | money_signed }}</div>
-          {% else %}
-          <div class="fv red">{{ (0 - (selected.statement_amount or 0)) | money_signed }}</div>
-          {% endif %}
-        </div>
-      </div>
-      <div class="sec-label">Why this is an exception</div>
-      <div class="reason">
-        {% if selected.exception_reason == 'Invoice Missing' %}
-        Invoice #{{ selected.invoice_number }} appears on the {{ vendor_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
-        {% elif selected.exception_reason == 'Amount Mismatch' %}
-        Invoice #{{ selected.invoice_number }} was found in the ERP, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
-        {% elif selected.exception_reason == 'EXTRACTION_INCOMPLETE' %}
-        {{ selected.ai_explanation }}
+
+    <div class="sec-label" style="margin-top:6px">Invoice details</div>
+    <div class="field-grid">
+      <div class="field-box"><div class="fb-label">Invoice number</div><div class="fb-value">{{ selected.invoice_number }}</div></div>
+      <div class="field-box"><div class="fb-label">Vendor</div><div class="fb-value">{{ vendor_name }}</div></div>
+      <div class="field-box"><div class="fb-label">Invoice date</div><div class="fb-value">{{ selected.invoice_date | friendly_date }}</div></div>
+      <div class="field-box"><div class="fb-label">Statement amount</div><div class="fb-value">{{ selected.statement_amount | money }}</div></div>
+      <div class="field-box">
+        <div class="fb-label">ERP amount</div>
+        {% if selected.erp_amount is not none %}
+        <div class="fb-value">{{ selected.erp_amount | money }}</div>
         {% else %}
-        {{ selected.exception_reason }}
+        <div class="fb-value danger">Not found</div>
         {% endif %}
       </div>
-      <label class="note-label">Add a note <span style="color:#4A4A4A;font-weight:400">(optional)</span></label>
+      <div class="field-box">
+        <div class="fb-label">Difference</div>
+        {% if selected.erp_amount is not none %}
+        <div class="fb-value danger">{{ ((selected.statement_amount or 0) - (selected.erp_amount or 0)) | money_signed }}</div>
+        {% else %}
+        <div class="fb-value danger">{{ (0 - (selected.statement_amount or 0)) | money_signed }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="sec-label">Why this is an exception</div>
+    <div class="why-box">
+      {% if selected.exception_reason == 'Invoice Missing' %}
+      Invoice #{{ selected.invoice_number }} appears on the {{ vendor_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
+      {% elif selected.exception_reason == 'Amount Mismatch' %}
+      Invoice #{{ selected.invoice_number }} was found in the ERP, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
+      {% elif selected.exception_reason == 'EXTRACTION_INCOMPLETE' %}
+      {{ selected.ai_explanation }}
+      {% else %}
+      {{ selected.exception_reason }}
+      {% endif %}
+    </div>
+
+    <div class="note-field">
+      <label>Add a note <span class="field-hint">(optional)</span></label>
       <textarea rows="3" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
     </div>
-    <div class="action-bar">
-      <button class="btn btn-accept" type="submit" name="action" value="ACCEPTED">✓ Accept</button>
-      <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED">✕ Dispute with vendor</button>
-      <button class="btn btn-writeoff" type="submit" name="action" value="WRITE_OFF">− Write off</button>
+
+    <div class="detail-actions">
+      <div class="action-cluster">
+        <button class="btn btn-accept" type="submit" name="action" value="ACCEPTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> Accept</button>
+        <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-x-circle"/></svg> Dispute with vendor</button>
+        <button class="btn btn-writeoff" type="submit" name="action" value="WRITE_OFF">− Write off</button>
+      </div>
     </div>
     </form>
     {% else %}
-    <div class="detail-body">
-      <div class="empty-state">🎉 All exceptions resolved for {{ vendor_name }}.</div>
-    </div>
+    <div class="empty-state">🎉 All exceptions resolved for {{ vendor_name }}.</div>
     {% endif %}
   </div>
+</div>
 </div>
 <script>
 (function () {

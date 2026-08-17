@@ -16,16 +16,43 @@
 # same reasoning as the app_command_line override itself not touching the
 # Dockerfile (local docker-compose dev is unaffected).
 #
-# Migration step: the SQLite file starts genuinely empty on every fresh
+# Migration step: notebooks/00_setup_lakehouse_schema.py's apply_pending_migrations()
+# runs the migrations/*.sql files as literal SQLite DDL (CREATE TABLE IF
+# NOT EXISTS, AUTOINCREMENT) -- invalid T-SQL syntax, so it fails outright
+# against a real Azure SQL Database, not just when a table already exists.
+# src/lakehouse/azure_sql_migrations.py is the dedicated Azure SQL schema
+# creator (see its own docstring / RULES.md RULE-13) -- safe to re-run,
+# each CREATE TABLE/INDEX/COLUMN is individually guarded against
+# sys.tables/sys.indexes/sys.columns. When AZURE_SQL_SERVER isn't set
+# (SQLite fallback), the SQLite file starts genuinely empty on every fresh
 # container -- get_connection() only creates the file, it never runs
-# migrations/*.sql against it. notebooks/00_setup_lakehouse_schema.py is
-# explicitly safe to re-run (already-applied migrations are skipped), so
-# running it on every boot is a no-op after the first. The DB itself is
-# ephemeral here (no Azure Files mount -- SQLite's WAL journal mode needs
-# POSIX locking semantics that mount doesn't reliably provide, see
-# README.md's "Where the database lives"), so this really does run fresh
-# every restart/redeploy.
-python notebooks/00_setup_lakehouse_schema.py
+# migrations/*.sql against it -- so 00_setup_lakehouse_schema.py's own
+# migration runner is still what's needed there; it's also safe to re-run.
+# The SQLite DB itself is ephemeral here (no Azure Files mount -- SQLite's
+# WAL journal mode needs POSIX locking semantics that mount doesn't
+# reliably provide, see README.md's "Where the database lives"), so that
+# path really does run fresh every restart/redeploy.
+# The 3 Fabric-cutover tables (extraction_cache, document_intake_log,
+# validation_document_review_queue) fall back to local SQLite whenever
+# Fabric itself isn't configured (FABRIC_SQLDB_ENDPOINT unset), regardless
+# of whether AZURE_SQL_SERVER is set -- see get_fabric_connection()'s own
+# docstring. That local SQLite file needs its own schema created too, or
+# every query against those 3 tables fails with "no such table" the
+# moment AZURE_SQL_SERVER is set without a real Fabric SQL database item
+# also configured (this repo's actual state today). Forcing
+# AZURE_SQL_SERVER empty for just this one invocation routes
+# 00_setup_lakehouse_schema.py at the local SQLite file specifically,
+# without letting its SQLite-only migrations/*.sql DDL anywhere near real
+# Azure SQL -- that's what the block below is for instead.
+if [ -n "$AZURE_SQL_SERVER" ] && [ -z "$FABRIC_SQLDB_ENDPOINT" ]; then
+    AZURE_SQL_SERVER= python notebooks/00_setup_lakehouse_schema.py
+fi
+
+if [ -n "$AZURE_SQL_SERVER" ]; then
+    python -m src.lakehouse.azure_sql_migrations
+else
+    python notebooks/00_setup_lakehouse_schema.py
+fi
 
 # exec so uvicorn replaces this shell as PID 1 instead of running as a
 # child of it -- correct signal handling for restarts/stop.
