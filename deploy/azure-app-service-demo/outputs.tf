@@ -14,13 +14,16 @@ output "webapp_url" {
   value = "https://${azurerm_linux_web_app.app.default_hostname}"
 }
 
-output "foundry_account_name" {
-  value = azurerm_cognitive_account.foundry.name
-}
-
-output "foundry_endpoint" {
-  value = azurerm_cognitive_account.foundry.endpoint
-}
+# Commented out along with azurerm_cognitive_account.foundry in main.tf --
+# reusing the existing foundry-vive-recon resource, not one this config
+# creates. var.foundry_endpoint is the connection detail now in use.
+# output "foundry_account_name" {
+#   value = azurerm_cognitive_account.foundry.name
+# }
+#
+# output "foundry_endpoint" {
+#   value = azurerm_cognitive_account.foundry.endpoint
+# }
 
 output "storage_account_name" {
   value = azurerm_storage_account.storage.name

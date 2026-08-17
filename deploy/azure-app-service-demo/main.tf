@@ -43,17 +43,25 @@ resource "azurerm_storage_container" "vendor_statements" {
 }
 
 # --- Azure AI Foundry (Cognitive Services "AIServices" account) ---
+# COMMENTED OUT for the VIVE migration (rg-vive-recon, East US 2): reusing
+# the existing "foundry-vive-recon" Foundry resource (one deployment so
+# far: claude-sonnet-4-6, GlobalStandard) instead of provisioning a new
+# one. Connection details are supplied manually via var.foundry_endpoint /
+# var.foundry_api_key (see app_settings below). Left in place, not
+# deleted, in case this needs to revert to provisioning its own Foundry
+# account.
+#
 # This resource is created here, but the Claude Haiku 4.5 / Claude Sonnet 4.6
 # *deployments* inside it are NOT created by this Terraform config -- see
 # README.md for why, and for the manual portal steps to add them.
-resource "azurerm_cognitive_account" "foundry" {
-  name                  = "${var.name_prefix}-foundry-${local.suffix}"
-  resource_group_name   = data.azurerm_resource_group.this.name
-  location              = data.azurerm_resource_group.this.location
-  kind                  = "AIServices"
-  sku_name              = "S0"
-  custom_subdomain_name = "${var.name_prefix}-foundry-${local.suffix}"
-}
+# resource "azurerm_cognitive_account" "foundry" {
+#   name                  = "${var.name_prefix}-foundry-${local.suffix}"
+#   resource_group_name   = data.azurerm_resource_group.this.name
+#   location              = data.azurerm_resource_group.this.location
+#   kind                  = "AIServices"
+#   sku_name              = "S0"
+#   custom_subdomain_name = "${var.name_prefix}-foundry-${local.suffix}"
+# }
 
 # --- Azure SQL Database: real backing store for src/lakehouse/connection.py,
 # selected automatically once AZURE_SQL_SERVER is set (see get_connection()).
@@ -169,11 +177,14 @@ resource "azurerm_linux_web_app" "app" {
     AZURE_SQL_USERNAME = azurerm_mssql_server.sql.administrator_login
     AZURE_SQL_PASSWORD = random_password.sql_admin.result
 
-    # Claude Haiku/Sonnet deployments now exist for this subscription (see
-    # README.md step 3) -- config/ai/active_provider.json's provider_chain
-    # was reverted back to claude_sonnet accordingly (2026-08-12).
-    AZURE_CLAUDE_API_KEY           = azurerm_cognitive_account.foundry.primary_access_key
-    AZURE_CLAUDE_ENDPOINT          = "${azurerm_cognitive_account.foundry.endpoint}anthropic"
+    # Reusing the existing foundry-vive-recon Foundry resource in
+    # rg-vive-recon instead of one provisioned by this config -- see the
+    # commented-out azurerm_cognitive_account.foundry block above. Only
+    # claude-sonnet-4-6 is deployed there so far; AZURE_CLAUDE_DEPLOYMENT
+    # (Haiku) below will not resolve to a real deployment until that's
+    # added later.
+    AZURE_CLAUDE_API_KEY           = var.foundry_api_key
+    AZURE_CLAUDE_ENDPOINT          = var.foundry_endpoint
     AZURE_CLAUDE_SONNET_DEPLOYMENT = var.claude_sonnet_deployment_name
     AZURE_CLAUDE_DEPLOYMENT        = var.claude_haiku_deployment_name
 

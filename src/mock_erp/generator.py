@@ -21,7 +21,7 @@ import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.lakehouse.connection import execute_sql, execute_query
+from src.lakehouse.connection import execute_sql, execute_query, get_connection
 
 
 def load_scenario_config(config_path: str = "config/mock_erp/scenario_config.json") -> dict:
@@ -198,43 +198,66 @@ def generate_mock_erp(statement_id: str, config_path: str = "config/mock_erp/sce
             erp_rows_to_write.append(erp_row)
             counts["duplicate"] += 1
 
-    # Write all ERP Bronze rows
-    for erp_row in erp_rows_to_write:
-        execute_sql(
-            """
-            INSERT INTO bronze_internal_erp_raw (
-                vendor_id, source, statement_id, statement_period,
-                ingestion_timestamp, raw_invoice_number, raw_invoice_date,
-                raw_posting_date, raw_amount, raw_outstanding_amount,
-                raw_ro_number, raw_po_number, raw_shop, raw_status, erp_version
-            ) VALUES (?, 'MOCK_ERP', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                erp_row["vendor_id"],
-                erp_row["statement_id"],
-                erp_row["statement_period"],
-                erp_row["ingestion_timestamp"],
-                erp_row["raw_invoice_number"],
-                erp_row["raw_invoice_date"],
-                erp_row["raw_posting_date"],
-                erp_row["raw_amount"],
-                erp_row["raw_outstanding_amount"],
-                erp_row["raw_ro_number"],
-                erp_row["raw_po_number"],
-                erp_row["raw_shop"],
-                erp_row["raw_status"],
-                erp_row["erp_version"],
-            ]
+    # Write all ERP Bronze rows in one batch via executemany() instead of
+    # one execute_sql() call per row -- same per-row-connection cost fixed
+    # today in this file's normalize_erp_to_silver() and in
+    # src/netsuite_erp.py's Bronze write; this loop was the one remaining
+    # unfixed instance of that pattern.
+    params = [
+        (
+            erp_row["vendor_id"],
+            erp_row["statement_id"],
+            erp_row["statement_period"],
+            erp_row["ingestion_timestamp"],
+            erp_row["raw_invoice_number"],
+            erp_row["raw_invoice_date"],
+            erp_row["raw_posting_date"],
+            erp_row["raw_amount"],
+            erp_row["raw_outstanding_amount"],
+            erp_row["raw_ro_number"],
+            erp_row["raw_po_number"],
+            erp_row["raw_shop"],
+            erp_row["raw_status"],
+            erp_row["erp_version"],
         )
-        counts["erp_rows_written"] += 1
+        for erp_row in erp_rows_to_write
+    ]
+    if params:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            if hasattr(cursor, "fast_executemany"):
+                cursor.fast_executemany = True
+            cursor.executemany(
+                """
+                INSERT INTO bronze_internal_erp_raw (
+                    vendor_id, source, statement_id, statement_period,
+                    ingestion_timestamp, raw_invoice_number, raw_invoice_date,
+                    raw_posting_date, raw_amount, raw_outstanding_amount,
+                    raw_ro_number, raw_po_number, raw_shop, raw_status, erp_version
+                ) VALUES (?, 'MOCK_ERP', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    counts["erp_rows_written"] = len(params)
 
     return counts
 
 
-def normalize_erp_to_silver(statement_id: str):
+def normalize_erp_to_silver(statement_id: str, source_file_label: str = "MOCK_ERP"):
     """
     Normalize Bronze INTERNAL_ERP rows to silver_reconciliation_standard.
     Mirrors what 01_document_intake.py does for the statement side.
+
+    source_file_label is stamped onto Silver's source_file column for every
+    row written here — defaults to "MOCK_ERP" (this function's original,
+    only caller for years). src/netsuite_erp.py passes "NETSUITE_EXPORT"
+    instead, since the rows it writes to Bronze come from a real NetSuite
+    export, not the mock generator, and labeling them "MOCK_ERP" in a
+    client-facing Silver table would misrepresent real data as simulated.
     """
     import hashlib
     from src.normalization import normalize_invoice_number
@@ -253,15 +276,24 @@ def normalize_erp_to_silver(statement_id: str):
     )
 
     now = datetime.now(timezone.utc).isoformat()
-    count = 0
 
+    def safe_float(val):
+        try:
+            return float(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    # Plain INSERT, not "INSERT OR REPLACE" -- safe because the DELETE
+    # above just cleared every INTERNAL_ERP row for this statement_id, so
+    # no row written in this call can ever collide with an existing
+    # record_id (which itself is derived from statement_id + erp_version).
+    # This lets the whole batch go through one connection via
+    # executemany() instead of execute_sql()'s per-call connection open/
+    # close (see get_connection() in src/lakehouse/connection.py) --
+    # at NetSuite-ledger volume (~3k rows) the per-row connection cost
+    # made this take tens of minutes; batched, it's seconds.
+    params = []
     for row in erp_rows:
-        def safe_float(val):
-            try:
-                return float(val) if val is not None else None
-            except (TypeError, ValueError):
-                return None
-
         outstanding = safe_float(row.get("raw_outstanding_amount"))
         amount = safe_float(row.get("raw_amount")) or outstanding
         invoice_number = row.get("raw_invoice_number")
@@ -271,9 +303,42 @@ def normalize_erp_to_silver(statement_id: str):
             f"INTERNAL_ERP|{statement_id}|{invoice_number}|{outstanding}|{row.get('erp_version', 1)}".encode()
         ).hexdigest()
 
-        execute_sql(
+        params.append((
+            record_id,
+            "INTERNAL_ERP",
+            "MOCK_ERP_EXTRACT",
+            statement_id,
+            row.get("statement_period"),
+            row.get("vendor_id"),
+            None,  # vendor_name not stored in ERP Bronze
+            row.get("raw_shop"),
+            invoice_number,
+            invoice_number_normalized,
+            row.get("raw_invoice_date"),
+            row.get("raw_ro_number"),
+            row.get("raw_po_number"),
+            None,  # work_order_number
+            amount,
+            None,  # credit
+            outstanding,
+            None,  # due_date
+            row.get("raw_posting_date"),
+            row.get("raw_status"),
+            None,  # description
+            None,  # currency
+            row.get("statement_period"),
+            source_file_label,
+            now,
+        ))
+
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        if hasattr(cursor, "fast_executemany"):
+            cursor.fast_executemany = True
+        cursor.executemany(
             """
-            INSERT OR REPLACE INTO silver_reconciliation_standard (
+            INSERT INTO silver_reconciliation_standard (
                 record_id, record_source, document_type, statement_id,
                 statement_date, vendor_id, vendor_name, shop,
                 invoice_number, invoice_number_normalized, invoice_date,
@@ -283,34 +348,10 @@ def normalize_erp_to_silver(statement_id: str):
                 statement_period, source_file, ingestion_timestamp
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [
-                record_id,
-                "INTERNAL_ERP",
-                "MOCK_ERP_EXTRACT",
-                statement_id,
-                row.get("statement_period"),
-                row.get("vendor_id"),
-                None,  # vendor_name not stored in ERP Bronze
-                row.get("raw_shop"),
-                invoice_number,
-                invoice_number_normalized,
-                row.get("raw_invoice_date"),
-                row.get("raw_ro_number"),
-                row.get("raw_po_number"),
-                None,  # work_order_number
-                amount,
-                None,  # credit
-                outstanding,
-                None,  # due_date
-                row.get("raw_posting_date"),
-                row.get("raw_status"),
-                None,  # description
-                None,  # currency
-                row.get("statement_period"),
-                "MOCK_ERP",
-                now,
-            ]
+            params,
         )
-        count += 1
+        conn.commit()
+    finally:
+        conn.close()
 
-    return count
+    return len(params)

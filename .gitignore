@@ -3,6 +3,7 @@ __pycache__/
 .env
 lakehouse/*.db
 lakehouse/ai_call_slots/
+lakehouse/fabric_token_cache.json
 logs/*.log
 *.egg-info/
 .venv/

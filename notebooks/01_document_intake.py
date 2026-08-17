@@ -26,6 +26,7 @@ import json
 import os
 import re
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -55,7 +56,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.ai.document_understanding_engine import (
     CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
 )
-from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
+from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric, get_connection
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
@@ -148,49 +149,66 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
         [statement_id]
     )
 
-    count = 0
-    for inv in invoices:
-        execute_sql(
-            """
-            INSERT INTO bronze_vendor_statement_raw (
-                vendor_id, vendor_name, source_file, statement_id, statement_period,
-                page_number, row_number, ingestion_timestamp,
-                raw_invoice_number, raw_invoice_date, raw_due_date,
-                raw_amount, raw_outstanding_amount, raw_ro_number,
-                raw_po_number, raw_work_order_number, raw_description,
-                raw_credit, raw_shop_name, raw_currency,
-                extraction_confidence, extraction_model, raw_ai_response
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                vendor_id,
-                vendor_name,
-                source_file,
-                statement_id,
-                statement_period,
-                inv.get("page_number"),
-                inv.get("row_number"),
-                now,
-                inv.get("invoice_number"),
-                inv.get("invoice_date"),
-                inv.get("due_date"),
-                str(inv.get("amount") or inv.get("outstanding_amount")) if (inv.get("amount") or inv.get("outstanding_amount")) is not None else None,
-                str(inv.get("outstanding_amount") or inv.get("amount")) if (inv.get("outstanding_amount") or inv.get("amount")) is not None else None,
-                inv.get("ro_number"),
-                inv.get("po_number"),
-                inv.get("work_order_number"),
-                inv.get("description"),
-                str(inv.get("credit")) if inv.get("credit") is not None else None,
-                inv.get("shop") or (schema_result.get("vendor_metadata", {}).get("shop_or_entity") or [None])[0],
-                schema_result.get("statement_metadata", {}).get("currency"),
-                inv.get("line_confidence"),
-                f"{provider_used}/{model_used}",
-                None,  # don't store full AI response in every row
-            ]
+    # Batched via executemany() instead of one execute_sql() call per row --
+    # same per-row-round-trip cost already fixed today in
+    # src/mock_erp/generator.py and src/netsuite_erp.py, isolated here via
+    # fine-grained timing on a real KSI upload: 69 rows took 99.93s one row
+    # at a time.
+    shop = schema_result.get("vendor_metadata", {}).get("shop_or_entity") or [None]
+    currency = schema_result.get("statement_metadata", {}).get("currency")
+    params = [
+        (
+            vendor_id,
+            vendor_name,
+            source_file,
+            statement_id,
+            statement_period,
+            inv.get("page_number"),
+            inv.get("row_number"),
+            now,
+            inv.get("invoice_number"),
+            inv.get("invoice_date"),
+            inv.get("due_date"),
+            str(inv.get("amount") or inv.get("outstanding_amount")) if (inv.get("amount") or inv.get("outstanding_amount")) is not None else None,
+            str(inv.get("outstanding_amount") or inv.get("amount")) if (inv.get("outstanding_amount") or inv.get("amount")) is not None else None,
+            inv.get("ro_number"),
+            inv.get("po_number"),
+            inv.get("work_order_number"),
+            inv.get("description"),
+            str(inv.get("credit")) if inv.get("credit") is not None else None,
+            inv.get("shop") or shop[0],
+            currency,
+            inv.get("line_confidence"),
+            f"{provider_used}/{model_used}",
+            None,  # don't store full AI response in every row
         )
-        count += 1
+        for inv in invoices
+    ]
+    if params:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            if hasattr(cursor, "fast_executemany"):
+                cursor.fast_executemany = True
+            cursor.executemany(
+                """
+                INSERT INTO bronze_vendor_statement_raw (
+                    vendor_id, vendor_name, source_file, statement_id, statement_period,
+                    page_number, row_number, ingestion_timestamp,
+                    raw_invoice_number, raw_invoice_date, raw_due_date,
+                    raw_amount, raw_outstanding_amount, raw_ro_number,
+                    raw_po_number, raw_work_order_number, raw_description,
+                    raw_credit, raw_shop_name, raw_currency,
+                    extraction_confidence, extraction_model, raw_ai_response
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
-    return count
+    return len(params)
 
 
 def get_skip_reason(invoice: dict) -> str:
@@ -292,31 +310,23 @@ def write_to_review_queue(invalid_invoices: list, reasons: list,
                            statement_id: str, source_file: str, stage: str):
     """Write invalid records to the review queue.
 
-    validation_document_review_queue is cut over to Fabric Warehouse (see
-    get_fabric_connection() in src/lakehouse/connection.py). Its `id`
-    column has no IDENTITY there — same situation as extraction_cache,
-    see update_cache()'s docstring for why — so each row gets an explicit
-    id, computed once as MAX(id)+1 and incremented locally across this
-    call's own batch of inserts (so multiple invalid rows from the same
-    call never collide with each other). Not concurrency-safe across
-    separate calls landing at the same moment — same documented caveat
-    as extraction_cache's update_cache().
+    validation_document_review_queue is cut over to a real SQL database in
+    Fabric (see get_fabric_connection() in src/lakehouse/connection.py),
+    migrated 2026-08-06 to a genuine IDENTITY(1,1) `id` column — see
+    docs/Claude.md changelog v2.9. `id` is no longer passed here; the
+    database assigns it.
     """
     now = datetime.now(timezone.utc).isoformat()
-    next_id = execute_query_fabric(
-        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM validation_document_review_queue"
-    )[0]["next_id"]
     for inv, reason in zip(invalid_invoices, reasons):
         execute_sql_fabric(
             """
             INSERT INTO validation_document_review_queue (
-                id, review_id, source_file, statement_id,
+                review_id, source_file, statement_id,
                 pipeline_stage, rejection_category, rejection_details,
                 raw_payload, review_status, flagged_timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)
             """,
             [
-                next_id,
                 str(uuid.uuid4()),
                 source_file,
                 statement_id,
@@ -327,7 +337,6 @@ def write_to_review_queue(invalid_invoices: list, reasons: list,
                 now,
             ]
         )
-        next_id += 1
 
 
 def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vendor_id: str):
@@ -356,16 +365,26 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
     )
 
     now = datetime.now(timezone.utc).isoformat()
-    count = 0
 
+    def safe_float(val):
+        try:
+            return float(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    # Plain INSERT, not "INSERT OR REPLACE" -- safe for the same reason as
+    # src/mock_erp/generator.py's normalize_erp_to_silver(): the DELETE
+    # above just cleared every VENDOR_STATEMENT row for this statement_id,
+    # and Step 4's duplicate check (see run_intake()) already deduped
+    # invoices on (invoice_number, outstanding_amount) before any of them
+    # reached Bronze, so no row written in this call can collide with
+    # either an existing row or another row in this same batch. This lets
+    # the whole batch go through one connection via executemany() instead
+    # of execute_sql()'s per-row round trip (each translated into its own
+    # T-SQL MERGE against Azure SQL) -- isolated via fine-grained timing on
+    # a real KSI upload: 69 rows took 99.52s one row at a time.
+    params = []
     for row in bronze_rows:
-        # Parse amount
-        def safe_float(val):
-            try:
-                return float(val) if val is not None else None
-            except (TypeError, ValueError):
-                return None
-
         amount = safe_float(row.get("raw_amount")) or safe_float(row.get("raw_outstanding_amount"))
         outstanding = safe_float(row.get("raw_outstanding_amount"))
         credit = safe_float(row.get("raw_credit"))
@@ -378,49 +397,59 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
             f"VENDOR_STATEMENT|{silver_statement_id}|{invoice_number}|{outstanding}".encode()
         ).hexdigest()
 
-        execute_sql(
-            """
-            INSERT OR REPLACE INTO silver_reconciliation_standard (
-                record_id, record_source, document_type, statement_id,
-                statement_date, vendor_id, vendor_name, shop,
-                invoice_number, invoice_number_normalized, invoice_date,
-                ro_number, po_number, work_order_number,
-                amount, credit, outstanding_amount, due_date,
-                posting_date, status, description, currency,
-                statement_period, source_file, ingestion_timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                record_id,
-                "VENDOR_STATEMENT",
-                "VENDOR_STATEMENT",
-                silver_statement_id,
-                row.get("statement_period"),   # statement_date — use period as proxy
-                row.get("vendor_id"),
-                row.get("vendor_name"),
-                row.get("raw_shop_name"),
-                invoice_number,
-                invoice_number_normalized,
-                row.get("raw_invoice_date"),
-                row.get("raw_ro_number"),
-                row.get("raw_po_number"),
-                row.get("raw_work_order_number"),
-                amount,
-                credit,
-                outstanding,
-                row.get("raw_due_date"),
-                None,   # posting_date — ERP concept, not applicable here
-                None,   # status — ERP concept
-                row.get("raw_description"),
-                row.get("raw_currency"),
-                row.get("statement_period"),
-                row.get("source_file"),
-                now,
-            ]
-        )
-        count += 1
+        params.append((
+            record_id,
+            "VENDOR_STATEMENT",
+            "VENDOR_STATEMENT",
+            silver_statement_id,
+            row.get("statement_period"),   # statement_date — use period as proxy
+            row.get("vendor_id"),
+            row.get("vendor_name"),
+            row.get("raw_shop_name"),
+            invoice_number,
+            invoice_number_normalized,
+            row.get("raw_invoice_date"),
+            row.get("raw_ro_number"),
+            row.get("raw_po_number"),
+            row.get("raw_work_order_number"),
+            amount,
+            credit,
+            outstanding,
+            row.get("raw_due_date"),
+            None,   # posting_date — ERP concept, not applicable here
+            None,   # status — ERP concept
+            row.get("raw_description"),
+            row.get("raw_currency"),
+            row.get("statement_period"),
+            row.get("source_file"),
+            now,
+        ))
 
-    return count
+    if params:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            if hasattr(cursor, "fast_executemany"):
+                cursor.fast_executemany = True
+            cursor.executemany(
+                """
+                INSERT INTO silver_reconciliation_standard (
+                    record_id, record_source, document_type, statement_id,
+                    statement_date, vendor_id, vendor_name, shop,
+                    invoice_number, invoice_number_normalized, invoice_date,
+                    ro_number, po_number, work_order_number,
+                    amount, credit, outstanding_amount, due_date,
+                    posting_date, status, description, currency,
+                    statement_period, source_file, ingestion_timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return len(params)
 
 
 def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
@@ -428,11 +457,11 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
                      invoice_count: int, routing_decision: str):
     """Write one row to document_intake_log.
 
-    document_intake_log is cut over to Fabric Warehouse (see
-    get_fabric_connection() in src/lakehouse/connection.py). Its `id`
-    column has no IDENTITY there either — same situation as
-    extraction_cache/validation_document_review_queue — so the new row
-    gets an explicit id via MAX(id)+1. Same not-concurrency-safe caveat.
+    document_intake_log is cut over to a real SQL database in Fabric (see
+    get_fabric_connection() in src/lakehouse/connection.py), migrated
+    2026-08-06 to a genuine IDENTITY(1,1) `id` column — see
+    docs/Claude.md changelog v2.9. `id` is no longer passed here; the
+    database assigns it.
     """
     now = datetime.now(timezone.utc).isoformat()
     meta = schema_result.get("document_metadata", {})
@@ -446,22 +475,18 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
         [statement_id]
     )
 
-    next_id = execute_query_fabric(
-        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM document_intake_log"
-    )[0]["next_id"]
     execute_sql_fabric(
         """
         INSERT INTO document_intake_log (
-            id, document_id, document_hash, source_file, ingestion_timestamp,
+            document_id, document_hash, source_file, ingestion_timestamp,
             document_type, document_type_confidence,
             vendor_name, shop_or_entity, statement_date, statement_period,
             currency, statement_total_as_printed,
             extraction_confidence_overall, extraction_model, extraction_method,
             routing_decision, statement_id, invoice_count, warnings, schema_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            next_id,
             document_id,
             document_hash,
             os.path.basename(pdf_path),
@@ -581,28 +606,17 @@ def update_cache(document_hash: str, statement_id: str, source_file: str,
                  provider_used: str, row_count: int):
     """Insert or replace a cache entry.
 
-    extraction_cache lives on Fabric Warehouse now (see check_cache()).
-    execute_sql_fabric() has no SQLite-dialect translation, so the
-    INSERT OR REPLACE upsert that execute_sql() would normally rewrite
-    into a T-SQL MERGE (see _translate_for_azure()/AZURE_UPSERT_KEYS in
-    src/lakehouse/connection.py) is done explicitly here as a SELECT-
-    then-UPDATE-or-INSERT, keyed on (document_hash, statement_id) same
-    as that translation uses.
+    extraction_cache lives on a real SQL database in Fabric now (see
+    check_cache()). execute_sql_fabric() has no SQLite-dialect
+    translation, so the INSERT OR REPLACE upsert that execute_sql() would
+    normally rewrite into a T-SQL MERGE (see _translate_for_azure()/
+    AZURE_UPSERT_KEYS in src/lakehouse/connection.py) is done explicitly
+    here as a SELECT-then-UPDATE-or-INSERT, keyed on (document_hash,
+    statement_id) same as that translation uses.
 
-    id assignment: the Fabric table's `id` column has no IDENTITY (the
-    9 migrated rows carry their original Azure SQL ids as plain
-    values — Fabric Warehouse's IDENTITY, confirmed separately, only
-    supports BIGINT with large non-sequential distributed values, and
-    can't be retrofitted onto an already-populated column without
-    recreating the table). New rows get `MAX(id) + 1` computed here.
-    This is NOT atomic/concurrency-safe — two workers updating the
-    cache for two different documents at the same moment could compute
-    the same next id. Low practical risk today (this function only
-    runs after a real extraction completes, so collisions require two
-    such completions landing in the same instant), but worth a
-    deliberate fix (e.g. a real sequence, or switching this column to
-    BIGINT IDENTITY on a freshly recreated table) before this table
-    sees heavier concurrent write volume.
+    id assignment: migrated 2026-08-06 to a genuine IDENTITY(1,1) `id`
+    column (see docs/Claude.md changelog v2.9) — `id` is no longer passed
+    on INSERT here; the database assigns it.
     """
     now = datetime.now(timezone.utc).isoformat()
     existing = execute_query_fabric(
@@ -620,19 +634,13 @@ def update_cache(document_hash: str, statement_id: str, source_file: str,
         )
         return
 
-    # COALESCE, not ISNULL — this must stay valid on both T-SQL (real
-    # Fabric) and SQLite (local/test fallback — see get_fabric_connection()
-    # in src/lakehouse/connection.py); ISNULL is T-SQL-only.
-    next_id = execute_query_fabric(
-        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM extraction_cache"
-    )[0]["next_id"]
     execute_sql_fabric(
         """
         INSERT INTO extraction_cache
-            (id, document_hash, statement_id, source_file, extraction_method, row_count, ingestion_timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (document_hash, statement_id, source_file, extraction_method, row_count, ingestion_timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        [next_id, document_hash, statement_id, source_file, provider_used, row_count, now]
+        [document_hash, statement_id, source_file, provider_used, row_count, now]
     )
 
 
@@ -665,20 +673,41 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     # Step 1: Cache check
     print(f"\n[Step 1] Checking extraction cache...")
+    _t1a = time.perf_counter()
     document_hash = compute_file_hash(pdf_path)
+    print(f"  [TIMING] Step 1a compute_file_hash: {time.perf_counter()-_t1a:.2f}s")
+    _t1b = time.perf_counter()
     cached = check_cache(document_hash)
+    print(f"  [TIMING] Step 1b check_cache (Fabric): {time.perf_counter()-_t1b:.2f}s")
     if cached:
         cached_statement_id = cached["statement_id"]
-        bronze_count = execute_query(
-            "SELECT COUNT(*) as cnt FROM bronze_vendor_statement_raw WHERE statement_id = ?",
+        bronze_rows = execute_query(
+            "SELECT vendor_id, vendor_name FROM bronze_vendor_statement_raw WHERE statement_id = ?",
             [cached_statement_id]
-        )[0]["cnt"]
+        )
+        bronze_count = len(bronze_rows)
+        # The real, AI-detected vendor_id/vendor_name from the original
+        # extraction (already stored per-row in Bronze) — not the generic
+        # filename-derived placeholder computed above at line 630, which
+        # exists only to have *something* to pass before a cache hit is
+        # known. Callers downstream of run_intake() (e.g.
+        # scripts/run_full_pipeline.py's vendor-conditional ERP source
+        # selection) need the real value on a cache hit exactly like they
+        # get it on a fresh extraction — a cache hit is not a different
+        # vendor, and previously returned neither key.
+        if bronze_rows:
+            vendor_id = bronze_rows[0].get("vendor_id") or vendor_id
+            vendor_name = bronze_rows[0].get("vendor_name")
+        else:
+            vendor_name = None
         print(f"  Cache HIT — {bronze_count} rows already in Bronze under {cached_statement_id}. Skipping AI extraction.")
         print(f"  Re-running Silver normalization...")
         silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id)
         print(f"  Silver: {silver_count} rows normalized.")
         return {
             "statement_id": statement_id,
+            "vendor_id": vendor_id,
+            "vendor_name": vendor_name,
             "cache_hit": True,
             "bronze_count": bronze_count,
             "silver_count": silver_count,
@@ -688,13 +717,19 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     # Step 2: Extract PDF text
     print(f"\n[Step 2] Extracting PDF text with pdfplumber...")
+    _t2 = time.perf_counter()
     pdf_text, page_count = extract_pdf_text(pdf_path)
     print(f"  Extracted text from {page_count} pages ({len(pdf_text)} characters)")
+    print(f"  [TIMING] Step 2 extract_pdf_text: {time.perf_counter()-_t2:.2f}s")
 
     # Step 3: Document Understanding Engine
     print(f"\n[Step 3] Running Document Understanding Engine...")
+    _t3init = time.perf_counter()
     engine = DocumentUnderstandingEngine()
+    print(f"  [TIMING] Step 3a DocumentUnderstandingEngine() construction: {time.perf_counter()-_t3init:.2f}s")
+    _t3understand = time.perf_counter()
     schema_result = engine.understand(pdf_text, pdf_path, statement_id=statement_id)
+    print(f"  [TIMING] Step 3b engine.understand() (includes AI call): {time.perf_counter()-_t3understand:.2f}s")
 
     provider_used = schema_result.get("_provider_used", "unknown")
     invoices = schema_result.get("invoices", [])
@@ -729,6 +764,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     # Step 4: Validate invoices
     print(f"\n[Step 4] Validating extracted invoices...")
+    _t4 = time.perf_counter()
     with open("config/validation/extraction_rules.json", "r") as f:
         validation_rules = json.load(f)
 
@@ -736,6 +772,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     invalid_invoices = []
     invalid_reasons = []
     skipped_count = 0
+    _t4_skip_calls = 0.0
 
     seen_keys = set()
     dup_fields = validation_rules.get("duplicate_key_fields", ["invoice_number", "outstanding_amount"])
@@ -750,9 +787,11 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             skipped_count += 1
             message = f"Row {row_num} skipped — {skip_reason}"
             print(f"  {message}")
+            _t4s = time.perf_counter()
             log_row_skip(statement_id, os.path.basename(pdf_path), message)
             write_skip_exception(statement_id, vendor_id, os.path.basename(pdf_path),
                                   statement_period, inv, message)
+            _t4_skip_calls += time.perf_counter() - _t4s
             continue
 
         is_valid, reason = validate_invoice(inv, validation_rules)
@@ -771,51 +810,68 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         valid_invoices.append(inv)
 
     print(f"  Valid: {len(valid_invoices)} | Invalid/queued: {len(invalid_invoices)} | Skipped: {skipped_count}")
+    print(f"  [TIMING] Step 4 total: {time.perf_counter()-_t4:.2f}s (of which log_row_skip/write_skip_exception DB calls: {_t4_skip_calls:.2f}s)")
 
     # Step 5: Write to Bronze
     print(f"\n[Step 5] Writing to Bronze...")
+    _t5 = time.perf_counter()
     bronze_count = write_to_bronze(
         valid_invoices, schema_result, statement_id,
         pdf_path, statement_period, vendor_id
     )
     print(f"  Bronze rows written: {bronze_count}")
+    print(f"  [TIMING] Step 5 write_to_bronze: {time.perf_counter()-_t5:.2f}s")
 
     # Write invalid to review queue
     if invalid_invoices:
+        _t5b = time.perf_counter()
         write_to_review_queue(
             invalid_invoices, invalid_reasons,
             statement_id, os.path.basename(pdf_path), "AI_EXTRACTION"
         )
         print(f"  Review queue entries: {len(invalid_invoices)}")
+        print(f"  [TIMING] write_to_review_queue: {time.perf_counter()-_t5b:.2f}s")
 
     # Step 6: Silver normalization
     print(f"\n[Step 6] Normalizing to Silver...")
+    _t6 = time.perf_counter()
     silver_count = normalize_to_silver(statement_id, statement_id, vendor_id)
     print(f"  Silver rows written: {silver_count}")
+    print(f"  [TIMING] Step 6 normalize_to_silver: {time.perf_counter()-_t6:.2f}s")
 
     # Step 7: Write intake log
+    print(f"\n[Step 7] Writing document intake log...")
+    _t7 = time.perf_counter()
     doc_type = schema_result.get("document_metadata", {}).get("document_type", "UNKNOWN")
     routing = "RECONCILIATION" if doc_type == "VENDOR_STATEMENT" else "PARKED"
     write_intake_log(
         document_id, pdf_path, document_hash, schema_result,
         statement_id, statement_period, bronze_count, routing
     )
+    print(f"  [TIMING] Step 7 write_intake_log: {time.perf_counter()-_t7:.2f}s")
 
     # Step 8: Upload PDF to Blob Storage for permanent archival. Silent by
     # design — a failed upload logs a warning but never blocks the pipeline.
     print(f"\n[Step 8] Uploading PDF to Blob Storage...")
+    _t8 = time.perf_counter()
     blob_storage_path = upload_pdf_to_blob_storage(
         pdf_path, vendor_name, statement_period, document_hash
     )
+    print(f"  [TIMING] Step 8a upload_pdf_to_blob_storage: {time.perf_counter()-_t8:.2f}s")
     if blob_storage_path:
+        _t8b = time.perf_counter()
         update_intake_log_blob_path(statement_id, blob_storage_path)
         print(f"  Uploaded to: {blob_storage_path}")
+        print(f"  [TIMING] Step 8b update_intake_log_blob_path: {time.perf_counter()-_t8b:.2f}s")
     else:
         print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
 
     # Step 9: Update cache
+    print(f"\n[Step 9] Updating extraction cache...")
+    _t9 = time.perf_counter()
     update_cache(document_hash, statement_id, os.path.basename(pdf_path),
                  provider_used, bronze_count)
+    print(f"  [TIMING] Step 9 update_cache: {time.perf_counter()-_t9:.2f}s")
 
     # Final summary
     print(f"\n{'='*60}")
@@ -835,6 +891,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     # Auto-suggest exception targets from extracted Silver rows
     if bronze_count > 0:
+        _t_suggest = time.perf_counter()
         try:
             # Get a sample of real invoice numbers and amounts from Silver
             sample_rows = execute_query(
@@ -872,6 +929,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
                 print(f"{'='*60}\n")
         except Exception:
             pass  # Suggestions are optional — never block the pipeline
+        finally:
+            print(f"  [TIMING] Auto-suggest exception targets block: {time.perf_counter()-_t_suggest:.2f}s")
 
     return {
         "statement_id": statement_id,

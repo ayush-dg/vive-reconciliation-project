@@ -312,6 +312,16 @@ TABLES = {
             batch_id NVARCHAR(36)
         )
     """,
+    "demo_netsuite_bills": """
+        CREATE TABLE demo_netsuite_bills (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            invoice_number NVARCHAR(255) NOT NULL,
+            amount FLOAT NOT NULL,
+            bill_date NVARCHAR(MAX),
+            source_file NVARCHAR(MAX),
+            loaded_at NVARCHAR(MAX) NOT NULL
+        )
+    """,
 }
 
 INDEXES = {

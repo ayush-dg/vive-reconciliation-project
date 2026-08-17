@@ -10,11 +10,22 @@ Usage:
 
 What it runs:
     1. Document Intake (AI extraction → Bronze → Silver)
+<<<<<<< Updated upstream
     2. Matching Engine (Silver both sides → Gold tables) -- against real
        voucher-sourced ERP data only (scripts/load_voucher_data.py); no
        mock ERP is generated or written by this pipeline anymore.
     3. Report (with optional AI exception explanations)
+=======
+    2. ERP Data — Mock ERP Generation for most vendors (Silver → Mock ERP
+       Bronze → Silver ERP), or real NetSuite data for vendor_id=="ASTECH"
+       (demo_netsuite_bills → Bronze → Silver ERP, see src/netsuite_erp.py)
+    3. Matching Engine (Silver both sides → Gold tables)
+    4. Report (with optional AI exception explanations)
+>>>>>>> Stashed changes
 """
+
+import time as _time
+_script_start = _time.perf_counter()
 
 import argparse
 import importlib.util
@@ -39,7 +50,10 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
+print(f"  [TIMING] run_full_pipeline.py top-of-file imports (argparse/os/sys/dotenv/load_dotenv): {_time.perf_counter()-_script_start:.2f}s")
+_t_engine_import = _time.perf_counter()
 from src.ai.document_understanding_engine import CorruptedPDFError
+print(f"  [TIMING] import src.ai.document_understanding_engine: {_time.perf_counter()-_t_engine_import:.2f}s")
 
 
 def load_notebook(name, relative_path):
@@ -73,7 +87,10 @@ def main():
 
     # Phase 1: Document Intake
     print(f"\n>>> PHASE 1: Document Intake")
+    print(f"  [TIMING] elapsed since script start, before load_notebook(): {_time.perf_counter()-_script_start:.2f}s")
+    _t_load_notebook = _time.perf_counter()
     intake_mod = load_notebook("intake", "notebooks/01_document_intake.py")
+    print(f"  [TIMING] load_notebook('intake', ...) -- executes 01_document_intake.py's own top-level imports: {_time.perf_counter()-_t_load_notebook:.2f}s")
     try:
         intake_result = intake_mod.run_intake(
             pdf_path=args.pdf,
@@ -100,8 +117,38 @@ def main():
         print(f"{'#'*65}\n")
         return
 
+<<<<<<< Updated upstream
     # Phase 2: Matching
     print(f"\n>>> PHASE 2: Matching Engine")
+=======
+    # Phase 2: ERP Data
+    # ASTECH uses real NetSuite data (demo_netsuite_bills) instead of the
+    # mock generator -- see src/netsuite_erp.py. Every other vendor keeps
+    # using the mock ERP generator unchanged.
+    if intake_result.get("vendor_id") == "ASTECH":
+        print(f"\n>>> PHASE 2: NetSuite ERP Data (real, vendor=ASTECH)")
+        from src.netsuite_erp import populate_erp_from_netsuite
+        counts = populate_erp_from_netsuite(statement_id)
+        print(f"    ERP rows: {counts['erp_rows_written']} (version {counts['erp_version']}, source={counts['source']})")
+        print(f"    Silver ERP: {counts['silver_erp_rows']} rows")
+        print(f"    No RO number data available from this NetSuite export -- Pass 2 (RO + amount) "
+              f"has nothing to match against for these rows and will fall through to Pass 1's "
+              f"exception handling for anything Pass 1 doesn't catch.")
+    else:
+        print(f"\n>>> PHASE 2: Mock ERP Generation")
+        from src.mock_erp.generator import generate_mock_erp, normalize_erp_to_silver
+        counts = generate_mock_erp(statement_id)
+        erp_silver = normalize_erp_to_silver(statement_id)
+        print(f"    ERP rows: {counts['erp_rows_written']} (version {counts['erp_version']})")
+        print(f"    Silver ERP: {erp_silver} rows")
+        print(f"    Exceptions planted: {counts['missing']} missing, "
+              f"{counts['amount_mismatch']} mismatches, "
+              f"{counts['duplicate']} duplicates, "
+              f"{counts['renumbered']} renumbered")
+
+    # Phase 3: Matching
+    print(f"\n>>> PHASE 3: Matching Engine")
+>>>>>>> Stashed changes
     from src.matching.engine import run_matching
     summary = run_matching(statement_id)
     print(f"    Matched: {summary['matched_count']}/{summary['total_invoices']} "

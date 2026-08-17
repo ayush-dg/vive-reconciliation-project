@@ -10,6 +10,8 @@ SQL abstraction). Routers stay thin; this module owns the SQL.
 import json
 import os
 import sys
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -20,6 +22,17 @@ if PROJECT_ROOT not in sys.path:
 from src.lakehouse.connection import execute_query, execute_sql, execute_query_fabric, execute_sql_fabric
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
+
+# Short-TTL cache for get_pending_review_count()'s result — see that
+# function's docstring. Separate from src/lakehouse/connection.py's
+# Fabric auth-token cache: even with the token cached, querying the
+# Fabric SQL database itself has a real ~1s execution-latency floor
+# (measured during the 2026-08-12 speed fix), and this function runs on
+# every single page render (get_kpis() plus web/deps.py's
+# sidebar_context(), on every page — twice on the dashboard alone).
+_pending_review_count_cache_lock = threading.Lock()
+_pending_review_count_cache = {"value": None, "fetched_at": 0.0}
+PENDING_REVIEW_COUNT_CACHE_TTL_SECONDS = 30
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -147,12 +160,33 @@ def _live_open_exception_count(statement_id: str) -> int:
 def _with_live_exception_counts(rows: list) -> list:
     """Overwrites exception_count/overall_status on each row (as returned
     by a gold_reconciliation_summary query) with a live count — see
-    _live_open_exception_count(). overall_status only ever needs to
-    distinguish RECONCILED from not here — every consumer template
-    (home.html, reports.html) renders any non-RECONCILED value identically
-    as a generic "Exceptions" badge."""
+    _live_open_exception_count()'s docstring for why the cached column
+    goes stale. Batches every row's count into one GROUP BY query instead
+    of one execute_query() round-trip per row — measured during the
+    2026-08-12 speed fix: each Azure SQL round-trip costs real network
+    latency (~0.77s in that environment) even on a reused, warm
+    connection, so this N+1 pattern was a second major contributor to
+    dashboard/reports slowness alongside the Fabric-token and connection-
+    reuse fixes in src/lakehouse/connection.py. overall_status only ever
+    needs to distinguish RECONCILED from not here — every consumer
+    template (home.html, reports.html) renders any non-RECONCILED value
+    identically as a generic "Exceptions" badge."""
+    if not rows:
+        return rows
+    statement_ids = [row["statement_id"] for row in rows]
+    placeholders = ", ".join("?" for _ in statement_ids)
+    count_rows = execute_query(
+        f"""
+        SELECT statement_id, COUNT(*) AS c
+        FROM gold_exceptions
+        WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+        GROUP BY statement_id
+        """,
+        statement_ids,
+    )
+    counts_by_statement = {r["statement_id"]: r["c"] for r in count_rows}
     for row in rows:
-        count = _live_open_exception_count(row["statement_id"])
+        count = counts_by_statement.get(row["statement_id"], 0)
         row["exception_count"] = count
         row["overall_status"] = "RECONCILED" if count == 0 else "EXCEPTIONS_PRESENT"
     return rows
@@ -1102,13 +1136,48 @@ def _parse_review_row(row: dict) -> dict:
     return row
 
 
-def get_pending_review_count() -> int:
-    # validation_document_review_queue is cut over to Fabric Warehouse —
-    # see get_fabric_connection() in src/lakehouse/connection.py.
-    rows = execute_query_fabric(
-        "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
-    )
-    return rows[0]["c"] or 0 if rows else 0
+def get_pending_review_count():
+    """Live-ish pending-review count, or None if the Fabric-backed query
+    fails. Called on every page render (both here via get_kpis() and from
+    web/deps.py's sidebar_context() — twice on the dashboard alone), so
+    two things about the Fabric-backed query matter:
+
+    1. It must never take the rest of the page down with it — see the
+       2026-08-12 demo's uncaught ClientAuthenticationError -> 500 on the
+       dashboard. Templates already treat this value as
+       falsy-hides-the-indicator (see web/templates/home.html, base.html),
+       so None degrades to "don't show a possibly-wrong number" with no
+       template changes needed.
+    2. Even with the Fabric auth token cached (see
+       src/lakehouse/connection.py's _get_fabric_access_token()), actually
+       executing this query against the Fabric SQL database has a real
+       ~1s latency floor, measured directly during the 2026-08-12 speed
+       fix — not a connection or auth cost, just inherent to that backend.
+       Cached here for PENDING_REVIEW_COUNT_CACHE_TTL_SECONDS so a page
+       full of clicks pays that cost roughly once per TTL window instead
+       of on every single render. A cached failure (None) is also held
+       for the same TTL, so an outage doesn't get hit on every render
+       either.
+    """
+    with _pending_review_count_cache_lock:
+        now = time.time()
+        if now - _pending_review_count_cache["fetched_at"] < PENDING_REVIEW_COUNT_CACHE_TTL_SECONDS:
+            return _pending_review_count_cache["value"]
+
+        # validation_document_review_queue is cut over to Fabric Warehouse
+        # — see get_fabric_connection() in src/lakehouse/connection.py.
+        try:
+            rows = execute_query_fabric(
+                "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
+            )
+            value = (rows[0]["c"] or 0) if rows else 0
+        except Exception as e:
+            print(f"  [get_pending_review_count] Fabric query failed, degrading to unavailable: {e}")
+            value = None
+
+        _pending_review_count_cache["value"] = value
+        _pending_review_count_cache["fetched_at"] = now
+        return value
 
 
 def get_review_queue_vendors() -> list:
