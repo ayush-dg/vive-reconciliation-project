@@ -36,17 +36,11 @@
       <div class="form-card">
         <div class="form-field">
           <label>Vendor <span class="field-hint">auto-detected from each PDF</span></label>
-          <input type="text" value="Detected automatically during processing" disabled />
+          <input type="text" id="preview-vendor" value="Detected automatically during processing" disabled />
         </div>
         <div class="form-field">
-          <label>Statement period</label>
-          <select name="period">
-            <option value="">Auto-detect from statement</option>
-            <option value="2026-07">July 2026</option>
-            <option value="2026-06">June 2026</option>
-            <option value="2026-05">May 2026</option>
-            <option value="2026-04">April 2026</option>
-          </select>
+          <label>Statement period <span class="field-hint">auto-detected from each PDF</span></label>
+          <input type="text" id="preview-period" value="Auto-detect from statement" disabled />
         </div>
         <div class="form-field">
           <label>Notes <span class="field-hint">optional</span></label>
@@ -54,7 +48,7 @@
         </div>
         <div class="form-actions">
           <a href="/" class="btn-secondary">Cancel</a>
-          <button class="btn-primary" style="width:auto;flex:1" type="submit" id="run-btn" disabled>Queue for reconciliation</button>
+          <button class="btn-primary" style="width:auto;flex:1" type="submit" id="run-btn" disabled>Proceed with extraction</button>
         </div>
       </div>
     </form>
@@ -75,6 +69,42 @@
     </div>
   </div>
 </div>
+
+{% if recent_batches %}
+<div class="panel" style="margin-top:20px">
+  <div class="panel-head">
+    <div>
+      <h2>Recent uploads</h2>
+      <div class="sub">Jump back into a previous upload's extraction results</div>
+    </div>
+  </div>
+  <table class="table">
+    <thead>
+      <tr><th>Uploaded</th><th>Files</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for batch in recent_batches %}
+      <tr>
+        <td style="color:var(--text-secondary)">{{ batch.submitted_at | friendly_dt }}</td>
+        <td>{{ batch.total_files }}</td>
+        <td>
+          {% if batch.active_count %}
+          <span class="badge warning">Extracting…</span>
+          {% elif batch.failed_count and not batch.completed_count %}
+          <span class="badge danger">Failed</span>
+          {% elif batch.failed_count %}
+          <span class="badge warning">Partial</span>
+          {% else %}
+          <span class="badge success">Extracted</span>
+          {% endif %}
+        </td>
+        <td><a href="/upload/status/{{ batch.batch_id }}" class="link-arrow">View results <svg class="icon"><use href="#i-arrow-right"/></svg></a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <div class="processing-overlay" id="processing-overlay">
   <div class="spinner"></div>

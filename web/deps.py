@@ -91,7 +91,29 @@ def initials(name):
     return name[:2].upper()
 
 
-_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y")
+# %m/%d/%y (2-digit year) must come before %m/%d/%Y — Python's %Y accepts a
+# bare 2-digit string too (parsing it as year 26 AD, not 2026), so trying
+# %m/%d/%Y first on a string like "04/01/26" would silently succeed wrong.
+_DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%y", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%d%b%y", "%B %d, %Y", "%b %d, %Y")
+
+
+def parse_flexible_date(value):
+    """Best-effort parse of a date in whatever format the source PDF used —
+    returns a date object, or None if nothing matched. Shared by
+    friendly_date (display) and queries.get_upload_batch_status (computing
+    a statement's actual invoice date range)."""
+    if not value:
+        return None
+    text = str(value).strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
 
 
 def friendly_date(value):
@@ -100,16 +122,10 @@ def friendly_date(value):
     tries the formats seen in practice and falls back to the raw value."""
     if not value:
         return "—"
-    text = str(value).strip()
-    for fmt in _DATE_FORMATS:
-        try:
-            return datetime.strptime(text, fmt).strftime("%d %b %Y")
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%d %b %Y")
-    except ValueError:
-        return text
+    parsed = parse_flexible_date(value)
+    if parsed:
+        return parsed.strftime("%d %b %Y")
+    return str(value).strip()
 
 
 IST = timezone(timedelta(hours=5, minutes=30))

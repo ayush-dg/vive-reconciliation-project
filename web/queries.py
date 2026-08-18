@@ -20,6 +20,7 @@ if PROJECT_ROOT not in sys.path:
 from src.lakehouse.connection import execute_query, execute_sql, execute_query_fabric, execute_sql_fabric
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
+from web.deps import parse_flexible_date, period_label
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -1014,6 +1015,107 @@ def get_recent_completed_batches(limit: int = 3) -> list:
     limit = int(limit)
     finished = [b for b in get_all_batches() if b["status"] != "PROCESSING"]
     return finished[:limit]
+
+
+def get_batch_job_statuses(batch_id: str) -> list:
+    """Lightweight status-only rows for one batch, for the
+    /upload/status/{batch_id} results page's poll-and-reload auto-refresh
+    (see web/static/app.js) — cheap on purpose, so polling doesn't repeat
+    the heavier per-job Silver/document_intake_log lookups that
+    get_upload_batch_status() does on every check."""
+    return execute_query(
+        "SELECT job_id, status FROM jobs WHERE batch_id = ? ORDER BY submitted_at",
+        [batch_id],
+    )
+
+
+def _invoice_period_range(invoices: list):
+    """Formats the actual span of invoice dates found in one statement's
+    extracted rows — e.g. "May 2026" if every invoice falls in one month,
+    or "May 2026 – Jun 2026" if they span more than one — or None if no
+    invoice_date on any row could be parsed. Preferred over the single
+    statement_period the AI reports on document_intake_log, since it's
+    derived from what was actually extracted rather than one metadata
+    field that may or may not reflect the real spread of invoices."""
+    dates = [d for d in (parse_flexible_date(inv["invoice_date"]) for inv in invoices) if d]
+    if not dates:
+        return None
+    start, end = min(dates), max(dates)
+    if (start.year, start.month) == (end.year, end.month):
+        return start.strftime("%b %Y")
+    return f"{start.strftime('%b %Y')} – {end.strftime('%b %Y')}"
+
+
+def get_upload_batch_status(batch_id: str) -> dict:
+    """{"jobs": [...]} for one manual-upload batch (see
+    web/routers/upload.py), for the /upload/status/{batch_id} results page.
+
+    Matching (Phase 2) is currently skipped for uploaded PDFs (see
+    scripts/run_full_pipeline.py's --extract-only, used by web/worker.py),
+    so this reports extraction-only results per file: the invoice date
+    range actually found in the Silver rows that made it past validation
+    (silver_reconciliation_standard) — falling back to the single AI-
+    detected statement_period (document_intake_log, Fabric) only if no
+    invoice_date on any row could be parsed. Not match/exception counts
+    like get_batch_detail() (used by the Batches page), which come from
+    gold_reconciliation_summary and would always read zero here since
+    that table is only ever written by the matching engine."""
+    jobs = execute_query(
+        "SELECT * FROM jobs WHERE batch_id = ? ORDER BY submitted_at",
+        [batch_id],
+    )
+    for job in jobs:
+        job["statement_period"] = None
+        job["invoices"] = []
+        if job["status"] != "COMPLETED" or not job["statement_id"]:
+            continue
+
+        job["invoices"] = execute_query(
+            """
+            SELECT invoice_number, ro_number, invoice_date, outstanding_amount, description
+            FROM silver_reconciliation_standard
+            WHERE statement_id = ? AND record_source = 'VENDOR_STATEMENT'
+            ORDER BY id
+            """,
+            [job["statement_id"]],
+        )
+
+        job["statement_period"] = _invoice_period_range(job["invoices"])
+        if not job["statement_period"]:
+            period_rows = execute_query_fabric(
+                "SELECT statement_period FROM document_intake_log WHERE statement_id = ?",
+                [job["statement_id"]],
+            )
+            if period_rows and period_rows[0]["statement_period"]:
+                job["statement_period"] = period_label(period_rows[0]["statement_period"])
+
+    return {"jobs": jobs}
+
+
+def get_recent_upload_batches(limit: int = 10) -> list:
+    """Recent upload batches, newest first, for the /upload page's "Recent
+    uploads" panel — a persistent way back into a batch's
+    /upload/status/{batch_id} extraction results after leaving that page
+    (previously there was no way back at all once you navigated away).
+    Deliberately doesn't compute invoice/exception counts the way
+    get_all_batches() (the disabled Batches page) does — those come from
+    gold_reconciliation_summary, which matching would populate but
+    extraction-only uploads never touch, so that count would always read
+    zero here."""
+    batches = execute_query(
+        """
+        SELECT batch_id, COUNT(*) AS total_files,
+               SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_count,
+               SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed_count,
+               SUM(CASE WHEN status IN ('PENDING', 'PROCESSING') THEN 1 ELSE 0 END) AS active_count,
+               MIN(submitted_at) AS submitted_at
+        FROM jobs
+        WHERE batch_id IS NOT NULL
+        GROUP BY batch_id
+        ORDER BY MIN(submitted_at) DESC
+        """
+    )
+    return batches[:limit]
 
 
 # ---------------------------------------------------------------------------

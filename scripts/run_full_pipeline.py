@@ -64,6 +64,10 @@ def main():
                         help="Generate AI explanations for exceptions")
     parser.add_argument("--max-explanations", type=int, default=5,
                         help="Max exceptions to explain (default: 5)")
+    parser.add_argument("--extract-only", action="store_true",
+                        help="Stop after Phase 1 (document intake) — skip matching and "
+                             "reporting. Used by web/worker.py while matching is out of "
+                             "scope for the current build phase.")
     args = parser.parse_args()
 
     print(f"\n{'#'*65}")
@@ -97,6 +101,14 @@ def main():
         print(f"  produced zero usable invoice rows — see Phase 1 output above")
         print(f"  for which providers failed and why (e.g. quota exhaustion).")
         print(f"  Nothing to match against.")
+        print(f"{'#'*65}\n")
+        return
+
+    if args.extract_only:
+        print(f"\n{'#'*65}")
+        print(f"  EXTRACTION COMPLETE — matching skipped (--extract-only)")
+        print(f"  Statement ID: {statement_id}")
+        print(f"  Invoices extracted: {intake_result.get('bronze_count', 0)}")
         print(f"{'#'*65}\n")
         return
 

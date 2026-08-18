@@ -98,7 +98,7 @@
       <h2>Recent batches</h2>
       <div class="sub">Multi-file uploads, most recent first</div>
     </div>
-    <a href="/batches" class="link-arrow">All batches <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+    <a href="/upload" class="link-arrow">Recent uploads <svg class="icon"><use href="#i-arrow-right"/></svg></a>
   </div>
   <table class="table">
     <thead>
@@ -112,7 +112,7 @@
     <tbody>
       {% for batch in recent_batches %}
       <tr>
-        <td style="font-weight:500"><a href="/batches/{{ batch.batch_id }}" class="link">Batch {{ batch.batch_id[:8] }}</a></td>
+        <td style="font-weight:500"><a href="/upload/status/{{ batch.batch_id }}" class="link">Batch {{ batch.batch_id[:8] }}</a></td>
         <td>{{ batch.total_files }}</td>
         <td>
           {% if batch.status == 'PARTIAL' %}
@@ -135,7 +135,7 @@
       <h2>Reconciliation runs</h2>
       <div class="sub">{{ current_month_label }} · most recent first</div>
     </div>
-    <a href="/reports" class="link-arrow">View all reports <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+    <span class="link-arrow disabled" title="Coming soon">View all reports <svg class="icon"><use href="#i-arrow-right"/></svg></span>
   </div>
   {% if runs %}
   <table>

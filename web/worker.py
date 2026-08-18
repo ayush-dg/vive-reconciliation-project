@@ -65,7 +65,11 @@ def _run_job(job: dict) -> None:
 
     try:
         result = subprocess.run(
-            [python_exe, os.path.join("scripts", "run_full_pipeline.py"), "--pdf", relative_pdf_path],
+            # --extract-only: matching/reporting are out of scope for the
+            # current build phase (only sign-in + upload/extraction are
+            # active) — see web/routers/upload.py and docs/Claude.md.
+            [python_exe, os.path.join("scripts", "run_full_pipeline.py"), "--pdf", relative_pdf_path,
+             "--extract-only"],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
