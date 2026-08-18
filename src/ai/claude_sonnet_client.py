@@ -626,6 +626,16 @@ class ClaudeSonnetClient(AIClient):
         invoice-number-as-amount cross-contamination (see module docstring).
         Returns (key, parsed_float) or (None, None)."""
         for key, val in row.items():
+            if key == "confidence":
+                # The model's own per-row confidence score (e.g. 0.90, 0.95)
+                # matches CURRENCY_LIKE_RE just as easily as a real two-decimal
+                # dollar amount -- without this exclusion, a row whose real
+                # amount-due cell the model left null gets its confidence
+                # score silently adopted as the outstanding_amount instead of
+                # correctly failing validation. Confirmed on a live statement:
+                # 86/231 rows had outstanding_amount == extraction_confidence
+                # exactly, and 85 of those became false exceptions.
+                continue
             if val in exclude or val is None:
                 continue
             if not CURRENCY_LIKE_RE.match(str(val).strip()):

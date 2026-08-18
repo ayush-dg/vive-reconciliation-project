@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-08-16.** The decision changed to a ground-up rebuild in a fresh repo, aligned to the target architecture, instead of enhancing this codebase. See `docs/VIVE_REBUILD_PLAN_TARGET_ARCHITECTURE.md`. Kept here for history, not active.
+
 # VIVE Reconciliation — 2-Month Build Plan (Dev → Prod-Testing Ready)
 
 **Prepared:** 2026-08-16
