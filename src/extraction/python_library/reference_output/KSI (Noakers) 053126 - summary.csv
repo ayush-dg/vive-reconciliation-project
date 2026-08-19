@@ -1,0 +1,20 @@
+Field,Value
+statement_as_of,05/31/26
+customer_no,21-VIVE6500
+customer_name,VIVE COLLISION - Noakers Collision
+billing_address,819 New Bloomfield Rd
+billing_city,Duncannon
+billing_state,PA
+billing_zip,17020
+vendor_name,"KSI Trading Corp. - S. Plainfield, NJ"
+vendor_address,"100-A Wade Ave, South Plainfield, NJ 07080"
+vendor_phone,908-754-7154
+vendor_fax,908-769-5957
+terms,30 days
+aged_bucket_05_01_to_05_31_26,"5,113.00"
+aged_bucket_04_01_to_04_30_26,"2,661.00"
+aged_bucket_03_01_to_03_31_26,0.00
+aged_bucket_02_01_to_02_28_26,0.00
+aged_bucket_before_02_01_26,0.00
+total_balance_due,"7,774.00"
+verification_note,"Every line item was verified against full-resolution crops of the original scan (document no., PO no., description, customer no., due date, and amount all visible together per row). The resulting total (7,774.00) reconciles exactly with two independent printed figures on the statement: the subtotal above the Aged Summary, and the sum of the Aged Summary bucket totals."

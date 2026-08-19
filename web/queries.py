@@ -1053,7 +1053,8 @@ def get_statement_report(statement_id: str) -> dict:
 
     matched = execute_query(
         """
-        SELECT invoice_number, ro_number, statement_amount, erp_amount, match_level
+        SELECT invoice_number, ro_number, statement_amount, erp_amount, match_level,
+               charges, credits, amount_due, transaction_code
         FROM gold_matched_invoices
         WHERE statement_id = ?
         ORDER BY invoice_number

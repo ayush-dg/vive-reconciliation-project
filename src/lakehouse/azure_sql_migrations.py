@@ -57,7 +57,11 @@ TABLES = {
             raw_currency NVARCHAR(MAX),
             extraction_confidence FLOAT,
             extraction_model NVARCHAR(MAX),
-            raw_ai_response NVARCHAR(MAX)
+            raw_ai_response NVARCHAR(MAX),
+            raw_charges NVARCHAR(MAX),
+            raw_credits NVARCHAR(MAX),
+            raw_amount_due NVARCHAR(MAX),
+            raw_transaction_code NVARCHAR(MAX)
         )
     """,
     "bronze_internal_erp_raw": """
@@ -107,7 +111,11 @@ TABLES = {
             currency NVARCHAR(MAX),
             statement_period NVARCHAR(MAX),
             source_file NVARCHAR(MAX),
-            ingestion_timestamp NVARCHAR(MAX)
+            ingestion_timestamp NVARCHAR(MAX),
+            charges FLOAT,
+            credits FLOAT,
+            amount_due FLOAT,
+            transaction_code NVARCHAR(MAX)
         )
     """,
     "gold_matched_invoices": """
@@ -128,7 +136,11 @@ TABLES = {
             statement_id NVARCHAR(MAX),
             match_timestamp NVARCHAR(MAX),
             statement_period NVARCHAR(MAX),
-            match_confidence FLOAT
+            match_confidence FLOAT,
+            charges FLOAT,
+            credits FLOAT,
+            amount_due FLOAT,
+            transaction_code NVARCHAR(MAX)
         )
     """,
     "gold_exceptions": """
@@ -159,7 +171,11 @@ TABLES = {
             escalation_status NVARCHAR(50) DEFAULT 'NONE',
             escalated_at DATETIME2,
             escalated_by NVARCHAR(255),
-            days_open AS (DATEDIFF(day, date_raised, GETUTCDATE()))
+            days_open AS (DATEDIFF(day, date_raised, GETUTCDATE())),
+            charges FLOAT,
+            credits FLOAT,
+            amount_due FLOAT,
+            transaction_code NVARCHAR(MAX)
         )
     """,
     "gold_reconciliation_summary": """
@@ -340,8 +356,28 @@ COLUMNS = {
         ("claim_token", "ALTER TABLE jobs ADD claim_token NVARCHAR(255)"),
         ("batch_id", "ALTER TABLE jobs ADD batch_id NVARCHAR(36)"),
     ],
+    "bronze_vendor_statement_raw": [
+        # Fred-Beans-only Python-library extraction path -- see
+        # notebooks/01_document_intake.py's _is_fred_beans_statement() and
+        # src/extraction/python_library/adapter.py. NULL for every other
+        # vendor's rows, which the AI extraction path never populates.
+        ("raw_charges", "ALTER TABLE bronze_vendor_statement_raw ADD raw_charges NVARCHAR(MAX)"),
+        ("raw_credits", "ALTER TABLE bronze_vendor_statement_raw ADD raw_credits NVARCHAR(MAX)"),
+        ("raw_amount_due", "ALTER TABLE bronze_vendor_statement_raw ADD raw_amount_due NVARCHAR(MAX)"),
+        ("raw_transaction_code", "ALTER TABLE bronze_vendor_statement_raw ADD raw_transaction_code NVARCHAR(MAX)"),
+    ],
+    "silver_reconciliation_standard": [
+        ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),
+        ("credits", "ALTER TABLE silver_reconciliation_standard ADD credits FLOAT"),
+        ("amount_due", "ALTER TABLE silver_reconciliation_standard ADD amount_due FLOAT"),
+        ("transaction_code", "ALTER TABLE silver_reconciliation_standard ADD transaction_code NVARCHAR(MAX)"),
+    ],
     "gold_matched_invoices": [
         ("match_confidence", "ALTER TABLE gold_matched_invoices ADD match_confidence FLOAT"),
+        ("charges", "ALTER TABLE gold_matched_invoices ADD charges FLOAT"),
+        ("credits", "ALTER TABLE gold_matched_invoices ADD credits FLOAT"),
+        ("amount_due", "ALTER TABLE gold_matched_invoices ADD amount_due FLOAT"),
+        ("transaction_code", "ALTER TABLE gold_matched_invoices ADD transaction_code NVARCHAR(MAX)"),
     ],
     "gold_exceptions": [
         ("match_confidence", "ALTER TABLE gold_exceptions ADD match_confidence FLOAT"),
@@ -349,6 +385,10 @@ COLUMNS = {
         ("escalation_status", "ALTER TABLE gold_exceptions ADD escalation_status NVARCHAR(50) DEFAULT 'NONE'"),
         ("escalated_at", "ALTER TABLE gold_exceptions ADD escalated_at DATETIME2"),
         ("escalated_by", "ALTER TABLE gold_exceptions ADD escalated_by NVARCHAR(255)"),
+        ("charges", "ALTER TABLE gold_exceptions ADD charges FLOAT"),
+        ("credits", "ALTER TABLE gold_exceptions ADD credits FLOAT"),
+        ("amount_due", "ALTER TABLE gold_exceptions ADD amount_due FLOAT"),
+        ("transaction_code", "ALTER TABLE gold_exceptions ADD transaction_code NVARCHAR(MAX)"),
     ],
 }
 

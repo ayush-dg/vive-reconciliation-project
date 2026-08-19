@@ -330,8 +330,9 @@ def run_matching(statement_id: str,
                     match_id, vendor_id, shop, invoice_number, ro_number,
                     statement_amount, erp_amount, match_level, match_status,
                     statement_record_id, erp_record_id, source_file,
-                    statement_id, match_timestamp, statement_period, match_confidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MATCHED', ?, ?, ?, ?, ?, ?, ?)
+                    statement_id, match_timestamp, statement_period, match_confidence,
+                    charges, credits, amount_due, transaction_code
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MATCHED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     match_id,
@@ -349,6 +350,13 @@ def run_matching(statement_id: str,
                     now,
                     stmt.get("statement_period"),
                     match_confidence,
+                    # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
+                    # -- NULL for Silver rows the AI-extraction path wrote, which
+                    # never populate these Silver columns.
+                    stmt.get("charges"),
+                    stmt.get("credits"),
+                    stmt.get("amount_due"),
+                    stmt.get("transaction_code"),
                 ]
             )
             matched_count += 1
@@ -364,8 +372,8 @@ def run_matching(statement_id: str,
                     statement_amount, erp_amount, match_status, exception_reason,
                     exception_status, statement_record_id, source_file,
                     statement_id, date_raised, statement_period, match_confidence,
-                    shop_owner
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?)
+                    shop_owner, charges, credits, amount_due, transaction_code
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'EXCEPTION', ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     exception_id,
@@ -383,6 +391,13 @@ def run_matching(statement_id: str,
                     stmt.get("statement_period"),
                     match_confidence,
                     shop_owner,
+                    # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
+                    # -- NULL for Silver rows the AI-extraction path wrote, which
+                    # never populate these Silver columns.
+                    stmt.get("charges"),
+                    stmt.get("credits"),
+                    stmt.get("amount_due"),
+                    stmt.get("transaction_code"),
                 ]
             )
             exception_count += 1

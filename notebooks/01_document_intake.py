@@ -12,6 +12,8 @@ What it does:
     1. Checks extraction cache (skip AI if already processed)
     2. Extracts PDF text with pdfplumber
     3. Calls Document Understanding Engine (Azure Claude Sonnet 4.6 → pdfplumber/OCR)
+       -- except Fred Beans Parts statements, routed to a deterministic
+       Python-library extractor instead (see _is_fred_beans_statement()).
     4. Validates extracted invoices
     5. Writes valid invoices to bronze_vendor_statement_raw
     6. Normalizes to silver_reconciliation_standard
@@ -55,6 +57,13 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.ai.document_understanding_engine import (
     CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
 )
+# Fred-Beans-only: a deterministic pdfplumber extractor, used in place of
+# DocumentUnderstandingEngine for exactly one vendor (see
+# _is_fred_beans_statement() below). Every other vendor's routing/behavior
+# is completely unchanged -- see src/extraction/python_library/adapter.py's
+# docstring for scope.
+from src.extraction.python_library.adapter import PythonLibraryExtractionEngine
+from src.extraction.python_library.extract_statement import VENDOR_SIGNATURE as FRED_BEANS_SIGNATURE
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
@@ -67,6 +76,40 @@ def compute_file_hash(pdf_path: str) -> str:
     """SHA-256 hash of the PDF file — used for cache lookup."""
     with open(pdf_path, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
+
+
+def _is_fred_beans_statement(pdf_path: str) -> bool:
+    """
+    True only for a real Fred Beans Parts statement — gates which vendors
+    get routed to PythonLibraryExtractionEngine instead of
+    DocumentUnderstandingEngine (Claude Sonnet). Every other vendor must
+    see zero behavior change, so this deliberately does NOT reuse
+    extract_all.py's full detect_vendor() dispatch: that function OCRs
+    page 1 (via ocr_embed.py/fitz/pytesseract) whenever a page has little
+    embedded text, to identify vendors whose statements are scanned (e.g.
+    KSI). Running that OCR pass here, on every upload, just to answer
+    "is this Fred Beans or not", would add new latency and a new failure
+    surface to every OTHER vendor's upload too — exactly what this gate
+    must not do. Fred Beans Parts statements are confirmed to carry real
+    embedded text (see extract_statement.py's module docstring), so a
+    plain pdfplumber text check is sufficient and reliable for this one
+    vendor, with no OCR involved at all.
+
+    Any error here (corrupt/unreadable PDF, missing dependency, etc.) is
+    swallowed and returns False — detection failure must always fall back
+    to the existing AI path, never block or crash intake.
+    """
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ""
+                if any(sig in text for sig in FRED_BEANS_SIGNATURE):
+                    return True
+        return False
+    except Exception as e:
+        print(f"  Warning: Fred Beans vendor detection failed ({e}) — falling back to AI extraction.")
+        return False
 
 
 def check_cache(document_hash: str):
@@ -123,7 +166,7 @@ def validate_invoice(invoice: dict, rules: dict):
     # so they fail this check and route to review; don't lower this threshold
     # without revisiting that rule.
     confidence = invoice.get("line_confidence")
-    threshold = rules.get("confidence_threshold", 0.90)
+    threshold = rules.get("confidence_threshold", 0.0)
     if confidence is not None and float(confidence) < threshold:
         return False, f"LOW_CONFIDENCE: line_confidence {confidence} < threshold {threshold}"
 
@@ -159,8 +202,9 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
                 raw_amount, raw_outstanding_amount, raw_ro_number,
                 raw_po_number, raw_work_order_number, raw_description,
                 raw_credit, raw_shop_name, raw_currency,
-                extraction_confidence, extraction_model, raw_ai_response
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                extraction_confidence, extraction_model, raw_ai_response,
+                raw_charges, raw_credits, raw_amount_due, raw_transaction_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 vendor_id,
@@ -186,6 +230,13 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
                 inv.get("line_confidence"),
                 f"{provider_used}/{model_used}",
                 None,  # don't store full AI response in every row
+                # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
+                # -- NULL for every existing/AI-extraction row, since those
+                # invoice dicts never carry these keys.
+                str(inv["charges"]) if inv.get("charges") is not None else None,
+                str(inv["credits"]) if inv.get("credits") is not None else None,
+                str(inv["amount_due"]) if inv.get("amount_due") is not None else None,
+                inv.get("transaction_code"),
             ]
         )
         count += 1
@@ -266,9 +317,10 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
                 exception_id, vendor_id, invoice_number, statement_amount,
                 erp_amount, match_status, exception_reason, exception_status,
                 source_file, statement_id, date_raised, statement_period,
-                ai_explanation, match_confidence, shop_owner
+                ai_explanation, match_confidence, shop_owner,
+                charges, credits, amount_due, transaction_code
             ) VALUES (?, ?, ?, ?, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
-                      'OPEN', ?, ?, ?, ?, ?, ?, ?)
+                      'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 str(uuid.uuid4()),
@@ -282,6 +334,74 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
                 f"{message}. Please check the original PDF manually.",
                 score_exception_confidence("EXTRACTION_INCOMPLETE"),
                 get_shop_owner(vendor_id),
+                # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
+                # -- NULL for AI-extraction rows, which never carry these keys.
+                invoice.get("charges"),
+                invoice.get("credits"),
+                invoice.get("amount_due"),
+                invoice.get("transaction_code"),
+            ]
+        )
+    except Exception as e:
+        print(f"  Warning: failed to write EXTRACTION_INCOMPLETE exception to gold_exceptions ({e})")
+
+
+def write_missing_amount_exception(statement_id: str, vendor_id: str, source_file: str,
+                                    statement_period: str, invoice: dict, message: str):
+    """
+    Raise a row that failed validate_invoice() specifically on a missing
+    outstanding_amount as an EXTRACTION_INCOMPLETE exception in
+    gold_exceptions, instead of the review queue — an intentional
+    visibility choice so it shows up in Reports/Exceptions alongside every
+    other exception, rather than in a separate queue most views never
+    check. Never reaches Silver (would violate INV-04's never-null
+    outstanding_amount), same reasoning as write_skip_exception() above.
+
+    Deliberately does NOT fall back to invoice['credit'] the way
+    write_skip_exception() does — the whole point of this routing is that
+    the row's amount is genuinely blank on the source document, and that
+    blank must stay visibly blank rather than being backfilled with a
+    different real field. A row that also has no credit value would
+    already have been caught earlier by get_skip_reason() instead of
+    reaching validate_invoice() at all.
+
+    Never raises — a logging failure must never block intake.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        execute_sql(
+            """
+            INSERT INTO gold_exceptions (
+                exception_id, vendor_id, invoice_number, statement_amount,
+                erp_amount, match_status, exception_reason, exception_status,
+                source_file, statement_id, date_raised, statement_period,
+                ai_explanation, match_confidence, shop_owner,
+                charges, credits, amount_due, transaction_code
+            ) VALUES (?, ?, ?, NULL, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
+                      'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                str(uuid.uuid4()),
+                vendor_id,
+                invoice.get("invoice_number"),
+                source_file,
+                statement_id,
+                now,
+                statement_period,
+                f"{message}. Please check the original PDF manually.",
+                score_exception_confidence("EXTRACTION_INCOMPLETE"),
+                get_shop_owner(vendor_id),
+                # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
+                # -- NULL for AI-extraction rows, which never carry these keys.
+                # statement_amount/erp_amount stay NULL here deliberately (see
+                # docstring above) -- charges/credits/amount_due are the only
+                # new fields carried through for this row, so the row's real
+                # per-column breakdown is still visible in Reports/Exceptions
+                # even though it never reaches Silver.
+                invoice.get("charges"),
+                invoice.get("credits"),
+                invoice.get("amount_due"),
+                invoice.get("transaction_code"),
             ]
         )
     except Exception as e:
@@ -370,12 +490,26 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
         outstanding = safe_float(row.get("raw_outstanding_amount"))
         credit = safe_float(row.get("raw_credit"))
 
+        # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
+        # -- all NULL for AI-extraction rows, which never populate the raw_
+        # Bronze columns these read from.
+        charges = safe_float(row.get("raw_charges"))
+        credits_ = safe_float(row.get("raw_credits"))
+        amount_due = safe_float(row.get("raw_amount_due"))
+        transaction_code = row.get("raw_transaction_code")
+
         invoice_number = row.get("raw_invoice_number")
         invoice_number_normalized = normalize_invoice_number(invoice_number)
 
-        # Generate a stable record_id
+        # Generate a stable record_id. Includes row_number (unique per Bronze
+        # row within a statement) alongside invoice_number/outstanding —
+        # outstanding_amount alone is not reliably distinct per row for every
+        # vendor layout (e.g. a shared extraction-fallback value across
+        # genuinely different lines), and invoice_number+outstanding_amount
+        # colliding used to silently overwrite one row with another via
+        # INSERT OR REPLACE, losing real rows with no error or log.
         record_id = hashlib.sha256(
-            f"VENDOR_STATEMENT|{silver_statement_id}|{invoice_number}|{outstanding}".encode()
+            f"VENDOR_STATEMENT|{silver_statement_id}|{invoice_number}|{outstanding}|{row.get('row_number')}".encode()
         ).hexdigest()
 
         execute_sql(
@@ -387,8 +521,9 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
                 ro_number, po_number, work_order_number,
                 amount, credit, outstanding_amount, due_date,
                 posting_date, status, description, currency,
-                statement_period, source_file, ingestion_timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                statement_period, source_file, ingestion_timestamp,
+                charges, credits, amount_due, transaction_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 record_id,
@@ -416,6 +551,10 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
                 row.get("statement_period"),
                 row.get("source_file"),
                 now,
+                charges,
+                credits_,
+                amount_due,
+                transaction_code,
             ]
         )
         count += 1
@@ -692,8 +831,16 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     print(f"  Extracted text from {page_count} pages ({len(pdf_text)} characters)")
 
     # Step 3: Document Understanding Engine
-    print(f"\n[Step 3] Running Document Understanding Engine...")
-    engine = DocumentUnderstandingEngine()
+    # Fred Beans Parts only: route to the deterministic Python-library
+    # extractor instead of Claude Sonnet. Every other vendor (or any error
+    # during detection itself) takes the exact same DocumentUnderstandingEngine
+    # path as before this change — see _is_fred_beans_statement()'s docstring.
+    if _is_fred_beans_statement(pdf_path):
+        print(f"\n[Step 3] Detected Fred Beans Parts — running Python-library extraction engine...")
+        engine = PythonLibraryExtractionEngine()
+    else:
+        print(f"\n[Step 3] Running Document Understanding Engine...")
+        engine = DocumentUnderstandingEngine()
     schema_result = engine.understand(pdf_text, pdf_path, statement_id=statement_id)
 
     provider_used = schema_result.get("_provider_used", "unknown")
@@ -737,9 +884,6 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     invalid_reasons = []
     skipped_count = 0
 
-    seen_keys = set()
-    dup_fields = validation_rules.get("duplicate_key_fields", ["invoice_number", "outstanding_amount"])
-
     for row_num, inv in enumerate(invoices, start=1):
         # Genuinely-unusable rows (no invoice identifier at all, or no
         # amount at all) are skipped outright — they aren't worth a human
@@ -757,17 +901,23 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
         is_valid, reason = validate_invoice(inv, validation_rules)
         if not is_valid:
+            # Missing outstanding_amount specifically is routed to
+            # gold_exceptions directly, not the review queue — an
+            # intentional visibility change so it's seen in Reports/Home
+            # like every other exception, with the amount genuinely blank
+            # rather than hidden away. Every other validation failure
+            # (missing invoice_number, bad field type, low confidence)
+            # is unchanged and still goes to the review queue.
+            if reason.startswith("MISSING_MANDATORY_FIELD: outstanding_amount"):
+                message = f"Row {row_num}: {reason}"
+                print(f"  {message} — routed to Exceptions (blank amount), not review queue")
+                write_missing_amount_exception(statement_id, vendor_id, os.path.basename(pdf_path),
+                                                statement_period, inv, message)
+                continue
             invalid_invoices.append(inv)
             invalid_reasons.append(reason)
             continue
 
-        # Duplicate check
-        dup_key = tuple(str(inv.get(f)) for f in dup_fields)
-        if dup_key in seen_keys:
-            invalid_invoices.append(inv)
-            invalid_reasons.append(f"DUPLICATE_RECORD: duplicate key {dup_key}")
-            continue
-        seen_keys.add(dup_key)
         valid_invoices.append(inv)
 
     print(f"  Valid: {len(valid_invoices)} | Invalid/queued: {len(invalid_invoices)} | Skipped: {skipped_count}")

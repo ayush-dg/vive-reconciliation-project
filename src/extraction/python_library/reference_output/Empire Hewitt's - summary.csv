@@ -1,0 +1,13 @@
+Field,Value
+vendor_name,"EMPIRE AUTO PARTS, MA"
+vendor_address,61 Robert Treat Paine Drive
+vendor_city_state_zip,"Taunton, MA 02780"
+account_no,151697
+customer_name,VIVE HEWITT'S AUTO BODY
+billing_address,PO BOX 162
+billing_city_state_zip,"MECHANIC FALLS, ME 04256"
+region,WH243
+activity_through,07/31/26
+total_balance_printed,8568.00
+total_balance_computed_from_amount_column,"8,568.00"
+reconciles,True
