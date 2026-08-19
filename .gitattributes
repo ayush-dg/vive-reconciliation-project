@@ -1,0 +1,10 @@
+# Shell scripts must always check out with LF line endings, regardless of a
+# Windows checkout's core.autocrlf setting -- these run inside Linux
+# containers (see deploy/azure-app-service-demo/container-start.sh), where
+# a CRLF-terminated line breaks /bin/sh's parser (a trailing \r gets glued
+# onto the last token on the line, e.g. "then\r" is not recognized as the
+# "then" keyword) with a confusing "Syntax error: end of file unexpected"
+# far from the real cause. Discovered the hard way: this file had silently
+# picked up CRLF locally and it went unnoticed until a real container build
+# actually included it and crash-looped on startup.
+*.sh text eol=lf
