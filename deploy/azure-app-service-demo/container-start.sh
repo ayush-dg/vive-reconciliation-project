@@ -54,6 +54,15 @@ else
     python notebooks/00_setup_lakehouse_schema.py
 fi
 
+# One-time cleanup: stale job f7298ada-6bfb-49ca-9d63-f11676fbfb4c
+# (Fred Beans Lee's.pdf, FAILED, manually terminated during troubleshooting
+# on 2026-08-19 -- stuck in PROCESSING with no Bronze/Silver written after
+# an earlier container restart orphaned it). scripts/remove_job.py is
+# idempotent -- a no-op once this row is gone -- so this is safe to leave
+# running on every container start rather than needing a follow-up deploy
+# to remove it.
+python scripts/remove_job.py --job-id f7298ada-6bfb-49ca-9d63-f11676fbfb4c || true
+
 # exec so uvicorn replaces this shell as PID 1 instead of running as a
 # child of it -- correct signal handling for restarts/stop.
 exec python -m uvicorn web.app:app --host 0.0.0.0 --port 8000
