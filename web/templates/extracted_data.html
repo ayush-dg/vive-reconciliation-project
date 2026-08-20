@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Extracted Data{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="/jobs/history">← Job history</a>
+    <span>/</span>
+    <span style="color:var(--text);font-weight:500">{{ job.pdf_filename }}</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="section-header">
+  <div class="section-title">Extracted data ({{ rows | length }} rows)</div>
+</div>
+{% if rows %}
+<table class="table">
+  <thead>
+    <tr><th>Invoice</th><th>Charges</th><th>Credits</th><th>Amount due</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.invoice_number or "—" }}</td>
+      <td>{{ r.charges | money if r.charges is not none else "—" }}</td>
+      <td>{{ r.credits | money if r.credits is not none else "—" }}</td>
+      <td>{{ r.amount_due | money if r.amount_due is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">No extracted rows found for this job.</div>
+{% endif %}
+{% endblock %}

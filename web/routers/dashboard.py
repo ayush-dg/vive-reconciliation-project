@@ -20,7 +20,6 @@ def home(request: Request, user: str = Depends(require_login)):
     ctx = {
         "active_page": "home",
         "kpis": queries.get_kpis(),
-        "runs": queries.get_recent_runs(limit=10),
         "active_jobs": queries.get_active_jobs(),
         "recent_batches": queries.get_recent_completed_batches(limit=3),
         "dashboard_title": datetime.now().strftime("Dashboard — %B %Y"),

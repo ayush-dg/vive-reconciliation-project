@@ -63,6 +63,15 @@ fi
 # to remove it.
 python scripts/remove_job.py --job-id f7298ada-6bfb-49ca-9d63-f11676fbfb4c || true
 
+# One-time cleanup: failed job 3d9cf2bb-b99a-4a51-bc59-54f5ec9e3612
+# (Fred Beans Lee's (fix-verify-2-cachehit).pdf, FAILED with a genuine
+# FileNotFoundError -- sample_data/ has no volume mount in this Azure App
+# Service deployment (confirmed empty volumeMounts on the sitecontainer),
+# so an uploaded file only exists on the container instance that received
+# it; a restart between upload and worker pickup removes it before
+# processing can run). Same idempotent, no-op-once-gone pattern as above.
+python scripts/remove_job.py --job-id 3d9cf2bb-b99a-4a51-bc59-54f5ec9e3612 || true
+
 # exec so uvicorn replaces this shell as PID 1 instead of running as a
 # child of it -- correct signal handling for restarts/stop.
 exec python -m uvicorn web.app:app --host 0.0.0.0 --port 8000

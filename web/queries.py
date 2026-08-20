@@ -881,6 +881,50 @@ def get_job_history() -> list:
     return execute_query("SELECT * FROM jobs ORDER BY submitted_at DESC")
 
 
+def get_job_by_id(job_id: str):
+    rows = execute_query("SELECT * FROM jobs WHERE job_id = ?", [job_id])
+    return rows[0] if rows else None
+
+
+def get_extracted_rows_for_job(job_id: str) -> list:
+    """Plain extraction-only view for Job History's "View extracted data"
+    link -- deliberately reads only invoice_number/charges/credits/
+    amount_due, nothing about matching, ERP amounts, or exception status.
+
+    Combines Silver (rows that passed validation and reached
+    silver_reconciliation_standard) with the EXTRACTION_INCOMPLETE
+    gold_exceptions rows for the same statement_id -- rows intake raised
+    directly for a blank Charges value that never reaches Silver at all
+    (see notebooks/01_document_intake.py's write_skip_exception()/
+    write_missing_amount_exception()) -- so this shows every row the
+    extractor actually produced, not just the reconciliation-eligible
+    subset."""
+    job = get_job_by_id(job_id)
+    if not job or not job.get("statement_id"):
+        return []
+    statement_id = job["statement_id"]
+
+    silver_rows = execute_query(
+        """
+        SELECT invoice_number, charges, credits, amount_due
+        FROM silver_reconciliation_standard
+        WHERE statement_id = ? AND record_source = 'VENDOR_STATEMENT'
+        ORDER BY invoice_number
+        """,
+        [statement_id],
+    )
+    incomplete_rows = execute_query(
+        """
+        SELECT invoice_number, charges, credits, amount_due
+        FROM gold_exceptions
+        WHERE statement_id = ? AND exception_reason = 'EXTRACTION_INCOMPLETE'
+        ORDER BY invoice_number
+        """,
+        [statement_id],
+    )
+    return silver_rows + incomplete_rows
+
+
 # ---------------------------------------------------------------------------
 # Batches (Event Grid auto-intake grouping — see migrations/007 and
 # web/routers/intake_trigger.py, which stamps one batch_id per webhook

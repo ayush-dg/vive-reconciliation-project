@@ -4,10 +4,13 @@ jobs.py
 GET /jobs — current job queue status as JSON, polled by the home page's
 auto-refresh (see web/static/app.js) to decide whether to reload while
 jobs are still active. GET /jobs/history — every job ever submitted,
-completed and failed included.
+completed and failed included. GET /jobs/{job_id}/extracted — plain
+extraction-only view (invoice_number/charges/credits/amount_due) for one
+completed job, nothing about matching/reconciliation.
 """
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
 
 from web.deps import render, require_login, sidebar_context
 from web import queries
@@ -37,3 +40,17 @@ def jobs_history(request: Request, user: str = Depends(require_login)):
         **sidebar_context(request),
     }
     return render(request, "jobs_history.html", ctx)
+
+
+@router.get("/jobs/{job_id}/extracted")
+def job_extracted_data(job_id: str, request: Request, user: str = Depends(require_login)):
+    job = queries.get_job_by_id(job_id)
+    if not job or job.get("status") != "COMPLETED":
+        return RedirectResponse("/jobs/history", status_code=303)
+    ctx = {
+        "active_page": "upload",
+        "job": job,
+        "rows": queries.get_extracted_rows_for_job(job_id),
+        **sidebar_context(request),
+    }
+    return render(request, "extracted_data.html", ctx)

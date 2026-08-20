@@ -18,10 +18,8 @@
     <tr>
       <th>File</th>
       <th>Status</th>
-      <th>Vendor</th>
       <th>Submitted</th>
-      <th>Completed</th>
-      <th>Details</th>
+      <th></th>
     </tr>
   </thead>
   <tbody>
@@ -39,16 +37,12 @@
         <span class="badge neutral">Pending</span>
         {% endif %}
       </td>
+      <td style="color:var(--text-secondary)">{{ job.submitted_at | friendly_dt }}</td>
       <td>
-        {% if job.vendor_name %}
-        <a href="/exceptions/{{ job.vendor_name | urlname }}" class="link">{{ job.vendor_name }}</a>
-        {% else %}
-        <span style="color:var(--text-secondary)">—</span>
+        {% if job.status == 'COMPLETED' %}
+        <a href="/jobs/{{ job.job_id }}/extracted" class="link-arrow">View extracted data <svg class="icon"><use href="#i-arrow-right"/></svg></a>
         {% endif %}
       </td>
-      <td style="color:var(--text-secondary)">{{ job.submitted_at | friendly_dt }}</td>
-      <td style="color:var(--text-secondary)">{{ job.completed_at | friendly_dt if job.completed_at else "—" }}</td>
-      <td style="color:var(--danger);font-size:12px;max-width:320px">{{ job.error_message[:200] if job.error_message else "" }}</td>
     </tr>
     {% endfor %}
   </tbody>
