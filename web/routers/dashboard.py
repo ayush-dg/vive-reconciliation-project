@@ -21,6 +21,12 @@ def home(request: Request, user: str = Depends(require_login)):
         "active_page": "home",
         "kpis": queries.get_kpis(),
         "active_jobs": queries.get_active_jobs(),
+        # Deliberately not wired to queries.get_recent_runs() -- vendor-level
+        # reconciliation summaries are hidden for this extraction-focused
+        # demo phase (same intent as the Auto-reconciled/Open exceptions
+        # KPI placeholders above), even though gold_reconciliation_summary
+        # itself is still being populated normally by the matching engine.
+        "runs": [],
         "recent_batches": queries.get_recent_completed_batches(limit=3),
         "dashboard_title": datetime.now().strftime("Dashboard — %B %Y"),
         "current_month_label": datetime.now().strftime("%b %Y"),

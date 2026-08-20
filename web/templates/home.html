@@ -55,7 +55,7 @@
 <div class="panel">
   <div class="panel-head">
     <div>
-      <h2>Active jobs</h2>
+      <h2>Recent jobs</h2>
       <div class="sub">Currently processing on the background worker</div>
     </div>
     <a href="/jobs/history" class="link-arrow">Job history <svg class="icon"><use href="#i-arrow-right"/></svg></a>
@@ -128,5 +128,71 @@
   </table>
 </div>
 {% endif %}
+
+<div class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Reconciliation runs</h2>
+      <div class="sub">{{ current_month_label }} · most recent first</div>
+    </div>
+    <a href="/reports" class="link-arrow">View all reports <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+  </div>
+  {% if runs %}
+  <table>
+    <thead>
+      <tr>
+        <th>Vendor</th>
+        <th>Period</th>
+        <th>Invoices</th>
+        <th>Matched</th>
+        <th>Exceptions</th>
+        <th>Status</th>
+        <th>Completed</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td><div class="vendor-cell"><div class="vendor-chip">{{ run.vendor_name | initials }}</div><div class="vendor-name">{{ run.vendor_name }}</div></div></td>
+        <td style="color:var(--text-muted)">{{ run.statement_period | period_label }}</td>
+        <td class="mono">{{ run.total_invoice_count }}</td>
+        <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
+        <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'var(--warning)' }}">{{ run.exception_count }}</td>
+        <td>
+          {% if run.overall_status == 'RECONCILED' %}
+          <span class="badge badge-success"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
+          {% else %}
+          <span class="badge badge-warning"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>Exceptions</span>
+          {% endif %}
+        </td>
+        <td style="color:var(--text-muted)">{{ run.reconciliation_timestamp | friendly_dt }}</td>
+        <td>
+          <a href="/exceptions/{{ run.vendor_name | urlname }}" class="link-arrow">
+            {{ "View" if run.exception_count == 0 else "Review" }} <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th>Vendor</th>
+        <th>Period</th>
+        <th>Invoices</th>
+        <th>Matched</th>
+        <th>Exceptions</th>
+        <th>Status</th>
+        <th>Completed</th>
+        <th></th>
+      </tr>
+    </thead>
+  </table>
+  <div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
+  {% endif %}
+</div>
 
 {% endblock %}
