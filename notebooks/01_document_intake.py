@@ -408,6 +408,78 @@ def write_missing_amount_exception(statement_id: str, vendor_id: str, source_fil
         print(f"  Warning: failed to write EXTRACTION_INCOMPLETE exception to gold_exceptions ({e})")
 
 
+def copy_extraction_incomplete_exceptions(cached_statement_id: str, new_statement_id: str,
+                                           vendor_id: str, source_file: str, statement_period: str) -> int:
+    """
+    On a cache HIT, run_intake() re-derives Bronze/Silver for the new
+    statement_id from the cached run's Bronze rows (see normalize_to_silver()
+    call site below) -- but that only ever covers the rows that reached
+    Bronze in the first place. Rows write_skip_exception()/
+    write_missing_amount_exception() raised directly to gold_exceptions
+    (EXTRACTION_INCOMPLETE -- blank Charges, never reaching Bronze/Silver at
+    all) live ONLY under the cached run's original statement_id, and were
+    silently absent from every subsequent cache-hit run's totals until now.
+
+    Copies those rows forward to new_statement_id (fresh exception_id,
+    date_raised, statement_period/source_file matching this run -- same
+    fields normalize_to_silver() refreshes for the Bronze/Silver copy),
+    so a cache-hit run reports the exact same total its original extraction
+    did, with no manual step. Always OPEN on the copy, matching how every
+    other exception type is freshly (re)computed per statement_id -- this
+    mirrors run_matching()'s classify_match() output, not a carried-over
+    disposition from the original run.
+
+    Never raises — a logging failure must never block intake.
+    """
+    try:
+        rows = execute_query(
+            "SELECT * FROM gold_exceptions WHERE statement_id = ? AND exception_reason = 'EXTRACTION_INCOMPLETE'",
+            [cached_statement_id],
+        )
+    except Exception as e:
+        print(f"  Warning: failed to read cached EXTRACTION_INCOMPLETE exceptions ({e})")
+        return 0
+
+    now = datetime.now(timezone.utc).isoformat()
+    copied = 0
+    for row in rows:
+        try:
+            execute_sql(
+                """
+                INSERT INTO gold_exceptions (
+                    exception_id, vendor_id, invoice_number, statement_amount,
+                    erp_amount, match_status, exception_reason, exception_status,
+                    source_file, statement_id, date_raised, statement_period,
+                    ai_explanation, match_confidence, shop_owner,
+                    charges, credits, amount_due, transaction_code
+                ) VALUES (?, ?, ?, ?, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
+                          'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    str(uuid.uuid4()),
+                    vendor_id,
+                    row.get("invoice_number"),
+                    row.get("statement_amount"),
+                    source_file,
+                    new_statement_id,
+                    now,
+                    statement_period,
+                    row.get("ai_explanation"),
+                    row.get("match_confidence"),
+                    row.get("shop_owner"),
+                    row.get("charges"),
+                    row.get("credits"),
+                    row.get("amount_due"),
+                    row.get("transaction_code"),
+                ]
+            )
+            copied += 1
+        except Exception as e:
+            print(f"  Warning: failed to copy one EXTRACTION_INCOMPLETE exception forward ({e})")
+
+    return copied
+
+
 def write_to_review_queue(invalid_invoices: list, reasons: list,
                            statement_id: str, source_file: str, stage: str):
     """Write invalid records to the review queue.
@@ -816,11 +888,17 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Re-running Silver normalization...")
         silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id)
         print(f"  Silver: {silver_count} rows normalized.")
+        incomplete_count = copy_extraction_incomplete_exceptions(
+            cached_statement_id, statement_id, vendor_id,
+            os.path.basename(pdf_path), statement_period
+        )
+        print(f"  Copied {incomplete_count} EXTRACTION_INCOMPLETE exception(s) forward from the cached run.")
         return {
             "statement_id": statement_id,
             "cache_hit": True,
             "bronze_count": bronze_count,
             "silver_count": silver_count,
+            "extraction_incomplete_count": incomplete_count,
         }
 
     print(f"  Cache MISS — proceeding with extraction.")
