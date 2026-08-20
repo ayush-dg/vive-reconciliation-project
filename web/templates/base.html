@@ -42,14 +42,14 @@
     <div class="nav-group-label">Workspace</div>
     <a href="/" class="nav-item {{ 'active' if active_page == 'home' }}"><svg class="icon"><use href="#i-home"/></svg> Home</a>
     <a href="/upload" class="nav-item {{ 'active' if active_page == 'upload' }}"><svg class="icon"><use href="#i-upload"/></svg> Upload PDF</a>
-    <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
+    <div class="nav-item disabled"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
       {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
-    </a>
-    <a href="/review-queue" class="nav-item {{ 'active' if active_page == 'review_queue' }}"><svg class="icon"><use href="#i-folder"/></svg> Review queue
+    </div>
+    <div class="nav-item disabled"><svg class="icon"><use href="#i-folder"/></svg> Review queue
       {% if pending_review_count %}<div class="nav-dot"></div>{% endif %}
-    </a>
-    <a href="/reports" class="nav-item {{ 'active' if active_page == 'reports' }}"><svg class="icon"><use href="#i-file"/></svg> Reports</a>
-    <a href="/batches" class="nav-item {{ 'active' if active_page == 'batches' }}"><svg class="icon"><use href="#i-history"/></svg> Batches</a>
+    </div>
+    <div class="nav-item disabled"><svg class="icon"><use href="#i-file"/></svg> Reports</div>
+    <div class="nav-item disabled"><svg class="icon"><use href="#i-history"/></svg> Batches</div>
 
     <div class="nav-group-label">Admin</div>
     <a href="/users" class="nav-item {{ 'active' if active_page == 'users' }}"><svg class="icon"><use href="#i-users"/></svg> Users</a>
