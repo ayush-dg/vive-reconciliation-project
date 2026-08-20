@@ -51,7 +51,6 @@
 </div>
 {% endif %}
 
-{% if active_jobs %}
 <div class="panel">
   <div class="panel-head">
     <div>
@@ -60,6 +59,7 @@
     </div>
     <a href="/jobs/history" class="link-arrow">Job history <svg class="icon"><use href="#i-arrow-right"/></svg></a>
   </div>
+  {% if active_jobs %}
   <table class="table">
     <thead>
       <tr>
@@ -88,8 +88,20 @@
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Status</th>
+        <th>Submitted</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+  </table>
+  <div class="empty-state">No recent jobs — upload a statement to get started.</div>
+  {% endif %}
 </div>
-{% endif %}
 
 {% if recent_batches %}
 <div class="panel">
