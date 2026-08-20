@@ -121,6 +121,28 @@ def get_open_exceptions_count() -> int:
     return rows[0]["c"] or 0 if rows else 0
 
 
+def _live_total_invoice_count(statement_id: str) -> int:
+    """Live count of every invoice this statement produced (Matched +
+    Exceptions, any status) -- the same total the report detail page shows
+    (see get_statement_report()'s matched/exceptions arrays). Replaces
+    gold_reconciliation_summary's cached total_invoice_count, which goes
+    stale for the same reason exception_count does (see
+    _live_open_exception_count()'s docstring): run_matching() computes it
+    as len(stmt_rows) -- a count of Silver VENDOR_STATEMENT rows only --
+    before intake's write_missing_amount_exception()/write_skip_exception()
+    rows (raised straight to gold_exceptions, never reaching Silver) are
+    counted at all."""
+    rows = execute_query(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM gold_matched_invoices WHERE statement_id = ?) +
+            (SELECT COUNT(*) FROM gold_exceptions WHERE statement_id = ?) AS c
+        """,
+        [statement_id, statement_id],
+    )
+    return rows[0]["c"] or 0 if rows else 0
+
+
 def _live_open_exception_count(statement_id: str) -> int:
     """
     Live count of OPEN gold_exceptions rows for a statement — the same
@@ -145,9 +167,10 @@ def _live_open_exception_count(statement_id: str) -> int:
 
 
 def _with_live_exception_counts(rows: list) -> list:
-    """Overwrites exception_count/overall_status on each row (as returned
-    by a gold_reconciliation_summary query) with a live count — see
-    _live_open_exception_count(). overall_status only ever needs to
+    """Overwrites exception_count/overall_status/total_invoice_count on each
+    row (as returned by a gold_reconciliation_summary query) with live
+    counts — see _live_open_exception_count() and
+    _live_total_invoice_count(). overall_status only ever needs to
     distinguish RECONCILED from not here — every consumer template
     (home.html, reports.html) renders any non-RECONCILED value identically
     as a generic "Exceptions" badge."""
@@ -155,6 +178,7 @@ def _with_live_exception_counts(rows: list) -> list:
         count = _live_open_exception_count(row["statement_id"])
         row["exception_count"] = count
         row["overall_status"] = "RECONCILED" if count == 0 else "EXCEPTIONS_PRESENT"
+        row["total_invoice_count"] = _live_total_invoice_count(row["statement_id"])
     return rows
 
 
