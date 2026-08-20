@@ -72,6 +72,14 @@ python scripts/remove_job.py --job-id f7298ada-6bfb-49ca-9d63-f11676fbfb4c || tr
 # processing can run). Same idempotent, no-op-once-gone pattern as above.
 python scripts/remove_job.py --job-id 3d9cf2bb-b99a-4a51-bc59-54f5ec9e3612 || true
 
+# TEMPORARY, ONE-TIME ONLY -- unlike the two calls above, this is NOT safe
+# to leave permanently: it deletes every jobs-table row except one
+# specific job_id, and would keep deleting every future legitimate job
+# forever if left here. This line must be removed again in the very next
+# commit/deploy, right after confirming (via container logs) that this
+# ran successfully exactly once.
+python scripts/cleanup_job_history_for_demo.py || true
+
 # exec so uvicorn replaces this shell as PID 1 instead of running as a
 # child of it -- correct signal handling for restarts/stop.
 exec python -m uvicorn web.app:app --host 0.0.0.0 --port 8000
