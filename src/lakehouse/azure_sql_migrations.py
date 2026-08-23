@@ -357,20 +357,49 @@ COLUMNS = {
         ("batch_id", "ALTER TABLE jobs ADD batch_id NVARCHAR(36)"),
     ],
     "bronze_vendor_statement_raw": [
-        # Fred-Beans-only Python-library extraction path -- see
-        # notebooks/01_document_intake.py's _is_fred_beans_statement() and
-        # src/extraction/python_library/adapter.py. NULL for every other
-        # vendor's rows, which the AI extraction path never populates.
+        # Python-library extraction path (see
+        # notebooks/01_document_intake.py's _determine_extraction_route() and
+        # src/extraction/python_library/adapter.py) -- populated for every
+        # vendor routed through PythonLibraryExtractionEngine (adapter.py's
+        # _FIELD_MAP), NULL for any vendor still on the AI extraction path,
+        # which never populates these.
         ("raw_charges", "ALTER TABLE bronze_vendor_statement_raw ADD raw_charges NVARCHAR(MAX)"),
         ("raw_credits", "ALTER TABLE bronze_vendor_statement_raw ADD raw_credits NVARCHAR(MAX)"),
         ("raw_amount_due", "ALTER TABLE bronze_vendor_statement_raw ADD raw_amount_due NVARCHAR(MAX)"),
         ("raw_transaction_code", "ALTER TABLE bronze_vendor_statement_raw ADD raw_transaction_code NVARCHAR(MAX)"),
+        # migrations/011_add_version_tracking.sql (SQLite side of this same
+        # change) -- see notebooks/01_document_intake.py's
+        # resolve_version_info(). NOT applied to any Azure SQL database by
+        # this session; mirrored here only for schema parity, per this
+        # file's own convention (see the raw_charges group above for
+        # migration 010's precedent).
+        ("version_number", "ALTER TABLE bronze_vendor_statement_raw ADD version_number INT NOT NULL DEFAULT 1"),
+        ("previous_statement_id", "ALTER TABLE bronze_vendor_statement_raw ADD previous_statement_id NVARCHAR(MAX)"),
+        ("is_latest_version", "ALTER TABLE bronze_vendor_statement_raw ADD is_latest_version INT NOT NULL DEFAULT 1"),
+        # migrations/012_add_keystone_ledger_columns.sql (SQLite side of
+        # this same change) -- see src/extraction/python_library/adapter.py's
+        # "extract_keystone" _FIELD_MAP entry. NOT applied to any Azure SQL
+        # database by this session; mirrored here only for schema parity.
+        ("raw_balance_forward", "ALTER TABLE bronze_vendor_statement_raw ADD raw_balance_forward NVARCHAR(MAX)"),
+        ("raw_period_activity", "ALTER TABLE bronze_vendor_statement_raw ADD raw_period_activity NVARCHAR(MAX)"),
+        ("raw_credit_applied", "ALTER TABLE bronze_vendor_statement_raw ADD raw_credit_applied NVARCHAR(MAX)"),
+        ("raw_payment_applied", "ALTER TABLE bronze_vendor_statement_raw ADD raw_payment_applied NVARCHAR(MAX)"),
     ],
     "silver_reconciliation_standard": [
         ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),
         ("credits", "ALTER TABLE silver_reconciliation_standard ADD credits FLOAT"),
         ("amount_due", "ALTER TABLE silver_reconciliation_standard ADD amount_due FLOAT"),
         ("transaction_code", "ALTER TABLE silver_reconciliation_standard ADD transaction_code NVARCHAR(MAX)"),
+        # migrations/011_add_version_tracking.sql -- see the same note above.
+        ("version_number", "ALTER TABLE silver_reconciliation_standard ADD version_number INT NOT NULL DEFAULT 1"),
+        ("previous_statement_id", "ALTER TABLE silver_reconciliation_standard ADD previous_statement_id NVARCHAR(MAX)"),
+        ("is_latest_version", "ALTER TABLE silver_reconciliation_standard ADD is_latest_version INT NOT NULL DEFAULT 1"),
+    ],
+    "gold_reconciliation_summary": [
+        # migrations/011_add_version_tracking.sql -- see the same note above.
+        ("version_number", "ALTER TABLE gold_reconciliation_summary ADD version_number INT NOT NULL DEFAULT 1"),
+        ("previous_statement_id", "ALTER TABLE gold_reconciliation_summary ADD previous_statement_id NVARCHAR(MAX)"),
+        ("is_latest_version", "ALTER TABLE gold_reconciliation_summary ADD is_latest_version INT NOT NULL DEFAULT 1"),
     ],
     "gold_matched_invoices": [
         ("match_confidence", "ALTER TABLE gold_matched_invoices ADD match_confidence FLOAT"),

@@ -1,8 +1,9 @@
 {
   "_comment": "Provider-agnostic structural validation rules. Applied to every extracted invoice line regardless of which AI provider or pdfplumber produced it.",
-  "required_fields": ["invoice_number", "outstanding_amount"],
+  "_outstanding_amount_note": "outstanding_amount deliberately removed from required_fields 2026-08-23 (INV-04 amendment, see docs/INVARIANTS.md) -- a blank amount is no longer a reason to divert a row away from Bronze/Silver at extraction time. Whether a blank-amount row is a real exception is now the matching engine's decision (src/matching/engine.py), not extraction's.",
+  "required_fields": ["invoice_number"],
   "numeric_fields": ["amount", "outstanding_amount", "credit"],
   "date_fields": ["invoice_date", "due_date"],
-  "confidence_threshold": 0.90,
+  "confidence_threshold": 0.0,
   "duplicate_key_fields": ["invoice_number", "outstanding_amount"]
 }

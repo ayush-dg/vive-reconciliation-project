@@ -263,12 +263,15 @@ class TestDocumentUnderstandingEngine(unittest.TestCase):
         row = {"ro_number": "RO-123", "outstanding_amount": 100.0}
         self.assertEqual(intake.get_skip_reason(row), "")
 
-    def test_get_skip_reason_no_amount_at_all(self):
-        """A row with an invoice_number but no outstanding_amount, amount,
-        or credit has nothing to reconcile against — genuinely unusable."""
+    def test_get_skip_reason_no_amount_at_all_is_not_skipped(self):
+        """Removed 2026-08-23 (INV-04 amendment, see docs/INVARIANTS.md) --
+        a row with an invoice_number but no outstanding_amount, amount, or
+        credit still has an identifier and now proceeds to Bronze/Silver
+        like any other row. Whether it's a genuine exception is now the
+        matching engine's decision, not extraction's."""
         intake = self._load_intake_module()
         row = {"invoice_number": "INV-001"}
-        self.assertEqual(intake.get_skip_reason(row), "no amount found")
+        self.assertEqual(intake.get_skip_reason(row), "")
 
     def test_get_skip_reason_amount_present_is_not_skipped(self):
         intake = self._load_intake_module()

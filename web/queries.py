@@ -7,6 +7,7 @@ pipeline itself uses — see that module's docstring for the SQLite/Azure
 SQL abstraction). Routers stay thin; this module owns the SQL.
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -32,18 +33,33 @@ REASON_LABELS = {
 # Home / dashboard
 # ---------------------------------------------------------------------------
 
-# One row per vendor — their single latest run — via a GROUP BY subquery
-# joined back for the full row, rather than LIMIT-1-per-vendor tricks that
-# don't translate cleanly across the SQLite/Azure SQL backends. Every run
-# now has a vendor_name (the intake pipeline falls back to a filename-
-# derived name when extraction can't determine one — see
-# notebooks/01_document_intake.py), so there's no null-vendor case to
-# exclude here anymore.
-_LATEST_RUN_PER_VENDOR = """
-    SELECT vendor_name, MAX(reconciliation_timestamp) AS max_ts
-    FROM gold_reconciliation_summary
-    GROUP BY vendor_name
+# gold_reconciliation_summary is an append-only per-run snapshot -- it keeps
+# a row for every vendor that has EVER completed a run, including ones whose
+# jobs-table row has since been deleted (job cleanup scripts, e.g.
+# scripts/cleanup_job_history_for_demo.py, only ever touch `jobs` and
+# deliberately leave Gold alone). So it's scoped here to only the
+# statement_ids that still have a live row in `jobs`. The subquery is
+# DISTINCT so this join can't fan out and double-count if a statement_id
+# were ever referenced by more than one jobs row.
+_CURRENT_STATEMENT_IDS = """
+    SELECT DISTINCT statement_id
+    FROM jobs
+    WHERE statement_id IS NOT NULL
 """
+
+# "Which row is a vendor+period's current one" used to be inferred here via
+# a vendor_name + MAX(reconciliation_timestamp) heuristic
+# (_LATEST_RUN_PER_VENDOR, removed by migrations/011_add_version_tracking.sql's
+# change) -- fragile in both directions: an AI-extracted vendor_name that
+# varies slightly between two uploads of the same statement (e.g. "asTech"
+# vs. "asTech (Repairify, Inc.)") looked like two different vendors and got
+# double-counted, and it had no period awareness at all, so two genuinely
+# different periods for the same vendor could collapse to a single "latest"
+# row. gold_reconciliation_summary.is_latest_version is now set explicitly
+# and deterministically at intake time (notebooks/01_document_intake.py's
+# resolve_version_info(), keyed on vendor_id + statement_period, not
+# vendor_name) -- a plain `is_latest_version = 1` filter replaces the old
+# join everywhere below.
 
 
 def get_kpis() -> dict:
@@ -55,9 +71,8 @@ def get_kpis() -> dict:
             COALESCE(SUM(s.statement_total), 0) AS statement_total,
             COUNT(DISTINCT s.vendor_name) AS vendor_count
         FROM gold_reconciliation_summary s
-        INNER JOIN ({_LATEST_RUN_PER_VENDOR}) latest
-            ON s.vendor_name = latest.vendor_name
-            AND s.reconciliation_timestamp = latest.max_ts
+        INNER JOIN ({_CURRENT_STATEMENT_IDS}) live ON s.statement_id = live.statement_id
+        WHERE s.is_latest_version = 1
         """
     )[0]
     open_exceptions = get_open_exceptions_count()
@@ -74,6 +89,47 @@ def get_kpis() -> dict:
     }
 
 
+def get_kpi_debug_state() -> dict:
+    """TEMPORARY diagnostic (added 2026-08-20 to investigate the Total
+    invoices/Statement total KPI cards showing 156 instead of the expected
+    273) -- read-only, no writes. Dumps every input get_kpis() actually
+    computes from, raw, so the exact live production state can be
+    inspected directly instead of inferred from rendered HTML pages.
+    Remove once the investigation is closed."""
+    jobs = execute_query(
+        "SELECT job_id, pdf_filename, status, vendor_name, statement_id, submitted_at, completed_at "
+        "FROM jobs ORDER BY submitted_at DESC"
+    )
+    job_statement_ids = [j["statement_id"] for j in jobs if j["statement_id"]]
+    gold_rows_for_jobs = []
+    if job_statement_ids:
+        placeholders = ", ".join("?" for _ in job_statement_ids)
+        gold_rows_for_jobs = execute_query(
+            f"""
+            SELECT statement_id, vendor_name, total_invoice_count, matched_count,
+                   exception_count, statement_total, reconciliation_timestamp,
+                   version_number, previous_statement_id, is_latest_version
+            FROM gold_reconciliation_summary
+            WHERE statement_id IN ({placeholders})
+            ORDER BY reconciliation_timestamp DESC
+            """,
+            job_statement_ids,
+        )
+    latest_versions = execute_query(
+        """
+        SELECT vendor_id, vendor_name, statement_period, statement_id, version_number
+        FROM gold_reconciliation_summary
+        WHERE is_latest_version = 1
+        """
+    )
+    return {
+        "jobs": jobs,
+        "gold_reconciliation_summary_rows_for_current_jobs": gold_rows_for_jobs,
+        "latest_version_rows": latest_versions,
+        "get_kpis_result": get_kpis(),
+    }
+
+
 def get_recent_runs(limit: int = 10) -> list:
     # The pipeline's SQLite->Azure SQL translator (see src/lakehouse/connection.py)
     # only rewrites a trailing "LIMIT <digit>" literal, not a bound "LIMIT ?"
@@ -84,9 +140,7 @@ def get_recent_runs(limit: int = 10) -> list:
         SELECT s.statement_id, s.vendor_name, s.statement_period, s.total_invoice_count,
                s.matched_count, s.exception_count, s.overall_status, s.reconciliation_timestamp
         FROM gold_reconciliation_summary s
-        INNER JOIN ({_LATEST_RUN_PER_VENDOR}) latest
-            ON s.vendor_name = latest.vendor_name
-            AND s.reconciliation_timestamp = latest.max_ts
+        WHERE s.is_latest_version = 1
         ORDER BY s.reconciliation_timestamp DESC
         LIMIT {limit}
         """
@@ -96,26 +150,25 @@ def get_recent_runs(limit: int = 10) -> list:
 
 def get_open_exceptions_count() -> int:
     """
-    Live count of OPEN gold_exceptions rows, scoped to each vendor's LATEST
-    statement_id only (same _LATEST_RUN_PER_VENDOR scoping get_kpis()/
-    get_recent_runs() already use) — a flat, unscoped COUNT(*) here would
-    also pick up exceptions still OPEN on a superseded run of the same
-    vendor/period (e.g. a statement re-run several times while debugging a
-    cache/connectivity issue, producing multiple statement_ids), which the
-    recent-runs table correctly excludes. Without this scoping, this KPI
-    and the table's per-row exception_count (see _with_live_exception_counts())
-    disagree — the whole point of both is to describe the same "open
-    exceptions right now" state.
+    Live count of OPEN gold_exceptions rows, scoped to each vendor+period's
+    latest version only (gold_reconciliation_summary.is_latest_version,
+    same scoping get_kpis()/get_recent_runs() already use) — a flat,
+    unscoped COUNT(*) here would also pick up exceptions still OPEN on a
+    superseded version of the same vendor/period (e.g. a statement
+    re-uploaded after a correction, or re-run several times while
+    debugging a cache/connectivity issue, producing multiple
+    statement_ids), which the recent-runs table correctly excludes.
+    Without this scoping, this KPI and the table's per-row
+    exception_count (see _with_live_exception_counts()) disagree — the
+    whole point of both is to describe the same "open exceptions right
+    now" state.
     """
     rows = execute_query(
-        f"""
+        """
         SELECT COUNT(*) AS c
         FROM gold_exceptions ge
         INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
-        INNER JOIN ({_LATEST_RUN_PER_VENDOR}) latest
-            ON s.vendor_name = latest.vendor_name
-            AND s.reconciliation_timestamp = latest.max_ts
-        WHERE ge.exception_status = 'OPEN'
+        WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
         """
     )
     return rows[0]["c"] or 0 if rows else 0
@@ -129,9 +182,10 @@ def _live_total_invoice_count(statement_id: str) -> int:
     stale for the same reason exception_count does (see
     _live_open_exception_count()'s docstring): run_matching() computes it
     as len(stmt_rows) -- a count of Silver VENDOR_STATEMENT rows only --
-    before intake's write_missing_amount_exception()/write_skip_exception()
-    rows (raised straight to gold_exceptions, never reaching Silver) are
-    counted at all."""
+    before intake's write_skip_exception() rows (raised straight to
+    gold_exceptions for a row with no invoice identifier at all, never
+    reaching Silver -- see notebooks/01_document_intake.py's
+    get_skip_reason()) are counted at all."""
     rows = execute_query(
         """
         SELECT
@@ -190,6 +244,17 @@ def get_vendor_summaries() -> list:
     """One row per vendor: their most recent reconciliation run, plus a
     breakdown of open-exception reasons for that run's footer note.
 
+    Still collapses to one card per vendor_name (this page's detail route,
+    get_vendor_latest_statement(), looks a vendor up by vendor_name alone
+    -- making this list period-aware without also changing that lookup
+    would let two cards for the same vendor point at the same single
+    detail page, a worse inconsistency than the one being fixed here).
+    What changed: is_latest_version = 1 is applied FIRST, so a superseded
+    duplicate upload (same vendor_id + statement_period re-uploaded --
+    see migrations/011_add_version_tracking.sql) is excluded before the
+    "most recent wins" collapse runs, instead of being able to win that
+    collapse and silently stand in for the version it actually supersedes.
+
     Also includes "exceptions-only" vendors: ones with OPEN gold_exceptions
     rows raised against a statement_id that never got a
     gold_reconciliation_summary row at all -- e.g. a review-queue row
@@ -204,6 +269,7 @@ def get_vendor_summaries() -> list:
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
         FROM gold_reconciliation_summary
+        WHERE is_latest_version = 1
         ORDER BY reconciliation_timestamp ASC
         """
     )
@@ -304,12 +370,17 @@ def _vendor_name_from_source_file(source_file: str) -> str:
 # ---------------------------------------------------------------------------
 
 def get_vendor_latest_statement(vendor_name: str):
+    # is_latest_version = 1 (migrations/011_add_version_tracking.sql) so a
+    # superseded duplicate upload can never win this lookup just because
+    # someone re-ran matching on its old statement_id after the fact and
+    # bumped its reconciliation_timestamp -- see get_vendor_summaries()'s
+    # docstring for the same reasoning applied to the vendor card list.
     rows = execute_query(
         """
         SELECT statement_id, vendor_name, statement_period, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status
         FROM gold_reconciliation_summary
-        WHERE vendor_name = ?
+        WHERE vendor_name = ? AND is_latest_version = 1
         ORDER BY reconciliation_timestamp DESC
         LIMIT 1
         """,
@@ -886,43 +957,87 @@ def get_job_by_id(job_id: str):
     return rows[0] if rows else None
 
 
-def get_extracted_rows_for_job(job_id: str) -> list:
-    """Plain extraction-only view for Job History's "View extracted data"
-    link -- deliberately reads only invoice_number/charges/credits/
-    amount_due, nothing about matching, ERP amounts, or exception status.
+def _resolve_bronze_statement_id(job: dict) -> str:
+    """Finds the statement_id that actually holds this job's Bronze rows.
 
-    Combines Silver (rows that passed validation and reached
-    silver_reconciliation_standard) with the EXTRACTION_INCOMPLETE
-    gold_exceptions rows for the same statement_id -- rows intake raised
-    directly for a blank Charges value that never reaches Silver at all
-    (see notebooks/01_document_intake.py's write_skip_exception()/
-    write_missing_amount_exception()) -- so this shows every row the
-    extractor actually produced, not just the reconciliation-eligible
-    subset."""
+    On a normal (cache-miss) run, that's just job["statement_id"] --
+    write_to_bronze() wrote directly under it. But on a cache HIT,
+    notebooks/01_document_intake.py's check_cache() means Bronze is never
+    rewritten under the new statement_id at all; it stays permanently
+    under whichever statement_id *first* extracted this exact file (see
+    run_intake()'s cache-hit branch). So a job's own statement_id can
+    legitimately have zero Bronze rows even though the file was
+    successfully processed.
+
+    Resolves this the same way run_intake() itself would on a fresh
+    upload of this file: re-hash job["pdf_path"] (uploads are saved
+    permanently to SAMPLE_DATA_DIR and never cleaned up -- see
+    web/routers/upload.py -- so the file reliably still exists) and look
+    up extraction_cache for the most recent successful (row_count > 0)
+    entry for that hash, mirroring notebooks/01_document_intake.py's
+    check_cache() query exactly. Falls back to job["statement_id"]
+    unchanged if the file is missing or no cache entry is found -- a
+    safe degradation (an empty/short result) rather than an error."""
+    statement_id = job["statement_id"]
+
+    direct_count = execute_query(
+        "SELECT COUNT(*) AS c FROM bronze_vendor_statement_raw WHERE statement_id = ?",
+        [statement_id],
+    )
+    if direct_count and direct_count[0]["c"] > 0:
+        return statement_id
+
+    pdf_path = job.get("pdf_path")
+    if not pdf_path or not os.path.exists(pdf_path):
+        return statement_id
+
+    try:
+        with open(pdf_path, "rb") as f:
+            document_hash = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return statement_id
+
+    cached_rows = execute_query_fabric(
+        """
+        SELECT statement_id, ingestion_timestamp FROM extraction_cache
+        WHERE document_hash = ? AND row_count > 0
+        ORDER BY ingestion_timestamp DESC
+        """,
+        [document_hash],
+    )
+    return cached_rows[0]["statement_id"] if cached_rows else statement_id
+
+
+def get_extracted_rows_for_job(job_id: str) -> list:
+    """The true raw extraction for Job History's "View extracted data"
+    link, read directly from bronze_vendor_statement_raw -- every row and
+    column the extractor produced, nothing filtered, merged, or dropped
+    (unlike the old Silver+EXTRACTION_INCOMPLETE union this replaced,
+    which could show MORE than Bronze for a statement with skipped rows,
+    or FEWER on a cache-hit statement whose Bronze rows live under a
+    different, earlier statement_id -- see _resolve_bronze_statement_id()).
+
+    Column names are kept as invoice_number/charges/credits/amount_due
+    (aliased from Bronze's raw_-prefixed columns) so extracted_data.html
+    doesn't need to change."""
     job = get_job_by_id(job_id)
     if not job or not job.get("statement_id"):
         return []
-    statement_id = job["statement_id"]
+    statement_id = _resolve_bronze_statement_id(job)
 
-    silver_rows = execute_query(
+    return execute_query(
         """
-        SELECT invoice_number, charges, credits, amount_due
-        FROM silver_reconciliation_standard
-        WHERE statement_id = ? AND record_source = 'VENDOR_STATEMENT'
-        ORDER BY invoice_number
+        SELECT
+            raw_invoice_number AS invoice_number,
+            raw_charges AS charges,
+            raw_credits AS credits,
+            raw_amount_due AS amount_due
+        FROM bronze_vendor_statement_raw
+        WHERE statement_id = ?
+        ORDER BY page_number, row_number
         """,
         [statement_id],
     )
-    incomplete_rows = execute_query(
-        """
-        SELECT invoice_number, charges, credits, amount_due
-        FROM gold_exceptions
-        WHERE statement_id = ? AND exception_reason = 'EXTRACTION_INCOMPLETE'
-        ORDER BY invoice_number
-        """,
-        [statement_id],
-    )
-    return silver_rows + incomplete_rows
 
 
 # ---------------------------------------------------------------------------

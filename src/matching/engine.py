@@ -425,8 +425,9 @@ def run_matching(statement_id: str,
             summary_id, vendor_id, vendor_name, shop, statement_period,
             statement_id, statement_total, erp_total, difference,
             total_invoice_count, matched_count, exception_count,
-            match_percentage, overall_status, reconciliation_timestamp, erp_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            match_percentage, overall_status, reconciliation_timestamp, erp_version,
+            version_number, previous_statement_id, is_latest_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             summary_id,
@@ -445,6 +446,16 @@ def run_matching(statement_id: str,
             overall_status,
             now,
             erp_version,
+            # run_matching() never decides duplicate/version status itself
+            # (see migrations/011_add_version_tracking.sql) -- it just
+            # copies forward whatever notebooks/01_document_intake.py's
+            # resolve_version_info() already stamped on the Silver rows
+            # this summary is computed from, so a standalone re-run of
+            # matching (see notebooks/03_run_matching.py) can't silently
+            # flip a superseded statement back to "latest".
+            vendor_row.get("version_number", 1),
+            vendor_row.get("previous_statement_id"),
+            vendor_row.get("is_latest_version", 1),
         ]
     )
 

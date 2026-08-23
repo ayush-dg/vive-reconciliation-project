@@ -3,7 +3,7 @@ tests/test_web_queries.py
 
 Tests for web/queries.py's vendor-list-summary functions
 (get_vendor_summaries, get_recent_runs, get_all_runs) against a real
-in-memory SQLite DB built from migrations/001_initial_schema.sql. No mocks
+in-memory SQLite DB with the full migration history applied. No mocks
 of the query layer itself -- these exercise real SQL, so a regression in
 the query text is actually caught.
 
@@ -28,14 +28,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from web import queries
 from src.lakehouse.migrations import apply_pending_migrations
 
-SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "migrations", "001_initial_schema.sql")
-
-
 def _make_db():
+    # Full migration history (not just 001_initial_schema.sql) -- as of
+    # migrations/011_add_version_tracking.sql, web/queries.py's
+    # get_vendor_summaries()/get_recent_runs()/get_open_exceptions_count()/
+    # get_kpis() all read gold_reconciliation_summary.is_latest_version,
+    # which only exists once 011 has been applied. Matches _make_jobs_db()'s
+    # existing precedent below.
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    with open(SCHEMA_PATH) as f:
-        conn.executescript(f.read())
+    apply_pending_migrations(conn)
     return conn
 
 
@@ -56,18 +58,18 @@ def _wire_fake_backend(conn):
 
 
 def _insert_summary(execute_sql, *, statement_id, vendor_name, exception_count, overall_status,
-                     reconciliation_timestamp):
+                     reconciliation_timestamp, is_latest_version=1):
     execute_sql(
         """
         INSERT INTO gold_reconciliation_summary (
             summary_id, vendor_id, vendor_name, statement_period, statement_id,
             statement_total, erp_total, difference, total_invoice_count,
             matched_count, exception_count, match_percentage, overall_status,
-            reconciliation_timestamp, erp_version
-        ) VALUES (?, ?, ?, '2026-05', ?, 1000.0, 1000.0, 0.0, 10, 10, ?, 100.0, ?, ?, 1)
+            reconciliation_timestamp, erp_version, is_latest_version
+        ) VALUES (?, ?, ?, '2026-05', ?, 1000.0, 1000.0, 0.0, 10, 10, ?, 100.0, ?, ?, 1, ?)
         """,
         [f"SUM-{statement_id}", vendor_name.upper(), vendor_name, statement_id,
-         exception_count, overall_status, reconciliation_timestamp],
+         exception_count, overall_status, reconciliation_timestamp, is_latest_version],
     )
 
 
@@ -207,7 +209,16 @@ class TestOpenExceptionsCountScopedToLatestRunPerVendor(unittest.TestCase):
     up -- matching's DELETE FROM gold_exceptions is scoped to the
     statement_id it's currently processing, not older ones). Only the
     latest statement_id's exceptions should count toward the KPI, exactly
-    like get_recent_runs()/get_vendor_summaries() already scope to it."""
+    like get_recent_runs()/get_vendor_summaries() already scope to it.
+
+    is_latest_version is set explicitly on each row here (1 for the
+    latest, 0 for the two superseded ones) rather than inferred from
+    reconciliation_timestamp order -- as of
+    migrations/011_add_version_tracking.sql, that's how
+    notebooks/01_document_intake.py's resolve_version_info() actually
+    decides this in production (see that function's docstring for why it
+    replaced the old vendor_name + MAX(timestamp) heuristic this test
+    used to rely on implicitly)."""
 
     def setUp(self):
         self.conn = _make_db()
@@ -227,12 +238,12 @@ class TestOpenExceptionsCountScopedToLatestRunPerVendor(unittest.TestCase):
         _insert_summary(
             execute_sql, statement_id="STMT-EARLIEST", vendor_name="Enterprise Reconciliation Register",
             exception_count=2, overall_status="MINOR_EXCEPTIONS",
-            reconciliation_timestamp="2026-05-01T00:00:00+00:00",
+            reconciliation_timestamp="2026-05-01T00:00:00+00:00", is_latest_version=0,
         )
         _insert_summary(
             execute_sql, statement_id="STMT-833A23C0", vendor_name="Enterprise Reconciliation Register",
             exception_count=3, overall_status="MINOR_EXCEPTIONS",
-            reconciliation_timestamp="2026-05-01T01:00:00+00:00",
+            reconciliation_timestamp="2026-05-01T01:00:00+00:00", is_latest_version=0,
         )
         _insert_summary(
             execute_sql, statement_id="STMT-7A290260", vendor_name="Enterprise Reconciliation Register",

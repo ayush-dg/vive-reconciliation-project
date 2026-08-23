@@ -12,8 +12,9 @@ What it does:
     1. Checks extraction cache (skip AI if already processed)
     2. Extracts PDF text with pdfplumber
     3. Calls Document Understanding Engine (Azure Claude Sonnet 4.6 → pdfplumber/OCR)
-       -- except Fred Beans Parts statements, routed to a deterministic
-       Python-library extractor instead (see _is_fred_beans_statement()).
+       -- except text-embedded PDFs matching a known Python-library vendor
+       signature, routed to a deterministic pdfplumber extractor instead
+       (see _determine_extraction_route()).
     4. Validates extracted invoices
     5. Writes valid invoices to bronze_vendor_statement_raw
     6. Normalizes to silver_reconciliation_standard
@@ -57,13 +58,15 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.ai.document_understanding_engine import (
     CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
 )
-# Fred-Beans-only: a deterministic pdfplumber extractor, used in place of
-# DocumentUnderstandingEngine for exactly one vendor (see
-# _is_fred_beans_statement() below). Every other vendor's routing/behavior
-# is completely unchanged -- see src/extraction/python_library/adapter.py's
-# docstring for scope.
-from src.extraction.python_library.adapter import PythonLibraryExtractionEngine
-from src.extraction.python_library.extract_statement import VENDOR_SIGNATURE as FRED_BEANS_SIGNATURE
+# A deterministic pdfplumber extractor, used in place of
+# DocumentUnderstandingEngine for text-embedded PDFs matching the known
+# vendors listed in src/extraction/python_library/adapter.py's _FIELD_MAP
+# (see _determine_extraction_route() below). Any scanned PDF, any vendor
+# not in that map, or a detection failure all take the existing
+# DocumentUnderstandingEngine path.
+from src.extraction.python_library.adapter import (
+    PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
+)
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
@@ -78,38 +81,125 @@ def compute_file_hash(pdf_path: str) -> str:
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def _is_fred_beans_statement(pdf_path: str) -> bool:
-    """
-    True only for a real Fred Beans Parts statement — gates which vendors
-    get routed to PythonLibraryExtractionEngine instead of
-    DocumentUnderstandingEngine (Claude Sonnet). Every other vendor must
-    see zero behavior change, so this deliberately does NOT reuse
-    extract_all.py's full detect_vendor() dispatch: that function OCRs
-    page 1 (via ocr_embed.py/fitz/pytesseract) whenever a page has little
-    embedded text, to identify vendors whose statements are scanned (e.g.
-    KSI). Running that OCR pass here, on every upload, just to answer
-    "is this Fred Beans or not", would add new latency and a new failure
-    surface to every OTHER vendor's upload too — exactly what this gate
-    must not do. Fred Beans Parts statements are confirmed to carry real
-    embedded text (see extract_statement.py's module docstring), so a
-    plain pdfplumber text check is sufficient and reliable for this one
-    vendor, with no OCR involved at all.
+# Same near-zero-extractable-text heuristic tested against every real PDF
+# available in this project (43/44 correct, the one miss being a corrupt
+# test file that couldn't be opened as a PDF at all) -- see
+# _classify_pdf()'s docstring.
+PDF_TYPE_CHECK_PAGES = 3
+PDF_TYPE_CHAR_THRESHOLD = 20
 
-    Any error here (corrupt/unreadable PDF, missing dependency, etc.) is
-    swallowed and returns False — detection failure must always fall back
-    to the existing AI path, never block or crash intake.
+
+def _classify_pdf(pdf_path: str):
+    """
+    Classifies pdf_path as "text_embedded" or "scanned" -- near-zero
+    extractable text (avg < PDF_TYPE_CHAR_THRESHOLD chars/page) across the
+    first PDF_TYPE_CHECK_PAGES pages means scanned -- and separately scans
+    ALL pages for a known python-library vendor signature (adapter.py's
+    ROUTABLE_VENDOR_SIGNATURES), in the same single pdfplumber pass (no
+    second file open, no OCR either way).
+
+    Returns (pdf_type, matched_vendor_signature_or_None). pdf_type is
+    "unknown" if the PDF couldn't even be opened (corrupt file, missing
+    dependency, etc.) -- see _determine_extraction_route()'s docstring for
+    why "unknown" is routed exactly like "scanned" (both go to AI): AI
+    vision handles any PDF format identically, so a detection failure has
+    a safe, non-blocking default, the same "any error -> fall back to AI"
+    guarantee the old _is_python_library_vendor() gate made.
     """
     try:
         import pdfplumber
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            total_chars = 0
+            pages_checked = 0
+            matched_vendor = None
+            for i, page in enumerate(pdf.pages):
                 text = page.extract_text() or ""
-                if any(sig in text for sig in FRED_BEANS_SIGNATURE):
-                    return True
-        return False
+                if i < PDF_TYPE_CHECK_PAGES:
+                    total_chars += len(text.strip())
+                    pages_checked += 1
+                if matched_vendor is None:
+                    for sig in ROUTABLE_VENDOR_SIGNATURES:
+                        if sig in text:
+                            matched_vendor = sig
+                            break
+            avg_chars = total_chars / max(pages_checked, 1)
+            pdf_type = "scanned" if avg_chars < PDF_TYPE_CHAR_THRESHOLD else "text_embedded"
+            return pdf_type, matched_vendor
     except Exception as e:
-        print(f"  Warning: Fred Beans vendor detection failed ({e}) — falling back to AI extraction.")
-        return False
+        print(f"  Warning: PDF type/vendor detection failed ({e}) — treating as unknown, routing to AI extraction.")
+        return "unknown", None
+
+
+def _determine_extraction_route(pdf_path: str) -> dict:
+    """
+    Decides which extraction engine handles pdf_path, based on BOTH
+    whether it's actually text-embedded or scanned AND whether it matches
+    a known python-library vendor signature -- not vendor identity alone.
+
+    [CORRECTED from the prior _is_python_library_vendor() gate, which
+    routed purely by vendor-signature match. That happened to work for
+    "a known vendor's statement is sometimes scanned" (the signature check
+    naturally fails against a scanned page's empty text, so it already
+    fell through to AI) -- but it never explicitly classified scanned vs.
+    text-embedded for its own sake, so a text-embedded PDF from a vendor
+    we've never seen before and a scanned PDF from a vendor we've never
+    seen before were indistinguishable: both just "not a known vendor
+    signature". This function makes that classification explicit and
+    general, so every future PDF -- known vendor or a vendor never seen
+    before -- gets a reasoned routing decision, per direct instruction.]
+
+    Three cases:
+    1. Text-embedded AND matches a known python-library vendor signature
+       -> deterministic pdfplumber (PythonLibraryExtractionEngine). Same
+       outcome as the old gate's one working case -- zero regression.
+    2. Text-embedded but matches NO known vendor signature -- a genuinely
+       new vendor. pdfplumber has no generic column-position parser for
+       an unseen layout (extract_all.py's own docstring: a generic
+       pdfplumber table-strategy pass was tried and rejected -- layouts
+       differ too much for one heuristic to cover safely). Routed to AI
+       for now, the only engine that can currently handle an arbitrary
+       layout -- but explicitly logged AND tagged into
+       schema_result["warnings"] (which lands in document_intake_log, not
+       just stdout), so this is visibly a NEW VENDOR case rather than
+       silently looking identical to an ordinary AI-routed scanned
+       document. It's a visible signal a dedicated extract_<vendor>.py
+       module could be built for, not a permanent routing decision.
+    3. Scanned (known vendor, new vendor, or detection failed/unknown) ->
+       AI vision, which handles any PDF format identically regardless of
+       what's underneath (see document_understanding_engine.py).
+
+    Returns {"engine": "python_library"|"ai", "pdf_type": str,
+    "matched_vendor": str|None, "reason": str, "new_vendor_warning": str|None}.
+    """
+    pdf_type, matched_vendor = _classify_pdf(pdf_path)
+
+    if pdf_type == "text_embedded" and matched_vendor:
+        return {
+            "engine": "python_library", "pdf_type": pdf_type, "matched_vendor": matched_vendor,
+            "reason": f"text-embedded, matches known vendor signature {matched_vendor!r}",
+            "new_vendor_warning": None,
+        }
+
+    if pdf_type == "text_embedded":
+        warning = (
+            "NEW VENDOR: this PDF has real embedded text but does not match any "
+            "known python-library vendor signature — pdfplumber has no generic "
+            "parser for an unseen layout, so this was routed to AI extraction "
+            "instead. Consider adding a dedicated extract_<vendor>.py module for "
+            "this vendor (see extract_astech.py for the simplest template)."
+        )
+        print(f"  {warning}")
+        return {
+            "engine": "ai", "pdf_type": pdf_type, "matched_vendor": None,
+            "reason": "text-embedded but no known vendor signature matched — no generic pdfplumber parser available",
+            "new_vendor_warning": warning,
+        }
+
+    return {
+        "engine": "ai", "pdf_type": pdf_type, "matched_vendor": matched_vendor,
+        "reason": f"{pdf_type} PDF — AI vision handles any format",
+        "new_vendor_warning": None,
+    }
 
 
 def check_cache(document_hash: str):
@@ -174,11 +264,19 @@ def validate_invoice(invoice: dict, rules: dict):
 
 
 def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
-                    pdf_path: str, statement_period: str, vendor_id: str) -> int:
+                    pdf_path: str, statement_period: str, vendor_id: str,
+                    version_info: dict = None) -> int:
     """
     Write validated invoice rows to bronze_vendor_statement_raw.
     Returns count of rows written.
+
+    version_info (see resolve_version_info()) carries
+    version_number/previous_statement_id/is_latest_version -- defaults to
+    a fresh version 1 when not supplied (e.g. an existing caller that
+    hasn't been updated), matching migrations/011_add_version_tracking.sql's
+    column defaults.
     """
+    version_info = version_info or {"version_number": 1, "previous_statement_id": None, "is_latest_version": 1}
     now = datetime.now(timezone.utc).isoformat()
     source_file = os.path.basename(pdf_path)
     vendor_name = schema_result.get("vendor_metadata", {}).get("vendor_name")
@@ -203,8 +301,10 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
                 raw_po_number, raw_work_order_number, raw_description,
                 raw_credit, raw_shop_name, raw_currency,
                 extraction_confidence, extraction_model, raw_ai_response,
-                raw_charges, raw_credits, raw_amount_due, raw_transaction_code
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                raw_charges, raw_credits, raw_amount_due, raw_transaction_code,
+                raw_balance_forward, raw_period_activity, raw_credit_applied, raw_payment_applied,
+                version_number, previous_statement_id, is_latest_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 vendor_id,
@@ -229,14 +329,32 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
                 schema_result.get("statement_metadata", {}).get("currency"),
                 inv.get("line_confidence"),
                 f"{provider_used}/{model_used}",
-                None,  # don't store full AI response in every row
+                # This row's own raw dynamic-column dict exactly as the AI
+                # returned it, before column-mapping collapsed it to this
+                # fixed schema (see ClaudeSonnetClient._row_to_invoice()'s
+                # "_raw_row") -- lets a future re-mapping recover from a
+                # mapping gap without re-calling the AI. None for
+                # python-library (pdfplumber) rows, which carry no such key.
+                json.dumps(inv["_raw_row"]) if inv.get("_raw_row") is not None else None,
                 # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
-                # -- NULL for every existing/AI-extraction row, since those
-                # invoice dicts never carry these keys.
+                # -- NULL when this vendor's document has no such column at
+                # all (e.g. KSI's single amount column); populated when the
+                # source column genuinely exists, for both extraction paths.
                 str(inv["charges"]) if inv.get("charges") is not None else None,
                 str(inv["credits"]) if inv.get("credits") is not None else None,
                 str(inv["amount_due"]) if inv.get("amount_due") is not None else None,
                 inv.get("transaction_code"),
+                # Keystone-only ledger fields (migrations/012_add_keystone_ledger_columns.sql)
+                # -- NULL for every other vendor, which never populates
+                # these keys at all (see adapter.py's "extract_keystone"
+                # _FIELD_MAP entry's passthrough_fields).
+                str(inv["balance_forward"]) if inv.get("balance_forward") is not None else None,
+                str(inv["period_activity"]) if inv.get("period_activity") is not None else None,
+                str(inv["credit_applied"]) if inv.get("credit_applied") is not None else None,
+                str(inv["payment_applied"]) if inv.get("payment_applied") is not None else None,
+                version_info["version_number"],
+                version_info["previous_statement_id"],
+                version_info["is_latest_version"],
             ]
         )
         count += 1
@@ -247,11 +365,18 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
 def get_skip_reason(invoice: dict) -> str:
     """
     A row is genuinely unusable — not just low-confidence — when it has
-    neither an invoice identifier nor any amount at all. Returns a skip
-    reason string for such rows, or "" if the row should proceed to
-    normal validation (validate_invoice), which may still route it to the
-    review queue for other reasons (missing a single required field,
-    low confidence, etc).
+    no invoice identifier at all (neither invoice_number nor ro_number),
+    since there's then no way to even reference which invoice this row
+    is. Returns a skip reason string for such rows, or "" if the row
+    should proceed to normal validation (validate_invoice), which may
+    still route it to the review queue for other reasons (low
+    confidence, bad field type, etc).
+
+    A blank amount alone is deliberately NOT treated as unusable here —
+    removed 2026-08-23 (INV-04 amendment, see docs/INVARIANTS.md). Every
+    extracted row, blank amount included, must still reach Bronze/Silver;
+    whether it's a real exception is now the matching engine's decision
+    (src/matching/engine.py), not extraction's.
     """
     def has_value(field):
         val = invoice.get(field)
@@ -259,9 +384,6 @@ def get_skip_reason(invoice: dict) -> str:
 
     if not has_value("invoice_number") and not has_value("ro_number"):
         return "no invoice identifier found"
-
-    if not has_value("outstanding_amount") and not has_value("amount") and not has_value("credit"):
-        return "no amount found"
 
     return ""
 
@@ -346,79 +468,22 @@ def write_skip_exception(statement_id: str, vendor_id: str, source_file: str,
         print(f"  Warning: failed to write EXTRACTION_INCOMPLETE exception to gold_exceptions ({e})")
 
 
-def write_missing_amount_exception(statement_id: str, vendor_id: str, source_file: str,
-                                    statement_period: str, invoice: dict, message: str):
-    """
-    Raise a row that failed validate_invoice() specifically on a missing
-    outstanding_amount as an EXTRACTION_INCOMPLETE exception in
-    gold_exceptions, instead of the review queue — an intentional
-    visibility choice so it shows up in Reports/Exceptions alongside every
-    other exception, rather than in a separate queue most views never
-    check. Never reaches Silver (would violate INV-04's never-null
-    outstanding_amount), same reasoning as write_skip_exception() above.
-
-    Deliberately does NOT fall back to invoice['credit'] the way
-    write_skip_exception() does — the whole point of this routing is that
-    the row's amount is genuinely blank on the source document, and that
-    blank must stay visibly blank rather than being backfilled with a
-    different real field. A row that also has no credit value would
-    already have been caught earlier by get_skip_reason() instead of
-    reaching validate_invoice() at all.
-
-    Never raises — a logging failure must never block intake.
-    """
-    now = datetime.now(timezone.utc).isoformat()
-    try:
-        execute_sql(
-            """
-            INSERT INTO gold_exceptions (
-                exception_id, vendor_id, invoice_number, statement_amount,
-                erp_amount, match_status, exception_reason, exception_status,
-                source_file, statement_id, date_raised, statement_period,
-                ai_explanation, match_confidence, shop_owner,
-                charges, credits, amount_due, transaction_code
-            ) VALUES (?, ?, ?, NULL, NULL, 'EXCEPTION', 'EXTRACTION_INCOMPLETE',
-                      'OPEN', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                str(uuid.uuid4()),
-                vendor_id,
-                invoice.get("invoice_number"),
-                source_file,
-                statement_id,
-                now,
-                statement_period,
-                f"{message}. Please check the original PDF manually.",
-                score_exception_confidence("EXTRACTION_INCOMPLETE"),
-                get_shop_owner(vendor_id),
-                # New pass-through columns (migrations/010_add_python_extraction_columns.sql)
-                # -- NULL for AI-extraction rows, which never carry these keys.
-                # statement_amount/erp_amount stay NULL here deliberately (see
-                # docstring above) -- charges/credits/amount_due are the only
-                # new fields carried through for this row, so the row's real
-                # per-column breakdown is still visible in Reports/Exceptions
-                # even though it never reaches Silver.
-                invoice.get("charges"),
-                invoice.get("credits"),
-                invoice.get("amount_due"),
-                invoice.get("transaction_code"),
-            ]
-        )
-    except Exception as e:
-        print(f"  Warning: failed to write EXTRACTION_INCOMPLETE exception to gold_exceptions ({e})")
-
-
 def copy_extraction_incomplete_exceptions(cached_statement_id: str, new_statement_id: str,
                                            vendor_id: str, source_file: str, statement_period: str) -> int:
     """
     On a cache HIT, run_intake() re-derives Bronze/Silver for the new
     statement_id from the cached run's Bronze rows (see normalize_to_silver()
     call site below) -- but that only ever covers the rows that reached
-    Bronze in the first place. Rows write_skip_exception()/
-    write_missing_amount_exception() raised directly to gold_exceptions
-    (EXTRACTION_INCOMPLETE -- blank Charges, never reaching Bronze/Silver at
-    all) live ONLY under the cached run's original statement_id, and were
-    silently absent from every subsequent cache-hit run's totals until now.
+    Bronze in the first place. Rows write_skip_exception() raised directly
+    to gold_exceptions (EXTRACTION_INCOMPLETE -- no invoice identifier at
+    all, never reaching Bronze/Silver -- see get_skip_reason()) live ONLY
+    under the cached run's original statement_id, and were silently absent
+    from every subsequent cache-hit run's totals until now.
+
+    A blank amount alone no longer routes here at all (removed 2026-08-23,
+    INV-04 amendment) -- every row with an invoice identifier reaches
+    Bronze/Silver regardless of amount, so it's already covered by the
+    normal Bronze-copy path above, not this one.
 
     Copies those rows forward to new_statement_id (fresh exception_id,
     date_raised, statement_period/source_file matching this run -- same
@@ -522,7 +587,8 @@ def write_to_review_queue(invalid_invoices: list, reasons: list,
         next_id += 1
 
 
-def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vendor_id: str):
+def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vendor_id: str,
+                         version_info: dict = None):
     """
     Read Bronze rows for bronze_statement_id and write normalized rows
     to silver_reconciliation_standard (record_source = VENDOR_STATEMENT),
@@ -531,7 +597,15 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
     These differ on a cache hit: Bronze rows live under the previous
     successful run's statement_id, but Silver rows are written under the
     current run's statement_id.
+
+    version_info (see resolve_version_info()) carries
+    version_number/previous_statement_id/is_latest_version -- Silver is
+    always freshly re-normalized under silver_statement_id even on a cache
+    hit (unlike Bronze, which stays under the cached bronze_statement_id),
+    which makes Silver the only reliable "always fresh" source of truth
+    for version-tracking lookups elsewhere (see run_intake()).
     """
+    version_info = version_info or {"version_number": 1, "previous_statement_id": None, "is_latest_version": 1}
     bronze_rows = execute_query(
         "SELECT * FROM bronze_vendor_statement_raw WHERE statement_id = ?",
         [bronze_statement_id]
@@ -594,8 +668,9 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
                 amount, credit, outstanding_amount, due_date,
                 posting_date, status, description, currency,
                 statement_period, source_file, ingestion_timestamp,
-                charges, credits, amount_due, transaction_code
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                charges, credits, amount_due, transaction_code,
+                version_number, previous_statement_id, is_latest_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 record_id,
@@ -627,6 +702,9 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
                 credits_,
                 amount_due,
                 transaction_code,
+                version_info["version_number"],
+                version_info["previous_statement_id"],
+                version_info["is_latest_version"],
             ]
         )
         count += 1
@@ -847,6 +925,69 @@ def update_cache(document_hash: str, statement_id: str, source_file: str,
     )
 
 
+def resolve_version_info(vendor_id: str, statement_period: str) -> dict:
+    """
+    Determines whether this intake run is a fresh version 1, or a new
+    version superseding a previous one, for this vendor_id + statement_period
+    (see migrations/011_add_version_tracking.sql).
+
+    Looks this up in silver_reconciliation_standard, not Bronze — on a
+    cache hit, Bronze rows stay under the previous run's statement_id
+    (see check_cache()), but Silver is always freshly re-normalized under
+    the new statement_id every run, cache hit or not (see
+    normalize_to_silver()'s docstring). That makes Silver the only
+    reliable place to find the CURRENT is_latest_version=1 row for this
+    vendor+period.
+
+    Marks that previous statement's rows across Bronze, Silver, and (if a
+    matching run already produced one) gold_reconciliation_summary as
+    superseded (is_latest_version = 0) before returning the new version's
+    info, so no two statement_ids for the same vendor+period are ever
+    both flagged current at once.
+
+    Normally there is at most one is_latest_version=1 row per vendor+period
+    -- this function is the only writer of that flag, and it always
+    supersedes the old one before setting a new one. But
+    migrations/011_add_version_tracking.sql's rollout defaults EVERY
+    pre-existing row to is_latest_version=1 (it has no way to know, after
+    the fact, which of several historical duplicate uploads for the same
+    vendor+period was truly "latest") -- so a vendor+period that already
+    had more than one run before this migration can start out with that
+    invariant already broken. Ordered DESC and looped over every match
+    (not just one) so a pre-existing violation is fully resolved the next
+    time this vendor+period is uploaded, rather than only partially
+    cleaned up and left broken.
+    """
+    existing = execute_query(
+        """
+        SELECT DISTINCT statement_id, version_number
+        FROM silver_reconciliation_standard
+        WHERE vendor_id = ? AND statement_period = ? AND is_latest_version = 1
+          AND record_source = 'VENDOR_STATEMENT'
+        ORDER BY version_number DESC
+        """,
+        [vendor_id, statement_period],
+    )
+    if not existing:
+        return {"version_number": 1, "previous_statement_id": None, "is_latest_version": 1}
+
+    previous_statement_id = existing[0]["statement_id"]
+    previous_version = existing[0]["version_number"] or 1
+
+    for row in existing:
+        for table in ("bronze_vendor_statement_raw", "silver_reconciliation_standard", "gold_reconciliation_summary"):
+            execute_sql(
+                f"UPDATE {table} SET is_latest_version = 0 WHERE statement_id = ?",
+                [row["statement_id"]],
+            )
+
+    return {
+        "version_number": previous_version + 1,
+        "previous_statement_id": previous_statement_id,
+        "is_latest_version": 1,
+    }
+
+
 def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = None):
     """
     Main intake function. Called by the CLI or directly from other scripts.
@@ -885,8 +1026,22 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             [cached_statement_id]
         )[0]["cnt"]
         print(f"  Cache HIT — {bronze_count} rows already in Bronze under {cached_statement_id}. Skipping AI extraction.")
+
+        # Version tracking is keyed on the cached run's actual vendor_id/
+        # statement_period (not this call's filename-derived defaults,
+        # which may not match if the real vendor name differs) -- see
+        # resolve_version_info().
+        cached_bronze_row = execute_query(
+            "SELECT vendor_id, statement_period FROM bronze_vendor_statement_raw WHERE statement_id = ? LIMIT 1",
+            [cached_statement_id],
+        )
+        cache_vendor_id = cached_bronze_row[0]["vendor_id"] if cached_bronze_row else vendor_id
+        cache_statement_period = cached_bronze_row[0]["statement_period"] if cached_bronze_row else statement_period
+        version_info = resolve_version_info(cache_vendor_id, cache_statement_period)
+        print(f"  Version: {version_info['version_number']} (previous: {version_info['previous_statement_id'] or 'none'})")
+
         print(f"  Re-running Silver normalization...")
-        silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id)
+        silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id, version_info)
         print(f"  Silver: {silver_count} rows normalized.")
         incomplete_count = copy_extraction_incomplete_exceptions(
             cached_statement_id, statement_id, vendor_id,
@@ -909,17 +1064,24 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     print(f"  Extracted text from {page_count} pages ({len(pdf_text)} characters)")
 
     # Step 3: Document Understanding Engine
-    # Fred Beans Parts only: route to the deterministic Python-library
-    # extractor instead of Claude Sonnet. Every other vendor (or any error
-    # during detection itself) takes the exact same DocumentUnderstandingEngine
-    # path as before this change — see _is_fred_beans_statement()'s docstring.
-    if _is_fred_beans_statement(pdf_path):
-        print(f"\n[Step 3] Detected Fred Beans Parts — running Python-library extraction engine...")
+    # Routes by BOTH text-embedded-vs-scanned classification AND known
+    # vendor signature match -- see _determine_extraction_route()'s
+    # docstring for the 3 cases this covers and why it replaces the old
+    # signature-only gate.
+    route = _determine_extraction_route(pdf_path)
+    print(f"\n[Step 3] PDF type: {route['pdf_type']} — {route['reason']}")
+    if route["engine"] == "python_library":
+        print(f"  Running deterministic pdfplumber extraction engine...")
         engine = PythonLibraryExtractionEngine()
     else:
-        print(f"\n[Step 3] Running Document Understanding Engine...")
+        print(f"  Running Document Understanding Engine...")
         engine = DocumentUnderstandingEngine()
     schema_result = engine.understand(pdf_text, pdf_path, statement_id=statement_id)
+
+    if route["new_vendor_warning"]:
+        schema_result.setdefault("warnings", []).append(
+            {"code": "NEW_VENDOR_TEXT_EMBEDDED", "message": route["new_vendor_warning"], "severity": "MEDIUM"}
+        )
 
     provider_used = schema_result.get("_provider_used", "unknown")
     invoices = schema_result.get("invoices", [])
@@ -952,6 +1114,12 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         if len(end_date) >= 7:
             statement_period = end_date[:7]  # "2026-05"
 
+    # Version tracking (see resolve_version_info()) -- resolved here, once
+    # vendor_id/statement_period reflect the AI-detected values, and before
+    # either Bronze or Silver is written below.
+    version_info = resolve_version_info(vendor_id, statement_period)
+    print(f"  Version: {version_info['version_number']} (previous: {version_info['previous_statement_id'] or 'none'})")
+
     # Step 4: Validate invoices
     print(f"\n[Step 4] Validating extracted invoices...")
     with open("config/validation/extraction_rules.json", "r") as f:
@@ -979,19 +1147,6 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
         is_valid, reason = validate_invoice(inv, validation_rules)
         if not is_valid:
-            # Missing outstanding_amount specifically is routed to
-            # gold_exceptions directly, not the review queue — an
-            # intentional visibility change so it's seen in Reports/Home
-            # like every other exception, with the amount genuinely blank
-            # rather than hidden away. Every other validation failure
-            # (missing invoice_number, bad field type, low confidence)
-            # is unchanged and still goes to the review queue.
-            if reason.startswith("MISSING_MANDATORY_FIELD: outstanding_amount"):
-                message = f"Row {row_num}: {reason}"
-                print(f"  {message} — routed to Exceptions (blank amount), not review queue")
-                write_missing_amount_exception(statement_id, vendor_id, os.path.basename(pdf_path),
-                                                statement_period, inv, message)
-                continue
             invalid_invoices.append(inv)
             invalid_reasons.append(reason)
             continue
@@ -1004,7 +1159,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     print(f"\n[Step 5] Writing to Bronze...")
     bronze_count = write_to_bronze(
         valid_invoices, schema_result, statement_id,
-        pdf_path, statement_period, vendor_id
+        pdf_path, statement_period, vendor_id, version_info
     )
     print(f"  Bronze rows written: {bronze_count}")
 
@@ -1018,7 +1173,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     # Step 6: Silver normalization
     print(f"\n[Step 6] Normalizing to Silver...")
-    silver_count = normalize_to_silver(statement_id, statement_id, vendor_id)
+    silver_count = normalize_to_silver(statement_id, statement_id, vendor_id, version_info)
     print(f"  Silver rows written: {silver_count}")
 
     # Step 7: Write intake log
