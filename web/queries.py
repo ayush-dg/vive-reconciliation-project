@@ -1008,6 +1008,30 @@ def _resolve_bronze_statement_id(job: dict) -> str:
     return cached_rows[0]["statement_id"] if cached_rows else statement_id
 
 
+def get_silver_row_count(statement_id: str) -> int:
+    """Real row count in silver_reconciliation_standard for statement_id --
+    used by web/worker.py's _run_job() to verify a subprocess that exited
+    0 and printed a real-looking "Statement ID: ..." line actually
+    produced usable data, instead of trusting exit code + regex alone.
+
+    Deliberately Silver, not Bronze: on a cache hit, Bronze rows stay
+    under the ORIGINAL statement_id that first extracted the file (see
+    notebooks/01_document_intake.py's check_cache()), so a naive Bronze
+    count keyed on the new run's own statement_id would read 0 for every
+    legitimate cache-hit success, not just genuine zero-invoice
+    extractions. Silver is always freshly (re)normalized under the
+    current run's statement_id on every run, cache hit or not -- the
+    same reasoning resolve_version_info() relies on -- so it's the
+    correct place to ask "did this specific run produce real data."
+    """
+    rows = execute_query(
+        "SELECT COUNT(*) AS c FROM silver_reconciliation_standard "
+        "WHERE statement_id = ? AND record_source = 'VENDOR_STATEMENT'",
+        [statement_id],
+    )
+    return rows[0]["c"] or 0 if rows else 0
+
+
 def get_extracted_rows_for_job(job_id: str) -> list:
     """The true raw extraction for Job History's "View extracted data"
     link, read directly from bronze_vendor_statement_raw -- every row and
