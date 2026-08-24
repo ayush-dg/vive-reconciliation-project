@@ -45,6 +45,8 @@ import re
 import time
 from typing import Callable, Optional
 
+import requests
+
 from .base_client import AIClient, AIResponse
 from .concurrency_limiter import ai_call_slot
 
@@ -52,7 +54,7 @@ ROW_CONFIDENCE = 0.75
 
 # Applied to a row's line_confidence only when the model omits a "confidence"
 # field, or returns something unparseable/out-of-range — deliberately below
-# the 0.90 validate_invoice() threshold (config/validation/extraction_rules.json)
+# the 0.0 validate_invoice() threshold (config/validation/extraction_rules.json)
 # so a missing/untrustworthy signal always routes to human review rather than
 # silently passing (RULE-10's "never silently succeed" principle). See
 # discovery/RISK_REGISTER.md R-001.
@@ -65,21 +67,40 @@ TOTALS_ROW_KEYWORDS = ("total", "balance", "subtotal")
 
 EXTRACTION_PROMPT = """You are extracting data from a vendor statement PDF for an accounts payable system. This is critical financial data — accuracy is essential.
 
-STEP 1: Look at the table headers and identify all columns.
+STEP 1: Look at the line-item table on this document. Identify EVERY column that has its own printed header or its own distinct visual position — including a column with no printed header at all, if it carries a distinct value type across rows (e.g. an unlabeled 2-digit account/route code column that appears before the invoice number).
+- Some statements print TWO separate tables covering overlapping data — e.g. a full transaction/activity history (grouped by a source/batch code, showing individual charges and payments as they posted) AND a separate open-items or aging summary (showing only currently-unpaid invoices with a running balance). If you see two such tables, extract line items from ONLY the primary transaction/activity table — do NOT also extract rows from a second open-items/aging summary table, even though it lists real invoice numbers and amounts, since it re-lists invoices already covered by the first table and would double-count them. If you're not sure whether a second table is a genuine second set of transactions or a summary of the same transactions, treat it as a summary and skip it for line-item purposes.
 
-STEP 2: Extract every single data row exactly as printed. For each row:
-- Use exact column header names as keys
-- invoice_number: use the CLEANEST invoice number column available —
-  if there are multiple invoice number columns, prefer the one WITHOUT
-  account codes or route codes.
-  NEVER include account codes like '60 35' or '99 57' before the number.
-- If a cell is blank return null
+STEP 2: Declare the exact list of columns you found, in left-to-right order, as "columns_found". Use each column's own printed header text verbatim (preserve exact wording/casing/punctuation). If a column has no printed header, name it "UNLABELED_TRANSACTION_CODE" (or "UNLABELED_TRANSACTION_CODE_2", "UNLABELED_TRANSACTION_CODE_3", ... if there is more than one such unlabeled column) — never invent any other name for an unlabeled column. Never declare the same column name twice — if this would only happen because you're looking at a second table, see the single-table rule in STEP 1 above instead of extracting from both.
+
+STEP 3: Extract every single data row exactly as printed. Every row object must use EXACTLY the same set of keys declared in "columns_found" — the same columns for every row in this document, even when a particular cell is blank (use null for a blank cell, never omit the key).
+- invoice_number-like columns: use the CLEANEST invoice number column available — if there are multiple invoice-number-like columns, prefer the one WITHOUT account codes or route codes. NEVER fold an account/route code (like '60 35' or '99 57') into the invoice number itself — a code like that belongs in its own UNLABELED_TRANSACTION_CODE column instead (see STEP 2).
 - Do NOT skip any rows
 - Do NOT merge rows
 - Do NOT calculate anything
 - Do NOT include a grand total, subtotal, or balance-forward row as if it
   were an invoice line — report those separately in statement-level totals
   only, never inside rows.
+- Some columns represent a genuinely different TYPE of value than others on
+  the same row — e.g. the ORIGINAL charge/invoice amount for a line is a
+  different column than a running BALANCE/AMOUNT DUE figure, which is
+  different again from a CREDITS/PAYMENTS figure. Extract each column
+  strictly from its own printed cell. Never substitute a value from a
+  different column type just because that other column happens to be
+  populated on the same row — e.g. if a row's charge/invoice-amount column
+  is blank, return null for it even when that same row's balance/amount-due
+  or credits/payments column has a value. A value in one column is never
+  evidence of what a different column's value should be.
+- When two or more rows share the same invoice/document number or the same
+  account/route code (e.g. an original charge immediately followed a few
+  rows later by its credit memo, write-off, or payment reversal), treat
+  every row completely independently — a nearby row sharing the same
+  invoice number, date, or account code is NEVER evidence for THIS row's
+  own Charges/Credits/Amount Due value. Re-read this row's own printed
+  line specifically; never carry a value forward or backward from an
+  adjacent row just because the two rows look similar.
+- Numbers must be plain numbers (no $ signs, no thousands commas); use
+  negative numbers for amounts shown in parentheses or with a leading or
+  trailing minus sign.
 - Include a "confidence" field (0.0-1.0) for every row: 0.9+ only if every
   character is unambiguous; lower it for anything uncertain — unclear
   handwriting/scan quality, an invoice number you had to guess between two
@@ -95,8 +116,8 @@ Return JSON:
 {
   vendor_name: '...',
   statement_date: '...',
-  columns_found: [exact column names from header],
-  rows: [{col1: val, col2: val, ..., confidence: 0.0-1.0}]
+  columns_found: [exact column names from header, in left-to-right order],
+  rows: [{<same keys as columns_found>: val, ..., confidence: 0.0-1.0}]
 }"""
 
 ACCOUNT_CODE_PREFIX_RE = re.compile(r'^\s*\d{2}[\s.]?\d{2}\b')
@@ -108,19 +129,40 @@ ACCOUNT_CODE_PREFIX_RE = re.compile(r'^\s*\d{2}[\s.]?\d{2}\b')
 CURRENCY_LIKE_RE = re.compile(r'^\(?-?\$?\s*\d[\d,]*\.\d{2}\)?-?$')
 DATE_LIKE_RE = re.compile(
     r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$'          # 05/01/2026, 04/01/26
-    r'|^\d{1,2}[A-Za-z]{3}\d{2,4}$',            # 12DEC25
+    r'|^\d{1,2}[A-Za-z]{3}\d{2,4}$'             # 12DEC25
+    r'|^\d{4}-\d{1,2}-\d{1,2}$',                # 2026-08-24 (ISO -- confirmed
+    #  a real NYE Sprague's row got this ISO-shaped value grabbed as a
+    #  fallback invoice number 2026-08-24 since the pre-existing patterns
+    #  above only cover D/M/Y-ordered dates, never Y-M-D)
 )
 ALPHANUMERIC_TOKEN_RE = re.compile(r'^[A-Za-z0-9\-]+$')
 
+# "reference" is deliberately its own weaker tier, not folded into
+# INVOICE_NUMBER_KEYWORDS -- a document with both a real "Invoice" column
+# and a separate "Reference" column (blank on many rows, e.g. NYE
+# Sprague's) must always prefer Invoice; _map_columns() only falls back to
+# a reference-keyword match when no invoice-keyword column exists at all.
 INVOICE_NUMBER_KEYWORDS = (
     "invoice #", "invoice no", "invoice number", "invoice#", "inv #", "inv no",
-    "document no", "sin", "reference",
+    "document no", "sin",
 )
+REFERENCE_ONLY_KEYWORDS = ("reference",)
+
+# Embedded invoice/credit number pattern -- some vendors (e.g. Momentum
+# Tire & Wheel Nutley) print no dedicated invoice-number column at all;
+# the real number instead appears inline inside a Description-type cell,
+# e.g. "WAYNE Invoice # 578039  W-1362421" or "WAYNE Credit # CR-1361914".
+# Confirmed via manual PDF comparison 2026-08-24: without this, the
+# generic whole-value fallback scan (_fallback_invoice_number) picked up
+# a short unrelated column (e.g. a store/location code like "WAYNE")
+# instead, since it never looks inside a longer text field for an
+# embedded number.
+EMBEDDED_INVOICE_RE = re.compile(r'(?:invoice|credit)\s*#\s*([A-Za-z0-9\-]+)', re.IGNORECASE)
 DUE_DATE_KEYWORDS = ("due date",)
 DATE_KEYWORDS = ("invoice date", "posting date", "transaction date", "date")
-OUTSTANDING_KEYWORDS = ("amount due", "balance", "outstanding", "remaining", "net amount", "unpaid")
-CREDIT_KEYWORDS = ("credits", "payments", "credit memo", "credit")
-CHARGE_KEYWORDS = ("charges", "purchases", "amount charged", "invoice amt", "debit", "gross amount")
+OUTSTANDING_KEYWORDS = ("amount due", "balance", "outstanding", "remaining", "remain", "net amount", "unpaid")
+CREDIT_KEYWORDS = ("credits", "payments", "credit memo", "credit", "applied")
+CHARGE_KEYWORDS = ("charges", "purchases", "amount charged", "invoice amt", "debit", "gross amount", "orig amt", "original amount")
 RO_KEYWORDS = ("ro #", "ro no", "repair order")
 PO_KEYWORDS = ("po #", "po no", "purchase order")
 WORK_ORDER_KEYWORDS = ("work order", "wo #", "wo no")
@@ -323,38 +365,56 @@ class ClaudeSonnetClient(AIClient):
         )
 
     def _real_file_call(self, pdf_b64: str, temperature, max_tokens):
-        """Real Claude API call via Azure Foundry, with an inline base64 PDF
-        document block — STREAMING (client.messages.stream() +
-        get_final_message()), required for a single whole-document
-        extraction call that can run long (see module docstring)."""
+        """Real Claude API call via Azure Foundry's REST endpoint directly
+        (requests.post to {endpoint}/v1/messages with an x-api-key header),
+        NOT the anthropic SDK's AnthropicFoundry client. The SDK class has
+        broken across versions in incompatible ways (e.g. dropping the
+        'temperature' kwarg in 1.0.0) despite Foundry's underlying REST API
+        staying stable, so this calls that REST API the same way the SDK
+        does internally, bypassing the SDK entirely — the same request
+        shape validated directly against foundry-vive-recon (see
+        test_foundry_pdf.py, 2026-08-21)."""
         try:
+            base_url = self.endpoint.rstrip("/") if self.endpoint else "https://api.anthropic.com"
+            url = base_url + "/v1/messages"
+            headers = {
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            }
+            payload = {
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": pdf_b64,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": EXTRACTION_PROMPT,
+                        },
+                    ],
+                }],
+            }
             with ai_call_slot():
-                client = self._build_client()
-                with client.messages.stream(
-                    model=self.model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
+                resp = requests.post(
+                    url, headers=headers, json=payload,
                     timeout=self.config.get("timeout_seconds", 600),
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "application/pdf",
-                                    "data": pdf_b64,
-                                },
-                            },
-                            {
-                                "type": "text",
-                                "text": EXTRACTION_PROMPT,
-                            },
-                        ],
-                    }],
-                ) as stream:
-                    message = stream.get_final_message()
-            return True, message.content[0].text, None
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            text = "\n".join(
+                block.get("text", "") for block in data.get("content", [])
+                if block.get("type") == "text"
+            )
+            return True, text, None
         except Exception as e:
             return False, "", self._clean_error(str(e))
 
@@ -435,27 +495,57 @@ class ClaudeSonnetClient(AIClient):
     def _map_columns(self, columns_found: list, rows: list) -> dict:
         """
         Map this document's actual header names to standard schema fields,
-        once per document. Returns {field_name: original_header_key}.
+        once per document. Returns {field_name: original_header_key}, plus
+        an internal "_unlabeled_headers" list (see _combine_unlabeled_columns()).
+
+        "charges"/"credits"/"outstanding_amount"/"amount_due" are populated
+        alongside the pre-existing "amount"/"credit" fields, not instead of
+        them — see _row_to_invoice() for how they're reconciled per the
+        ground-truth rule (migrations/010_add_python_extraction_columns.sql,
+        adapter.py's PythonLibraryExtractionEngine): Charges is the only
+        field that may ever populate outstanding_amount/amount. A document
+        with only one amount-type column at all (e.g. KSI's "Remaining
+        Amount", which never matches CHARGE_KEYWORDS) never gets a
+        "charges" entry here, so that rule never fires for it and
+        outstanding_amount/amount keep their original, already-verified
+        behavior unchanged.
         """
         field_map = {}
         invoice_candidates = []
+        reference_only_candidates = []
 
         headers = columns_found or (list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
 
         for header in headers:
             h = self._normalize_header(header)
-            if self._match_any(h, INVOICE_NUMBER_KEYWORDS):
+            # h == "invoice" (bare, exact) alongside the substring keywords
+            # below -- a document with a plain "Invoice" header (no "#"/
+            # "no"/"number" suffix, e.g. NYE Sprague's) matched no existing
+            # keyword at all, so it fell through and lost to a same-column
+            # "Reference" match instead. Exact-match only (not a substring
+            # check) so this never collides with "Invoice Date"/"Invoice
+            # Amount", which the DATE_KEYWORDS/CHARGE_KEYWORDS checks below
+            # still need to catch.
+            if self._match_any(h, INVOICE_NUMBER_KEYWORDS) or h == "invoice":
                 invoice_candidates.append(header)
+            elif self._match_any(h, REFERENCE_ONLY_KEYWORDS):
+                reference_only_candidates.append(header)
             elif self._match_any(h, DUE_DATE_KEYWORDS):
                 field_map.setdefault("due_date", header)
             elif self._match_any(h, DATE_KEYWORDS):
                 field_map.setdefault("invoice_date", header)
             elif self._match_any(h, OUTSTANDING_KEYWORDS):
                 field_map.setdefault("outstanding_amount", header)
+                # Candidate only -- surfaced as the real amount_due output
+                # field in _row_to_invoice() only when this document also
+                # has its own distinct charges column (see docstring above).
+                field_map.setdefault("amount_due", header)
             elif self._match_any(h, CREDIT_KEYWORDS):
                 field_map.setdefault("credit", header)
+                field_map.setdefault("credits", header)
             elif self._match_any(h, CHARGE_KEYWORDS) or h == "amount":
                 field_map.setdefault("amount", header)
+                field_map.setdefault("charges", header)
             elif self._match_any(h, RO_KEYWORDS):
                 field_map.setdefault("ro_number", header)
             elif self._match_any(h, PO_KEYWORDS):
@@ -467,8 +557,22 @@ class ClaudeSonnetClient(AIClient):
             elif self._match_any(h, SHOP_KEYWORDS):
                 field_map.setdefault("shop", header)
 
+        # A real "Invoice"-labeled column always wins over a "Reference"
+        # column, even when Reference is also present -- only fall back to
+        # Reference when no genuine invoice-number column exists at all
+        # (see REFERENCE_ONLY_KEYWORDS' module-level comment).
         if invoice_candidates:
             field_map["invoice_number"] = self._pick_cleanest_column(invoice_candidates, rows)
+        elif reference_only_candidates:
+            field_map["invoice_number"] = self._pick_cleanest_column(reference_only_candidates, rows)
+
+        # Unlabeled account/route-code columns declared per EXTRACTION_PROMPT
+        # STEP 2 (e.g. Fred Beans' two-part "60 35" code) -- reconstructed
+        # into transaction_code by _combine_unlabeled_columns(). A document
+        # with no such column (the common case) leaves this unset.
+        unlabeled_headers = [h for h in headers if self._normalize_header(h).startswith("unlabeled")]
+        if unlabeled_headers:
+            field_map["_unlabeled_headers"] = unlabeled_headers
 
         return field_map
 
@@ -494,6 +598,20 @@ class ClaudeSonnetClient(AIClient):
                 best = col
         return best
 
+    @staticmethod
+    def _combine_unlabeled_columns(row: dict, field_map: dict) -> Optional[str]:
+        """Reconstructs a transaction/account code from the UNLABELED_* columns
+        the model declared for this document (see EXTRACTION_PROMPT STEP 2)
+        — e.g. Fred Beans' two-part '60 35' account/route code, which has no
+        printed header of its own. Returns None for a document with no such
+        column (the common case, e.g. KSI) or a row where every such column
+        is blank on this row."""
+        headers = field_map.get("_unlabeled_headers")
+        if not headers:
+            return None
+        parts = [str(row.get(h)).strip() for h in headers if row.get(h) not in (None, "")]
+        return " ".join(parts) if parts else None
+
     def _row_to_invoice(self, row: dict, field_map: dict, row_num: int, fallback_log: list) -> Optional[dict]:
         def get(field):
             key = field_map.get(field)
@@ -505,14 +623,54 @@ class ClaudeSonnetClient(AIClient):
 
         invoice_number = raw_invoice_number
         outstanding = self._to_float(raw_outstanding)
+        # amount (the charges/original-invoice-amount field) reflects ONLY
+        # its own mapped column — never backfilled from outstanding_amount.
+        # A row with a genuinely blank charges cell must show a blank
+        # amount, even when outstanding_amount (amount due) is populated on
+        # that same row (e.g. a settlement row) — see EXTRACTION_PROMPT's
+        # column-type guidance above.
         amount = self._to_float(raw_amount)
-        if amount is None:
-            amount = outstanding
+
+        # New pass-through fields (migrations/010_add_python_extraction_columns.sql).
+        charges = self._to_float(get("charges"))
+        credits_value = self._to_float(get("credits"))
+        transaction_code = self._combine_unlabeled_columns(row, field_map)
+
+        # Ground-truth rule (same as adapter.py's PythonLibraryExtractionEngine
+        # and migrations/010_add_python_extraction_columns.sql): when this
+        # document has its own genuinely distinct charges-type column,
+        # Charges is the only field that may populate the amount/
+        # outstanding_amount matching role — a separate balance/amount-due
+        # column on the same document must never backfill it, even when
+        # this row's own charges cell is blank (that's this row's own real,
+        # deliberate blank, not evidence of a chargeable amount). This also
+        # means the outstanding-type column becomes a genuinely distinct
+        # "amount_due" display field once a real charges column exists.
+        # Documents with only one amount-type column at all (e.g. KSI's
+        # "Remaining Amount", which never matches CHARGE_KEYWORDS) have no
+        # "charges" key in field_map. In that case there is no separate
+        # charges-type column to reconcile against, so the single mapped
+        # amount column IS the charges value -- charges is backfilled from
+        # outstanding_amount rather than left null (previously this left
+        # "charges" incorrectly null even though a real amount existed on
+        # the document, e.g. KSI's "Remaining Amount"). amount_due still
+        # only becomes a genuinely distinct display field once a real,
+        # separate charges column exists on the document.
+        has_charges_column = "charges" in field_map
+        if has_charges_column:
+            outstanding = charges
+            amount = charges
+        else:
+            charges = outstanding
+        amount_due = self._to_float(get("amount_due")) if has_charges_column else None
 
         # Tolerant fallback mapping — standard keyword-based mapping missed
         # this field for this row. Scan the row's raw values directly rather
         # than leaving the field null and letting the row silently fail
-        # validation downstream.
+        # validation downstream. Skipped for outstanding_amount when this
+        # document has its own charges column — a blank charges cell there
+        # is a real, deliberate blank (see rule above), not a mapping miss
+        # to fall back on.
         used_fallback = []
         already_used = {v for v in (raw_invoice_number, raw_outstanding, raw_amount) if v is not None}
 
@@ -523,12 +681,15 @@ class ClaudeSonnetClient(AIClient):
                 already_used.add(candidate)
                 used_fallback.append("invoice_number")
 
-        if outstanding is None:
+        if outstanding is None and not has_charges_column:
             _, candidate = self._fallback_amount(row, exclude=already_used)
             if candidate is not None:
+                # This candidate was scanned for as a stand-in for
+                # outstanding_amount specifically — it must never also
+                # backfill amount (the charges field), which stays null
+                # here on purpose when this row's own charges cell was
+                # genuinely blank.
                 outstanding = candidate
-                if amount is None:
-                    amount = candidate
                 used_fallback.append("outstanding_amount")
 
         if used_fallback:
@@ -557,6 +718,20 @@ class ClaudeSonnetClient(AIClient):
             "page_number": 1,  # single whole-document call — no per-page split to track
             "row_number": row_num,
             "line_confidence": self._parse_confidence(row.get("confidence")),
+            # New pass-through fields (migrations/010_add_python_extraction_columns.sql)
+            # -- null when this vendor's document has no such column at all
+            # (e.g. KSI), populated when the source column genuinely exists.
+            "charges": charges,
+            "credits": credits_value,
+            "amount_due": amount_due,
+            "transaction_code": transaction_code,
+            # Internal only -- the original dynamic-column row exactly as
+            # the model returned it, before this mapping collapsed it to
+            # the fixed schema above. Not part of the Universal Financial
+            # Document Schema; consumed only by write_to_bronze() to
+            # populate raw_ai_response so a future re-mapping doesn't need
+            # to re-call the AI. Never written to Silver/matching/reports.
+            "_raw_row": row,
         }
 
     @staticmethod
@@ -572,7 +747,7 @@ class ClaudeSonnetClient(AIClient):
     @staticmethod
     def _parse_confidence(raw_confidence) -> float:
         """Real per-row confidence from the model's own "confidence" field.
-        Falls back to FALLBACK_LINE_CONFIDENCE (below the 0.90 validation
+        Falls back to FALLBACK_LINE_CONFIDENCE (below the 0.0 validation
         threshold) whenever the signal can't be trusted — missing, not a
         number, or outside [0.0, 1.0] — rather than defaulting to a value
         that would silently clear the review gate. See RISK_REGISTER.md R-001."""
@@ -607,13 +782,39 @@ class ClaudeSonnetClient(AIClient):
     def _fallback_invoice_number(cls, row: dict, exclude=frozenset()):
         """Scan all values in `row` for the first one that looks like an
         invoice number, skipping any value already claimed by another
-        field. Returns (key, value) or (None, None)."""
+        field. Returns (key, value) or (None, None).
+
+        Tries an embedded "Invoice #"/"Credit #" match inside a longer
+        text field (e.g. a Description cell) first — a real number buried
+        in running text is a stronger signal than any other whole-cell
+        value happening to look invoice-number-shaped (e.g. a short
+        store/location code), and checking it first avoids that column
+        being grabbed instead (see EMBEDDED_INVOICE_RE's module-level
+        comment)."""
+        for key, val in row.items():
+            if val in exclude or not isinstance(val, str):
+                continue
+            m = EMBEDDED_INVOICE_RE.search(val)
+            if m:
+                return key, m.group(1)
+
         for key, val in row.items():
             if val in exclude:
                 continue
             if cls._looks_like_invoice_number(val):
                 return key, val
         return None, None
+
+    # Keys never eligible as a fallback amount candidate, regardless of what
+    # their value looks like — the model's own per-row "confidence" field
+    # (0.0-1.0, two decimal places, e.g. 0.95) is structurally
+    # indistinguishable from a small currency figure under CURRENCY_LIKE_RE,
+    # so without this exclusion a genuinely blank amount cell gets silently
+    # backfilled with that row's own confidence score instead of staying
+    # null. Checked by key name, not by value, so a real amount that
+    # happens to numerically match a confidence score elsewhere in the row
+    # is unaffected.
+    _NON_AMOUNT_KEYS = frozenset({"confidence", "line_confidence"})
 
     @classmethod
     def _fallback_amount(cls, row: dict, exclude=frozenset()):
@@ -626,6 +827,8 @@ class ClaudeSonnetClient(AIClient):
         invoice-number-as-amount cross-contamination (see module docstring).
         Returns (key, parsed_float) or (None, None)."""
         for key, val in row.items():
+            if isinstance(key, str) and key.strip().lower() in cls._NON_AMOUNT_KEYS:
+                continue
             if val in exclude or val is None:
                 continue
             if not CURRENCY_LIKE_RE.match(str(val).strip()):
