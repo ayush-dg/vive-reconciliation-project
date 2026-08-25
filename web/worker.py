@@ -48,6 +48,11 @@ POLL_INTERVAL_SECONDS = 30
 DEFAULT_WORKER_POOL_SIZE = 3
 STATEMENT_ID_RE = re.compile(r"Statement ID:\s*(\S+)")
 
+# Exact substring from src/matching/engine.py's run_matching() guard --
+# identifies "extraction succeeded, matching had no real ERP data to
+# compare against" specifically, as opposed to any other non-zero exit.
+NO_VOUCHER_DATA_MARKER = "No real voucher-sourced INTERNAL_ERP rows"
+
 # Dropzone auto-intake, polling variant -- see _dropzone_watcher_loop()'s
 # docstring for why this exists alongside (not instead of)
 # web/routers/intake_trigger.py's Event Grid webhook.
@@ -92,6 +97,33 @@ def _run_job(job: dict) -> None:
         completed_at = datetime.now(timezone.utc).isoformat()
 
         if result.returncode != 0 or not match:
+            # Matching's deliberate no-mock-ERP-data guard (src/matching/
+            # engine.py's run_matching()) raises after Phase 1 (extraction)
+            # has already completed and written real Bronze/Silver rows --
+            # that's a genuinely different situation from an extraction
+            # failure, and labeling both "FAILED" hides that the extraction
+            # itself succeeded. Verify against real Silver data (not just
+            # the error text) before relabeling, same caution as the
+            # zero-rows check below.
+            if match and NO_VOUCHER_DATA_MARKER in output:
+                statement_id = match.group(1)
+                silver_count = queries.get_silver_row_count(statement_id)
+                if silver_count > 0:
+                    vendor_name = queries.get_vendor_name_for_statement(statement_id)
+                    print(f"[worker] Job {job_id} COMPLETED (extraction only, no ERP data to match) — {statement_id} ({vendor_name})")
+                    queries.update_job_status(
+                        job_id,
+                        status="COMPLETED",
+                        completed_at=completed_at,
+                        statement_id=statement_id,
+                        vendor_name=vendor_name,
+                        error_message=(
+                            f"Extraction successful ({silver_count} rows) -- no ERP reference data "
+                            f"loaded for this vendor yet, matching skipped. See scripts/load_voucher_data.py."
+                        ),
+                    )
+                    return
+
             print(f"[worker] Job {job_id} FAILED (exit {result.returncode})")
             queries.update_job_status(
                 job_id,

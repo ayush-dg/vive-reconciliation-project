@@ -1,0 +1,328 @@
+{
+  "vendor": "Matt Nimey Sprague's",
+  "module": "extract_nimey",
+  "fieldnames": [
+    "row_no",
+    "invoice_date",
+    "invoice_no",
+    "purchases",
+    "payments",
+    "balance",
+    "note"
+  ],
+  "line_items": [
+    {
+      "row_no": "1",
+      "invoice_date": "06/05/26",
+      "invoice_no": "1009294-3",
+      "purchases": "$27.11",
+      "payments": "",
+      "balance": "$27.11",
+      "note": ""
+    },
+    {
+      "row_no": "2",
+      "invoice_date": "06/16/26",
+      "invoice_no": "1009294-3R",
+      "purchases": "",
+      "payments": "-$27.11",
+      "balance": "-$27.11",
+      "note": ""
+    },
+    {
+      "row_no": "3",
+      "invoice_date": "07/01/26",
+      "invoice_no": "1009642-1",
+      "purchases": "$1,717.52",
+      "payments": "",
+      "balance": "$1,717.52",
+      "note": ""
+    },
+    {
+      "row_no": "4",
+      "invoice_date": "07/01/26",
+      "invoice_no": "1009594-1",
+      "purchases": "$6,128.21",
+      "payments": "",
+      "balance": "$6,128.21",
+      "note": ""
+    },
+    {
+      "row_no": "5",
+      "invoice_date": "07/02/26",
+      "invoice_no": "1009678",
+      "purchases": "$112.94",
+      "payments": "",
+      "balance": "$112.94",
+      "note": ""
+    },
+    {
+      "row_no": "6",
+      "invoice_date": "07/02/26",
+      "invoice_no": "1009673",
+      "purchases": "$6.47",
+      "payments": "",
+      "balance": "$6.47",
+      "note": ""
+    },
+    {
+      "row_no": "7",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009687",
+      "purchases": "$109.33",
+      "payments": "",
+      "balance": "$109.33",
+      "note": ""
+    },
+    {
+      "row_no": "8",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009642-2",
+      "purchases": "$392.32",
+      "payments": "",
+      "balance": "$392.32",
+      "note": ""
+    },
+    {
+      "row_no": "9",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009594-2",
+      "purchases": "$102.71",
+      "payments": "",
+      "balance": "$102.71",
+      "note": ""
+    },
+    {
+      "row_no": "10",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009236R",
+      "purchases": "",
+      "payments": "-$125.00",
+      "balance": "-$156.12",
+      "note": "Balance combines this row with row 11 (same invoice 1009236R)."
+    },
+    {
+      "row_no": "11",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009236R",
+      "purchases": "",
+      "payments": "-$31.12",
+      "balance": "",
+      "note": "Continuation of invoice 1009236R from row 10; that row's balance (-$156.12) is the combined total for both rows."
+    },
+    {
+      "row_no": "12",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009593-1R",
+      "purchases": "",
+      "payments": "-$125.00",
+      "balance": "-$125.00",
+      "note": ""
+    },
+    {
+      "row_no": "13",
+      "invoice_date": "07/06/26",
+      "invoice_no": "1009593-3R",
+      "purchases": "",
+      "payments": "-$75.00",
+      "balance": "-$75.00",
+      "note": ""
+    },
+    {
+      "row_no": "14",
+      "invoice_date": "07/09/26",
+      "invoice_no": "1009734",
+      "purchases": "$172.49",
+      "payments": "",
+      "balance": "$172.49",
+      "note": ""
+    },
+    {
+      "row_no": "15",
+      "invoice_date": "07/10/26",
+      "invoice_no": "1009749-1",
+      "purchases": "$2,051.04",
+      "payments": "",
+      "balance": "$2,051.04",
+      "note": ""
+    },
+    {
+      "row_no": "16",
+      "invoice_date": "07/10/26",
+      "invoice_no": "1009642-2R",
+      "purchases": "",
+      "payments": "-$75.00",
+      "balance": "-$75.00",
+      "note": ""
+    },
+    {
+      "row_no": "17",
+      "invoice_date": "07/13/26",
+      "invoice_no": "1009749-2",
+      "purchases": "$422.96",
+      "payments": "",
+      "balance": "$422.96",
+      "note": ""
+    },
+    {
+      "row_no": "18",
+      "invoice_date": "07/15/26",
+      "invoice_no": "1009808-1",
+      "purchases": "$78.70",
+      "payments": "",
+      "balance": "$78.70",
+      "note": ""
+    },
+    {
+      "row_no": "19",
+      "invoice_date": "07/16/26",
+      "invoice_no": "1009815",
+      "purchases": "$1,034.95",
+      "payments": "",
+      "balance": "$1,034.95",
+      "note": ""
+    },
+    {
+      "row_no": "20",
+      "invoice_date": "07/16/26",
+      "invoice_no": "1009678R",
+      "purchases": "",
+      "payments": "-$21.11",
+      "balance": "-$21.11",
+      "note": ""
+    },
+    {
+      "row_no": "21",
+      "invoice_date": "07/17/26",
+      "invoice_no": "1009808-2",
+      "purchases": "$515.43",
+      "payments": "",
+      "balance": "$515.43",
+      "note": ""
+    },
+    {
+      "row_no": "22",
+      "invoice_date": "07/17/26",
+      "invoice_no": "1009838-1",
+      "purchases": "$47.48",
+      "payments": "",
+      "balance": "$47.48",
+      "note": ""
+    },
+    {
+      "row_no": "23",
+      "invoice_date": "07/20/26",
+      "invoice_no": "1009838-2",
+      "purchases": "$872.13",
+      "payments": "",
+      "balance": "$872.13",
+      "note": ""
+    },
+    {
+      "row_no": "24",
+      "invoice_date": "07/20/26",
+      "invoice_no": "1009857",
+      "purchases": "$668.96",
+      "payments": "",
+      "balance": "$668.96",
+      "note": ""
+    },
+    {
+      "row_no": "25",
+      "invoice_date": "07/22/26",
+      "invoice_no": "1009887",
+      "purchases": "$850.31",
+      "payments": "",
+      "balance": "$850.31",
+      "note": ""
+    },
+    {
+      "row_no": "26",
+      "invoice_date": "07/23/26",
+      "invoice_no": "1009924",
+      "purchases": "$479.18",
+      "payments": "",
+      "balance": "$479.18",
+      "note": ""
+    },
+    {
+      "row_no": "27",
+      "invoice_date": "07/24/26",
+      "invoice_no": "1009838-2R",
+      "purchases": "",
+      "payments": "-$50.00",
+      "balance": "-$50.00",
+      "note": ""
+    },
+    {
+      "row_no": "28",
+      "invoice_date": "07/31/26",
+      "invoice_no": "1009924R",
+      "purchases": "",
+      "payments": "-$75.00",
+      "balance": "-$75.00",
+      "note": ""
+    },
+    {
+      "row_no": "29",
+      "invoice_date": "07/31/26",
+      "invoice_no": "1009815R",
+      "purchases": "",
+      "payments": "-$75.00",
+      "balance": "-$75.00",
+      "note": ""
+    },
+    {
+      "row_no": "30",
+      "invoice_date": "07/31/26",
+      "invoice_no": "1009887R",
+      "purchases": "",
+      "payments": "-$75.00",
+      "balance": "-$75.00",
+      "note": ""
+    },
+    {
+      "row_no": "31",
+      "invoice_date": "07/31/26",
+      "invoice_no": "1009749-2R",
+      "purchases": "",
+      "payments": "-$75.00",
+      "balance": "-$75.00",
+      "note": ""
+    },
+    {
+      "row_no": "32",
+      "invoice_date": "07/31/26",
+      "invoice_no": "1009749-1R",
+      "purchases": "",
+      "payments": "-$125.00",
+      "balance": "-$125.00",
+      "note": ""
+    }
+  ],
+  "summary": {
+    "vendor_address_line1": "13371 NY 12",
+    "vendor_city_state_zip": "Boonville, NY 13309",
+    "vendor_phone": "(315) 942 - 2911",
+    "customer_number": "23087",
+    "vendor_email": "office@nimeysgmc.com",
+    "statement_period_start": "07/01/26",
+    "statement_period_end": "07/31/26",
+    "due_date": "08/30/26",
+    "total_amount_due_printed": "14,835.90",
+    "customer_name": "SPRAGUES COLLISION CENTER VIVE",
+    "billing_address": "58 Henderson Street",
+    "vendor_name": "Matt Nimey GMC, Inc.",
+    "billing_city_state_zip": "New York Mills, NY 13417",
+    "invoices_count_printed": "32",
+    "amount_due_printed": "14,835.90",
+    "aging_current": "14,835.90",
+    "aging_31_60_days": "0.00",
+    "aging_61_90_days": "0.00",
+    "aging_91_120_days": "0.00",
+    "aging_120_plus_days": "0.00",
+    "total_computed": "14,835.90",
+    "total_printed": "14,835.90",
+    "reconciles": true
+  }
+}

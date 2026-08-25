@@ -1,0 +1,194 @@
+
+==========================================================================================
+Fred Beans Lee's
+==========================================================================================
+  reference rows: 273   generic rows: 0
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'word_bucket_fallback'), (3, 'word_bucket_fallback'), (4, 'word_bucket_fallback'), (5, 'word_bucket_fallback'), (6, 'word_bucket_fallback'), (7, 'word_bucket_fallback')]
+  MATCHED (date+invoice+amount all correct): 0 / 273 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 273
+  EXTRA (generic row not in reference / spurious):      0
+  -- sample missing rows --
+    ref row #0: ('23DEC25', '8944468', 699.57, None)  (raw ref item: {'page': 1, 'date': '23DEC25', 'transaction_code': '60 35', 'invoice_number': '8944468', 'charges': '699.57', 'credits': '', 'amount_due': '', 'remit_invoice_no': '8944468', 'remit_amount_due': ''})
+    ref row #1: ('22JUN26', 'CM8944468', None, 525.89)  (raw ref item: {'page': 1, 'date': '22JUN26', 'transaction_code': '60 35', 'invoice_number': 'CM8944468', 'charges': '', 'credits': '525.89', 'amount_due': '', 'remit_invoice_no': 'CM8944468', 'remit_amount_due': ''})
+    ref row #2: ('08JUL26', '8944468', None, 173.68)  (raw ref item: {'page': 1, 'date': '08JUL26', 'transaction_code': '99 57', 'invoice_number': '8944468', 'charges': '', 'credits': '173.68', 'amount_due': '', 'remit_invoice_no': '8944468', 'remit_amount_due': ''})
+    ref row #3: ('14MAR26', '9148606', 430.44, None)  (raw ref item: {'page': 1, 'date': '14MAR26', 'transaction_code': '60 35', 'invoice_number': '9148606', 'charges': '430.44', 'credits': '', 'amount_due': '', 'remit_invoice_no': '9148606', 'remit_amount_due': ''})
+    ref row #4: ('01APR26', 'CM9148606', None, 39.05)  (raw ref item: {'page': 1, 'date': '01APR26', 'transaction_code': '60 35', 'invoice_number': 'CM9148606', 'charges': '', 'credits': '39.05', 'amount_due': '', 'remit_invoice_no': 'CM9148606', 'remit_amount_due': ''})
+
+==========================================================================================
+Astech Owego
+==========================================================================================
+  reference rows: 106   generic rows: 108
+  tiers used: [(1, 'table_lines'), (2, 'table_lines'), (3, 'table_lines')]
+  MATCHED (date+invoice+amount all correct): 0 / 106 (0.0%)
+  MISMATCHED (matched row, wrong amount):     106
+  MISSING (reference row not found in generic output): 0
+  EXTRA (generic row not in reference / spurious):      2
+  -- sample amount mismatches --
+    ref row #0: ref(date,inv,charge,credit)=('06/01/2026', 'SIN12331257', 48.75, None)  generic=('06/01/2026', 'SIN12331257', None, None)
+    ref row #1: ref(date,inv,charge,credit)=('06/01/2026', 'SIN12331786', 48.75, None)  generic=('06/01/2026', 'SIN12331786', None, None)
+    ref row #2: ref(date,inv,charge,credit)=('06/01/2026', 'SIN12332672', 48.75, None)  generic=('06/01/2026', 'SIN12332672', None, None)
+    ref row #3: ref(date,inv,charge,credit)=('06/01/2026', 'SIN12333347', 48.75, None)  generic=('06/01/2026', 'SIN12333347', None, None)
+    ref row #4: ref(date,inv,charge,credit)=('06/01/2026', 'SIN12333484', 48.75, None)  generic=('06/01/2026', 'SIN12333484', None, None)
+  -- sample extra/spurious rows --
+    generic row #41: {'page': 1, 'row_kind': 'table_lines', 'date': '', 'invoice_number': '', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+    generic row #106: {'page': 2, 'row_kind': 'table_lines', 'date': '', 'invoice_number': '', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+
+==========================================================================================
+Empire Hewitt's
+==========================================================================================
+  reference rows: 91   generic rows: 0
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'word_bucket_fallback'), (3, 'word_bucket_fallback'), (4, 'word_bucket_fallback')]
+  MATCHED (date+invoice+amount all correct): 0 / 91 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 91
+  EXTRA (generic row not in reference / spurious):      0
+  -- sample missing rows --
+    ref row #0: ('06/01/26', '40442673', 58.0, None)  (raw ref item: {'page': 1, 'transaction_date': '06/01/26', 'description': '2016 Corolla Sedan', 'doc_no': '40442673', 'your_po_no': '2107381', 'orig_inv_no': '', 'amount': '58.00', 'due_date': '07/10/26', 'balance': '58.00'})
+    ref row #1: ('06/01/26', '40442674', 51.0, None)  (raw ref item: {'page': 1, 'transaction_date': '06/01/26', 'description': '2016 Corolla Sedan', 'doc_no': '40442674', 'your_po_no': '2107381', 'orig_inv_no': '', 'amount': '51.00', 'due_date': '07/10/26', 'balance': '51.00'})
+    ref row #2: ('06/01/26', '40443399', 70.0, None)  (raw ref item: {'page': 1, 'transaction_date': '06/01/26', 'description': '2016 Tiguan', 'doc_no': '40443399', 'your_po_no': '2107364', 'orig_inv_no': '', 'amount': '70.00', 'due_date': '07/10/26', 'balance': '70.00'})
+    ref row #3: ('06/01/26', '40444218', 78.0, None)  (raw ref item: {'page': 1, 'transaction_date': '06/01/26', 'description': '2016 Highlander / Highlander', 'doc_no': '40444218', 'your_po_no': '2107371', 'orig_inv_no': '', 'amount': '78.00', 'due_date': '07/10/26', 'balance': '78.00'})
+    ref row #4: ('06/02/26', '40455920', None, 97.0)  (raw ref item: {'page': 1, 'transaction_date': '06/02/26', 'description': 'Return', 'doc_no': '40455920', 'your_po_no': '2107193', 'orig_inv_no': '40004932', 'amount': '-97.00', 'due_date': '', 'balance': '-97.00'})
+
+==========================================================================================
+Wilbert's Owego
+==========================================================================================
+  reference rows: 28   generic rows: 2
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'table_lines')]
+  MATCHED (date+invoice+amount all correct): 0 / 28 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 28
+  EXTRA (generic row not in reference / spurious):      2
+  -- sample missing rows --
+    ref row #0: ('07/02/26', '1690264', 95.0, None)  (raw ref item: {'page': 1, 'date': '07/02/26', 'store': '1', 'invoice_number': '1690264', 'reference': 'PO#10200268', 'amount': '95.00', 'core_chg': '0.00', 'balance': '95.00'})
+    ref row #1: ('07/06/26', '1691091', 895.0, None)  (raw ref item: {'page': 1, 'date': '07/06/26', 'store': '1', 'invoice_number': '1691091', 'reference': 'PO#10200314', 'amount': '895.00', 'core_chg': '0.00', 'balance': '895.00'})
+    ref row #2: ('07/06/26', '1691092', 320.2, None)  (raw ref item: {'page': 1, 'date': '07/06/26', 'store': '1', 'invoice_number': '1691092', 'reference': 'PO#10200338', 'amount': '320.20', 'core_chg': '0.00', 'balance': '320.20'})
+    ref row #3: ('07/08/26', '1692575', 320.2, None)  (raw ref item: {'page': 1, 'date': '07/08/26', 'store': '1', 'invoice_number': '1692575', 'reference': 'PO#10200338', 'amount': '320.20', 'core_chg': '0.00', 'balance': '320.20'})
+    ref row #4: ('07/08/26', '1693081', 420.0, None)  (raw ref item: {'page': 1, 'date': '07/08/26', 'store': '1', 'invoice_number': '1693081', 'reference': 'PO#10200353', 'amount': '420.00', 'core_chg': '0.00', 'balance': '420.00'})
+  -- sample extra/spurious rows --
+    generic row #0: {'page': 2, 'row_kind': 'table_lines', 'date': '', 'invoice_number': '', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+    generic row #1: {'page': 2, 'row_kind': 'table_lines', 'date': '', 'invoice_number': '', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': 2302.25, 'amount_generic': 2302.25}
+
+==========================================================================================
+Quirk Colemans
+==========================================================================================
+  reference rows: 174   generic rows: 0
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'word_bucket_fallback'), (3, 'word_bucket_fallback'), (4, 'word_bucket_fallback'), (5, 'word_bucket_fallback'), (6, 'word_bucket_fallback')]
+  MATCHED (date+invoice+amount all correct): 0 / 174 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 174
+  EXTRA (generic row not in reference / spurious):      0
+  -- sample missing rows --
+    ref row #0: ('07-02', 'CVW438612A', 445.54, None)  (raw ref item: {'page': 1, 'date': '07-02', 'source': '4', 'invoice': 'CVW438612A', 'reference': 'CVW438612A', 'description': '', 'amount': '445.54', 'age_in_days': '29', 'remit_date': '07-02', 'remit_invoice': 'CVW438612A', 'remit_balance': '445.54'})
+    ref row #1: ('07-02', 'CVWA437252', None, 125.0)  (raw ref item: {'page': 1, 'date': '07-02', 'source': '4', 'invoice': 'CVWA437252', 'reference': 'CMCVWA437252', 'description': '', 'amount': '-125.00', 'age_in_days': '', 'remit_date': '07-02', 'remit_invoice': 'CVWA437252', 'remit_balance': '-125.00'})
+    ref row #2: ('07-03', 'CVW438612A-1', 739.63, None)  (raw ref item: {'page': 1, 'date': '07-03', 'source': '4', 'invoice': 'CVW438612A-1', 'reference': 'CVW438612A-1', 'description': '', 'amount': '739.63', 'age_in_days': '28', 'remit_date': '07-03', 'remit_invoice': 'CVW438612A-1', 'remit_balance': '739.63'})
+    ref row #3: ('07-07', 'CVW438832A', 282.19, None)  (raw ref item: {'page': 1, 'date': '07-07', 'source': '4', 'invoice': 'CVW438832A', 'reference': 'CVW438832A', 'description': '', 'amount': '282.19', 'age_in_days': '24', 'remit_date': '07-07', 'remit_invoice': 'CVW438832A', 'remit_balance': '282.19'})
+    ref row #4: ('07-07', 'CVW438832A-1', 120.58, None)  (raw ref item: {'page': 1, 'date': '07-07', 'source': '4', 'invoice': 'CVW438832A-1', 'reference': 'CVW438832A-1', 'description': '', 'amount': '120.58', 'age_in_days': '24', 'remit_date': '07-07', 'remit_invoice': 'CVW438832A-1', 'remit_balance': '120.58'})
+
+==========================================================================================
+Matt Nimey Sprague's
+==========================================================================================
+  reference rows: 32   generic rows: 0
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'word_bucket_fallback')]
+  MATCHED (date+invoice+amount all correct): 0 / 32 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 32
+  EXTRA (generic row not in reference / spurious):      0
+  -- sample missing rows --
+    ref row #0: ('06/05/26', '1009294-3', 27.11, None)  (raw ref item: {'row_no': '1', 'invoice_date': '06/05/26', 'invoice_no': '1009294-3', 'purchases': '$27.11', 'payments': '', 'balance': '$27.11', 'note': ''})
+    ref row #1: ('06/16/26', '1009294-3R', None, -27.11)  (raw ref item: {'row_no': '2', 'invoice_date': '06/16/26', 'invoice_no': '1009294-3R', 'purchases': '', 'payments': '-$27.11', 'balance': '-$27.11', 'note': ''})
+    ref row #2: ('07/01/26', '1009642-1', 1717.52, None)  (raw ref item: {'row_no': '3', 'invoice_date': '07/01/26', 'invoice_no': '1009642-1', 'purchases': '$1,717.52', 'payments': '', 'balance': '$1,717.52', 'note': ''})
+    ref row #3: ('07/01/26', '1009594-1', 6128.21, None)  (raw ref item: {'row_no': '4', 'invoice_date': '07/01/26', 'invoice_no': '1009594-1', 'purchases': '$6,128.21', 'payments': '', 'balance': '$6,128.21', 'note': ''})
+    ref row #4: ('07/02/26', '1009678', 112.94, None)  (raw ref item: {'row_no': '5', 'invoice_date': '07/02/26', 'invoice_no': '1009678', 'purchases': '$112.94', 'payments': '', 'balance': '$112.94', 'note': ''})
+
+==========================================================================================
+Lia Vestal
+==========================================================================================
+  reference rows: 31   generic rows: 31
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'word_bucket_fallback')]
+  MATCHED (date+invoice+amount all correct): 28 / 31 (90.3%)
+  MISMATCHED (matched row, wrong amount):     1
+  MISSING (reference row not found in generic output): 2
+  EXTRA (generic row not in reference / spurious):      2
+  -- sample amount mismatches --
+    ref row #8: ref(date,inv,charge,credit)=('13JUL26', 'CM153454HA', None, 50.0)  generic=('13JUL26', 'CM153454HA', 50.0, None)
+  -- sample missing rows --
+    ref row #26: ('28JUL26', '154579HA', 63.43, None)  (raw ref item: {'page': 1, 'date': '28JUL26', 'document_transaction': '154579HA', 'purchases': '63.43', 'payments_credits': '', 'balance': '63.43'})
+    ref row #30: ('30JUL26', '154750HA', 840.91, None)  (raw ref item: {'page': 2, 'date': '30JUL26', 'document_transaction': '154750HA', 'purchases': '840.91', 'payments_credits': '', 'balance': '840.91'})
+  -- sample extra/spurious rows --
+    generic row #26: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '28JUL26 STATUS OVER 30 "FINANCE CHARGES" RATE of statement from the LIA AUTO Copyright 2014 CDK Global, LLC ACCOUNTS', 'invoice_number': '154579HA OVER 60 are computed by a periodic rate of applied to the unpaid balance after previous balance. GROUP RECEIVABLE STATEMENT TYPE 1 - AR1C - IMAGING CUSTOMER', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+    generic row #30: {'page': 2, 'row_kind': 'word_bucket_fallback', 'date': '30JUL26 ST A T US OVER 30 "FINANCE CHARGES" RATE of statement from the LIA AUTO Copyright 2014 CDK Global, LLC ACCOUNTS', 'invoice_number': '154750HA 0.00 OVER 60 0.00 0.00 are computed by a periodic rate of applied to the unpaid balance after previous balance. GROUP RECEIVABLE STATEMENT TYPE 1 - AR1C - IMAGING CUSTOMER', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+
+==========================================================================================
+Keystone Neet's
+==========================================================================================
+  reference rows: 160   generic rows: 0
+  tiers used: [(1, 'no_header_found'), (2, 'no_header_found'), (3, 'no_header_found'), (4, 'word_bucket_fallback')]
+  MATCHED (date+invoice+amount all correct): 0 / 160 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 160
+  EXTRA (generic row not in reference / spurious):      0
+  -- sample missing rows --
+    ref row #0: ('06/02/26', 'Z1450793', 0.0, None)  (raw ref item: {'reference_date': '06/02/26', 'reference_number': 'Z1450793', 'purchase_order_number': '1502667-PO-001', 'balance_forward': '489.42', 'period_activity': '', 'credit_applied': '0.00', 'payment_applied': '489.42', 'balance_due': '0.00'})
+    ref row #1: ('06/02/26', 'Z1450794', 0.0, None)  (raw ref item: {'reference_date': '06/02/26', 'reference_number': 'Z1450794', 'purchase_order_number': '1502683-PO-002', 'balance_forward': '345.81', 'period_activity': '', 'credit_applied': '0.00', 'payment_applied': '345.81', 'balance_due': '0.00'})
+    ref row #2: ('06/03/26', 'Z1451085', 0.0, None)  (raw ref item: {'reference_date': '06/03/26', 'reference_number': 'Z1451085', 'purchase_order_number': '1502683-PO-009', 'balance_forward': '12.00', 'period_activity': '', 'credit_applied': '0.00', 'payment_applied': '12.00', 'balance_due': '0.00'})
+    ref row #3: ('06/03/26', 'Z1451086', 0.0, None)  (raw ref item: {'reference_date': '06/03/26', 'reference_number': 'Z1451086', 'purchase_order_number': '1502687-PO-001', 'balance_forward': '21.36', 'period_activity': '', 'credit_applied': '0.00', 'payment_applied': '21.36', 'balance_due': '0.00'})
+    ref row #4: ('06/03/26', 'Z1451096', 0.0, None)  (raw ref item: {'reference_date': '06/03/26', 'reference_number': 'Z1451096', 'purchase_order_number': '1502672-PO-001', 'balance_forward': '-148.45', 'period_activity': '', 'credit_applied': '0.00', 'payment_applied': '-148.45', 'balance_due': '0.00'})
+
+==========================================================================================
+Precision Diagnostics Klapec
+==========================================================================================
+  reference rows: 27   generic rows: 56
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'table_text')]
+  MATCHED (date+invoice+amount all correct): 0 / 27 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 27
+  EXTRA (generic row not in reference / spurious):      56
+  -- sample missing rows --
+    ref row #0: ('7/1/2026', '160200', 186.57, None)  (raw ref item: {'page': 1, 'date': '7/1/2026', 'invoice_no': '160200', 'description': 'Invoice #INV160200 Pay Now', 'message_on_statement': '2026 Kia Seltos KNDEUCAA5T7826518 RO 82451', 'charge': '186.57', 'payment': '', 'balance': '186.57'})
+    ref row #1: ('7/1/2026', '160197', 726.25, None)  (raw ref item: {'page': 1, 'date': '7/1/2026', 'invoice_no': '160197', 'description': 'Invoice #INV160197 Pay Now', 'message_on_statement': '2025 Buick Envista KL47LAEP3SB127439 RO 82475', 'charge': '726.25', 'payment': '', 'balance': '912.82'})
+    ref row #2: ('7/2/2026', '160494', 225.75, None)  (raw ref item: {'page': 1, 'date': '7/2/2026', 'invoice_no': '160494', 'description': 'Invoice #INV160494 Pay Now', 'message_on_statement': 'RO 82306 2020 SUBA WRX VIN: JF1VA1A67L9814146', 'charge': '225.75', 'payment': '', 'balance': '1,138.57'})
+    ref row #3: ('7/8/2026', '162080', 255.6, None)  (raw ref item: {'page': 1, 'date': '7/8/2026', 'invoice_no': '162080', 'description': 'Invoice #INV162080 Pay Now', 'message_on_statement': 'RO 82296 2018 Honda Civic', 'charge': '255.60', 'payment': '', 'balance': '1,394.17'})
+    ref row #4: ('7/8/2026', '162073', 278.0, None)  (raw ref item: {'page': 1, 'date': '7/8/2026', 'invoice_no': '162073', 'description': 'Invoice #INV162073 Pay Now', 'message_on_statement': 'RO 82430 2020 Chevrolet Traverse LT', 'charge': '278.00', 'payment': '', 'balance': '1,672.17'})
+  -- sample extra/spurious rows --
+    generic row #0: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '7/1/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #INV160200Pay Now', 'charge': None, 'credit': None, 'balance': 186.57, 'amount_generic': 186.57}
+    generic row #1: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '7/1/2026', 'invoice_number': '7/16/2026 Invoice #INV164355Pay Now 7/16/2026 Invoice #INV164352Pay Now 7/20/2026 Invoice #INV165149Pay Now', 'reference': '2020 SUBA WRX VIN: JF1VA1A67L9814146 2018 Honda Civic 2020 Chevrolet Traverse LT 1500 Rav4 2022 Subaru Forester 2018 Chevy Silverado $358.75 $4,145.27 3GCUKSECXJG301558 RO 82488 2019 Toyota Rav4 $668.50 $4,813.77 2T3G1RFVXKC016547 RO 82429 Escape 2024 Kia Sportage 2024 Honda Pilot $1,838.55 $7,670.17 5FNYG1H61RB011844 RO 82406 Ascent 2024 Subaru Forester 2021 Nissan Rogue 2017 Ford Taurus 1 of 2', 'description': 'Invoice #INV160197Pay Now', 'charge': None, 'credit': None, 'balance': 912.82, 'amount_generic': 912.82}
+    generic row #2: {'page': 2, 'row_kind': 'table_text', 'date': '', 'invoice_number': '', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+    generic row #3: {'page': 2, 'row_kind': 'table_text', 'date': '7/22/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #INV165865Pay', 'charge': 746.55, 'credit': None, 'balance': 10902.02, 'amount_generic': 746.55}
+    generic row #4: {'page': 2, 'row_kind': 'table_text', 'date': '', 'invoice_number': '', 'reference': '', 'description': '', 'charge': None, 'credit': None, 'balance': None, 'amount_generic': None}
+
+==========================================================================================
+Adas Calibration Don Joe
+==========================================================================================
+  reference rows: 48   generic rows: 74
+  tiers used: [(1, 'word_bucket_fallback'), (2, 'table_text')]
+  MATCHED (date+invoice+amount all correct): 0 / 48 (0.0%)
+  MISMATCHED (matched row, wrong amount):     0
+  MISSING (reference row not found in generic output): 48
+  EXTRA (generic row not in reference / spurious):      74
+  -- sample missing rows --
+    ref row #0: ('07/01/2026', '14757', 592.0, None)  (raw ref item: {'date': '07/01/2026', 'description': 'Invoice #14757: Due 07/31/2026.', 'amount': '592.00', 'open_amount': '592.00', 'invoice_no': '14757', 'due_date': '07/31/2026'})
+    ref row #1: ('07/02/2026', '14774', 768.75, None)  (raw ref item: {'date': '07/02/2026', 'description': 'Invoice #14774: Due 07/31/2026.', 'amount': '768.75', 'open_amount': '768.75', 'invoice_no': '14774', 'due_date': '07/31/2026'})
+    ref row #2: ('07/08/2026', '14793', 316.0, None)  (raw ref item: {'date': '07/08/2026', 'description': 'Invoice #14793: Due 07/31/2026.', 'amount': '316.00', 'open_amount': '316.00', 'invoice_no': '14793', 'due_date': '07/31/2026'})
+    ref row #3: ('07/10/2026', '14817', 400.0, None)  (raw ref item: {'date': '07/10/2026', 'description': 'Invoice #14817: Due 07/31/2026.', 'amount': '400.00', 'open_amount': '400.00', 'invoice_no': '14817', 'due_date': '07/31/2026'})
+    ref row #4: ('07/10/2026', '14818', 400.0, None)  (raw ref item: {'date': '07/10/2026', 'description': 'Invoice #14818: Due 07/31/2026.', 'amount': '400.00', 'open_amount': '400.00', 'invoice_no': '14818', 'due_date': '07/31/2026'})
+  -- sample extra/spurious rows --
+    generic row #0: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '07/01/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #14757: Due 07/31/2026.', 'charge': 592.0, 'credit': None, 'balance': 592.0, 'amount_generic': 592.0}
+    generic row #1: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '07/02/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #14774: Due 07/31/2026.', 'charge': 768.75, 'credit': None, 'balance': 768.75, 'amount_generic': 768.75}
+    generic row #2: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '07/08/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #14793: Due 07/31/2026.', 'charge': 316.0, 'credit': None, 'balance': 316.0, 'amount_generic': 316.0}
+    generic row #3: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '07/10/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #14817: Due 07/31/2026.', 'charge': 400.0, 'credit': None, 'balance': 400.0, 'amount_generic': 400.0}
+    generic row #4: {'page': 1, 'row_kind': 'word_bucket_fallback', 'date': '07/10/2026', 'invoice_number': '', 'reference': '', 'description': 'Invoice #14818: Due 07/31/2026.', 'charge': 400.0, 'credit': None, 'balance': 400.0, 'amount_generic': 400.0}
+
+##########################################################################################
+SUMMARY
+##########################################################################################
+  Fred Beans Lee's                 FAIL           matched 0/273 (0.0%)  extra=0  mismatched_amount=0
+  Astech Owego                     FAIL           matched 0/106 (0.0%)  extra=2  mismatched_amount=106
+  Empire Hewitt's                  FAIL           matched 0/91 (0.0%)  extra=0  mismatched_amount=0
+  Wilbert's Owego                  FAIL           matched 0/28 (0.0%)  extra=2  mismatched_amount=0
+  Quirk Colemans                   FAIL           matched 0/174 (0.0%)  extra=0  mismatched_amount=0
+  Matt Nimey Sprague's             FAIL           matched 0/32 (0.0%)  extra=0  mismatched_amount=0
+  Lia Vestal                       PARTIAL MATCH  matched 28/31 (90.3%)  extra=2  mismatched_amount=1
+  Keystone Neet's                  FAIL           matched 0/160 (0.0%)  extra=0  mismatched_amount=0
+  Precision Diagnostics Klapec     FAIL           matched 0/27 (0.0%)  extra=56  mismatched_amount=0
+  Adas Calibration Don Joe         FAIL           matched 0/48 (0.0%)  extra=74  mismatched_amount=0

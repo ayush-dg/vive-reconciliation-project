@@ -1,0 +1,281 @@
+{
+  "vendor": "Lia Vestal",
+  "module": "extract_lia",
+  "fieldnames": [
+    "page",
+    "date",
+    "document_transaction",
+    "purchases",
+    "payments_credits",
+    "balance"
+  ],
+  "line_items": [
+    {
+      "page": 1,
+      "date": "03JUL26",
+      "document_transaction": "153272HA",
+      "purchases": "4,344.19",
+      "payments_credits": "",
+      "balance": "4,344.19"
+    },
+    {
+      "page": 1,
+      "date": "03JUL26",
+      "document_transaction": "153304HA",
+      "purchases": "120.15",
+      "payments_credits": "",
+      "balance": "120.15"
+    },
+    {
+      "page": 1,
+      "date": "07JUL26",
+      "document_transaction": "153425HA",
+      "purchases": "938.90",
+      "payments_credits": "",
+      "balance": "938.90"
+    },
+    {
+      "page": 1,
+      "date": "08JUL26",
+      "document_transaction": "153425HAX1",
+      "purchases": "786.71",
+      "payments_credits": "",
+      "balance": "786.71"
+    },
+    {
+      "page": 1,
+      "date": "08JUL26",
+      "document_transaction": "153454HA",
+      "purchases": "655.79",
+      "payments_credits": "",
+      "balance": "655.79"
+    },
+    {
+      "page": 1,
+      "date": "10JUL26",
+      "document_transaction": "153272HAX1",
+      "purchases": "51.63",
+      "payments_credits": "",
+      "balance": "51.63"
+    },
+    {
+      "page": 1,
+      "date": "13JUL26",
+      "document_transaction": "153705HA",
+      "purchases": "39.11",
+      "payments_credits": "",
+      "balance": "39.11"
+    },
+    {
+      "page": 1,
+      "date": "13JUL26",
+      "document_transaction": "153756HA",
+      "purchases": "10.06",
+      "payments_credits": "",
+      "balance": "10.06"
+    },
+    {
+      "page": 1,
+      "date": "13JUL26",
+      "document_transaction": "CM153454HA",
+      "purchases": "",
+      "payments_credits": "50.00",
+      "balance": "50.00-"
+    },
+    {
+      "page": 1,
+      "date": "14JUL26",
+      "document_transaction": "153727HA",
+      "purchases": "1,403.95",
+      "payments_credits": "",
+      "balance": "1,403.95"
+    },
+    {
+      "page": 1,
+      "date": "14JUL26",
+      "document_transaction": "153795HA",
+      "purchases": "932.57",
+      "payments_credits": "",
+      "balance": "932.57"
+    },
+    {
+      "page": 1,
+      "date": "16JUL26",
+      "document_transaction": "154012HA",
+      "purchases": "343.60",
+      "payments_credits": "",
+      "balance": "343.60"
+    },
+    {
+      "page": 1,
+      "date": "17JUL26",
+      "document_transaction": "153703HA",
+      "purchases": "69.00",
+      "payments_credits": "",
+      "balance": "69.00"
+    },
+    {
+      "page": 1,
+      "date": "20JUL26",
+      "document_transaction": "154197HA",
+      "purchases": "132.51",
+      "payments_credits": "",
+      "balance": "132.51"
+    },
+    {
+      "page": 1,
+      "date": "21JUL26",
+      "document_transaction": "154204HA",
+      "purchases": "1,420.77",
+      "payments_credits": "",
+      "balance": "1,420.77"
+    },
+    {
+      "page": 1,
+      "date": "21JUL26",
+      "document_transaction": "154207HA",
+      "purchases": "99.63",
+      "payments_credits": "",
+      "balance": "99.63"
+    },
+    {
+      "page": 1,
+      "date": "21JUL26",
+      "document_transaction": "154233HA",
+      "purchases": "168.31",
+      "payments_credits": "",
+      "balance": "168.31"
+    },
+    {
+      "page": 1,
+      "date": "22JUL26",
+      "document_transaction": "154278HA",
+      "purchases": "1,041.73",
+      "payments_credits": "",
+      "balance": "1,041.73"
+    },
+    {
+      "page": 1,
+      "date": "22JUL26",
+      "document_transaction": "154324HA",
+      "purchases": "2.22",
+      "payments_credits": "",
+      "balance": "2.22"
+    },
+    {
+      "page": 1,
+      "date": "24JUL26",
+      "document_transaction": "154451HA",
+      "purchases": "2,264.20",
+      "payments_credits": "",
+      "balance": "2,264.20"
+    },
+    {
+      "page": 1,
+      "date": "24JUL26",
+      "document_transaction": "154452HA",
+      "purchases": "515.59",
+      "payments_credits": "",
+      "balance": "515.59"
+    },
+    {
+      "page": 1,
+      "date": "24JUL26",
+      "document_transaction": "154464HA",
+      "purchases": "10.02",
+      "payments_credits": "",
+      "balance": "10.02"
+    },
+    {
+      "page": 1,
+      "date": "24JUL26",
+      "document_transaction": "154508HA",
+      "purchases": "638.21",
+      "payments_credits": "",
+      "balance": "638.21"
+    },
+    {
+      "page": 1,
+      "date": "27JUL26",
+      "document_transaction": "154415HA",
+      "purchases": "20.08",
+      "payments_credits": "",
+      "balance": "20.08"
+    },
+    {
+      "page": 1,
+      "date": "27JUL26",
+      "document_transaction": "154601HA",
+      "purchases": "66.93",
+      "payments_credits": "",
+      "balance": "66.93"
+    },
+    {
+      "page": 1,
+      "date": "28JUL26",
+      "document_transaction": "154560HA",
+      "purchases": "19.43",
+      "payments_credits": "",
+      "balance": "19.43"
+    },
+    {
+      "page": 1,
+      "date": "28JUL26",
+      "document_transaction": "154579HA",
+      "purchases": "63.43",
+      "payments_credits": "",
+      "balance": "63.43"
+    },
+    {
+      "page": 2,
+      "date": "29JUL26",
+      "document_transaction": "154415HAX1",
+      "purchases": "114.50",
+      "payments_credits": "",
+      "balance": "114.50"
+    },
+    {
+      "page": 2,
+      "date": "29JUL26",
+      "document_transaction": "154618HA",
+      "purchases": "162.36",
+      "payments_credits": "",
+      "balance": "162.36"
+    },
+    {
+      "page": 2,
+      "date": "29JUL26",
+      "document_transaction": "154620HA",
+      "purchases": "29.80",
+      "payments_credits": "",
+      "balance": "29.80"
+    },
+    {
+      "page": 2,
+      "date": "30JUL26",
+      "document_transaction": "154750HA",
+      "purchases": "840.91",
+      "payments_credits": "",
+      "balance": "840.91"
+    }
+  ],
+  "summary": {
+    "account_no": "HOA7979999",
+    "customer_name": "VIVE COLL VESTAL",
+    "closing_date": "31JUL26",
+    "billing_address": "2813 OLD VESTAL RD",
+    "billing_city_state_zip": "VESTAL NY 13850",
+    "page_no": "1",
+    "total_pages": 2,
+    "past_due": "0.00",
+    "current": "17,256.29",
+    "please_pay_this_amount": "17,256.29",
+    "over_30": "0.00",
+    "over_60": "0.00",
+    "over_90": "0.00",
+    "over_120": "0.00",
+    "total_computed": "17,256.29",
+    "total_printed": "17,256.29",
+    "reconciles": true
+  }
+}

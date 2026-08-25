@@ -137,6 +137,75 @@ class BlobStorageClient:
         except Exception as e:
             return False, None, str(e)
 
+    def list_pdf_blobs(self) -> list:
+        """
+        Lists PDF blob names currently in the configured container. Used by
+        the dropzone polling watcher (web/worker.py) to find newly-landed
+        statements without needing Event Grid. Returns [] on any failure
+        (missing config, network/auth error) -- never raises.
+        """
+        if not self.connection_string:
+            return []
+        try:
+            from azure.storage.blob import BlobServiceClient
+
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            container_client = service_client.get_container_client(self.container_name)
+            return [b.name for b in container_client.list_blobs() if b.name.lower().endswith(".pdf")]
+        except Exception as e:
+            print(f"[blob_client] Failed to list blobs in {self.container_name}: {e}")
+            return []
+
+    def download_blob_by_name(self, blob_name: str, dest_path: str) -> bool:
+        """
+        Downloads blob_name (as returned by list_pdf_blobs(), not a full
+        URL) from the configured container to dest_path. Returns True on
+        success, False on any failure -- never raises. Unlike download_pdf(),
+        this trusts blob_name directly rather than parsing/validating a
+        caller-supplied URL, since the caller here (the dropzone watcher)
+        got the name from this same client's own list_pdf_blobs() call
+        against self.container_name, not from an external request.
+        """
+        if not self.connection_string:
+            print(f"[blob_client] Skipping download -- {self.connection_string_env_var} not set")
+            return False
+        try:
+            success, error = self._real_download(self.container_name, blob_name, dest_path)
+        except Exception as e:
+            print(f"[blob_client] Unexpected error downloading {blob_name}: {e}")
+            return False
+        if not success:
+            print(f"[blob_client] Download failed for {blob_name}: {error}")
+            return False
+        return True
+
+    def delete_blob(self, blob_name: str) -> bool:
+        """
+        Deletes blob_name from the configured container. Used by the
+        dropzone polling watcher after a blob has been downloaded and
+        queued, so the dropzone container stays a transient inbox (already
+        -picked-up files don't pile up and get re-scanned/re-queued on
+        every poll). Returns True on success, False on any failure --
+        never raises. A failed delete is logged but never blocks intake --
+        the job is already queued by the time this runs, so the worst
+        outcome is the same PDF sitting in the dropzone to be picked up
+        again from scratch (or its already-completed job to be skipped
+        because of an existing statement_id, since re-running the pipeline
+        for the same file is idempotent per RULE-02).
+        """
+        if not self.connection_string:
+            return False
+        try:
+            from azure.storage.blob import BlobServiceClient
+
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            blob_client = service_client.get_blob_client(container=self.container_name, blob=blob_name)
+            blob_client.delete_blob()
+            return True
+        except Exception as e:
+            print(f"[blob_client] Delete failed for {blob_name}: {e}")
+            return False
+
     def download_pdf(self, blob_url: str, dest_path: str) -> bool:
         """
         Downloads the blob named by blob_url's path to dest_path. Returns

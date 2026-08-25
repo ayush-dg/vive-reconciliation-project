@@ -1,8 +1,9 @@
 __pycache__/
 *.pyc
 .env
-lakehouse/*.db
+lakehouse/reconciliation.db*
 lakehouse/ai_call_slots/
+lakehouse/fabric_token_cache.json
 logs/*.log
 *.egg-info/
 .venv/
@@ -16,3 +17,7 @@ terraform.tfvars
 tfplan*
 crash.log
 crash.*.log
+netsuite_tools/.env
+*.bak
+JOBS_BACKUP_*.json
+cache_bust_marker.txt

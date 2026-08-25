@@ -31,11 +31,10 @@ values.
 extract_keystone (wired 2026-08-23) is a balance-forward/period-activity
 ledger rather than simple charge rows -- see its own _FIELD_MAP entry
 below. Extraction and Bronze storage are fully wired (every row, every
-field, reaches Bronze); charges/credits/outstanding_amount deliberately
-stay None for every Keystone row pending a separate, still-open decision
-on how its ledger fields relate to a chargeable amount for matching
-purposes. That decision is out of scope here -- see the Keystone
-investigation session and migrations/012_add_keystone_ledger_columns.sql.
+field, reaches Bronze). Charges/Credits are resolved per-row via
+_keystone_charge_credit() (2026-08-24) -- period_activity on a
+new-charge row, or balance_forward on a settlement row -- see that
+function's own docstring and migrations/012_add_keystone_ledger_columns.sql.
 """
 
 import os
@@ -168,13 +167,17 @@ _FIELD_MAP = {
     "extract_adas": {
         "invoice_number": ("invoice_no",),
         "date_field": "date", "due_date_field": "due_date",
-        # "open_amount", not "amount" -- extract_adas.py's own docstring:
-        # amount is the ORIGINAL invoice amount, open_amount is what's
-        # still unpaid, and the printed TOTAL DUE reconciles against
-        # sum(open_amount) (most older invoices are already paid off, so
-        # their open_amount is 0.00 while amount still shows the original
-        # charge).
-        "charge_field": "open_amount", "credit_field": None,
+        # "amount", not "open_amount" -- Charges must always be the
+        # ORIGINAL invoice amount (extract_adas.py's own docstring), never
+        # the remaining unpaid balance. Confirmed via manual comparison
+        # against the real PDF (2026-08-24): invoices #14564-14748, already
+        # paid off before the statement period, show open_amount=0.00 but
+        # a real original amount (e.g. $536.00) -- using open_amount here
+        # was silently showing $0.00 in Charges for every closed invoice.
+        # (This module's own extract()/reconciles check, which does sum
+        # open_amount against the printed TOTAL DUE, is separate from this
+        # per-row Bronze/matching field and is unaffected by this change.)
+        "charge_field": "amount", "credit_field": None,
     },
     "extract_keystone": {
         # Ledger-style statement (see extract_keystone.py's own docstring
@@ -182,26 +185,24 @@ _FIELD_MAP = {
         # new-charge row (period_activity populated) OR a settlement row
         # (balance_forward/credit_applied/payment_applied populated),
         # never both. No single field maps cleanly to the shared
-        # charge_field/credit_field roles without first deciding how these
-        # relate to a chargeable amount for matching purposes -- an
-        # explicit, still-open decision, deliberately NOT made here.
-        # charge_field/credit_field/amount_due_field are intentionally
-        # left unset except amount_due_field below: charges/credits/
-        # outstanding_amount stay None for every Keystone row (extraction/
-        # Bronze-visibility wiring only -- see migrations/
-        # 012_add_keystone_ledger_columns.sql). Every real field still
+        # charge_field/credit_field roles, so "ledger_charge_credit"
+        # dispatches to _keystone_charge_credit() instead (see its own
+        # docstring) -- Charges = period_activity on a new-charge row,
+        # or balance_forward (what was owed coming into this period) on
+        # a settlement row; Credits = credit_applied when genuinely
+        # non-zero. amount_due_field (balance_due) is untouched --
+        # already correct, confirmed 2026-08-24. Every real field still
         # reaches Bronze in its own dedicated column: reference_date ->
         # raw_invoice_date, reference_number -> raw_invoice_number
         # (invoice_number below), purchase_order_number -> raw_po_number
         # (po_number_field below), balance_due -> raw_amount_due
-        # (amount_due_field below -- balance_due is the one column always
-        # populated on every row, purely display/storage, never read by
-        # the matching engine), and the remaining four via
+        # (amount_due_field below), and the remaining four via
         # passthrough_fields.
         "invoice_number": ("reference_number",),
         "date_field": "reference_date", "due_date_field": None,
         "po_number_field": "purchase_order_number",
         "amount_due_field": "balance_due",
+        "ledger_charge_credit": True,
         "passthrough_fields": {
             "balance_forward": "balance_forward",
             "period_activity": "period_activity",
@@ -255,6 +256,26 @@ def _parse_money(raw):
     return -value if negative else value
 
 
+def _keystone_charge_credit(item):
+    """Keystone's ledger rows are EITHER a new-charge row (period_activity
+    populated, balance_forward blank) OR a settlement row (balance_forward
+    populated) -- never both (see extract_keystone.py's own docstring).
+    Charges must show the original amount owed for the row either way:
+    period_activity for a new charge, or balance_forward (what was owed
+    coming into this period, before this row's payment/credit) for a
+    settlement row. Credits shows credit_applied only when it's genuinely
+    non-zero -- a printed $0.00 credit_applied is not a real credit.
+    Amount Due is untouched by this (still balance_due via
+    amount_due_field) -- confirmed correct already, out of scope here."""
+    period_activity = _parse_money(item.get("period_activity"))
+    balance_forward = _parse_money(item.get("balance_forward"))
+    credit_applied = _parse_money(item.get("credit_applied"))
+
+    charges = period_activity if period_activity is not None else balance_forward
+    credits = credit_applied if credit_applied else None
+    return charges, credits
+
+
 class PythonLibraryExtractionEngine:
     """Drop-in substitute for DocumentUnderstandingEngine -- same
     understand(pdf_text, pdf_path, statement_id=None) signature. Ignores
@@ -296,6 +317,8 @@ class PythonLibraryExtractionEngine:
                 signed = _parse_money(item.get(field_map["signed_field"]))
                 charges = signed if (signed is not None and signed > 0) else None
                 credits = abs(signed) if (signed is not None and signed < 0) else None
+            elif field_map.get("ledger_charge_credit"):
+                charges, credits = _keystone_charge_credit(item)
             else:
                 # charge_field is optional (unlike the original Fred-Beans-
                 # only code, every other module here declares one) -- a

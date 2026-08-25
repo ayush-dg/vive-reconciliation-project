@@ -83,7 +83,7 @@
           {% endif %}
         </td>
         <td style="color:var(--text-muted)">{{ job.submitted_at | friendly_dt }}</td>
-        <td style="color:var(--danger);font-size:12px">{{ job.error_message[:200] if job.error_message else "" }}</td>
+        <td style="color:var(--danger);font-size:12px">{{ job.error_message | friendly_error }}</td>
       </tr>
       {% endfor %}
     </tbody>

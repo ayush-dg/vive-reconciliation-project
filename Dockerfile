@@ -51,7 +51,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # re-run instead of silently reusing a stale cached COPY layer from a
 # previous build — pass a fresh value (e.g. `--build-arg CACHE_BUST=$(date +%s)`)
 # on every `az acr build` invocation.
-ARG CACHE_BUST=0
+ARG CACHE_BUST=20260818
 COPY . .
 
 CMD ["tail", "-f", "/dev/null"]

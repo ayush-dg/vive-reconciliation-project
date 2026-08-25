@@ -1,0 +1,49 @@
+{
+  "line_items": [],
+  "fieldnames": [
+    "page",
+    "row_kind",
+    "date",
+    "invoice_number",
+    "reference",
+    "description",
+    "charge",
+    "credit",
+    "balance",
+    "amount_generic"
+  ],
+  "summary": {
+    "tier_used_per_page": [
+      [
+        1,
+        "word_bucket_fallback"
+      ],
+      [
+        2,
+        "word_bucket_fallback"
+      ],
+      [
+        3,
+        "word_bucket_fallback"
+      ],
+      [
+        4,
+        "word_bucket_fallback"
+      ],
+      [
+        5,
+        "word_bucket_fallback"
+      ],
+      [
+        6,
+        "word_bucket_fallback"
+      ],
+      [
+        7,
+        "word_bucket_fallback"
+      ]
+    ],
+    "line_item_count": 0
+  },
+  "full_text": null
+}

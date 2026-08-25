@@ -1,0 +1,314 @@
+{
+  "vendor": "Precision Diagnostics Klapec",
+  "module": "extract_precision",
+  "fieldnames": [
+    "page",
+    "date",
+    "invoice_no",
+    "description",
+    "message_on_statement",
+    "charge",
+    "payment",
+    "balance"
+  ],
+  "line_items": [
+    {
+      "page": 1,
+      "date": "7/1/2026",
+      "invoice_no": "160200",
+      "description": "Invoice #INV160200 Pay Now",
+      "message_on_statement": "2026 Kia Seltos KNDEUCAA5T7826518 RO 82451",
+      "charge": "186.57",
+      "payment": "",
+      "balance": "186.57"
+    },
+    {
+      "page": 1,
+      "date": "7/1/2026",
+      "invoice_no": "160197",
+      "description": "Invoice #INV160197 Pay Now",
+      "message_on_statement": "2025 Buick Envista KL47LAEP3SB127439 RO 82475",
+      "charge": "726.25",
+      "payment": "",
+      "balance": "912.82"
+    },
+    {
+      "page": 1,
+      "date": "7/2/2026",
+      "invoice_no": "160494",
+      "description": "Invoice #INV160494 Pay Now",
+      "message_on_statement": "RO 82306 2020 SUBA WRX VIN: JF1VA1A67L9814146",
+      "charge": "225.75",
+      "payment": "",
+      "balance": "1,138.57"
+    },
+    {
+      "page": 1,
+      "date": "7/8/2026",
+      "invoice_no": "162080",
+      "description": "Invoice #INV162080 Pay Now",
+      "message_on_statement": "RO 82296 2018 Honda Civic",
+      "charge": "255.60",
+      "payment": "",
+      "balance": "1,394.17"
+    },
+    {
+      "page": 1,
+      "date": "7/8/2026",
+      "invoice_no": "162073",
+      "description": "Invoice #INV162073 Pay Now",
+      "message_on_statement": "RO 82430 2020 Chevrolet Traverse LT",
+      "charge": "278.00",
+      "payment": "",
+      "balance": "1,672.17"
+    },
+    {
+      "page": 1,
+      "date": "7/14/2026",
+      "invoice_no": "163720",
+      "description": "Invoice #INV163720 Pay Now",
+      "message_on_statement": "RO 82483 2020 Ram 1500",
+      "charge": "225.75",
+      "payment": "",
+      "balance": "1,897.92"
+    },
+    {
+      "page": 1,
+      "date": "7/15/2026",
+      "invoice_no": "163847",
+      "description": "Invoice #INV163847 Pay Now",
+      "message_on_statement": "RO 82489 2019 Toyota Rav4",
+      "charge": "757.75",
+      "payment": "",
+      "balance": "2,655.67"
+    },
+    {
+      "page": 1,
+      "date": "7/15/2026",
+      "invoice_no": "163978",
+      "description": "Invoice #INV163978 Pay Now",
+      "message_on_statement": "RO 82484 2022 Subaru Forester",
+      "charge": "1,130.85",
+      "payment": "",
+      "balance": "3,786.52"
+    },
+    {
+      "page": 1,
+      "date": "7/16/2026",
+      "invoice_no": "164355",
+      "description": "Invoice #INV164355 Pay Now",
+      "message_on_statement": "2018 Chevy Silverado 3GCUKSECXJG301558 RO 82488",
+      "charge": "358.75",
+      "payment": "",
+      "balance": "4,145.27"
+    },
+    {
+      "page": 1,
+      "date": "7/16/2026",
+      "invoice_no": "164352",
+      "description": "Invoice #INV164352 Pay Now",
+      "message_on_statement": "2019 Toyota Rav4 2T3G1RFVXKC016547 RO 82429",
+      "charge": "668.50",
+      "payment": "",
+      "balance": "4,813.77"
+    },
+    {
+      "page": 1,
+      "date": "7/16/2026",
+      "invoice_no": "164416",
+      "description": "Invoice #INV164416 Pay Now",
+      "message_on_statement": "RO 82412 2020 Ford Escape",
+      "charge": "922.25",
+      "payment": "",
+      "balance": "5,736.02"
+    },
+    {
+      "page": 1,
+      "date": "7/20/2026",
+      "invoice_no": "165040",
+      "description": "Invoice #INV165040 Pay Now",
+      "message_on_statement": "RO 82413 2024 Kia Sportage",
+      "charge": "95.60",
+      "payment": "",
+      "balance": "5,831.62"
+    },
+    {
+      "page": 1,
+      "date": "7/20/2026",
+      "invoice_no": "165149",
+      "description": "Invoice #INV165149 Pay Now",
+      "message_on_statement": "2024 Honda Pilot 5FNYG1H61RB011844 RO 82406",
+      "charge": "1,838.55",
+      "payment": "",
+      "balance": "7,670.17"
+    },
+    {
+      "page": 1,
+      "date": "7/21/2026",
+      "invoice_no": "165384",
+      "description": "Invoice #INV165384 Pay Now",
+      "message_on_statement": "RO 82242 2022 Subaru Ascent",
+      "charge": "95.60",
+      "payment": "",
+      "balance": "7,765.77"
+    },
+    {
+      "page": 1,
+      "date": "7/21/2026",
+      "invoice_no": "165351",
+      "description": "Invoice #INV165351 Pay Now",
+      "message_on_statement": "RO 7800005 2024 Subaru Forester",
+      "charge": "1,165.85",
+      "payment": "",
+      "balance": "8,931.62"
+    },
+    {
+      "page": 1,
+      "date": "7/21/2026",
+      "invoice_no": "165454",
+      "description": "Invoice #INV165454 Pay Now",
+      "message_on_statement": "RO 82198 2021 Nissan Rogue",
+      "charge": "735.60",
+      "payment": "",
+      "balance": "9,667.22"
+    },
+    {
+      "page": 1,
+      "date": "7/21/2026",
+      "invoice_no": "165353",
+      "description": "Invoice #INV165353 Pay Now",
+      "message_on_statement": "RO 82508 2017 Ford Taurus",
+      "charge": "488.25",
+      "payment": "",
+      "balance": "10,155.47"
+    },
+    {
+      "page": 2,
+      "date": "7/22/2026",
+      "invoice_no": "165865",
+      "description": "Invoice #INV165865 Pay Now",
+      "message_on_statement": "RO 82471 2021 Subaru Forester",
+      "charge": "746.55",
+      "payment": "",
+      "balance": "10,902.02"
+    },
+    {
+      "page": 2,
+      "date": "7/22/2026",
+      "invoice_no": "166053",
+      "description": "Invoice #INV166053 Pay Now",
+      "message_on_statement": "RO 7800009 2025 Nissan Rogue",
+      "charge": "1,104.25",
+      "payment": "",
+      "balance": "12,006.27"
+    },
+    {
+      "page": 2,
+      "date": "7/22/2026",
+      "invoice_no": "166050",
+      "description": "Invoice #INV166050 Pay Now",
+      "message_on_statement": "RO 82493 2025 Hyundai Santa Fe",
+      "charge": "1,492.05",
+      "payment": "",
+      "balance": "13,498.32"
+    },
+    {
+      "page": 2,
+      "date": "7/23/2026",
+      "invoice_no": "166346",
+      "description": "Invoice #INV166346 Pay Now",
+      "message_on_statement": "RO 7800023 2020 Toyota Tacoma",
+      "charge": "255.60",
+      "payment": "",
+      "balance": "13,753.92"
+    },
+    {
+      "page": 2,
+      "date": "7/24/2026",
+      "invoice_no": "166576",
+      "description": "Invoice #INV166576 Pay Now",
+      "message_on_statement": "RO#82450 2021 CHEV Silverado 2500",
+      "charge": "175.60",
+      "payment": "",
+      "balance": "13,929.52"
+    },
+    {
+      "page": 2,
+      "date": "7/24/2026",
+      "invoice_no": "166767",
+      "description": "Invoice #INV166767 Pay Now",
+      "message_on_statement": "RO 82501 2020 Toyota Corolla Hybrid LE JTDEBRBE3LJ012459",
+      "charge": "953.75",
+      "payment": "",
+      "balance": "14,883.27"
+    },
+    {
+      "page": 2,
+      "date": "7/24/2026",
+      "invoice_no": "166772",
+      "description": "Invoice #INV166772 Pay Now",
+      "message_on_statement": "RO 82467 2018 TOYO Tundra 5TFCY5F17JX022251",
+      "charge": "827.75",
+      "payment": "",
+      "balance": "15,711.02"
+    },
+    {
+      "page": 2,
+      "date": "7/24/2026",
+      "invoice_no": "166711",
+      "description": "Invoice #INV166711 Pay Now",
+      "message_on_statement": "7800043 2022 Honda Pilot",
+      "charge": "1,275.05",
+      "payment": "",
+      "balance": "16,986.07"
+    },
+    {
+      "page": 2,
+      "date": "7/28/2026",
+      "invoice_no": "167435",
+      "description": "Invoice #INV167435 Pay Now",
+      "message_on_statement": "RO 7800095 2025 Toyota Tacoma VIN: 3TMLB5JN6SM191342",
+      "charge": "275.60",
+      "payment": "",
+      "balance": "17,261.67"
+    },
+    {
+      "page": 2,
+      "date": "7/28/2026",
+      "invoice_no": "167499",
+      "description": "Invoice #INV167499 Pay Now",
+      "message_on_statement": "RO 82497 2017 Buick LaCrosse",
+      "charge": "691.25",
+      "payment": "",
+      "balance": "17,952.92"
+    }
+  ],
+  "summary": {
+    "statement_date": "7/30/2026",
+    "customer_name": "VIVE Collision-Klapec",
+    "billing_address": "180 Regina Drive",
+    "billing_city_state_zip": "Cranberry PA 16319",
+    "billing_country": "United States",
+    "amount_due_printed": "17,952.92",
+    "vendor_name": "Precision Diagnostics, Inc",
+    "vendor_address": "2702 Agriculture Drive",
+    "vendor_city_state_zip": "Madison WI 53718",
+    "vendor_country": "United States",
+    "vendor_phone": "1-888-349-2327",
+    "aging_current": "17,952.92",
+    "aging_1_30_days": "0.00",
+    "aging_31_60_days": "0.00",
+    "aging_61_90_days": "0.00",
+    "aging_over_90_days": "0.00",
+    "aging_amount_due": "17,952.92",
+    "opening_balance_forward": "0.00",
+    "opening_balance_forward_note": "The statement's first data row is 'Balance Forward $0.00'. It is excluded from line_items (it is not an actual charge/invoice, just the ledger's starting balance) and is reported here instead.",
+    "payment_column_used": false,
+    "payment_column_note": "The header defines a 'Payment' column but no row in this statement has a value in it - every transaction is a Charge, so the running Balance is a pure additive sum of Charges.",
+    "total_computed_from_charges": "17,952.92",
+    "total_computed": "17,952.92",
+    "total_printed": "17,952.92",
+    "last_row_balance": "17,952.92",
+    "reconciles": true
+  }
+}

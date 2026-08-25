@@ -137,6 +137,26 @@ def friendly_dt(iso_str):
     return f"{dt.strftime('%b %d, %Y')}, {time_part}"
 
 
+def friendly_error(raw):
+    """A failed job's error_message can be a full stdout+traceback dump up
+    to 4000 characters (see worker.py's _run_job()) -- showing the first
+    ~200 chars of that (as the UI used to) just shows the pipeline's
+    opening "FULL RECONCILIATION PIPELINE" banner, not the actual failure,
+    since that banner is always printed first. The real explanation is
+    always at the END of captured output, never the start: for an
+    uncaught exception it's the traceback's final "ExceptionType: message"
+    line; for worker.py's own short messages ("Pipeline exited with no
+    output.", "Worker error: ...") it's simply the whole (already short,
+    already clean) string. Truncated defensively in case a message has no
+    newlines and is itself very long."""
+    if not raw:
+        return ""
+    lines = [line for line in str(raw).strip().splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[-1].strip()[:300]
+
+
 def urlname(value):
     """Fully percent-encodes a value (including '/') for use as a single
     path segment — vendor names can contain slashes (e.g. "Tekion / Vinart")
@@ -151,4 +171,5 @@ templates.env.filters["period_label"] = period_label
 templates.env.filters["initials"] = initials
 templates.env.filters["friendly_dt"] = friendly_dt
 templates.env.filters["friendly_date"] = friendly_date
+templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname

@@ -1,0 +1,416 @@
+{
+  "vendor": "Adas Calibration Don Joe",
+  "module": "extract_adas",
+  "fieldnames": [
+    "date",
+    "description",
+    "amount",
+    "open_amount",
+    "invoice_no",
+    "due_date"
+  ],
+  "line_items": [
+    {
+      "date": "07/01/2026",
+      "description": "Invoice #14757: Due 07/31/2026.",
+      "amount": "592.00",
+      "open_amount": "592.00",
+      "invoice_no": "14757",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/02/2026",
+      "description": "Invoice #14774: Due 07/31/2026.",
+      "amount": "768.75",
+      "open_amount": "768.75",
+      "invoice_no": "14774",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/08/2026",
+      "description": "Invoice #14793: Due 07/31/2026.",
+      "amount": "316.00",
+      "open_amount": "316.00",
+      "invoice_no": "14793",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/10/2026",
+      "description": "Invoice #14817: Due 07/31/2026.",
+      "amount": "400.00",
+      "open_amount": "400.00",
+      "invoice_no": "14817",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/10/2026",
+      "description": "Invoice #14818: Due 07/31/2026.",
+      "amount": "400.00",
+      "open_amount": "400.00",
+      "invoice_no": "14818",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/10/2026",
+      "description": "Invoice #14819: Due 07/31/2026.",
+      "amount": "825.00",
+      "open_amount": "825.00",
+      "invoice_no": "14819",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/14/2026",
+      "description": "Invoice #14833: Due 07/31/2026.",
+      "amount": "675.00",
+      "open_amount": "675.00",
+      "invoice_no": "14833",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/16/2026",
+      "description": "Invoice #14849: Due 07/31/2026.",
+      "amount": "864.50",
+      "open_amount": "864.50",
+      "invoice_no": "14849",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/16/2026",
+      "description": "Invoice #14850: Due 07/31/2026.",
+      "amount": "240.00",
+      "open_amount": "240.00",
+      "invoice_no": "14850",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/20/2026",
+      "description": "Invoice #14875: Due 07/31/2026.",
+      "amount": "536.00",
+      "open_amount": "536.00",
+      "invoice_no": "14875",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/20/2026",
+      "description": "Invoice #14876: Due 07/20/2026.",
+      "amount": "284.00",
+      "open_amount": "284.00",
+      "invoice_no": "14876",
+      "due_date": "07/20/2026"
+    },
+    {
+      "date": "07/22/2026",
+      "description": "Invoice #14892: Due 07/31/2026.",
+      "amount": "400.00",
+      "open_amount": "400.00",
+      "invoice_no": "14892",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/24/2026",
+      "description": "Invoice #14910: Due 07/31/2026.",
+      "amount": "400.00",
+      "open_amount": "400.00",
+      "invoice_no": "14910",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/24/2026",
+      "description": "Invoice #14911: Due 07/31/2026.",
+      "amount": "160.00",
+      "open_amount": "160.00",
+      "invoice_no": "14911",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/24/2026",
+      "description": "Invoice #14912: Due 07/31/2026.",
+      "amount": "316.00",
+      "open_amount": "316.00",
+      "invoice_no": "14912",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/27/2026",
+      "description": "Invoice #14920: Due 07/31/2026.",
+      "amount": "420.00",
+      "open_amount": "420.00",
+      "invoice_no": "14920",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/27/2026",
+      "description": "Invoice #14921: Due 07/31/2026.",
+      "amount": "864.50",
+      "open_amount": "864.50",
+      "invoice_no": "14921",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/28/2026",
+      "description": "Invoice #14931: Due 07/31/2026.",
+      "amount": "660.00",
+      "open_amount": "660.00",
+      "invoice_no": "14931",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/28/2026",
+      "description": "Invoice #14932: Due 07/31/2026.",
+      "amount": "496.00",
+      "open_amount": "496.00",
+      "invoice_no": "14932",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/30/2026",
+      "description": "Invoice #14948: Due 07/31/2026.",
+      "amount": "536.00",
+      "open_amount": "536.00",
+      "invoice_no": "14948",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "07/31/2026",
+      "description": "Invoice #14963: Due 07/31/2026.",
+      "amount": "532.00",
+      "open_amount": "532.00",
+      "invoice_no": "14963",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "06/01/2026",
+      "description": "Invoice #14564: Due 06/30/2026.",
+      "amount": "536.00",
+      "open_amount": "0.00",
+      "invoice_no": "14564",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/02/2026",
+      "description": "Invoice #14571: Due 06/30/2026.",
+      "amount": "400.00",
+      "open_amount": "0.00",
+      "invoice_no": "14571",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/03/2026",
+      "description": "Invoice #14580: Due 06/30/2026.",
+      "amount": "200.00",
+      "open_amount": "0.00",
+      "invoice_no": "14580",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/09/2026",
+      "description": "Invoice #14617: Due 06/30/2026.",
+      "amount": "452.00",
+      "open_amount": "0.00",
+      "invoice_no": "14617",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/10/2026",
+      "description": "Invoice #14623: Due 06/30/2026.",
+      "amount": "640.00",
+      "open_amount": "0.00",
+      "invoice_no": "14623",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/10/2026",
+      "description": "Invoice #14624: Due 06/30/2026.",
+      "amount": "636.00",
+      "open_amount": "0.00",
+      "invoice_no": "14624",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/16/2026",
+      "description": "Invoice #14653: Due 06/30/2026.",
+      "amount": "636.00",
+      "open_amount": "0.00",
+      "invoice_no": "14653",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/16/2026",
+      "description": "Invoice #14654: Due 06/30/2026.",
+      "amount": "864.50",
+      "open_amount": "0.00",
+      "invoice_no": "14654",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/16/2026",
+      "description": "Invoice #14655: Due 06/30/2026.",
+      "amount": "705.00",
+      "open_amount": "0.00",
+      "invoice_no": "14655",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/18/2026",
+      "description": "Invoice #14665: Due 06/30/2026.",
+      "amount": "1,391.25",
+      "open_amount": "0.00",
+      "invoice_no": "14665",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/18/2026",
+      "description": "Invoice #14666: Due 06/30/2026.",
+      "amount": "738.75",
+      "open_amount": "0.00",
+      "invoice_no": "14666",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/18/2026",
+      "description": "Invoice #14667: Due 06/30/2026.",
+      "amount": "400.00",
+      "open_amount": "0.00",
+      "invoice_no": "14667",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/19/2026",
+      "description": "Invoice #14678: Due 06/30/2026.",
+      "amount": "500.00",
+      "open_amount": "0.00",
+      "invoice_no": "14678",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/19/2026",
+      "description": "Invoice #14679: Due 06/30/2026.",
+      "amount": "316.00",
+      "open_amount": "0.00",
+      "invoice_no": "14679",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/19/2026",
+      "description": "Invoice #14680: Due 06/30/2026.",
+      "amount": "1,361.50",
+      "open_amount": "0.00",
+      "invoice_no": "14680",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/22/2026",
+      "description": "Invoice #14686: Due 06/30/2026.",
+      "amount": "240.00",
+      "open_amount": "0.00",
+      "invoice_no": "14686",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/22/2026",
+      "description": "Invoice #14687: Due 06/30/2026.",
+      "amount": "400.00",
+      "open_amount": "0.00",
+      "invoice_no": "14687",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/22/2026",
+      "description": "Invoice #14688: Due 06/30/2026.",
+      "amount": "636.00",
+      "open_amount": "0.00",
+      "invoice_no": "14688",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/23/2026",
+      "description": "Invoice #14694: Due 06/30/2026.",
+      "amount": "316.00",
+      "open_amount": "0.00",
+      "invoice_no": "14694",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/25/2026",
+      "description": "Invoice #14713: Due 06/30/2026.",
+      "amount": "400.00",
+      "open_amount": "0.00",
+      "invoice_no": "14713",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/25/2026",
+      "description": "Invoice #14714: Due 06/30/2026.",
+      "amount": "636.00",
+      "open_amount": "0.00",
+      "invoice_no": "14714",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/25/2026",
+      "description": "Invoice #14715: Due 06/30/2026.",
+      "amount": "1,172.50",
+      "open_amount": "0.00",
+      "invoice_no": "14715",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/25/2026",
+      "description": "Invoice #14716: Due 06/30/2026.",
+      "amount": "798.75",
+      "open_amount": "0.00",
+      "invoice_no": "14716",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/29/2026",
+      "description": "Invoice #14740: Due 06/30/2026.",
+      "amount": "536.00",
+      "open_amount": "0.00",
+      "invoice_no": "14740",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/29/2026",
+      "description": "Invoice #14741: Due 06/30/2026.",
+      "amount": "798.75",
+      "open_amount": "0.00",
+      "invoice_no": "14741",
+      "due_date": "06/30/2026"
+    },
+    {
+      "date": "06/30/2026",
+      "description": "Invoice #14747: Due 07/31/2026.",
+      "amount": "400.00",
+      "open_amount": "0.00",
+      "invoice_no": "14747",
+      "due_date": "07/31/2026"
+    },
+    {
+      "date": "06/30/2026",
+      "description": "Invoice #14748: Due 06/30/2026.",
+      "amount": "316.00",
+      "open_amount": "0.00",
+      "invoice_no": "14748",
+      "due_date": "06/30/2026"
+    }
+  ],
+  "summary": {
+    "statement_no": "3058",
+    "statement_date": "07/31/2026",
+    "total_due_printed": "10,685.75",
+    "customer_name": "Don Joe Auto Body",
+    "customer_address": "247 E Shore Rd",
+    "customer_city_state_zip": "Great Neck, NY 11023",
+    "aging_current": "10,401.75",
+    "aging_1_30_days_past_due": "284.00",
+    "aging_31_60_days_past_due": "0.00",
+    "aging_61_90_days_past_due": "0.00",
+    "aging_90_plus_days_past_due": "0.00",
+    "aging_amount_due": "10,685.75",
+    "total_computed": "10,685.75",
+    "total_printed": "10,685.75",
+    "reconciles": true,
+    "aging_current_plus_1_30_cross_check": "10,685.75"
+  }
+}

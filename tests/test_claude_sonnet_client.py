@@ -113,21 +113,18 @@ class TestClaudeSonnetClientGenerateWithFile(unittest.TestCase):
 
 
 class TestClaudeSonnetClientStreaming(unittest.TestCase):
-    """Direct tests that the real call path uses client.messages.stream() +
-    get_final_message() rather than a plain messages.create() call — the
-    whole point of this client (see module docstring)."""
+    """Direct tests that the real call path hits Foundry's REST endpoint
+    directly via requests.post (see module docstring) — the whole point of
+    this client after the anthropic SDK's AnthropicFoundry class broke
+    across versions (dropping the 'temperature' kwarg in 1.0.0)."""
 
-    def _fake_stream_manager(self, text):
-        fake_message = mock.MagicMock()
-        fake_message.content = [mock.MagicMock(text=text)]
-
-        fake_stream = mock.MagicMock()
-        fake_stream.get_final_message.return_value = fake_message
-
-        fake_manager = mock.MagicMock()
-        fake_manager.__enter__ = mock.Mock(return_value=fake_stream)
-        fake_manager.__exit__ = mock.Mock(return_value=False)
-        return fake_manager
+    @staticmethod
+    def _fake_response(text, status_code=200):
+        fake_resp = mock.MagicMock()
+        fake_resp.status_code = status_code
+        fake_resp.json.return_value = {"content": [{"type": "text", "text": text}]}
+        fake_resp.raise_for_status = mock.Mock()
+        return fake_resp
 
     @staticmethod
     def _write_temp_pdf():
@@ -142,31 +139,29 @@ class TestClaudeSonnetClientStreaming(unittest.TestCase):
 
     def test_generate_with_file_uses_streaming_call(self):
         response_json = json.dumps({"columns_found": ["Invoice #"], "rows": [{"Invoice #": "A1"}]})
-        fake_manager = self._fake_stream_manager(response_json)
-
-        fake_client = mock.MagicMock()
-        fake_client.messages.stream.return_value = fake_manager
+        fake_resp = self._fake_response(response_json)
 
         pdf_path = self._write_temp_pdf()
         try:
-            with mock.patch("anthropic.Anthropic", return_value=fake_client):
+            with mock.patch("requests.post", return_value=fake_resp) as post:
                 client = ClaudeSonnetClient(CLAUDE_SONNET_CONFIG, transport=None)
                 response = client.generate_with_file(pdf_path, "extract this")
         finally:
             os.remove(pdf_path)
 
         self.assertTrue(response.success)
-        fake_client.messages.stream.assert_called_once()
-        fake_manager.__enter__.return_value.get_final_message.assert_called_once()
+        post.assert_called_once()
         self.assertEqual(response.parsed_json["invoices"][0]["invoice_number"], "A1")
 
     def test_streaming_error_returns_clean_failure_not_exception(self):
-        fake_client = mock.MagicMock()
-        fake_client.messages.stream.side_effect = Exception("529 overloaded_error")
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            pass
+        pdf_path = f.name
+        with open(pdf_path, "wb") as fh:
+            fh.write(b"%PDF-1.4 dummy content")
 
-        pdf_path = self._write_temp_pdf()
         try:
-            with mock.patch("anthropic.Anthropic", return_value=fake_client):
+            with mock.patch("requests.post", side_effect=Exception("529 overloaded_error")):
                 client = ClaudeSonnetClient(CLAUDE_SONNET_CONFIG, transport=None)
                 response = client.generate_with_file(pdf_path, "extract this")
         finally:
@@ -175,19 +170,16 @@ class TestClaudeSonnetClientStreaming(unittest.TestCase):
         self.assertFalse(response.success)
         self.assertIn("overloaded", response.error)
 
-    def test_uses_azure_foundry_client_when_endpoint_set(self):
+    def test_uses_azure_foundry_endpoint_when_configured(self):
         config = dict(CLAUDE_SONNET_CONFIG, endpoint_env_var="CLAUDE_SONNET_TEST_ENDPOINT")
         os.environ["CLAUDE_SONNET_TEST_ENDPOINT"] = "https://example.services.ai.azure.com/anthropic"
 
         response_json = json.dumps({"columns_found": ["Invoice #"], "rows": [{"Invoice #": "A1"}]})
-        fake_manager = self._fake_stream_manager(response_json)
-
-        fake_client = mock.MagicMock()
-        fake_client.messages.stream.return_value = fake_manager
+        fake_resp = self._fake_response(response_json)
 
         pdf_path = self._write_temp_pdf()
         try:
-            with mock.patch("anthropic.AnthropicFoundry", return_value=fake_client) as foundry_ctor:
+            with mock.patch("requests.post", return_value=fake_resp) as post:
                 client = ClaudeSonnetClient(config, transport=None)
                 response = client.generate_with_file(pdf_path, "extract this")
         finally:
@@ -195,7 +187,11 @@ class TestClaudeSonnetClientStreaming(unittest.TestCase):
             del os.environ["CLAUDE_SONNET_TEST_ENDPOINT"]
 
         self.assertTrue(response.success)
-        foundry_ctor.assert_called_once()
+        post.assert_called_once()
+        called_url = post.call_args.args[0] if post.call_args.args else post.call_args.kwargs["url"]
+        self.assertEqual(called_url, "https://example.services.ai.azure.com/anthropic/v1/messages")
+        called_headers = post.call_args.kwargs["headers"]
+        self.assertEqual(called_headers["x-api-key"], "test-claude-key")
 
 
 class TestClaudeSonnetClientColumnMapping(unittest.TestCase):
@@ -423,16 +419,10 @@ class TestClaudeSonnetClientTruncationDetection(unittest.TestCase):
         systematic (token budget), not transient, so retrying the same
         model is pointless."""
         response_json = json.dumps({"columns_found": ["Invoice #", "Amount"], "rows": []})
-        fake_message = mock.MagicMock()
-        fake_message.content = [mock.MagicMock(text=response_json)]
-        fake_stream = mock.MagicMock()
-        fake_stream.get_final_message.return_value = fake_message
-        fake_manager = mock.MagicMock()
-        fake_manager.__enter__ = mock.Mock(return_value=fake_stream)
-        fake_manager.__exit__ = mock.Mock(return_value=False)
-
-        fake_client = mock.MagicMock()
-        fake_client.messages.stream.return_value = fake_manager
+        fake_resp = mock.MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"content": [{"type": "text", "text": response_json}]}
+        fake_resp.raise_for_status = mock.Mock()
 
         config = dict(CLAUDE_SONNET_CONFIG,
                       retry_policy={"max_retries": 2, "backoff_seconds": 0, "backoff_multiplier": 1})
@@ -441,7 +431,7 @@ class TestClaudeSonnetClientTruncationDetection(unittest.TestCase):
         with os.fdopen(fd, "wb") as f:
             f.write(b"%PDF-1.4 dummy content")
         try:
-            with mock.patch("anthropic.Anthropic", return_value=fake_client):
+            with mock.patch("requests.post", return_value=fake_resp) as post:
                 client = ClaudeSonnetClient(config, transport=None)
                 response = client.generate_with_file(pdf_path, "extract this")
         finally:
@@ -450,7 +440,7 @@ class TestClaudeSonnetClientTruncationDetection(unittest.TestCase):
         self.assertFalse(response.success)
         self.assertIn("truncated", response.error.lower())
         self.assertEqual(response.attempt_count, 1)
-        fake_client.messages.stream.assert_called_once()
+        post.assert_called_once()
 
 
 if __name__ == "__main__":

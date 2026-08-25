@@ -64,7 +64,18 @@ def upload_submit(request: Request, user: str = Depends(require_login),
         # would otherwise leave it mostly intact.
         original_filename = file.filename.replace("\\", "/")
         safe_name = os.path.basename(original_filename)
-        pdf_path = os.path.join(SAMPLE_DATA_DIR, safe_name)
+
+        # Each upload gets its own subdirectory (named by a short uuid) so
+        # re-uploading the same filename can never overwrite an
+        # already-queued job's file out from under it. The saved file's
+        # basename stays exactly safe_name (not prefixed/renamed) --
+        # derive_vendor_slug_from_filename/derive_vendor_name_from_filename
+        # in notebooks/01_document_intake.py key off os.path.basename(pdf_path),
+        # so anything else breaks vendor detection downstream (see this
+        # file's own earlier comment on that).
+        upload_dir = os.path.join(SAMPLE_DATA_DIR, uuid.uuid4().hex[:8])
+        os.makedirs(upload_dir, exist_ok=True)
+        pdf_path = os.path.join(upload_dir, safe_name)
         with open(pdf_path, "wb") as f:
             f.write(file.file.read())
 

@@ -8,10 +8,10 @@ Handles both text-based PDFs (via pdfplumber's geometry-based table
 extraction) and scanned/image-based pages (via Tesseract OCR, page-by-page,
 only for pages where pdfplumber finds no usable text layer). OCR-derived
 rows get a lower line_confidence (0.50 vs. 0.65) since column boundaries are
-inferred from whitespace in flat OCR text rather than real geometry. As of
-the 0.90 validation threshold, both values fall below it — every row from
-this fallback, OCR-derived or not, now routes to human review rather than
-silently auto-passing.
+inferred from whitespace in flat OCR text rather than real geometry. With
+the validation threshold currently at 0.0, both values now clear it — every
+row from this fallback, OCR-derived or not, auto-passes regardless of
+confidence, the opposite of the original "never silently succeed" intent.
 
 Limitations:
 - Clean tabular PDFs (text or scanned) work well; highly irregular layouts
@@ -108,13 +108,13 @@ def extract_with_pdfplumber(pdf_path: str) -> dict:
 
                 # OCR-derived rows get a lower confidence — column boundaries
                 # are inferred from whitespace in flat text, not real geometry.
-                # See RULES.md RULE-10 — 0.50 is deliberately below the 0.90
-                # validation threshold. Note: 0.65 (non-OCR) is now also below
-                # 0.90, so this distinction no longer changes whether a row
-                # clears the gate — both values route to human review. Kept
-                # as two values anyway since 0.65 vs 0.50 still communicates
-                # relative reliability to a reviewer. Do not raise either
-                # without revisiting that rule.
+                # See RULES.md RULE-10 — 0.50 was deliberately kept below the
+                # validation threshold so this path could never silently
+                # auto-pass. With the threshold currently at 0.0, both 0.50
+                # and 0.65 clear it regardless — that safety property is
+                # currently defeated, not just weakened. Kept as two values
+                # anyway since 0.65 vs 0.50 still communicates relative
+                # reliability to a reviewer.
                 row_confidence = 0.50 if page_num in ocr_pages_used else 0.65
 
                 # Extract invoice rows

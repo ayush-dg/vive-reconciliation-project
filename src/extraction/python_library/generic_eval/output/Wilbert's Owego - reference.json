@@ -1,0 +1,313 @@
+{
+  "vendor": "Wilbert's Owego",
+  "module": "extract_wilberts",
+  "fieldnames": [
+    "page",
+    "date",
+    "store",
+    "invoice_number",
+    "reference",
+    "amount",
+    "core_chg",
+    "balance"
+  ],
+  "line_items": [
+    {
+      "page": 1,
+      "date": "07/02/26",
+      "store": "1",
+      "invoice_number": "1690264",
+      "reference": "PO#10200268",
+      "amount": "95.00",
+      "core_chg": "0.00",
+      "balance": "95.00"
+    },
+    {
+      "page": 1,
+      "date": "07/06/26",
+      "store": "1",
+      "invoice_number": "1691091",
+      "reference": "PO#10200314",
+      "amount": "895.00",
+      "core_chg": "0.00",
+      "balance": "895.00"
+    },
+    {
+      "page": 1,
+      "date": "07/06/26",
+      "store": "1",
+      "invoice_number": "1691092",
+      "reference": "PO#10200338",
+      "amount": "320.20",
+      "core_chg": "0.00",
+      "balance": "320.20"
+    },
+    {
+      "page": 1,
+      "date": "07/08/26",
+      "store": "1",
+      "invoice_number": "1692575",
+      "reference": "PO#10200338",
+      "amount": "320.20",
+      "core_chg": "0.00",
+      "balance": "320.20"
+    },
+    {
+      "page": 1,
+      "date": "07/08/26",
+      "store": "1",
+      "invoice_number": "1693081",
+      "reference": "PO#10200353",
+      "amount": "420.00",
+      "core_chg": "0.00",
+      "balance": "420.00"
+    },
+    {
+      "page": 1,
+      "date": "07/09/26",
+      "store": "1",
+      "invoice_number": "1693412",
+      "reference": "PO#10200355",
+      "amount": "232.05",
+      "core_chg": "0.00",
+      "balance": "232.05"
+    },
+    {
+      "page": 1,
+      "date": "07/09/26",
+      "store": "1",
+      "invoice_number": "1693414",
+      "reference": "PO#10200356",
+      "amount": "650.00",
+      "core_chg": "0.00",
+      "balance": "650.00"
+    },
+    {
+      "page": 1,
+      "date": "07/10/26",
+      "store": "1",
+      "invoice_number": "1694450",
+      "reference": "PO#10200359",
+      "amount": "133.00",
+      "core_chg": "0.00",
+      "balance": "133.00"
+    },
+    {
+      "page": 1,
+      "date": "07/10/26",
+      "store": "1",
+      "invoice_number": "1694476",
+      "reference": "CR for #1691092",
+      "amount": "-320.20",
+      "core_chg": "0.00",
+      "balance": "-320.20"
+    },
+    {
+      "page": 1,
+      "date": "07/10/26",
+      "store": "1",
+      "invoice_number": "1694559",
+      "reference": "CR for #1690264, DT#704518",
+      "amount": "-95.00",
+      "core_chg": "0.00",
+      "balance": "-95.00"
+    },
+    {
+      "page": 1,
+      "date": "07/15/26",
+      "store": "1",
+      "invoice_number": "1696407",
+      "reference": "PO#10200300",
+      "amount": "349.00",
+      "core_chg": "0.00",
+      "balance": "349.00"
+    },
+    {
+      "page": 1,
+      "date": "07/15/26",
+      "store": "1",
+      "invoice_number": "1696408",
+      "reference": "PO#10200338",
+      "amount": "335.00",
+      "core_chg": "0.00",
+      "balance": "335.00"
+    },
+    {
+      "page": 1,
+      "date": "07/15/26",
+      "store": "1",
+      "invoice_number": "Payment",
+      "reference": "ACCT 2234465",
+      "amount": "-5542.30",
+      "core_chg": "0.00",
+      "balance": "0.00"
+    },
+    {
+      "page": 1,
+      "date": "07/15/26",
+      "store": "1",
+      "invoice_number": "1697032",
+      "reference": "PO#10200362",
+      "amount": "345.00",
+      "core_chg": "0.00",
+      "balance": "345.00"
+    },
+    {
+      "page": 1,
+      "date": "07/16/26",
+      "store": "1",
+      "invoice_number": "1697732",
+      "reference": "CR for #1691091",
+      "amount": "-895.00",
+      "core_chg": "0.00",
+      "balance": "-895.00"
+    },
+    {
+      "page": 1,
+      "date": "07/21/26",
+      "store": "1",
+      "invoice_number": "1699601",
+      "reference": "PO#10200362",
+      "amount": "545.00",
+      "core_chg": "0.00",
+      "balance": "545.00"
+    },
+    {
+      "page": 1,
+      "date": "07/22/26",
+      "store": "1",
+      "invoice_number": "1700287",
+      "reference": "PO#10200357",
+      "amount": "819.00",
+      "core_chg": "0.00",
+      "balance": "819.00"
+    },
+    {
+      "page": 1,
+      "date": "07/22/26",
+      "store": "1",
+      "invoice_number": "1700572",
+      "reference": "CR for #1697032, DT#707032",
+      "amount": "-345.00",
+      "core_chg": "0.00",
+      "balance": "-345.00"
+    },
+    {
+      "page": 1,
+      "date": "07/22/26",
+      "store": "1",
+      "invoice_number": "1700585",
+      "reference": "CR for #1693414, DT#707511",
+      "amount": "-650.00",
+      "core_chg": "0.00",
+      "balance": "-650.00"
+    },
+    {
+      "page": 1,
+      "date": "07/22/26",
+      "store": "1",
+      "invoice_number": "1700599",
+      "reference": "CR for #1687544, DT#703626",
+      "amount": "-550.00",
+      "core_chg": "0.00",
+      "balance": "-550.00"
+    },
+    {
+      "page": 1,
+      "date": "07/22/26",
+      "store": "1",
+      "invoice_number": "1700627",
+      "reference": "CR for #1696408, DT#707050",
+      "amount": "-245.00",
+      "core_chg": "0.00",
+      "balance": "-245.00"
+    },
+    {
+      "page": 1,
+      "date": "07/23/26",
+      "store": "1",
+      "invoice_number": "1701362",
+      "reference": "CR for #1696408, DT#707050",
+      "amount": "-90.00",
+      "core_chg": "0.00",
+      "balance": "-90.00"
+    },
+    {
+      "page": 1,
+      "date": "07/24/26",
+      "store": "1",
+      "invoice_number": "1701715",
+      "reference": "PO#10200369",
+      "amount": "146.00",
+      "core_chg": "0.00",
+      "balance": "146.00"
+    },
+    {
+      "page": 1,
+      "date": "07/28/26",
+      "store": "1",
+      "invoice_number": "1703253",
+      "reference": "PO#10200383",
+      "amount": "325.00",
+      "core_chg": "0.00",
+      "balance": "325.00"
+    },
+    {
+      "page": 1,
+      "date": "07/30/26",
+      "store": "1",
+      "invoice_number": "1704792",
+      "reference": "PO#10200399",
+      "amount": "99.00",
+      "core_chg": "0.00",
+      "balance": "99.00"
+    },
+    {
+      "page": 1,
+      "date": "07/30/26",
+      "store": "1",
+      "invoice_number": "1704843",
+      "reference": "PO#10200384",
+      "amount": "78.00",
+      "core_chg": "0.00",
+      "balance": "78.00"
+    },
+    {
+      "page": 1,
+      "date": "07/30/26",
+      "store": "1",
+      "invoice_number": "1705113",
+      "reference": "CR for #1699601",
+      "amount": "-545.00",
+      "core_chg": "0.00",
+      "balance": "-545.00"
+    },
+    {
+      "page": 1,
+      "date": "07/30/26",
+      "store": "1",
+      "invoice_number": "1705188",
+      "reference": "CR for #1700287, DT#708677",
+      "amount": "-69.00",
+      "core_chg": "0.00",
+      "balance": "-69.00"
+    }
+  ],
+  "summary": {
+    "vendor_name": "Wilbert's Inc.",
+    "vendor_address": "1272 Salt Road",
+    "vendor_city_state_zip": "Webster NY 14580",
+    "vendor_phone": "585-872-1540",
+    "customer_name": "VIVE COLLISION - OWEGO",
+    "billing_address": "875 STATE ROUTE 17C",
+    "billing_city_state_zip": "OWEGO, NY, 13827",
+    "statement_date": "07/31/26",
+    "account_no": "2234465",
+    "aging_current_printed": "2,302.25",
+    "total_balance_due_printed": "2,302.25",
+    "total_amount_column_computed": "-3,240.05",
+    "total_computed": "2,302.25",
+    "total_printed": "2,302.25",
+    "reconciles": true
+  }
+}

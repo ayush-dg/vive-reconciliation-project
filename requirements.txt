@@ -1,7 +1,8 @@
 pdfplumber>=0.11.0
 pymupdf>=1.24.0  # fitz -- used by src/extraction/python_library/extract_ksi.py's OCR vendor-detection path
 python-dotenv>=1.0.0
-anthropic>=0.40.0
+anthropic==0.125.0
+requests>=2.31.0
 openai>=2.40.0
 google-genai>=2.10.0
 pytesseract==0.3.13

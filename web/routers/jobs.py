@@ -32,6 +32,14 @@ def jobs_status(request: Request, user: str = Depends(require_login)):
     return [_job_json(j) for j in queries.get_active_jobs()]
 
 
+@router.get("/jobs/_debug/kpi-state")
+def kpi_debug_state(request: Request, user: str = Depends(require_login)):
+    """TEMPORARY read-only diagnostic -- see queries.get_kpi_debug_state()
+    docstring. Remove once the Total invoices/Statement total KPI
+    investigation is closed."""
+    return queries.get_kpi_debug_state()
+
+
 @router.get("/jobs/history")
 def jobs_history(request: Request, user: str = Depends(require_login)):
     ctx = {
