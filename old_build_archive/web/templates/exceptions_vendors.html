@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Exceptions{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">
+    <div class="eyebrow">Vendors this period</div>
+    <h1>Exceptions</h1>
+  </div>
+  <div class="topbar-actions">
+    <span style="font-size:12px;color:var(--text-muted)">{{ total_open }} open across {{ vendor_count_with_ex }} vendor{{ "s" if vendor_count_with_ex != 1 }}</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if vendors %}
+<div class="vendor-grid">
+  {% for v in vendors %}
+  <a href="/exceptions/{{ v.url_name }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}">
+    <div class="vendor-card-head">
+      <div class="vendor-card-id">
+        <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--success-tint);color:var(--success)"{% endif %}>{{ v.vendor_name | initials }}</div>
+        <div>
+          <div class="vendor-card-name">{{ v.vendor_name }}</div>
+          <div class="vendor-card-meta">{{ v.statement_period | period_label }} · {{ v.total_invoice_count }} invoices · {{ v.statement_total | money_short }}</div>
+        </div>
+      </div>
+      {% if v.exception_count > 0 %}
+      <span class="badge badge-warning">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
+      {% else %}
+      <span class="badge badge-success"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
+      {% endif %}
+    </div>
+    <div class="vendor-card-body">
+      <div class="vc-metric"><div class="num" style="color:var(--success)">{{ v.matched_count }}</div><div class="lbl">Matched</div></div>
+      <div class="vc-metric"><div class="num"{% if v.exception_count > 0 %} style="color:var(--warning)"{% endif %}>{{ v.exception_count }}</div><div class="lbl">Exceptions</div></div>
+    </div>
+    {% if v.exception_count > 0 and v.aging %}
+    <div class="aging-line{{ ' stale' if v.aging.days_open > 14 else '' }}">Oldest exception: <b>{{ v.aging.days_open }} day{{ "s" if v.aging.days_open != 1 }}</b></div>
+    {% endif %}
+    <div class="vendor-card-foot">
+      {% if v.exception_count > 0 %}
+      {%- set parts = [] -%}
+      {%- for reason, count in v.reason_breakdown.items() -%}
+        {%- set _ = parts.append(count|string ~ " " ~ reason) -%}
+      {%- endfor -%}
+      <span class="breakdown">{{ parts | join(" · ") }}</span>
+      <span class="link-arrow">Review exceptions <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+      {% else %}
+      <span class="clean-note"><svg class="icon"><use href="#i-check-circle"/></svg>All invoices matched</span>
+      <span class="link-arrow">View report <svg class="icon"><use href="#i-arrow-right"/></svg></span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
+{% endif %}
+{% endblock %}

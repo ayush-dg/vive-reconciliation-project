@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Batches{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">Batches</div>
+  <span style="font-size:12px;color:var(--text-secondary)">{{ batches | length }} batch{{ "es" if batches | length != 1 }}</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="section-title">Auto-intake batches</div>
+{% if batches %}
+<div class="vendor-grid">
+  {% for batch in batches %}
+  <a href="/batches/{{ batch.batch_id }}" class="vendor-card {{ 'clean' if batch.status == 'COMPLETED' else 'has-ex' }}">
+    <div class="vc-header">
+      <div class="vc-info">
+        <div class="vc-avatar {{ 'ava-green' if batch.status == 'COMPLETED' else 'ava-amber' }}">📦</div>
+        <div>
+          <div class="vc-name">Batch {{ batch.batch_id[:8] }}</div>
+          <div class="vc-period">{{ batch.submitted_at | friendly_dt }} · {{ batch.total_files }} file{{ "s" if batch.total_files != 1 }}</div>
+        </div>
+      </div>
+      {% if batch.status == 'PROCESSING' %}
+      <span class="badge warning">Processing…</span>
+      {% elif batch.status == 'PARTIAL' %}
+      <span class="badge danger">Partial</span>
+      {% else %}
+      <span class="badge success">✓ Completed</span>
+      {% endif %}
+    </div>
+    <div class="stats-row">
+      <div class="stat stat-col"><div class="stat-val green">{{ batch.completed_count }}</div><div class="stat-lbl">Completed</div></div>
+      <div class="stat stat-col"><div class="stat-val {{ 'amber' if batch.failed_count else '' }}">{{ batch.failed_count }}</div><div class="stat-lbl">Failed</div></div>
+      <div class="stat stat-col"><div class="stat-val">{{ batch.active_count }}</div><div class="stat-lbl">Processing</div></div>
+      <div class="stat stat-col"><div class="stat-val">{{ batch.total_invoices }}</div><div class="stat-lbl">Invoices</div></div>
+      <div class="stat stat-col"><div class="stat-val {{ 'amber' if batch.total_exceptions else 'green' }}">{{ batch.total_exceptions }}</div><div class="stat-lbl">Exceptions</div></div>
+    </div>
+    <div class="vc-footer">
+      <span class="vc-footer-note">{{ ("Took " ~ batch.time_taken) if batch.time_taken else "Still running…" }}</span>
+      <span class="review-link">View batch →</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No auto-intake batches yet.</div>
+{% endif %}
+
+<div class="section-header" style="margin-top:32px">
+  <div class="section-title">Manual uploads</div>
+</div>
+{% if manual_upload_groups %}
+{% for group in manual_upload_groups %}
+<div class="section-header" style="margin-top:20px;margin-bottom:8px">
+  <span style="font-size:12px;color:var(--text-secondary);font-weight:500">{{ group.date }}</span>
+</div>
+<table class="table" style="margin-bottom:12px">
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>Status</th>
+      <th>Vendor</th>
+      <th>Submitted</th>
+      <th>Completed</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for job in group.jobs %}
+    <tr>
+      <td style="font-weight:500">{{ job.pdf_filename }}</td>
+      <td>
+        {% if job.status == 'COMPLETED' %}
+        <span class="badge success">Completed</span>
+        {% elif job.status == 'FAILED' %}
+        <span class="badge danger">Failed</span>
+        {% elif job.status == 'PROCESSING' %}
+        <span class="badge warning">Processing</span>
+        {% else %}
+        <span class="badge neutral">Pending</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if job.vendor_name %}
+        <a href="/exceptions/{{ job.vendor_name | urlname }}" class="link">{{ job.vendor_name }}</a>
+        {% else %}
+        <span style="color:var(--text-secondary)">—</span>
+        {% endif %}
+      </td>
+      <td style="color:var(--text-secondary)">{{ job.submitted_at | friendly_dt }}</td>
+      <td style="color:var(--text-secondary)">{{ job.completed_at | friendly_dt if job.completed_at else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% else %}
+<div class="empty-state">No manual uploads yet.</div>
+{% endif %}
+{% endblock %}

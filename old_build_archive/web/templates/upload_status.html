@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Upload results{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="/upload">← Upload</a>
+    <span>/</span>
+    <span style="color:var(--text);font-weight:500">Extraction results</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if active_count %}
+<div id="batch-poll-data" data-batch-id="{{ batch_id }}" style="display:none"></div>
+{% endif %}
+
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">Files</div>
+    <div class="kpi-value">{{ jobs|length }}</div>
+    <div class="kpi-sub">in this upload</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Extracted</div>
+    <div class="kpi-value green">{{ completed_count }}</div>
+    <div class="kpi-sub">vendor + invoices detected</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Failed</div>
+    <div class="kpi-value {{ 'amber' if failed_count else '' }}">{{ failed_count }}</div>
+    <div class="kpi-sub">see error below</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">In progress</div>
+    <div class="kpi-value {{ 'amber' if active_count else '' }}">{{ active_count }}</div>
+    <div class="kpi-sub">{{ "updating automatically…" if active_count else "all done" }}</div>
+  </div>
+</div>
+
+<div class="section-header">
+  <div class="section-title">Files in this upload</div>
+</div>
+
+{% for job in jobs %}
+<div class="panel" style="padding:18px 20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-weight:600">{{ job.pdf_filename }}</div>
+    {% if job.status == 'COMPLETED' %}
+      <span class="badge success">Extracted</span>
+    {% elif job.status == 'FAILED' %}
+      <span class="badge danger">Failed</span>
+    {% elif job.status == 'PROCESSING' %}
+      <span class="badge warning">Extracting…</span>
+    {% else %}
+      <span class="badge neutral">Queued</span>
+    {% endif %}
+  </div>
+
+  {% if job.status == 'COMPLETED' %}
+    <div style="display:flex;gap:28px;margin-bottom:14px;color:var(--text-secondary);font-size:13px;flex-wrap:wrap">
+      <div><b style="color:var(--text)">Vendor:</b> {{ job.vendor_name or "Not detected" }}</div>
+      <div><b style="color:var(--text)">Statement period:</b> {{ job.statement_period or "Not detected" }}</div>
+      <div><b style="color:var(--text)">Invoices found:</b> {{ job.invoices|length }}</div>
+    </div>
+    {% if job.invoices %}
+    <table class="table">
+      <thead>
+        <tr><th>Invoice #</th><th>RO #</th><th>Invoice date</th><th>Description</th><th>Amount</th></tr>
+      </thead>
+      <tbody>
+        {% for inv in job.invoices %}
+        <tr>
+          <td>{{ inv.invoice_number or "—" }}</td>
+          <td>{{ inv.ro_number or "—" }}</td>
+          <td>{{ inv.invoice_date or "—" }}</td>
+          <td style="color:var(--text-secondary)">{{ inv.description or "—" }}</td>
+          <td>{{ "%.2f"|format(inv.outstanding_amount) if inv.outstanding_amount is not none else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No invoice rows passed extraction/validation for this file — see the review queue.</div>
+    {% endif %}
+  {% elif job.status == 'FAILED' %}
+    <div style="color:var(--danger);font-size:13px">{{ job.error_message or "Processing failed." }}</div>
+  {% else %}
+    <div style="color:var(--text-secondary);font-size:13px">Waiting for the background worker to pick this file up and extract its invoices…</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

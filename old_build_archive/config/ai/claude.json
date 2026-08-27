@@ -1,0 +1,16 @@
+{
+  "provider": "claude",
+  "model": "claude-haiku-4-5-20251001",
+  "api_key_env_var": "AZURE_CLAUDE_API_KEY",
+  "endpoint_env_var": "AZURE_CLAUDE_ENDPOINT",
+  "deployment_env_var": "AZURE_CLAUDE_DEPLOYMENT",
+  "temperature": 0.1,
+  "max_output_tokens": 65536,
+  "timeout_seconds": 90,
+  "retry_policy": {
+    "max_retries": 2,
+    "backoff_seconds": 2,
+    "backoff_multiplier": 2,
+    "retry_on_status_codes": [429, 500, 502, 503, 504, 529]
+  }
+}

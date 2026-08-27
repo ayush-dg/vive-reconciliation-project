@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VIVE Reconciliation — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.5" cy="15.5" r="3.2"/><path d="M10.6 13.3 18 6l1.6 1.6M15.4 9.2l1.9 1.9"/></symbol>
+  </defs>
+</svg>
+<div class="login-panel">
+  <div class="login-card">
+    <div class="vc-mark"><img src="/static/vive-logo.png" alt="VIVE Collision" style="width:90px"></div>
+    <h2>Sign in to VIVE Reconciliation</h2>
+    <p class="sub">Use your VIVE Collision work account.</p>
+    {% if error %}
+    <div class="login-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+      <div class="form-field">
+        <label for="email">Work email</label>
+        <input id="email" type="email" name="email" placeholder="name@vive-collision.com" required autofocus />
+      </div>
+      <div class="form-field">
+        <label for="password">Password</label>
+        <input id="password" type="password" name="password" placeholder="••••••••" required />
+      </div>
+      <button class="btn-primary" type="submit">Sign in</button>
+    </form>
+    <div class="divider-text">or continue with</div>
+    <button class="btn-sso" type="button" disabled>
+      <svg class="icon" style="stroke:var(--text-muted)"><use href="#i-key"/></svg>
+      Sign in with company SSO
+    </button>
+    <a class="login-alt-link" href="#" onclick="return false">Don't have access yet? Contact IT</a>
+    <div class="login-foot">VIVE Collision · Insight Factory · Confidential</div>
+  </div>
+</div>
+</body>
+</html>

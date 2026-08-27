@@ -1,0 +1,9 @@
+{
+  "_comment": "Controls the deterministic matching engine. These thresholds are never AI-influenced.",
+  "amount_tolerance_pct": 0.01,
+  "amount_tolerance_abs": 0.50,
+  "match_hierarchy": [
+    {"level": 1, "name": "Exact Invoice Match", "keys": ["invoice_number", "outstanding_amount"]},
+    {"level": 2, "name": "RO + Amount Match", "keys": ["ro_number", "outstanding_amount"]}
+  ]
+}

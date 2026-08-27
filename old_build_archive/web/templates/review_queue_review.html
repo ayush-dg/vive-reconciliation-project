@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}VIVE Reconciliation — Review Queue{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="/review-queue">← Review queue</a>
+    <span>/</span>
+    <span style="color:var(--text);font-weight:500">{{ vendor_name }}</span>
+  </div>
+  <span style="font-size:11px;color:var(--text-secondary);margin-left:auto">{{ items | length }} pending</span>
+</div>
+{% endblock %}
+
+{% block body %}
+<div class="body-split">
+  <div class="list">
+    <div class="list-header">
+      <div class="list-title">{{ vendor_name }} <span style="color:var(--text-secondary);font-weight:400">({{ items | length }})</span></div>
+    </div>
+    <div class="exc-list">
+      {% for item in items %}
+      <a href="/review-queue/{{ vendor_url_name }}?selected={{ item.review_id }}"
+         class="exc-item {{ 'sel' if selected and selected.review_id == item.review_id }}">
+        <div class="exc-inv">Invoice #{{ item.invoice_number or "Unknown" }}</div>
+        <div class="exc-row">
+          <span class="badge {{ category_badge.get(item.rejection_category, {}).css or 'neutral' }}">{{ category_badge.get(item.rejection_category, {}).label or item.rejection_category }}</span>
+          <span style="font-size:12px;font-weight:600">{{ item.amount | money if item.amount is not none else "—" }}</span>
+        </div>
+      </a>
+      {% else %}
+      <div class="empty-state">No rows pending review for this source file.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="detail">
+    {% if selected %}
+    <div class="detail-header">
+      <div class="detail-title">Invoice #{{ selected.invoice_number or "Unknown" }} — {{ vendor_name }}</div>
+      <span class="badge {{ category_badge.get(selected.rejection_category, {}).css or 'neutral' }}" style="flex-shrink:0">{{ category_badge.get(selected.rejection_category, {}).label or selected.rejection_category }}</span>
+    </div>
+    <form method="post" action="/review-queue/{{ vendor_url_name }}/action" id="action-form">
+    <input type="hidden" name="review_id" value="{{ selected.review_id }}">
+    <div class="detail-body">
+      <div class="sec-label">Row details</div>
+      <div class="field-grid">
+        <div class="field"><div class="fl">Invoice number</div><div class="fv">{{ selected.invoice_number or "Unknown" }}</div></div>
+        <div class="field"><div class="fl">Amount</div><div class="fv">{{ selected.amount | money if selected.amount is not none else "—" }}</div></div>
+        <div class="field"><div class="fl">Source file</div><div class="fv">{{ selected.source_file }}</div></div>
+      </div>
+      <div class="sec-label">Why this was rejected</div>
+      <div class="reason">{{ selected.rejection_details }}</div>
+
+      <div class="sec-label">Raw extracted data</div>
+      <div class="field-grid">
+        {% for key, value in selected.payload.items() %}
+        <div class="field"><div class="fl">{{ key }}</div><div class="fv">{{ value if value is not none else "—" }}</div></div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="action-bar">
+      <button class="btn btn-accept" type="submit" name="action" value="approve">✓ Approve</button>
+      <button class="btn btn-dispute" type="submit" name="action" value="flag">⚑ Flag as exception</button>
+    </div>
+    </form>
+    {% else %}
+    <div class="detail-body">
+      <div class="empty-state">🎉 No rows pending review for {{ vendor_name }}.</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

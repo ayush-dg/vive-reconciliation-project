@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../dg-os"
+		},
+		{
+			"path": "../../vive-terraform"
+		},
+		{
+			"path": "../../../Downloads/VIVE_BUILD1_docs"
+		}
+	],
+	"settings": {}
+}

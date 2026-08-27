@@ -1,0 +1,252 @@
+"""
+tests/test_blob_client.py
+
+Tests for BlobStorageClient using an injected fake transport.
+No real Azure calls made -- tests run fully offline.
+"""
+
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+os.environ["AZURE_BLOB_TEST_CONNECTION_STRING"] = "AccountName=test;AccountKey=test;EndpointSuffix=core.windows.net"
+
+from src.storage.blob_client import BlobStorageClient, _slugify_vendor_name
+
+
+def _make_client(transport=None, download_transport=None):
+    return BlobStorageClient(
+        container_name="vendor-statements",
+        connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING",
+        transport=transport,
+        download_transport=download_transport,
+    )
+
+
+def _make_dropzone_client(download_transport=None):
+    """Mirrors how web/routers/intake_trigger.py constructs its client --
+    container_name pinned to the dropzone container, matching the blob_url
+    host/container used throughout TestBlobStorageClientDownloadPdf."""
+    return BlobStorageClient(
+        container_name="incoming-statements",
+        connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING",
+        download_transport=download_transport,
+    )
+
+
+class TestSlugifyVendorName(unittest.TestCase):
+
+    def test_lowercases_and_replaces_non_alphanumeric(self):
+        self.assertEqual(_slugify_vendor_name("ABC Auto Parts, Inc."), "abc_auto_parts_inc")
+
+    def test_none_or_empty_falls_back_to_unknown_vendor(self):
+        self.assertEqual(_slugify_vendor_name(None), "unknown_vendor")
+        self.assertEqual(_slugify_vendor_name(""), "unknown_vendor")
+
+
+class TestBlobStorageClientUploadPdf(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        self.tmp.write(b"%PDF-1.4 fake content")
+        self.tmp.close()
+        self.pdf_path = self.tmp.name
+
+    def tearDown(self):
+        os.unlink(self.pdf_path)
+
+    def test_successful_upload_returns_blob_url_with_expected_path(self):
+        captured = {}
+
+        def fake_transport(blob_path, pdf_path, metadata, container_name, connection_string):
+            captured["blob_path"] = blob_path
+            captured["metadata"] = metadata
+            captured["container_name"] = container_name
+            return True, f"https://test.blob.core.windows.net/{container_name}/{blob_path}", None
+
+        client = _make_client(transport=fake_transport)
+        url = client.upload_pdf(
+            self.pdf_path,
+            vendor_name="ABC Auto Parts",
+            year=2026,
+            month=7,
+            document_hash="abc123hash",
+            original_filename="statement.pdf",
+            uploaded_by="jdoe",
+        )
+
+        self.assertEqual(captured["blob_path"], "abc_auto_parts/2026/07/abc123hash.pdf")
+        self.assertEqual(captured["container_name"], "vendor-statements")
+        self.assertEqual(captured["metadata"]["original_filename"], "statement.pdf")
+        self.assertEqual(captured["metadata"]["vendor_name"], "ABC Auto Parts")
+        self.assertEqual(captured["metadata"]["uploaded_by"], "jdoe")
+        self.assertEqual(url, f"https://test.blob.core.windows.net/vendor-statements/abc_auto_parts/2026/07/abc123hash.pdf")
+
+    def test_month_and_year_are_zero_padded(self):
+        captured = {}
+
+        def fake_transport(blob_path, pdf_path, metadata, container_name, connection_string):
+            captured["blob_path"] = blob_path
+            return True, "https://test/blob", None
+
+        client = _make_client(transport=fake_transport)
+        client.upload_pdf(self.pdf_path, "Vendor", year=2026, month=3, document_hash="h1")
+
+        self.assertEqual(captured["blob_path"], "vendor/2026/03/h1.pdf")
+
+    def test_transport_failure_returns_none_not_raise(self):
+        def fake_transport(blob_path, pdf_path, metadata, container_name, connection_string):
+            return False, None, "simulated network error"
+
+        client = _make_client(transport=fake_transport)
+        url = client.upload_pdf(self.pdf_path, "Vendor", 2026, 7, "h1")
+
+        self.assertIsNone(url)
+
+    def test_transport_raising_exception_returns_none_not_raise(self):
+        def fake_transport(blob_path, pdf_path, metadata, container_name, connection_string):
+            raise RuntimeError("boom")
+
+        client = _make_client(transport=fake_transport)
+        url = client.upload_pdf(self.pdf_path, "Vendor", 2026, 7, "h1")
+
+        self.assertIsNone(url)
+
+    def test_missing_connection_string_returns_none(self):
+        client = BlobStorageClient(
+            container_name="vendor-statements",
+            connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING_UNSET",
+        )
+        url = client.upload_pdf(self.pdf_path, "Vendor", 2026, 7, "h1")
+
+        self.assertIsNone(url)
+
+    def test_missing_document_hash_returns_none(self):
+        client = _make_client(transport=lambda *a: (True, "https://test/blob", None))
+        url = client.upload_pdf(self.pdf_path, "Vendor", 2026, 7, document_hash="")
+
+        self.assertIsNone(url)
+
+    def test_missing_file_returns_none(self):
+        client = _make_client(transport=lambda *a: (True, "https://test/blob", None))
+        url = client.upload_pdf("does/not/exist.pdf", "Vendor", 2026, 7, "h1")
+
+        self.assertIsNone(url)
+
+    def test_invalid_year_or_month_returns_none(self):
+        client = _make_client(transport=lambda *a: (True, "https://test/blob", None))
+        url = client.upload_pdf(self.pdf_path, "Vendor", year="not-a-year", month=7, document_hash="h1")
+
+        self.assertIsNone(url)
+
+    def test_no_original_filename_falls_back_to_basename(self):
+        captured = {}
+
+        def fake_transport(blob_path, pdf_path, metadata, container_name, connection_string):
+            captured["metadata"] = metadata
+            return True, "https://test/blob", None
+
+        client = _make_client(transport=fake_transport)
+        client.upload_pdf(self.pdf_path, "Vendor", 2026, 7, "h1")
+
+        self.assertEqual(captured["metadata"]["original_filename"], os.path.basename(self.pdf_path))
+
+
+class TestBlobStorageClientDownloadPdf(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.dest_path = os.path.join(self.tmp_dir, "downloaded.pdf")
+        self.blob_url = "https://viverecondropzone.blob.core.windows.net/incoming-statements/statement.pdf"
+
+    def test_successful_download_returns_true(self):
+        captured = {}
+
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            captured["container_name"] = container_name
+            captured["blob_name"] = blob_name
+            captured["dest_path"] = dest_path
+            return True, None
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertTrue(result)
+        self.assertEqual(captured["container_name"], "incoming-statements")
+        self.assertEqual(captured["blob_name"], "statement.pdf")
+        self.assertEqual(captured["dest_path"], self.dest_path)
+
+    def test_download_transport_failure_returns_false_not_raise(self):
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            return False, "simulated network error"
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_download_transport_raising_exception_returns_false_not_raise(self):
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            raise RuntimeError("boom")
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_missing_connection_string_returns_false(self):
+        client = BlobStorageClient(
+            container_name="incoming-statements",
+            connection_string_env_var="AZURE_BLOB_TEST_CONNECTION_STRING_UNSET",
+        )
+        result = client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_url_without_container_and_blob_segments_returns_false(self):
+        client = _make_dropzone_client(download_transport=lambda *a: (True, None))
+        result = client.download_pdf("https://viverecondropzone.blob.core.windows.net/", self.dest_path)
+
+        self.assertFalse(result)
+
+    def test_url_naming_a_different_container_is_refused(self):
+        """The container segment of blob_url must never be trusted to pick
+        which container gets read -- a URL naming any container other than
+        the client's configured one is rejected outright, and the
+        transport (which would perform the real download) must never even
+        be invoked."""
+        transport_called = []
+
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            transport_called.append((container_name, blob_name))
+            return True, None
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        other_container_url = "https://viverecondropzone.blob.core.windows.net/vendor-statements/statement.pdf"
+        result = client.download_pdf(other_container_url, self.dest_path)
+
+        self.assertFalse(result)
+        self.assertEqual(transport_called, [])
+
+    def test_download_always_targets_configured_container_not_parsed_one(self):
+        """Even when the URL's container matches, the transport must be
+        called with self.container_name (the configured value), not
+        whatever string happened to be parsed out of the URL -- guards
+        against a future refactor silently reintroducing caller control."""
+        captured = {}
+
+        def fake_download_transport(container_name, blob_name, dest_path, connection_string):
+            captured["container_name"] = container_name
+            return True, None
+
+        client = _make_dropzone_client(download_transport=fake_download_transport)
+        client.download_pdf(self.blob_url, self.dest_path)
+
+        self.assertEqual(captured["container_name"], client.container_name)
+
+
+if __name__ == "__main__":
+    unittest.main()
