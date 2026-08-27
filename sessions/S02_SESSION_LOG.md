@@ -66,8 +66,8 @@ not re-solicited via a fresh gate question. Flagged as a process note, not silen
 |---------|-----------|--------|--------|
 | 2.1 | Upload screen (UI) | Completed | f974c12 |
 | 2.2 | Document registration + content-hash dedup | Completed | cb7f8ad |
-| 2.3 | Home's status badge wiring | | |
-| 2.4 | Extract action (UI trigger + endpoint) | | |
+| 2.3 | Home's status badge wiring | Completed | ff1fe4b |
+| 2.4 | Extract action (UI trigger + endpoint) | Completed | dafa26f |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
 
@@ -114,10 +114,25 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED
-**All tasks verified:** [ ] Yes
-**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
+**Session integration check:** [x] PASSED (with one documented partial — see below)
+
+Ran EXECUTION_PLAN.md's Session 2 integration check:
+```
+npx playwright test ui_tests/upload.spec.ts && \
+  sqlcmd -S "$FABRIC_SQL_ENDPOINT" -d recon -Q "SELECT COUNT(*) FROM extracted.document;"
+```
+- `npx playwright test ui_tests/upload.spec.ts` → 7/7 PASS
+- `sqlcmd -S "$FABRIC_SQL_ENDPOINT" ...` → NOT RUN — no live Fabric endpoint in this
+  environment, consistent with every other Fabric-dependent check across Sessions 1-2.
+  SQLite-equivalent confirmed instead: `SELECT COUNT(*) FROM extracted_document` → 4 rows
+  present after the test run.
+
+**All tasks verified:** [x] Yes — all 4 tasks (2.1–2.4) Completed, PASS verdicts recorded
+in `sessions/S02_VERIFICATION_RECORD.md`, 28/28 `ui_tests` passing (run twice for
+stability), all backend verification scripts passing, `npm run build` clean.
+**Blocked tasks resolved:** N/A — no BLOCKED tasks occurred this session.
 **PR raised:** [ ] Yes — PR #: session/s02_document-intake → feature/pbvi_execution
+(not raised yet — pushing/opening a PR is a shared-state action; awaiting engineer go-ahead)
 **Status updated to:** 
 **Engineer sign-off:** 
 SIGNED OFF: [name] — [date]
