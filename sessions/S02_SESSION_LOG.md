@@ -64,8 +64,8 @@ not re-solicited via a fresh gate question. Flagged as a process note, not silen
 
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
-| 2.1 | Upload screen (UI) | | |
-| 2.2 | Document registration + content-hash dedup | | |
+| 2.1 | Upload screen (UI) | Completed | f974c12 |
+| 2.2 | Document registration + content-hash dedup | Completed | cb7f8ad |
 | 2.3 | Home's status badge wiring | | |
 | 2.4 | Extract action (UI trigger + endpoint) | | |
 
