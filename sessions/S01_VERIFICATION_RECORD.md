@@ -161,49 +161,89 @@ Source: EXECUTION_PLAN.md Session 1
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Valid credentials submitted | Redirect to `/home` | | |
-| TC-2 | Invalid credentials submitted | Inline error shown, no redirect | | |
-| TC-3 | Session idle for 30+ minutes | Redirect to `/login` on next action | | |
+| TC-1 | Valid credentials submitted | Redirect to `/home` | WRITTEN — 2 assertions (both seeded users, per OD5) | PASS |
+| TC-2 | Invalid credentials submitted | Inline error shown, no redirect | WRITTEN — 2 assertions | PASS |
+| TC-3 | Session idle for 30+ minutes | Redirect to `/login` on next action | WRITTEN — 1 assertion (crafted stale token, not a real 30-min wait) | PASS |
+| TC-4 (UI_SURFACE.md) | SSO button present | Visible but disabled, "Coming soon" | WRITTEN — 2 assertions | PASS |
+
+`ui_tests/sign-in.spec.ts`: 5 tests, all PASS (`npx playwright test ui_tests/sign-in.spec.ts`).
 
 ### Challenge Agent Output
-[Written by the build agent. Populated during task execution.]
+Run via an independent subagent (no build-session context), evidence-only.
 
-**Verdict:**
+**Verdict:** FINDINGS — 3 items (2 real gaps in code, 1 stale-documentation report that turned out to be self-resolved by Next.js's own tooling — see below).
 
-**Untested scenarios:**
+**Untested scenarios (from the challenge):**
+1. Second, distinct named user login — only `testuser` was exercised; OD5 requires genuinely multiple named accounts, not asserted by schema shape alone.
+2. Bootstrapping a user against live Fabric — no automated/documented path existed.
+3. A stolen/copied session token remains valid after `logoutAction` clears the browser's own cookie (stateless HMAC tokens have no server-side revocation list).
+4. A deleted/deactivated user's already-issued session token keeps working — `verifySessionToken` never re-queries `recon.app_user`.
+5. Session cookies omitted `secure: true` despite the target stack (Azure App Service) serving HTTPS.
 
-**Unverified assumptions:**
+**Unverified assumptions:** The challenge agent flagged that its own task packet claimed the middleware file was "left as `middleware.ts`" — factually wrong at review time. Investigated: Next.js 16's dev/build tooling had already auto-migrated `src/middleware.ts` -> `src/proxy.ts` (renaming the exported function `middleware` -> `proxy` too) transparently during an earlier `npm run build` in this task, before the challenge agent ran. Self-resolved by the framework, not a defect — the packet text describing the file was simply stale by the time of review.
 
-**Invariant coverage gaps:**
+**Invariant coverage gaps:** NONE — explicitly checked G1-G5 and G3 in particular (no LLM call, no document/extraction/matching path exists anywhere in this diff); EXECUTION_PLAN.md's "None task-scoped directly" holds.
 
-**Scope boundary observations:**
+**Scope boundary observations:** None — all fixes stayed inside this task's own files (`src/lib/session.ts`, `src/lib/migrate.ts`, `src/app/login/actions.ts`, `src/proxy.ts`, `scripts/seed_users.mjs`, `ui_tests/*`).
 
-**Finding dispositions (FINDINGS verdict only):**
+**Structural complexity check:** CLEAN across every new function/component.
+
+**Finding dispositions:**
 
 | Finding # | Disposition | Rationale / Test case added | Test result |
 |-----------|-------------|------------------------------|-------------|
-|           |             |                              |             |
+| 1 (Fabric provisioning message misdirects) | TEST | `migrate.ts`'s Fabric-mode error now lists every pending `migrations/*.sql` file (not a hardcoded, now-stale single filename); `seed_users.mjs`'s Fabric-mode exit message now explains there is no automated path and points to the manual `sqlcmd` + `hashPassword()` workaround, with a pointer to this record | PASS — messages now accurate; live Fabric seeding itself remains genuinely out of reach in this environment (no endpoint) and is recorded below as a Known Untested Scenario, not silently treated as solved |
+| 2 (cookies missing `secure`) | TEST | Added `sessionCookieOptions()` in `src/lib/session.ts` (single source of truth: `secure: NODE_ENV === 'production'`), used at both cookie-set sites (`actions.ts`, `proxy.ts`) | PASS — `npx tsc --noEmit`, `npm run build`, and the full Playwright suite all still pass after the change |
+| 3 (stale "middleware.ts" claim) | ACCEPT | Confirmed self-resolved by Next.js 16's own tooling (file + export already renamed to `proxy.ts`/`proxy` by the time of review) — no code change needed, only this record's own language corrected | N/A — verified via `ls`/`git status`/file contents, not a test |
+| Untested #1 (second user) | TEST | Added a second seeded user (`testuser2`) in `ui_tests/global-setup.ts` and a dedicated spec asserting independent sign-in | PASS |
+| Untested #3/#4 (no session revocation) | ACCEPT (documented limitation, not fixed) | Server-side session revocation (a sessions table checked per-request, or re-querying `recon.app_user` on every verify) is a real architecture gap for a stateless-HMAC design, but building it is materially more than Task 1.3's literal scope ("Sign In screen") and no invariant/requirement doc mandates it. Flagged explicitly rather than silently accepted — see Known Untested Scenarios below for a recommended follow-up | N/A — no test added; documented as a known limitation |
 
 ### Code Review
 Not invariant-touching per EXECUTION_PLAN.md ("None task-scoped directly — authentication is
-infrastructure"). OD5's multi-user resolution (multiple named users share one role) is a design
-constraint reflected in the CC prompt, not a GLOBAL/TASK-SCOPED invariant.
+infrastructure") — confirmed by the challenge agent's explicit G1-G5/G3 check, not just asserted.
+OD5's multi-user resolution (multiple named users share one role) is a design constraint reflected
+in the CC prompt and now exercised by two distinct seeded accounts in `ui_tests/sign-in.spec.ts`,
+not a GLOBAL/TASK-SCOPED invariant.
 
 ### Scope Decisions
-[Recorded during task execution.]
+- **User table gap (flagged, filled minimally):** no task in EXECUTION_PLAN.md provisions the
+  `recon.app_user` table or the first user account. Added `migrations/002_auth_users.sql`(.sqlite.sql)
+  and `scripts/seed_users.mjs` — the minimum needed for Task 1.3's own stated deliverable, not a
+  user-management screen (none exists in UI_SURFACE.md's Screen Inventory). Real production user
+  provisioning remains undecided anywhere in the signed-off docs.
+- **Session mechanism:** custom HMAC-signed cookie token (Web Crypto, Edge-runtime-safe — required
+  because `src/proxy.ts` runs on Next's Edge runtime, which restricts Node APIs), not a library like
+  next-auth/iron-session. Password hashing: Node's built-in `scrypt`, not bcrypt/argon2, to avoid an
+  extra native dependency.
+- **`/home` placeholder:** thin placeholder page added so Task 1.3's own required redirect target
+  (`/home`, per its explicit test case and UI_SURFACE.md) renders instead of 404ing — same reasoning
+  as Task 1.1's root-page fix. Not Task 6.1's real Home screen (status badges, summary stats,
+  Uploaded Statements panel) — that remains fully deferred to Session 6.
+- **Root page rewired:** `src/app/page.tsx` now redirects to `/login` (was a neutral placeholder
+  since Task 1.1, when `/login` didn't exist yet) — safe now that this task builds `/login`.
+- **No server-side session revocation** — see Finding dispositions above; accepted as a documented
+  limitation, not built, since it exceeds this task's literal scope.
+
+### Known Untested Scenarios (informational — not gate-blocking)
+- Real Entra ID / SSO login flow — explicitly deferred, disabled placeholder by design (UI_SURFACE.md gap #1).
+- Sidebar logout button click flow — Task 1.4 builds the sidebar UI that calls `logoutAction`; no UI trigger exists yet.
+- Production `SESSION_SECRET` provisioning/rotation — deployment/ops concern.
+- Live Fabric `recon.app_user` creation/seeding — no live endpoint in this environment; messaging fixed (Finding 1) but the workflow itself is unautomated and untested.
+- Brute-force/rate-limiting protection on login attempts — no mechanism exists or was scoped anywhere in the signed-off docs; would be new functionality, not a test.
+- **Recommended follow-up (not this session's job to schedule):** server-side session revocation (sessions table, or re-check `recon.app_user` on every `verifySessionToken` call) if stronger logout/deactivation guarantees are ever required.
 
 ### BCE Impact
 No BCE artifact impact — `discovery/` is empty pre-Phase 8.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching) — N/A, confirmed not invariant-touching
+[x] Scope decisions documented
 
-**Status:**
+**Status:** PASS
 
 ---
 

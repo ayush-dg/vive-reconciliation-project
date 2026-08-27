@@ -3,12 +3,15 @@ import path from 'node:path';
 import { getDbMode, getSqliteDb } from './db';
 
 /**
- * Migration runner (Task 1.2). SQLite path applies migrations/*.sqlite.sql files
- * directly — idempotent via a _migrations bookkeeping table. Fabric path is
- * intentionally NOT executed by this runner: Task 1.2's own Verification Command
- * applies migrations/*.sql (the canonical Fabric T-SQL, using `GO` batch
- * separators sqlcmd understands) via `sqlcmd -i`, not application code. Re-
- * implementing a T-SQL batch client here would duplicate sqlcmd, not replace it.
+ * Migration runner (Task 1.2, extended by Task 1.3). SQLite path applies every
+ * migrations/*.sqlite.sql file, in filename order, directly — idempotent via a
+ * _migrations bookkeeping table. Fabric path is intentionally NOT executed by
+ * this runner: each canonical migrations/*.sql file (Fabric T-SQL, using `GO`
+ * batch separators sqlcmd understands) is applied via `sqlcmd -i` directly, not
+ * application code — re-implementing a T-SQL batch client here would duplicate
+ * sqlcmd, not replace it. The thrown error lists every pending Fabric migration
+ * file so this stays accurate as new migrations are added, rather than naming
+ * one file that goes stale.
  */
 
 const MIGRATIONS_DIR = path.resolve(process.cwd(), 'migrations');
@@ -20,12 +23,22 @@ function listSqliteMigrations(): string[] {
     .sort();
 }
 
+function listFabricMigrations(): string[] {
+  return fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith('.sql') && !f.endsWith('.sqlite.sql'))
+    .sort();
+}
+
 export function runMigrations(): { applied: string[]; skipped: string[] } {
   const mode = getDbMode();
   if (mode === 'fabric') {
+    const commands = listFabricMigrations()
+      .map((f) => `  sqlcmd -S "$FABRIC_SQL_ENDPOINT" -d recon -i migrations/${f}`)
+      .join('\n');
     throw new Error(
-      'runMigrations() does not apply Fabric migrations — run `sqlcmd -S "$FABRIC_SQL_ENDPOINT" ' +
-        '-d recon -i migrations/001_foundation_schema.sql` directly, per Task 1.2\'s Verification Command.'
+      'runMigrations() does not apply Fabric migrations — run each file via sqlcmd directly, ' +
+        `in order:\n${commands}`
     );
   }
 

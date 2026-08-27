@@ -10,7 +10,8 @@
     "test:ui": "playwright test",
     "test:db-fallback": "tsx scripts/verify_db_fallback.mjs",
     "migrate": "tsx scripts/migrate.mjs",
-    "test:schema": "tsx scripts/test_foundation_schema.mjs"
+    "test:schema": "tsx scripts/test_foundation_schema.mjs",
+    "seed:users": "tsx scripts/seed_users.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
