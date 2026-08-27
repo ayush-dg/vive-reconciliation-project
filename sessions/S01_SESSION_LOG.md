@@ -68,7 +68,7 @@
 | 1.1 | Repository scaffolding + Playwright setup | Completed | 758cf08 |
 | 1.2 | Database schema: `extracted`, `silver`, `recon` foundation tables | Completed | 6c07ed7 |
 | 1.3 | Authentication (Sign In screen) | Completed | 7ab877f |
-| 1.4 | Global elements (sidebar nav, logout, error boundary, loading, toast) | | |
+| 1.4 | Global elements (sidebar nav, logout, error boundary, loading, toast) | Completed | db0baa8 |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
 SKIPPED is set by the engineer manually outside of any execution prompt.
@@ -136,10 +136,26 @@ Leave this table empty if no out-of-scope items were noticed.
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED
-**All tasks verified:** [ ] Yes
-**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
+**Session integration check:** [x] PASSED (with one documented partial — see below)
+
+Ran EXECUTION_PLAN.md's Session 1 integration check:
+```
+npx playwright --version && \
+  sqlcmd -S "$FABRIC_SQL_ENDPOINT" -d recon -Q "SELECT name FROM sys.tables;" && \
+  curl -f http://localhost:3000/login
+```
+- `npx playwright --version` → `Version 1.62.1` — PASS
+- `sqlcmd -S "$FABRIC_SQL_ENDPOINT" ...` → NOT RUN — no live Fabric endpoint in this
+  environment (consistent with every other Fabric-dependent check this session; see
+  Task 1.2's Known Untested Scenarios). SQLite-equivalent covered throughout via
+  `npm run migrate` + `scripts/test_foundation_schema.mjs`.
+- `curl -f http://localhost:3000/login` → HTTP 200, page contains "Sign In" — PASS
+
+**All tasks verified:** [x] Yes — all 4 tasks (1.1–1.4) Completed, PASS verdicts recorded
+in `sessions/S01_VERIFICATION_RECORD.md`, 13/13 `ui_tests` passing, `npm run build` clean.
+**Blocked tasks resolved:** N/A — no BLOCKED tasks occurred this session.
 **PR raised:** [ ] Yes — PR #: session/s01_scaffolding-auth-db → feature/pbvi_execution
+(not raised yet — pushing/opening a PR is a shared-state action; awaiting engineer go-ahead)
 **Status updated to:** 
 **Engineer sign-off:** 
 SIGNED OFF: [name] — [date]
