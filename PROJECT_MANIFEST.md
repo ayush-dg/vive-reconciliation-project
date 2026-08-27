@@ -47,7 +47,8 @@ full reasoning and trade-offs discussed before this choice was made.
 | `verification/` | Sign-off checklists | PENDING | Populated at Phase 4 gate and beyond |
 | `discovery/` | BCE SIL artifacts | PENDING | Not yet applicable — produced at Phase 8 |
 | `enhancements/` | Enhancement registry | PENDING | Empty until first post-Phase-8 enhancement |
-| `tools/` | Agentic build scripts | **PENDING — see note** | The five standard DG-Forge automation scripts (`challenge.sh`, `resume_challenge.sh`, `resume_session.sh`, `monitor.sh`, `launch.sh`) have not been pulled in yet — source them from the DG-Forge repository before Phase 6 begins, per `pbvi_core.md`'s Directory Creation convention. Not fabricated here since this project has no access to that source. |
+| `tools/` | Agentic build scripts | PRESENT | Five standard DG-Forge automation scripts (`challenge.sh`, `resume_challenge.sh`, `resume_session.sh`, `monitor.sh`, `launch.sh`) sourced 2026-08-27 from the local `dg-os` repository ahead of Session 1, per `pbvi_core.md`'s Directory Creation convention. |
+| `.claude/SKILL.md` | DG-Forge methodology reference (PBVI, monolithic pre-split) | PRESENT | Copied 2026-08-27 from `dg-os/skills/PBVI/SKILL.md` per `pbvi_build.md`'s Phase 6 setup requirement. Frontmatter version v4.9 — matches this project's declared METHODOLOGY_VERSION exactly (dg-os's current default is the split v5.0 pbvi_core.md/pbvi_build.md/pbvi_plan.md; this older monolithic copy was selected instead to avoid a version mismatch). Never edited locally — refresh from DG-Forge source on explicit migration only. |
 
 ---
 
@@ -59,9 +60,9 @@ full reasoning and trade-offs discussed before this choice was made.
    `docs/PHASE4_GATE_RECORD.md`'s Overall verdict and Engineer Sign-Off. Phase 5 (Claude.md)
    is validly open; the retroactive-sequencing gap noted at the top of the gate record is
    closed.
-2. **`tools/` scripts** — not yet sourced (see File Registry note above). Soft blocker
-   only — required for autonomous/challenge-agent mode, not for manually-driven Phase 6
-   sessions.
+2. ~~**`tools/` scripts**~~ — **RESOLVED 2026-08-27.** Sourced from the local `dg-os`
+   repository ahead of Session 1 (see File Registry above). Session 1 runs in Autonomous
+   mode, so this was a hard prerequisite, not just a soft blocker.
 3. **Reusable-components boundary — partially addressed, by design (2026-08-27).** D-K
    applied two narrow reconciliations from `brief/Reconciliation_Engine_Reusable_
    Components.docx`: `extracted.document.artifact_type` and a structured pipeline result
