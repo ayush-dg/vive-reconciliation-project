@@ -8,7 +8,9 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test:ui": "playwright test",
-    "test:db-fallback": "tsx scripts/verify_db_fallback.mjs"
+    "test:db-fallback": "tsx scripts/verify_db_fallback.mjs",
+    "migrate": "tsx scripts/migrate.mjs",
+    "test:schema": "tsx scripts/test_foundation_schema.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
