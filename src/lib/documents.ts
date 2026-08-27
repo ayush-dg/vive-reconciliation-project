@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { getSqliteDb, getDbMode } from './db';
+import { computeDocumentStatus } from './documentStatus';
 import { saveDocumentFile } from './storage';
 
 /**
@@ -127,7 +128,17 @@ export function listDocuments(): DocumentRow[] {
 
 /** Wire shape returned by /api/documents — snake_case, matching the DB
  * column names, so client code and this module agree on one convention
- * instead of silently mismatching camelCase (DocumentRow) vs snake_case. */
+ * instead of silently mismatching camelCase (DocumentRow) vs snake_case.
+ *
+ * `status` is the raw internal `extracted_document.status` column
+ * ('registered' | 'processing', Task 2.4's G5 lock state) — used ONLY to
+ * decide whether the Extract action is available. `status_badge` is Task
+ * 2.3's computed display badge (Processing/Retrying/Failed/Reconciled) —
+ * used for what the user actually sees once extraction has started.
+ * Conflating these two was a real defect a challenge-agent pass on Task 2.4
+ * found and fixed: the raw column, read directly, can only ever display the
+ * literal word "processing" and would never show "Retrying"/"Failed"/
+ * "Reconciled" once Session 3's extraction pipeline exists. */
 export type ApiDocument = {
   document_id: string;
   content_sha256: string;
@@ -135,10 +146,11 @@ export type ApiDocument = {
   vendor_id: string | null;
   statement_period: string | null;
   status: string;
+  status_badge: { badge: string; label: string };
   upload_timestamp: string;
 };
 
-export function toApiDocument(doc: DocumentRow): ApiDocument {
+export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; label: string }): ApiDocument {
   return {
     document_id: doc.documentId,
     content_sha256: doc.contentSha256,
@@ -146,8 +158,20 @@ export function toApiDocument(doc: DocumentRow): ApiDocument {
     vendor_id: doc.vendorId,
     statement_period: doc.statementPeriod,
     status: doc.status,
+    status_badge: statusBadge,
     upload_timestamp: doc.uploadTimestamp,
   };
+}
+
+/** Single source of truth for "documents + their Task 2.3 display badge" —
+ * used by both the Upload screen's SSR initial render (page.tsx) and the
+ * client-side /api/documents refresh path, so the two can't silently drift
+ * apart the way DocumentRow (camelCase) vs ApiDocument (snake_case) once did. */
+export function listDocumentsWithStatusBadge(): ApiDocument[] {
+  return listDocuments().map((doc) => {
+    const { badge, label } = computeDocumentStatus(doc.documentId);
+    return toApiDocument(doc, { badge, label });
+  });
 }
 
 export function getDocumentById(documentId: string): DocumentRow | null {

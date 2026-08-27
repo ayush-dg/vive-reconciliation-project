@@ -1,4 +1,4 @@
-import { listDocuments } from '@/lib/documents';
+import { listDocumentsWithStatusBadge } from '@/lib/documents';
 import UploadForm from './UploadForm';
 
 // Upload screen (Task 2.1, route /upload, Form type per UI_SURFACE.md).
@@ -6,7 +6,7 @@ import UploadForm from './UploadForm';
 // not the user here (ARCHITECTURE.md D-L amendment). Save behaviour: stay on
 // page with a confirmation toast (resolved default), not a redirect.
 export default function UploadPage() {
-  const documents = listDocuments();
+  const documents = listDocumentsWithStatusBadge();
 
   return (
     <>

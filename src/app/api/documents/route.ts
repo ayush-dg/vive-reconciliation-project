@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities';
-import { listDocuments, registerDocument, toApiDocument } from '@/lib/documents';
+import { registerDocument, toApiDocument, listDocumentsWithStatusBadge } from '@/lib/documents';
+import { computeDocumentStatus } from '@/lib/documentStatus';
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, per the Upload screen's stated limit
 
@@ -8,8 +9,7 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, per the Upload screen's state
 // consumer). POST: register a new upload (Task 2.2). Never calls a matching
 // service — S1.
 export async function GET() {
-  const documents = listDocuments().map(toApiDocument);
-  return NextResponse.json({ documents });
+  return NextResponse.json({ documents: listDocumentsWithStatusBadge() });
 }
 
 export async function POST(request: Request) {
@@ -43,8 +43,9 @@ export async function POST(request: Request) {
   const bytes = Buffer.from(await file.arrayBuffer());
   const { document, duplicate, legalEntityMismatch } = registerDocument(bytes, legalEntityId);
 
+  const { badge, label } = computeDocumentStatus(document.documentId);
   return NextResponse.json(
-    { document: toApiDocument(document), duplicate, legalEntityMismatch },
+    { document: toApiDocument(document, { badge, label }), duplicate, legalEntityMismatch },
     { status: duplicate ? 200 : 201 }
   );
 }

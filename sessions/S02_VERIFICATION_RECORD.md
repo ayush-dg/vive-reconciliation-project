@@ -204,34 +204,58 @@ Source: EXECUTION_PLAN.md Session 2
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Click Extract on a registered document | Status transitions to "Processing", triggers extraction service | | |
-| TC-2 | Uploading a document (Task 2.2) | Does not itself invoke extraction — status remains pre-Processing until Extract clicked | | |
-| TC-3 | Extract button state once extraction has started | Not shown / disabled | | |
-| TC-4 (G5) | Trigger Extract twice in rapid succession on same `document_id` | Exactly one extraction attempt started; second rejected | | |
+| TC-1 | Click Extract on a registered document | Status transitions to "Processing", triggers extraction service | WRITTEN — 2 assertions | PASS |
+| TC-2 | Uploading a document (Task 2.2) | Does not itself invoke extraction — status remains pre-Processing until Extract clicked | WRITTEN — 2 assertions | PASS |
+| TC-3 | Extract button state once extraction has started | Not shown / disabled | WRITTEN — 1 assertion | PASS |
+| TC-4 (G5) | Trigger Extract twice in rapid succession on same `document_id` | Exactly one extraction attempt started; second rejected | WRITTEN — 1 assertion | PASS |
+| TC-5 (added) | POST extract for a non-existent `document_id` | 404 | WRITTEN — 1 assertion | PASS |
+| TC-6 (added) | Real double-click on the rendered Extract button (not just two direct API calls) | Exactly one extraction started, no duplicate row/inconsistent state | WRITTEN — 2 assertions | PASS |
+| TC-7 (added) | Badge display after a synthesized failed attempt | Shows Task 2.3's computed "Retrying (1/2)", not the raw internal "processing" column | WRITTEN — 1 assertion | PASS |
+
+`ui_tests/extract-trigger.spec.ts`: 8 tests, all PASS. Full suite (28 tests): PASS, run twice for stability.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+Run via an independent subagent (no build-session context), evidence-only.
+
+**Verdict:** FINDINGS — 2 items, both real defects (not just coverage gaps) — Task 2.4's own CC prompt explicitly says the displayed status should come from "Task 2.3's status computation," but the UI read the raw internal lock-state column instead.
+
+**Findings (from the challenge):**
+1. `UploadForm.tsx` displayed the raw `extracted_document.status` column (`'registered'`/`'processing'`) as the row's status text instead of calling Task 2.3's `computeDocumentStatus()` — confirmed by grep that `computeDocumentStatus` was never imported anywhere outside its own test script. Once Session 3 exists, this would have permanently shown the literal word "processing" and never "Retrying"/"Failed"/"Reconciled", regardless of actual extraction outcome.
+2. The status indicator rendered with generic `badge badge-neutral` styling instead of the purpose-built `.status-badge.{state}` CSS classes already defined in `globals.css` (added ahead of this task, in the design-system-adoption commit) — those five rules were dead code.
+3. (Untested Scenarios, folded into the same fix) The 404 (not-found) branch, a real UI double-click (as opposed to two direct API calls), and the Retrying/Failed/Reconciled badge states were all unexercised by any test.
+
+**Also flagged, accepted as-is:** the G5 concurrency test proves the atomic-UPDATE guard is correct by construction, but — since `better-sqlite3` is synchronous and Node is single-threaded — it cannot demonstrate genuine multi-connection/multi-process concurrency the way the real production mechanism (Fabric row-lock, per G5's Implementation note) would face. Accepted: Fabric wiring is out of scope until Session 4; the SQL-level guard logic itself (the actual enforcement point) is what's being verified here, and it is dialect-independent.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (raw status vs. computed badge conflated) | TEST | Added `status_badge` to the `ApiDocument` wire shape (`documents.ts`) and a single shared `listDocumentsWithStatusBadge()` used by both the Upload screen's SSR initial render (`page.tsx`) and the client refresh path (`route.ts`'s `GET`) — deliberately centralized after the earlier camelCase/snake_case drift bug, so SSR and client can't diverge again. `status` (raw) still drives Extract-button visibility only; `status_badge` (Task 2.3's computation) drives the displayed text. Added TC-7: insert a synthetic failed attempt, assert the badge shows "Retrying (1/2)" | PASS |
+| 2 (dead CSS, generic styling) | TEST | Row now renders `className="badge status-badge {state}"`, applying the existing per-state color rules | PASS (visual/class assertion via TC-7's badge text; class application confirmed by code) |
+| 3 (untested 404 / double-click / badge states) | TEST | Added TC-5 (404), TC-6 (real double-click via the rendered button, not just API calls), TC-7 (Retrying badge, doubling as Finding 1's regression test) | PASS |
 
 ### Code Review
-[Required — D-I, G5.]
+Required — D-I, G5.
 
 | Invariant | Enforcement point to check | Result |
 |---|---|---|
-| D-I | Extract endpoint not reachable automatically from the registration code path (Task 2.2) | |
-| G5 | Atomic ownership acquisition (`UPDATE ... WHERE status != 'Processing'` guard or row lock) before invoking extraction | |
+| D-I | No call site for `triggerExtraction()`/`/api/documents/[id]/extract` anywhere in `documents.ts`'s registration path — confirmed by code inspection; separately confirmed behaviorally (TC-2: upload alone leaves `status: 'registered'`) | CONFIRMED |
+| G5 | Single atomic `UPDATE extracted_document SET status = 'processing' WHERE document_id = ? AND status != 'processing'`, `changes === 0` detects an already-owned document — confirmed via TC-4 (API-level race) and TC-6 (real double-click through the UI) | CONFIRMED for the SQLite/single-process case; genuine multi-connection concurrency against the real Fabric row-lock mechanism remains untested until Session 4 (documented, not silently assumed) |
 
 ### Scope Decisions
-[Recorded during task execution — e.g. how "Session 3's extraction service" is stubbed, since Session 3 doesn't exist yet.]
+- `startExtractionPipelineStub()` in `extraction.ts` is an intentional no-op — Session 3 (not yet built) implements the real pipeline; Task 2.4's own CC prompt says to wire the trigger through to "Session 3's extraction service," which doesn't exist yet.
+- The Extract button only appears on the Upload screen's document list, not on Home's "Uploaded Statements panel" (also named in Task 2.4's CC prompt) — Home only has a thin Session 1 placeholder; its real content is Task 6.1 (Session 6).
+- `listDocumentsWithStatusBadge()` computes the badge per-document via `computeDocumentStatus()` (Task 2.3) inline in the list query path — O(n) status computations per page load. Acceptable at this build's scale (no pagination/volume concerns raised anywhere in the signed-off docs for the Upload screen); would need revisiting if Session 6's Home panel has different performance requirements.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** PASS
