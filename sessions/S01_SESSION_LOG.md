@@ -111,7 +111,7 @@ Engineer reviews at session sign-off and determines disposition.]
 
 | Task | Observation | Nature | Recommended action |
 |------|-------------|--------|--------------------|
-|      |             |        |                    |
+| 1.1 | Next.js 16's dev/build tooling auto-generates `/AGENTS.md` and a root-level `/CLAUDE.md` (containing `@AGENTS.md`) on every `next dev`/`next build` run — confirmed by the generated file's own text, sourced from `node_modules/next/dist/server/lib/generate-agent-files.js`. This collides with the project's existing PBVI root-stub convention (`Claude.md.ROOT_STUB.txt` -> `docs/Claude.md`, registered in `PROJECT_MANIFEST.md`): a literal `CLAUDE.md` at repo root now exists that says `@AGENTS.md`, not "See docs/Claude.md". Not committed — added to `.gitignore` instead so it regenerates locally without polluting the repo. Separately noted: `PROJECT_MANIFEST.md`'s File Registry lists `Claude.md` (no suffix) as PRESENT at repo root, but the actual file on disk is `Claude.md.ROOT_STUB.txt` — this naming mismatch predates this session and wasn't introduced or corrected here. | FRAGILITY | BACKLOG — engineer to decide whether to (a) leave gitignored as done here, (b) rename `Claude.md.ROOT_STUB.txt` to close the `PROJECT_MANIFEST.md` naming gap while keeping Next's generated file gitignored, or (c) something else. Not a build-blocking issue for Session 1. |
 
 Nature values: BUG | MISSING | FRAGILITY
 Disposition at sign-off: BACKLOG | DISMISS | IMMEDIATE (requires loop)

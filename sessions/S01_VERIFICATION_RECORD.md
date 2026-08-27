@@ -9,46 +9,61 @@ Source: EXECUTION_PLAN.md Session 1
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | `npx playwright --version` | Returns a version string | N/A | |
-| TC-2 | Missing `FABRIC_SQL_ENDPOINT` env var | Falls back to local SQLite without crashing | N/A | |
+| TC-1 | `npx playwright --version` | Returns a version string | N/A | PASS — `Version 1.62.1` |
+| TC-2 | Missing `FABRIC_SQL_ENDPOINT` env var | Falls back to local SQLite without crashing | N/A | PASS — `npm run test:db-fallback` (scripts/verify_db_fallback.mjs): `{"mode":"sqlite","ok":true}` |
 
 ### Challenge Agent Output
-[Written by the build agent. Populated during task execution.]
+Run via an independent subagent (no build-session context), evidence-only, per `tools/challenge.sh`'s prompt contract.
 
-**Verdict:**
+**Verdict:** FINDINGS — 6 items (all dispositioned below; commit proceeded after fixes/rationale, not before).
 
 **Untested scenarios:**
+1. `db.ts`'s connection logic had no automated/reproducible test — the task's own specified failure-case test was verified only ad hoc.
+2. Root route (`/`) redirected to `/login`, which didn't exist in this diff — confirmed 404 via live dev server.
+3. `db.ts` was not called from anywhere in the app — no boot hook, no health route.
 
 **Unverified assumptions:**
+1. `getSqlitePath()` resolves against `process.cwd()` with no validation — confirmed to silently open a different DB file when launched from an unexpected working directory.
+2. Committed `next-env.d.ts` diverges from the state `npm run dev` (the exact command Playwright's `webServer` invokes) regenerates on first run.
+3. Module-level singletons (`sqliteInstance`, `fabricPoolPromise`) have no invalidation path if the driving env var changes mid-process.
 
-**Invariant coverage gaps:**
+**Invariant coverage gaps:** NONE — Task 1.1 is explicitly "None task-scoped (pure scaffolding)"; no schema/data created by this diff.
 
-**Scope boundary observations:**
+**Scope boundary observations:** None raised — all findings were fixable within Task 1.1's own file set (`src/lib/db.ts`, `src/app/page.tsx`, plus one new health route and one new verification script, both within Claude.md's `/src/**` and `/scripts/**` scope).
 
-**Finding dispositions (FINDINGS verdict only):**
+**Structural complexity check (all six functions):** CLEAN — single stateable purpose each, no conditional nesting beyond one level.
+
+**Finding dispositions:**
 
 | Finding # | Disposition | Rationale / Test case added | Test result |
 |-----------|-------------|------------------------------|-------------|
-|           |             |                              |             |
+| 1 (db.ts untested) | TEST | Added `scripts/verify_db_fallback.mjs` + `npm run test:db-fallback` — reproducible, non-ad-hoc check of the exact Task 1.1 failure case | PASS — see TC-2 above |
+| 2 (root route 404s) | TEST | Removed the premature `redirect('/login')` (Task 1.3 owns wiring root -> `/login` once it exists); replaced with a neutral scaffold placeholder | PASS — `npm run build` succeeds, `/` renders statically, no dead redirect |
+| 3 (db.ts unreachable) | TEST | Added `src/app/api/health/route.ts` — a minimal `GET` handler calling `pingDb()`, giving the connection module a real request path | PASS — appears as `ƒ /api/health` in `next build` route output |
+| 4 (cwd-relative SQLite path) | ACCEPT | `process.cwd()` is the app root at runtime for both `next dev`/`next start` locally and standard App Service deployments — documented in a code comment; not changed, since anchoring elsewhere would fight the deployment convention rather than follow it | N/A — no test required |
+| 5 (`next-env.d.ts` drift) | ACCEPT | Standard Next.js framework self-maintenance behaviour (regenerates on first `next dev`/`next build`), identical across every Next.js 13+ project — not a defect introduced by this task | N/A — no test required |
+| 6 (no singleton invalidation) | ACCEPT | Env-var-driven config is read once at process start per standard 12-factor/App Service convention; runtime env-var mutation without a process restart is out of scope for this system | N/A — no test required |
 
 ### Code Review
 Not invariant-touching — pure scaffolding. GLOBAL invariants apply implicitly to all subsequent tasks, not to this one directly.
 
 ### Scope Decisions
-[Recorded during task execution.]
+- Framework: Next.js 16 (App Router) + TypeScript, chosen over the originally-installed 14.2.5 after `npm audit` surfaced multiple HIGH-severity advisories against 14.2.5 with no fix short of a major bump — greenfield project, zero cost to start on a patched major version instead of pinning a vulnerable one. React bumped 18 -> 19 to match.
+- Local dev DB driver: `better-sqlite3` (installs via prebuilt binary on this platform, no native toolchain required). Fabric path: `mssql` (untested — no live Fabric endpoint available; required starting Session 4 per EXECUTION_PLAN.md).
+- Added `src/app/api/health/route.ts` and `scripts/verify_db_fallback.mjs` beyond the CC prompt's literal text, in direct response to Challenge Agent findings 1 and 3 — both stay inside Task 1.1's own stated deliverable (the DB connection module) and inside Claude.md's `/src/**` and `/scripts/**` scope, not scope creep into a later task.
 
 ### BCE Impact
 No BCE artifact impact — `discovery/` is empty pre-Phase 8.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching) — N/A, not invariant-touching
+[x] Scope decisions documented
 
-**Status:**
+**Status:** PASS
 
 ---
 
