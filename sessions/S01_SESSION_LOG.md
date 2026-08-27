@@ -67,7 +67,7 @@
 |---------|-----------|--------|--------|
 | 1.1 | Repository scaffolding + Playwright setup | Completed | 758cf08 |
 | 1.2 | Database schema: `extracted`, `silver`, `recon` foundation tables | Completed | 6c07ed7 |
-| 1.3 | Authentication (Sign In screen) | | |
+| 1.3 | Authentication (Sign In screen) | Completed | 7ab877f |
 | 1.4 | Global elements (sidebar nav, logout, error boundary, loading, toast) | | |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
@@ -96,6 +96,9 @@ Leave this table empty if the session was not resumed.
 | 1.2 | Application-generated TEXT UUID primary keys everywhere, not `IDENTITY`/`AUTOINCREMENT` | Sidesteps the SQLite/T-SQL PK-generation dialect gap entirely — same column type/constraint works unmodified in both engines |
 | 1.2 | Two migration files per logical migration (`001_foundation_schema.sql` Fabric T-SQL + `.sqlite.sql` companion), not one shared literal SQL text | SQLite does not enforce foreign keys across ATTACHed databases; since G1/S11's FK and cross-schema constraints are load-bearing, an ATTACH-based single-file rendering would silently stop enforcing them. Full rationale in both files' headers |
 | 1.2 | `recon.exception.category` CHECK enum seeded with only 2 placeholder values (`amount_mismatch`, `not_posted`) | No canonical enum exists anywhere in signed-off docs yet — Task 5.4 owns finalizing it. Flagged as non-final in the migration's own comments, not silently treated as complete |
+| 1.3 | Added `recon.app_user` (migrations/002_auth_users.sql) + `scripts/seed_users.mjs` — no task in EXECUTION_PLAN.md provisions a user table or the first account | Sign In is untestable with zero user records; minimum viable fix scoped to Task 1.3's own deliverable, not a user-management screen (none exists in UI_SURFACE.md) |
+| 1.3 | Session cookie is a custom HMAC-signed token (Web Crypto), not next-auth/iron-session; password hashing is Node's built-in scrypt, not bcrypt/argon2 | `src/proxy.ts` runs on Next's Edge runtime (restricts Node APIs) — Web Crypto works in both Edge and Node; scrypt avoids an extra native dependency |
+| 1.3 | No server-side session revocation (logout only clears the requesting browser's cookie; a copied token or a deleted user's token remains valid until 30-min idle expiry) | Accepted as a documented limitation, not built — exceeds Task 1.3's literal "Sign In screen" scope and no invariant/requirement doc mandates it. Recommended follow-up noted in Verification Record |
 
 ---
 
