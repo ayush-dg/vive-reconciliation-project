@@ -82,37 +82,57 @@ Source: EXECUTION_PLAN.md Session 2
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Upload a genuinely new document (new hash) | Registers cleanly, `vendor_id`/`statement_period` NULL, no prior version link | N/A | |
-| TC-2 | Re-upload the identical file (same hash) | Rejected/ignored, no new row — INVARIANT TOUCH: G4 | N/A | |
-| TC-3 | Registration endpoint call | Does not call the matching service — INVARIANT TOUCH: S1 | N/A | |
-| TC-4 | Registration endpoint code path | Does not perform vendor/period version-chaining (that's Task 3.1) | N/A | |
+| TC-1 | Upload a genuinely new document (new hash), via `POST /api/documents` | Registers cleanly (201), `vendor_id`/`statement_period` NULL, no prior version link | N/A | PASS |
+| TC-2 | Re-upload the identical file (same hash), same entity | Rejected/ignored (200, `duplicate:true`), no new row — INVARIANT TOUCH: G4 | N/A | PASS |
+| TC-2b (added) | Re-upload the identical file (same hash), different entity | Still no new row; mismatch surfaced (`legalEntityMismatch:true`), original entity preserved — INVARIANT TOUCH: G4 | N/A | PASS |
+| TC-3 | Registration endpoint call | Does not call the matching service — INVARIANT TOUCH: S1 | N/A | PASS |
+| TC-4 | Registration endpoint code path | Does not perform vendor/period version-chaining (that's Task 3.1) | N/A | PASS |
+| TC-5 (added) | Check-then-insert race (UNIQUE constraint hit on INSERT, not the pre-check) | Handled gracefully — no unhandled crash | N/A | PASS |
+
+`scripts/test_document_registration.sh` (→ `.mjs`, invokes the actual `POST`/`GET` route handlers directly, not just the library function): 20/20 checks PASS. Full `ui_tests` suite re-run after this task's fix: 20/20 PASS.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+Run via an independent subagent (no build-session context), evidence-only.
+
+**Verdict:** FINDINGS — 3 items, all real gaps in the verification pass itself (not new code defects, except one real robustness gap surfaced along the way — see below).
+
+**Findings (from the challenge):**
+1. The original script only called `registerDocument()` directly — never exercised `POST`/`GET /api/documents` (the actual endpoint Task 2.2 is nominally verifying). A regression introduced only in `route.ts` (wrong status code, dropped `legalEntityMismatch` field, broken form parsing) would not have been caught.
+2. The `legalEntityMismatch` branch — the exact code path a prior challenge pass (Task 2.1) found and fixed as a real bug — had zero coverage in this script; the only re-upload test used the same entity both times.
+3. `registerDocument()`'s `INSERT` had no handling for a `UNIQUE`-constraint violation hit directly at insert time (as opposed to caught by the pre-check read) — under a genuine check-then-insert race (plausible on Azure App Service if it ever runs multiple instances), this would surface as an unhandled crash instead of the documented graceful-duplicate response.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (route handler unexercised) | TEST | Rewrote the script to import and call `POST`/`GET` from `route.ts` directly with constructed `Request`/`FormData` objects (Route Handlers are plain functions over the standard Request/Response Web APIs — no running server needed) | PASS — all TCs now exercise the real endpoint |
+| 2 (legalEntityMismatch uncovered) | TEST | Added TC-2b: re-upload identical bytes under a different `legalEntityId`, assert `legalEntityMismatch: true` and the original entity preserved | PASS |
+| 3 (unhandled race on INSERT) | TEST | Added a `try/catch` around the `INSERT` in `registerDocument()` — on a `UNIQUE constraint failed` error, re-queries the winning row and returns the same graceful duplicate response the pre-check path returns, instead of throwing. Added TC-5, which confirms the error-message shape the catch's detection regex relies on (a true concurrent-process race can't be reproduced in this single-threaded, synchronous test — documented as such, not overclaimed) | PASS |
 
 ### Code Review
-[Required — S1, G4.]
+Required — S1, G4.
 
 | Invariant | Enforcement point to check | Result |
 |---|---|---|
-| S1 | Registration endpoint never calls matching service, sync or async | |
-| G4 | `content_sha256` UNIQUE constraint (Task 1.2) enforces idempotency at write time | |
+| S1 | No matching-service call site anywhere in `documents.ts` or `route.ts` — confirmed by static inspection (widened regex per the challenge's Unverified Assumption 1, covering `queueMatch`/`invokeMatch`/`startReconcil` naming variants in addition to the original pattern) and by the fact that no matching-service module exists anywhere in this repo yet (Session 5 not built) | CONFIRMED — with the noted limitation that a sufficiently differently-named future call could still evade a textual scan; re-review required once Session 5 introduces matching |
+| G4 | `content_sha256` UNIQUE constraint (Task 1.2, DB-level) + application-level pre-check (`findDocumentByHash`) + now a catch-based fallback for the race window between them | CONFIRMED — all three layers tested (TC-2, TC-2b, TC-5) |
 
 ### Scope Decisions
-[Recorded during task execution.]
+- Verification command satisfies EXECUTION_PLAN.md's literal path (`./scripts/test_document_registration.sh`) via a thin wrapper that calls `test_document_registration.mjs` through `tsx`, consistent with every other verification script in this project (TypeScript, not bash, since Session 1 — see `scripts/test_foundation_schema.mjs`).
+- No code changes were needed in `documents.ts`/`route.ts` beyond the race-condition catch (Finding 3) — Task 2.1's own challenge-agent pass already found and fixed the two defects most relevant to this task's S1/G4 scope (PDF-type bypass was S1-adjacent input validation, not S1 itself; entity-mismatch was directly G4).
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** PASS
 
 ---
 

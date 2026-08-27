@@ -12,7 +12,8 @@
     "migrate": "tsx scripts/migrate.mjs",
     "test:schema": "tsx scripts/test_foundation_schema.mjs",
     "seed:users": "tsx scripts/seed_users.mjs",
-    "test:toast": "tsx scripts/test_toast_store.mjs"
+    "test:toast": "tsx scripts/test_toast_store.mjs",
+    "test:document-registration": "tsx scripts/test_document_registration.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

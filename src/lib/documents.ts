@@ -92,10 +92,23 @@ export function registerDocument(fileBytes: Buffer, legalEntityId: string): Regi
 
   const db = getSqliteDb();
   const documentId = crypto.randomUUID();
-  db.prepare(
-    `INSERT INTO extracted_document (document_id, content_sha256, legal_entity_id)
-     VALUES (?, ?, ?)`
-  ).run(documentId, contentSha256, legalEntityId);
+  try {
+    db.prepare(
+      `INSERT INTO extracted_document (document_id, content_sha256, legal_entity_id)
+       VALUES (?, ?, ?)`
+    ).run(documentId, contentSha256, legalEntityId);
+  } catch (err) {
+    // Check-then-insert race: another request registered the same hash
+    // between our findDocumentByHash() read and this INSERT (plausible under
+    // Claude.md's Azure App Service target, which may run multiple
+    // instances). The DB's UNIQUE constraint (Task 1.2, G4) is the real
+    // guarantee here — this catch turns that into the same graceful
+    // duplicate response the pre-check path returns, not an unhandled 500.
+    const isUniqueViolation = err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
+    if (!isUniqueViolation) throw err;
+    const winner = findDocumentByHash(contentSha256)!;
+    return { document: winner, duplicate: true, legalEntityMismatch: winner.legalEntityId !== legalEntityId };
+  }
 
   return { document: findDocumentByHash(contentSha256)!, duplicate: false };
 }
