@@ -1,8 +1,16 @@
 # ARCHITECTURE.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.3 (pending engineer sign-off on 2026-08-27 changes)
-**Status:** DRAFT — awaiting sign-off per PBVI Human Accountability Gate
-**Traces to:** `brief/REQUIREMENTS_BRIEF.md`, Phase 1 Interrogate Output v2, `docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_3.md` (decision register D1–D24)
+**Version:** 1.4 (2026-08-27 — PHASE4_GATE_RECORD.md remediation, Findings 2 and 6)
+
+## v1.4 Changelog (2026-08-27, remediates PHASE4_GATE_RECORD.md Findings 2 and 6)
+
+**New D-L** — known-vendor deterministic extraction fast path, explicitly superseding
+`brief/REQUIREMENTS_BRIEF.md` §7 (Finding 6). **Amended same day** to add vendor
+identification: vendor is detected by the app during extraction (Task 3.1), not selected by
+the user at upload — resolves Finding 2 (unknown-vendor landing table) and UI_SURFACE.md's
+previously-open gap #3. **D-H amended** to reflect the resulting timing shift: the
+vendor/period/entity collision check (version-chaining) now runs post-extraction, not at
+registration — only content-hash dedup applies at upload time.
 
 ## v1.3 Changelog (2026-08-27, same day as v1.2)
 
@@ -197,6 +205,12 @@ genuinely conflicting statement rather than a correction.
   human checkpoint the original design provided for genuinely conflicting (non-correction)
   statements — worth Vaishali/Vartan confirming this trade explicitly.
 
+**Amendment (2026-08-27 — timing shift, per D-L's vendor auto-detection):** Vendor is no
+longer known at upload (see D-L amendment below) — it's identified during extraction. The
+vendor/period/entity collision check this decision describes therefore cannot run at
+registration time (Task 2.2); it runs once extraction populates `vendor_id` (Task 3.1). At
+registration, only content-hash dedup (G4) applies. See D-L for the full sequencing.
+
 ### D-I — Upload and extraction are separate explicit acts [NEW 2026-08-26]
 **Decision:** Uploading a document registers it only (content-hash check, `extracted.document`
 record created — see D-J). Extraction is a distinct, explicit user-triggered action on that
@@ -276,6 +290,63 @@ BCE or a parallel track; this build does not attempt any of them.
   capabilities in this repo, not existing VIVE-coupled code needing decoupling, so BCE
   building them generic from day one costs nothing extra. Re-scoping Build1 to build them
   now would extend the timeline for no benefit this build needs.
+
+### D-L — Known-vendor deterministic extraction, explicitly superseding brief §7 [NEW 2026-08-27 — PHASE4_GATE_RECORD.md Finding 6]
+**Decision:** This build implements a known-vendor deterministic extraction fast path
+(`pdfplumber`-based, no LLM call) alongside the Claude-primary universal path, per Session 3
+of EXECUTION_PLAN.md and the `provider` enum on `extracted.extraction_attempt`
+(`python_library_pdfplumber` / `claude_sonnet` / `pdfplumber_fallback`).
+
+**This explicitly supersedes `brief/REQUIREMENTS_BRIEF.md` §7**, which lists "Per-vendor
+deterministic parsers" as out of scope and states: *"Universal extraction is the default;
+build a vendor-specific fast path only if real volume/cost data justifies it later."* No
+volume/cost data justifying this exists yet — the fast path is being built ahead of that
+test, not in response to it. Per the brief's own directory contract (`brief/` is never
+modified after receipt), this decision is recorded here rather than by editing the brief;
+a corresponding addendum has been appended to `brief/REQUIREMENTS_BRIEF.md` pointing back
+to this entry.
+
+**Rationale:** Recorded as a knowing, engineer-directed scope change, not an oversight —
+carried forward from earlier investigation of the reference implementation (see
+`PROJECT_MANIFEST.md`'s "Known Prior Art" note) rather than re-derived from this build's own
+volume/cost data. Vendor-native `extracted.stmt_<vendor_slug>` raw tables (D-J) accommodate
+this path structurally but do not by themselves require it — D-J's schema choice is
+independent of whether extraction is deterministic or Claude-primary for a given vendor.
+
+**Alternatives rejected:**
+- *Universal (Claude-primary) extraction only, per the brief's own test* — the
+  brief-compliant option: defer the deterministic fast path until real volume/cost data
+  justifies it, and extract every vendor via Claude Sonnet (with pdfplumber OCR fallback)
+  until then. Rejected for this revision in favor of building the fast path now; not
+  rejected on technical grounds — this alternative remains available if the supersession
+  above is reconsidered.
+
+**Revisit condition:** If this decision is walked back, Session 3's known-vendor bypass
+path (Task 3.1's provider selection logic) is the only code affected — matching, exceptions,
+and reporting are vendor-agnostic (D-J) and require no change either way.
+
+**Amendment (2026-08-27 — vendor identification, resolves PHASE4_GATE_RECORD.md Finding
+2):** Vendor is identified by the app, not selected by the user at upload — this also
+resolves `UI_SURFACE.md`'s previously-open gap #3. Sequencing:
+1. **Upload (Task 2.1/2.2):** user supplies the PDF only. `extracted.document.vendor_id` is
+   written NULL at registration; only content-hash dedup (G4) runs — no vendor is known yet
+   to check for a vendor/period collision against (see D-H amendment above).
+2. **Extraction (Task 3.1):** the document is checked against `extracted.vendor_registry`
+   (e.g. by a lightweight signature/layout match against each known vendor's expected
+   format). **Match found** → known-vendor deterministic `pdfplumber` path, `vendor_id` set
+   to the matched vendor, raw rows land in that vendor's `extracted.stmt_<vendor_slug>`
+   table. **No match** → Claude-primary path; Claude identifies the vendor name from
+   document content, raw output lands in `extracted.extraction_attempt.raw_output` (no
+   per-vendor raw table required for this path), and `vendor_id` is set to a matched
+   existing vendor if Claude's identification resolves to one already in the registry, or a
+   new provisional vendor record if it doesn't (a genuinely new vendor is not an error).
+3. Once `vendor_id` is populated, the D-H vendor/period/entity collision check (version-
+   chaining) runs at this point, not at registration.
+
+This closes Finding 2 (unknown-vendor statements previously had no defined landing table or
+routing) without requiring a generic raw-table fallback — Claude-extracted rows already have
+a defined home in `extracted.extraction_attempt.raw_output`, consistent with Task 3.6's
+normalization step already reading from both sources.
 
 ### D-G — Exception schema forward-compatibility (Explore evaluation criterion, not a fact)
 **Decision:** The exception data model in this build must be structured so that BCE can add
@@ -460,54 +531,23 @@ table where VIVE and NetSuite data coexist by design.)*
 
 ---
 
-## v1.1 Sign-Off Addendum (2026-08-26)
-
-**Decision owner:** Vaishali
-**Date:** 2026-08-26
-**Status:** DRAFT — pending sign-off. Two items carried over from INVARIANTS.md v1.3
-specifically need confirmation before this version is final:
-1. D-B/D7 confidence-floor removal (see G2).
-2. D-H version-chaining without a human checkpoint (see S2/OD4).
-
-**Not requiring separate sign-off:** Fabric-live confirmation, D-I (upload/extract
-separation), ExtractionAttempt provider-field addition — these are lower-risk,
-mechanical updates.
-
----
-
-## v1.2 Sign-Off Addendum (2026-08-27)
+## Final Sign-Off (2026-08-27)
 
 **Decision owner:** Vaishali
 **Date:** 2026-08-27
-**Status:** DRAFT — pending sign-off. D-J (extracted schema, per-vendor raw tables) is a
-new structural decision — not carried forward from a prior flag, but new enough to note
-explicitly:
+**Status:** SIGNED OFF — all items below confirmed, no longer draft/pending.
 
-1. **D-J** — confirms Option A (per-vendor tables at raw layer only, unified
-   `silver.statement_line`) over Option B (per-vendor all the way through Silver).
-   Revisit if the reusable-components effort later requires per-vendor Silver.
-2. **Fabric sequencing** — confirms Sessions 1–3 build/test locally (SQLite fallback),
-   Fabric required starting Session 4. Migrations must be Fabric-compatible T-SQL from
-   the start.
+All items flagged across the v1.0–v1.3 revisions are now confirmed as intentional,
+accepted decisions:
 
-**Still outstanding from v1.1 (unchanged, not resolved by this revision):**
-1. D-B/D7 confidence-floor removal (see G2).
-2. D-H version-chaining without a human checkpoint (see S2/OD4).
+1. **D-B/D7 (G2)** — extraction-confidence floor removed as a gate, not lowered.
+2. **D-H (S2/OD4)** — duplicate/conflict handling via automatic version-chaining, no
+   human checkpoint.
+3. **D-J** — VIVE intake data in a new `extracted` schema; per-vendor raw tables at the
+   raw layer only (Option A), unified `silver.statement_line`. Fabric sequencing
+   confirmed: Sessions 1–3 build/test locally, Fabric required starting Session 4.
+4. **D-K** — reusable-components reconciliation (`artifact_type` column, structured
+   pipeline result contract) confirmed as the right scope for this build.
 
----
-
-## v1.3 Sign-Off Addendum (2026-08-27, same day as v1.2)
-
-**Decision owner:** Vaishali
-**Date:** 2026-08-27
-**Status:** DRAFT — pending sign-off.
-
-**New this revision:** D-K (reusable-components reconciliation — `artifact_type` column,
-pipeline result contract). Low risk — additive fields and a return-shape convention, not a
-new behavioral trade — but worth explicit confirmation that this is the right amount of
-generalization for now (not too much, not too little) before it propagates through Session
-5's actual matching implementation.
-
-**Still outstanding, unresolved by this or the v1.2 revision:**
-1. D-B/D7 confidence-floor removal (see G2).
-2. D-H version-chaining without a human checkpoint (see S2/OD4).
+**Signature / confirmation:** [x] I confirm this architecture, including all amendments
+through v1.3, is accurate to my decisions and I authorize proceeding to Phase 6.

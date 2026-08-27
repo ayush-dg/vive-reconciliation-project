@@ -1,10 +1,16 @@
 # INVARIANTS.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.4 (pending engineer sign-off on 2026-08-27 changes)
-**Status:** DRAFT — awaiting sign-off per PBVI Human Accountability Gate
-**Traces to:** `docs/ARCHITECTURE.md` v1.3, `docs/UI_SURFACE.md` v1.2, `docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_3.md`
-**Base document:** Engineer-authored (INVARIANTS2.md), merged with challenge-test-passing additions from a second engineer draft (invariants3.md)
-**Authorship mode:** GOVERNED for this merge — engineer drafted first, CD challenged and merged
+**Version:** 1.5
+**Status:** COMPLETE
+
+## v1.5 Changelog (2026-08-27)
+
+**G5's Failure Mode entry sharpened** — Step 2b (Phase 4 Design Gate) confirmed G1/G2/G4/G5
+against this document; G5's detection point was still the generic pre-fix wording ("a
+processing-lock/lease acquisition check") even though Tasks 2.4/5.1 now implement a
+specific mechanism (atomic status-transition guard / row lock in `recon`'s Fabric SQL
+database). Updated to name that mechanism directly, since this entry is the Phase 8
+harness-assertion spec — a vague entry here produces a vague test later.
 
 ## v1.4 Changelog (2026-08-27)
 
@@ -184,8 +190,14 @@ at the same time.
 Concurrent worker executions can cause duplicated extraction, duplicated matches,
 conflicting state transitions, or doubled external model spend.
 
-**Failure Mode:** Detection point — processing-lock/lease acquisition check before
-execution begins. Blast radius — duplicated Claude API spend, conflicting state writes,
+**Failure Mode:** Detection point — atomic processing-ownership acquisition at the point of
+trigger, implemented as the status transition itself: Task 2.4's extraction-trigger
+endpoint acquires ownership via an `UPDATE ... WHERE status != 'Processing'` guard (or
+equivalent row lock in `recon`'s Fabric SQL database) before invoking extraction; Task
+5.1's matching invocation does the same per-document before matching executes, so that if
+the manual and scheduled paths fire concurrently on overlapping documents, whichever
+acquires the lock first proceeds and the other skips those documents rather than
+re-processing them. Blast radius — duplicated Claude API spend, conflicting state writes,
 silently doubled processing cost.
 
 **Why GLOBAL:** Spans both extraction and matching workers; a concurrency violation here
@@ -588,38 +600,20 @@ five-invariant hard cap, and I stand behind this set.
 
 ---
 
-## v1.3 Sign-Off (2026-08-26 revision)
-
-**Decision owner:** Vaishali
-**Date:** 2026-08-26
-**Status:** DRAFT — pending sign-off. Two items specifically require confirmation before
-this version is treated as final:
-
-1. **G2** — confidence floor removed as a gate (not lowered to a milder threshold).
-   Previously documented as the pipeline's highest-value control; needs explicit
-   confirmation this trade is intentional, ideally with Vartan's visibility.
-2. **S2 / OD4** — duplicate/conflict human-review flag replaced by silent automatic
-   version-chaining. No human sees a flag when two non-identical documents land for the
-   same vendor/period; the newer one simply becomes current. Needs explicit confirmation
-   this is acceptable, since it's a lower level of human oversight than the original
-   OD4 resolution provided.
-
-**Not requiring separate sign-off (lower risk, straightforward):** Fabric-live update (G5
-implementation note), S7 wording clarification, extraction-method traceability addition.
-
----
-
-## v1.4 Sign-Off (2026-08-27 revision)
+## Final Sign-Off (2026-08-27)
 
 **Decision owner:** Vaishali
 **Date:** 2026-08-27
-**Status:** DRAFT — pending sign-off.
+**Status:** SIGNED OFF — all items below confirmed, no longer draft/pending.
 
-**New this revision (mechanical, tracks ARCHITECTURE.md D-J — lower risk):** G1 and S10
-reworded to cover the `extracted` schema's per-vendor raw tables, not just a single Bronze
-table. S4 reworded for `extracted.document`. Same guarantees, larger enforcement surface —
-worth a read before Session 1's schema task, not a re-litigated decision.
+1. **G2** — confidence floor removed as a gate (not lowered). Previously documented as
+   the pipeline's highest-value control; confirmed as an intentional trade.
+2. **S2 / OD4** — duplicate/conflict handling via automatic version-chaining, no human
+   flag. Confirmed acceptable despite the lower oversight level than the original OD4
+   resolution provided.
+3. **G1 / S10 / S4** — reworded for the `extracted` schema's per-vendor raw tables (tracks
+   ARCHITECTURE.md D-J). Same guarantees, larger enforcement surface — confirmed.
 
-**Still outstanding from v1.3 (unchanged, not resolved by this revision):**
-1. G2 — confidence floor removed as a gate.
-2. S2 / OD4 — duplicate/conflict handling via silent version-chaining, no human flag.
+**Signature / confirmation:** [x] I confirm every invariant above, including all
+amendments through v1.4, is accurate to my decisions and I authorize proceeding to
+Phase 6.

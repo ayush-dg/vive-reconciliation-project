@@ -33,13 +33,14 @@ full reasoning and trade-offs discussed before this choice was made.
 | `README.md` | Repo root | PRESENT | Navigation/orientation |
 | `PROJECT_MANIFEST.md` | Repo root | PRESENT | This file |
 | `Claude.md` | Repo root | PRESENT | Tool-compatibility shim — not authoritative content, per Location and Root Stub Pattern |
-| `docs/Claude.md` | PBVI trunk artifact | PRESENT | v1.1 — DRAFT, pending sign-off (see flagged items in changelog) |
-| `docs/ARCHITECTURE.md` | PBVI trunk artifact | PRESENT | v1.3 — DRAFT, pending sign-off |
-| `docs/INVARIANTS.md` | PBVI trunk artifact | PRESENT | v1.4 — DRAFT, pending sign-off |
-| `docs/EXECUTION_PLAN.md` | PBVI trunk artifact | PRESENT | v1.3 — DRAFT, not yet frozen (Phase 8 pending) |
-| `docs/UI_SURFACE.md` | Dual-registered planning + discovery artifact (PBVI-011) | PRESENT | v1.2 — DRAFT, pending sign-off |
+| `docs/Claude.md` | PBVI trunk artifact | PRESENT | v1.2 — auth corrected (username/password v1, Entra ID = end-goal) per `docs/PHASE4_GATE_RECORD.md` Finding 5, `frozen: true` |
+| `docs/ARCHITECTURE.md` | PBVI trunk artifact | PRESENT | v1.4 — D-L (§7 supersession) + vendor-identification amendment, D-H amendment (version-chaining timing), per `docs/PHASE4_GATE_RECORD.md` Findings 6 and 2 |
+| `docs/INVARIANTS.md` | PBVI trunk artifact | PRESENT | v1.4 — **SIGNED OFF 2026-08-27** |
+| `docs/EXECUTION_PLAN.md` | PBVI trunk artifact | PRESENT | v1.5 — Task 3.6 (Silver normalization), G5 lock/lease (2.4/5.1), Task 3.1 rewritten (vendor identification/routing, moved version-chaining), Task 2.2 narrowed to hash-dedup, per `docs/PHASE4_GATE_RECORD.md` Findings 1/2/3/4 (not FROZEN — that's a Phase 8 banner, separate from sign-off) |
+| `docs/UI_SURFACE.md` | Dual-registered planning + discovery artifact (PBVI-011) | PRESENT | v1.3 — Vendor removed as Upload form field (gap #3 resolved), per `docs/PHASE4_GATE_RECORD.md` Finding 2 |
+| `docs/PHASE4_GATE_RECORD.md` | PBVI trunk artifact (Phase 4 Design Gate) | PRESENT | **GATE PASSED AND SIGNED, 2026-08-27** — Vaishali. Step 1 = APPROVE (all 5 BLOCKERs, both HIGH findings dispositioned), Step 1c = RESOLVED, Step 2 = COMPLETE, Step 2b = COMPLETE (G1–G5 all PASS, including G3's Domain→Structural reclassification and confirmation). MEDIUM 8/9, LOW 10-12 remain open but non-blocking. |
 | `docs/target-architecture/VIVE_Statement_Reconciliation_Architecture_v3_3.md` | Reference/target-state architecture | PRESENT | Full v3.3 target design this bounded build scopes down from |
-| `brief/REQUIREMENTS_BRIEF.md` | Client input | PRESENT | Never modified after receipt, per directory contract |
+| `brief/REQUIREMENTS_BRIEF.md` | Client input | PRESENT | Original content never modified after receipt, per directory contract. **Engagement-Side Addendum appended 2026-08-27** (not an edit to the original) recording §7's explicit supersession — see ARCHITECTURE.md D-L |
 | `brief/Reconciliation_Engine_Reusable_Components.docx` | Client input | PRESENT | Reusable-components requirements brief — informs future ENH scoping, not yet incorporated into `docs/ARCHITECTURE.md`'s core/adapter boundary (see Open Questions) |
 | `docs/prompts/` | CC execution prompts | PENDING | Not yet populated — created at Phase 6 session start |
 | `sessions/` | Session logs + verification records | PENDING | Populated as Phase 6 sessions run |
@@ -52,17 +53,24 @@ full reasoning and trade-offs discussed before this choice was made.
 
 ## Open Items Before Phase 6 (Build) Can Begin
 
-1. **Phase 4 Design Gate sign-off** — four items across `docs/ARCHITECTURE.md` v1.3 and
-   `docs/INVARIANTS.md` v1.4 remain unconfirmed: G2 confidence-floor removal, S2/OD4
-   version-chaining without a human checkpoint, D-J's per-vendor `extracted` schema, and
-   D-K's reusable-components reconciliation (lowest risk of the four, but new). `docs/
-   Claude.md`'s `frozen: true` is provisional pending these.
-2. **`tools/` scripts** — not yet sourced (see File Registry note above).
-3. **Reusable-components boundary — partially addressed (2026-08-27).** D-K applied two
-   narrow reconciliations from `brief/Reconciliation_Engine_Reusable_Components.docx`:
-   `extracted.document.artifact_type` and a structured pipeline result contract
-   (Tasks 3.2, 5.2, 5.3, 5.4). **Deliberately still unaddressed, per that brief's own
-   deferral to BCE (unchanged):** Run Manager, generic Document Registry service, Audit
-   Ledger, Human Review Contract. **Genuinely open, no decision made either way:**
+1. ~~**Phase 4 Design Gate**~~ — **PASSED AND SIGNED, 2026-08-27** (Vaishali). All four
+   steps complete: Step 1 (APPROVE — all 5 BLOCKERs and both HIGH findings dispositioned),
+   Step 1c (RESOLVED), Step 2 (COMPLETE), Step 2b (COMPLETE — G1–G5 all PASS). See
+   `docs/PHASE4_GATE_RECORD.md`'s Overall verdict and Engineer Sign-Off. Phase 5 (Claude.md)
+   is validly open; the retroactive-sequencing gap noted at the top of the gate record is
+   closed.
+2. **`tools/` scripts** — not yet sourced (see File Registry note above). Soft blocker
+   only — required for autonomous/challenge-agent mode, not for manually-driven Phase 6
+   sessions.
+3. **Reusable-components boundary — partially addressed, by design (2026-08-27).** D-K
+   applied two narrow reconciliations from `brief/Reconciliation_Engine_Reusable_
+   Components.docx`: `extracted.document.artifact_type` and a structured pipeline result
+   contract (Tasks 3.2, 5.2, 5.3, 5.4). **Deliberately still unaddressed, per that brief's
+   own deferral to BCE (unchanged):** Run Manager, generic Document Registry service,
+   Audit Ledger, Human Review Contract. **Genuinely open, no decision made either way:**
    Evaluation Harness, Observability/correlation package — neither Build1 nor BCE has
-   claimed these yet.
+   claimed these yet. Not a Phase 6 blocker.
+
+**Net: Phase 6 (Build) can begin.** Item 1 is resolved. Item 2 only matters for
+automated/autonomous build sessions — manually-driven Session 1 is unaffected. Item 3 is
+not a blocker.

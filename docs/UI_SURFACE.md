@@ -1,9 +1,10 @@
 # UI_SURFACE.md — VIVE Statement Reconciliation (Bounded First Build)
-## Version: v1.2 · 2026-08-27
+## Version: v1.3 · 2026-08-27
 
 ## Amendment Log
 | Date | Screen/Section | Change | Reason |
 |---|---|---|---|
+| 2026-08-27 | Upload | Vendor removed as a form field — app identifies vendor during extraction, not the user at upload; uploaded-document list shows "Identifying…" until extraction completes | Resolves gap #3, per ARCHITECTURE.md D-L amendment (PHASE4_GATE_RECORD.md Finding 2) |
 | 2026-08-27 | Home, Document Detail | Data-source references updated `bronze.document`/`bronze.extraction_attempt` → `extracted.document`/`extracted.extraction_attempt` | ARCHITECTURE.md D-J — VIVE intake data relocated to new `extracted` schema, separate from `bronze` (which hosts live NetSuite data) |
 | 2026-08-26 | Home | Added reconciled/not-reconciled counts to Summary stats; added Reconcile action per row | New requirement — manual reconcile trigger + outcome visibility |
 | 2026-08-26 | Home | "View statement" now resolved — navigates to new Document Detail screen | Resolves prior gap #2 |
@@ -169,7 +170,7 @@ list below the drop-zone, showing each registered document with a per-row Extrac
 ### Actions
 | Label | Scope | Trigger | Condition | Outcome |
 |---|---|---|---|---|
-| Upload | Screen | Form submit / drop | Always | API call → document registered, content-hash checked; non-identical re-upload for same vendor/period is version-chained automatically (D-H amended) |
+| Upload | Screen | Form submit / drop | Always | API call → document registered, content-hash checked. Vendor is not known yet at this point (identified during extraction, per ARCHITECTURE.md D-L amendment) — the vendor/period version-chaining check (D-H) runs post-extraction, not here |
 | Extract | Row | Click/Button | Document registered, not yet extracted (added 2026-08-26) | Triggers extraction service (Session 3); does NOT happen automatically on upload |
 
 ### States
@@ -183,8 +184,12 @@ list below the drop-zone, showing each registered document with a per-row Extrac
 | Field | Type | Required | Conditional On | Validation Message |
 |---|---|---|---|---|
 | Statement PDF | File | Y | NONE | "Select a PDF statement" |
-| Vendor | Dropdown | TBD | NONE | — |
 | Legal Entity | Dropdown | TBD — real architectural gap: v3.3 tags `legal_entity_id` at document level but doesn't specify who/what sets it | NONE | — |
+
+**Vendor is not a form field (resolved 2026-08-27, per ARCHITECTURE.md D-L amendment):**
+the app identifies the vendor during extraction, not the user at upload. The uploaded-
+document list (below the drop-zone) and Home's Uploaded Statements panel show vendor as
+"Identifying…" until extraction completes and populates it.
 
 - Save behaviour: Stay on page with confirmation toast (safer than silent navigate-away for financial-data upload)
 - Cancel behaviour: N/A
@@ -319,15 +324,17 @@ No approve/dispute actions — correctly absent, per D-C.
 ## UNRESOLVED UI GAPS — carried to Interrogate Missing Information
 
 10 of 14 original gaps resolved via engineer-supplied defaults (2026-08-17); gap #2
-resolved 2026-08-26. Three remain open — real architectural questions (data provenance),
-not styling choices, deliberately not defaulted:
+resolved 2026-08-26; gap #3 resolved 2026-08-27. Two remain open — real architectural
+questions (data provenance), not styling choices, deliberately not defaulted:
 
 1. Screen: Sign In — Is SSO actually offered, or ahead of the unresolved auth mechanism
    (still open from Interrogate)?
 2. ~~Screen: Home — "View statement" action target~~ **RESOLVED 2026-08-26** — navigates
    to the new Document Detail screen.
-3. Screen: Upload — Vendor field: user-selected at upload, or auto-resolved during
-   extraction (per v3.3's vendor crosswalk)?
+3. ~~Screen: Upload — Vendor field: user-selected at upload, or auto-resolved during
+   extraction?~~ **RESOLVED 2026-08-27** — auto-resolved during extraction, per
+   ARCHITECTURE.md D-L amendment (PHASE4_GATE_RECORD.md Finding 2). Not a form field;
+   shown as "Identifying…" until extraction populates it.
 4. Screen: Upload — Legal Entity field: user-selected, or inferred? Real architectural
    gap — v3.3 tags `legal_entity_id` at the document level but doesn't specify who/what
    sets it.
@@ -342,21 +349,17 @@ not styling choices, deliberately not defaulted:
 
 ---
 
-## v1.1 Sign-Off Addendum (2026-08-26)
+## Final Sign-Off (2026-08-27)
 
 **Decision owner:** Vaishali
-**Date:** _______________________
-**Status:** DRAFT — pending sign-off.
+**Date:** 2026-08-27
+**Status:** SIGNED OFF.
 
-**Changes this revision:** Document Detail screen added (resolves gap #2); Home gains
-Reconcile action + reconciled/not-reconciled counts; Upload gains a separate Extract
+Changes across v1.0–v1.2 confirmed: Document Detail screen added (resolves gap #2); Home
+gains Reconcile action + reconciled/not-reconciled counts; Upload gains a separate Extract
 action (D-I); Exceptions/Exception Detail updated for D-H's version-chaining (duplicate
-exception type removed) and the new amount-mismatch drill-down.
+exception type removed) and the amount-mismatch drill-down; data-source references
+updated for the `extracted` schema (D-J).
 
-**No open sign-off-sensitive items on this file specifically** — the underlying trades
-(confidence-gate removal, version-chaining without a human flag) are flagged for sign-off
-in INVARIANTS.md v1.3 and ARCHITECTURE.md v1.1; this file's changes are UI consequences of
-those decisions, not new trades of their own.
-
-**Signature / confirmation:** [ ] I confirm this UI surface update is accurate to my
-decision and authorize it for Phase 4 execution.
+**Signature / confirmation:** [x] I confirm this UI surface, including all amendments
+through v1.2, is accurate to my decision and I authorize proceeding to Phase 6.

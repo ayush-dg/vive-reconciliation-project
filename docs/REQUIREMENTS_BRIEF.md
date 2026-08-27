@@ -192,3 +192,24 @@ but none should be quietly assumed:
   working extraction/matching logic worth reading, not a codebase this brief inherits scope,
   gaps, or technical debt from.
 
+---
+
+## Engagement-Side Addendum (added 2026-08-27 — does not alter the original brief above)
+
+Per `brief/`'s directory contract, this brief is never modified after receipt. The note
+below is appended, not edited into, the original content, per PHASE4_GATE_RECORD.md
+Finding 6.
+
+**§7 supersession — per-vendor deterministic parsers.** §7 above lists "Per-vendor
+deterministic parsers" as out of scope, with the stated test: *"Universal extraction is the
+default; build a vendor-specific fast path only if real volume/cost data justifies it
+later."* This build (EXECUTION_PLAN.md Session 3; ARCHITECTURE.md D-L) implements a
+known-vendor deterministic (`pdfplumber`) extraction fast path alongside the Claude-primary
+universal path — ahead of §7's own volume/cost test, not in response to it. This is a
+knowing, engineer-directed decision, recorded here rather than by editing §7 itself. See
+`docs/ARCHITECTURE.md` D-L for full rationale, the rejected alternative (stay
+brief-compliant, universal-only, until §7's test is actually met), and the revisit
+condition.
+
+**Decision owner:** Vaishali. **Date:** 2026-08-27.
+

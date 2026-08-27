@@ -1,8 +1,32 @@
 # EXECUTION_PLAN.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.3 (pending engineer sign-off on 2026-08-27 changes)
-**Traces to:** `docs/ARCHITECTURE.md` v1.3, `docs/INVARIANTS.md` v1.4, `docs/UI_SURFACE.md` v1.2
+**Version:** 1.5 (2026-08-27 — PHASE4_GATE_RECORD.md remediation)
+**Traces to:** `docs/ARCHITECTURE.md` v1.4, `docs/INVARIANTS.md` v1.4, `docs/UI_SURFACE.md` v1.3
 **APPLICATION_SURFACE:** UI+API — Session 1 includes Playwright scaffolding per PBVI-011.
+
+## v1.5 Changelog (2026-08-27, remediates PHASE4_GATE_RECORD.md Finding 2)
+
+1. **Task 2.1** — Vendor removed as an Upload form field. The app identifies vendor during
+   extraction, not the user at upload (ARCHITECTURE.md D-L amendment); resolves
+   UI_SURFACE.md's previously-open gap #3.
+2. **Task 1.2** — `extracted.document.vendor_id`/`statement_period` now NULLABLE at
+   registration.
+3. **Task 2.2** — vendor/period version-chaining (D-H, S2/OD4) removed from this task;
+   registration now only performs content-hash dedup (G4). Renamed accordingly.
+4. **Task 3.1 rewritten** — now owns vendor identification (registry match → deterministic
+   path; no match → Claude-primary path, provisional vendor creation), routes extraction
+   accordingly, and performs the vendor/period version-chaining check moved from Task 2.2,
+   now that vendor is known. Closes Finding 2: unknown-vendor statements previously had no
+   defined landing table or routing — they now route to the Claude-primary path with
+   output landing in `extraction_attempt.raw_output`, consistent with Task 3.6.
+
+## v1.4 Changelog (2026-08-27, remediates PHASE4_GATE_RECORD.md Findings 1 and 3)
+
+1. **Task 3.6 added** — Silver normalization (`extracted.stmt_*` → `silver.statement_line`).
+   Closes Finding 1: no task previously wrote to the table Task 5.2's matching reads from.
+2. **Task 2.4 and Task 5.1 amended** — G5 (single active processing owner) lock/lease
+   acquisition added inline. Closes Finding 3 (G5 had zero task coverage) and Finding 4
+   (concurrent manual + scheduled matching was undefined).
 
 ## v1.3 Changelog (2026-08-27, same day as v1.2)
 
@@ -143,8 +167,10 @@ notation, `CHECK` constraint behavior) are cheaper to avoid now than to debug th
 Create database migration scripts for:
 - extracted.document (document_id, content_sha256 UNIQUE NOT NULL, legal_entity_id NOT
   NULL, artifact_type NOT NULL DEFAULT 'vendor_statement' — per ARCHITECTURE.md D-K, a
-  cheap reusability concession, not a multi-artifact-type system, vendor_id,
-  statement_period, status, version, previous_statement_id NULLABLE, is_latest_version,
+  cheap reusability concession, not a multi-artifact-type system, vendor_id NULLABLE — not
+  known at registration; the app identifies it during extraction (Task 3.1), not the user
+  at upload, per ARCHITECTURE.md D-L amendment — statement_period NULLABLE for the same
+  reason, status, version, previous_statement_id NULLABLE, is_latest_version,
   upload_timestamp)
 - extracted.extraction_attempt (attempt_id, document_id FK, attempt_no, raw_output,
   confidence, provider_used, arithmetic_pass BOOLEAN, structural_pass BOOLEAN,
@@ -311,28 +337,32 @@ npx playwright test ui_tests/upload.spec.ts && \
   sqlcmd -S "$FABRIC_SQL_ENDPOINT" -d recon -Q "SELECT COUNT(*) FROM extracted.document;"
 ```
 
-## Task 2.1 — Upload screen (UI)
+## Task 2.1 — Upload screen (UI) [amended 2026-08-27]
 
-**Description:** Build the Upload screen per UI_SURFACE.md's spec, including the
-Vendor/Legal Entity fields (still marked TBD in UI_SURFACE.md — implement as user-selected
-dropdowns as the safer default, since neither field's provenance was resolved before
-Phase 3; flag this explicitly rather than guess silently).
+**Description:** Build the Upload screen per UI_SURFACE.md's spec. Legal Entity is still
+marked TBD in UI_SURFACE.md — implement as a user-selected dropdown as the safer default,
+since its provenance wasn't resolved before Phase 3; flag this explicitly rather than guess
+silently. **Vendor is not a form field** (resolved 2026-08-27, ARCHITECTURE.md D-L
+amendment) — the app identifies it during extraction, not the user at upload.
 
 **CC prompt:**
 ```
 Build the Upload screen (route /upload, Form type) per UI_SURFACE.md. Drop-zone for PDF
-file upload. Vendor and Legal Entity fields: UI_SURFACE.md leaves their provenance (user-
-selected vs. auto-resolved) as an unresolved gap — implement as user-selected dropdowns
-for this task, since that's buildable without depending on the extraction service, and
-flag in the PR description that this may need revisiting once the auto-resolution
-question is answered. Save behaviour: stay on page with confirmation toast (resolved
-default).
+file upload. No Vendor field — vendor is identified by the app during extraction (Task
+3.1), not selected by the user here. Legal Entity field: UI_SURFACE.md leaves its
+provenance (user-selected vs. auto-resolved) as an unresolved gap — implement as a user-
+selected dropdown for this task, and flag in the PR description that this may need
+revisiting once the auto-resolution question is answered. The uploaded-document list
+below the drop-zone shows each row's vendor as "Identifying…" until extraction populates
+it. Save behaviour: stay on page with confirmation toast (resolved default).
 ```
 
 **Test cases:**
-- Happy path: selecting a PDF, vendor, and legal entity, then submitting, shows a
-  confirmation toast and stays on `/upload`.
+- Happy path: selecting a PDF and a legal entity, then submitting, shows a confirmation
+  toast and stays on `/upload` — no vendor selection required.
 - Failure case: submitting without a file shows a validation message.
+- Happy path: the uploaded-document list shows "Identifying…" for vendor on a
+  freshly-registered, not-yet-extracted row.
 
 **Verification command:**
 ```bash
@@ -349,61 +379,58 @@ prompt for Task 2.2, since this task only builds the UI, not the backend trigger
 Screen: Upload
 Test strategy: User-generated
 Assertions to implement:
-- Selecting a file, vendor, and entity, then submitting, shows confirmation toast
+- Selecting a file and entity, then submitting, shows confirmation toast — no vendor field
 - Submitting without a file shows validation error
 - Save behaviour keeps user on /upload (per resolved default)
+- Uploaded-document list shows "Identifying…" for vendor pre-extraction
 Test file path: ui_tests/upload.spec.ts
 ```
 
 ---
 
-## Task 2.2 — Document registration + content-hash dedup + version-chaining (amended 2026-08-26)
+## Task 2.2 — Document registration + content-hash dedup (amended 2026-08-27 — vendor-chaining moved to Task 3.1)
 
 **Description:** Backend endpoint that registers an uploaded PDF into `extracted.document`,
-computing `content_sha256` and enforcing content-hash dedup plus automatic
-version-chaining for non-identical re-uploads, per D-H (amended).
+computing `content_sha256` and enforcing content-hash dedup, per G4. **Vendor/period
+version-chaining (D-H, S2/OD4) no longer happens here** — vendor isn't known at upload
+(ARCHITECTURE.md D-L amendment); that check moves to Task 3.1, once extraction populates
+`vendor_id`.
 
 **CC prompt:**
 ```
 Implement the document registration endpoint. On upload: compute content_sha256. If a
 document with the same hash already exists, reject silently (no re-registration, no
 re-extraction) per G1/S9's append-only-identity guarantee combined with G-level hash
-idempotency. If a document with a different hash exists for the same
-vendor+period+legal_entity combination, register the new document and version-chain it:
-set previous_statement_id to the prior document's id, mark the new document
-is_latest_version = true, and flip the prior document's is_latest_version to false. There
-is no human-reviewed flag or exception raised for this case — version-chaining is fully
-automatic. Apply this TASK-SCOPED invariant inline:
+idempotency. Otherwise, register the new document with vendor_id and statement_period both
+NULL — they are not known yet; do not prompt the user for them. Apply this TASK-SCOPED
+invariant inline:
 
 - S1 — Upload/intake never implicitly triggers matching. Registration writes to
   extracted.document only; it must not call the matching service directly, synchronously or
   otherwise.
-- S2 (amended) — A non-identical document for an already-processed vendor/period/entity
-  combination must not be silently accepted as an unrelated statement; it must be
-  version-chained to the prior document (is_latest_version flip), not left disconnected.
+- G4 — Byte-identical documents are never independently re-extracted or re-matched;
+  enforced here via the content_sha256 uniqueness check.
 ```
 
 **Test cases:**
-- Happy path: uploading a genuinely new document (new hash, new vendor/period/entity)
-  registers cleanly with no prior version link.
+- Happy path: uploading a genuinely new document (new hash) registers cleanly with
+  `vendor_id`/`statement_period` NULL and no prior version link.
 - Happy path: re-uploading the identical file (same hash) is rejected/ignored, no new row.
-- Happy path: uploading a different file for the same vendor/period/entity creates a new
-  document row with `is_latest_version = true`, `previous_statement_id` pointing at the
-  prior document, and flips the prior document's `is_latest_version` to `false`.
 - Failure case: registration endpoint does not call the matching service (verify via
   absence of any matching-service log entry after a registration-only call).
-- Failure case: two documents for the same vendor/period never both show
-  `is_latest_version = true` simultaneously.
+- Failure case: registration endpoint does not perform vendor/period version-chaining —
+  that logic must not exist in this task's code path (verify via absence of any
+  `is_latest_version`/`previous_statement_id` write here; see Task 3.1 instead).
 
 **Verification command:**
 ```bash
 ./scripts/test_document_registration.sh
 ```
 
-**Invariant enforcement:** S1, S2 (embedded above).
+**Invariant enforcement:** S1, G4 (embedded above).
 
 **Regression classification:** HARNESS-CANDIDATE — stateless, portable, directly tied to
-S1/S2/G1.
+S1/G1/G4.
 
 **UI test spec:** N/A (backend task).
 
@@ -455,10 +482,16 @@ Add an "Extract" button per document row wherever a registered, not-yet-extracte
 appears (Upload screen's uploaded-list, Home's Uploaded Statements panel). On click, call
 a new extraction-trigger endpoint that invokes Session 3's extraction service for that
 document_id. Button is disabled/hidden once extraction has been triggered (status moves to
-"Processing" per Task 2.3's status computation). Apply this TASK-SCOPED invariant inline:
+"Processing" per Task 2.3's status computation). Apply these TASK-SCOPED invariants inline:
 
 - D-I (ARCHITECTURE.md) — Extraction is a separate explicit user act from upload; this
   endpoint must not be reachable automatically from the registration code path (Task 2.2).
+- G5 — A document cannot have multiple active processing owners simultaneously. Before
+  invoking the extraction service, the endpoint must atomically acquire processing
+  ownership of document_id (e.g., an UPDATE ... WHERE status != 'Processing' guard, or a
+  row lock in `recon`'s Fabric SQL database per G5's implementation note) and the status
+  transition to "Processing" IS that ownership acquisition. A second Extract trigger on a
+  document already "Processing" must be rejected, not silently re-queued or re-triggered.
 ```
 
 **Test cases:**
@@ -467,13 +500,16 @@ document_id. Button is disabled/hidden once extraction has been triggered (statu
 - Failure case: uploading a document (Task 2.2) does not itself invoke extraction — status
   remains "Registered"/pre-Processing until Extract is explicitly clicked.
 - Happy path: Extract button is not shown/is disabled once extraction has already started.
+- Failure case (G5): triggering Extract twice in rapid succession on the same document_id
+  (e.g., a double-click or two concurrent requests) results in exactly one extraction
+  attempt being started; the second trigger is rejected.
 
 **Verification command:**
 ```bash
 npx playwright test ui_tests/extract-trigger.spec.ts
 ```
 
-**Invariant enforcement:** D-I (embedded above).
+**Invariant enforcement:** D-I, G5 (embedded above).
 
 **Regression classification:** REGRESSION-RELEVANT.
 
@@ -494,48 +530,82 @@ Test file path: ui_tests/extract-trigger.spec.ts
 # Session 3 — Extraction Service
 
 **Session goal:** Extract-triggered documents (Task 2.4) are extracted — deterministic
-pdfplumber for known vendors, Claude Sonnet primary with pdfplumber-fallback otherwise —
-validated (arithmetic + structural only, per G2 amended 2026-08-26), retried up to 2 times,
-and either promoted to Silver or flagged `OCR_LOW_CONFIDENCE`. Confidence is recorded as
-diagnostic metadata, not a gate.
+pdfplumber for known vendors (per ARCHITECTURE.md D-L, which explicitly supersedes
+`brief/REQUIREMENTS_BRIEF.md` §7's per-vendor-parser exclusion), Claude Sonnet primary with
+pdfplumber-fallback otherwise — validated (arithmetic + structural only, per G2 amended
+2026-08-26), retried up to 2 times, and either promoted to Silver or flagged
+`OCR_LOW_CONFIDENCE`. Confidence is recorded as diagnostic metadata, not a gate.
 
 **Integration check:**
 ```bash
 ./scripts/run_extraction_service_smoke_test.sh
 ```
 
-## Task 3.1 — Extraction attempt recording (Bronze-first, append-only)
+## Task 3.1 — Vendor identification, extraction routing, and attempt recording (amended 2026-08-27)
 
-**Description:** Implement the extraction attempt write path: every attempt (success or
-failure) is written to `extracted.extraction_attempt` before validation runs, and existing
-attempt rows are never modified.
+**Description:** Before writing an extraction attempt, identify the document's vendor and
+route it: check the document against `extracted.vendor_registry` (signature/layout match).
+Match found → known-vendor deterministic `pdfplumber` path. No match → Claude-primary path,
+with Claude identifying the vendor name from content; resolve to an existing registry
+vendor if possible, else create a new provisional vendor record (a new vendor is not an
+error — see ARCHITECTURE.md D-L amendment, PHASE4_GATE_RECORD.md Finding 2). Populate
+`extracted.document.vendor_id` (and `statement_period`, parsed from the statement) once
+identified, then run the D-H vendor/period/entity version-chaining check that Task 2.2 no
+longer performs (S2/OD4 — deferred from registration since vendor wasn't known then). Every
+attempt (success or failure) is written to `extracted.extraction_attempt` before validation
+runs, and existing attempt rows are never modified.
 
 **CC prompt:**
 ```
-Implement the extraction attempt recording logic. Extraction always writes to
-extracted.extraction_attempt BEFORE validation determines pass/fail — validation never
-gates the Bronze write. Apply these TASK-SCOPED invariants inline:
+Implement, in order: (1) vendor identification — check the document against
+extracted.vendor_registry; on match, select the known-vendor pdfplumber path and that
+vendor's extracted.stmt_<vendor_slug> table; on no match, select the Claude-primary path,
+have Claude identify the vendor name from the document, and either resolve it to an
+existing vendor_registry entry or create a new provisional one (extracted.vendor_registry
+row with no deterministic extraction_route yet) — a genuinely new vendor must not be
+treated as an error or block extraction. (2) Write extracted.document.vendor_id and
+statement_period once identified. (3) Run the vendor/period/entity version-chaining check
+Task 2.2 no longer performs: if a different document (different content_sha256) already
+exists for this vendor_id+statement_period+legal_entity_id, version-chain it exactly as
+Task 2.2 previously described (previous_statement_id set, is_latest_version flipped) — no
+human-reviewed flag. (4) Extraction always writes to extracted.extraction_attempt BEFORE
+validation determines pass/fail — validation never gates the Bronze write; Claude-path
+raw output lands in extraction_attempt.raw_output (no stmt_<vendor_slug> row required for
+that path). Apply these TASK-SCOPED invariants inline:
 
 - S10 — Bronze write precedes validation, never the reverse. A failed extraction attempt
   must still appear in Bronze; validation running before the write completes is a
   violation.
 - G1 (promoted from S9) — Every extraction attempt belongs to exactly one document (FK
   constraint) and attempts are append-only — no UPDATE on existing attempt rows.
+- S2 (amended, moved from Task 2.2) — A non-identical document for an already-processed
+  vendor/period/entity combination must not be silently accepted as an unrelated
+  statement; it must be version-chained to the prior document, not left disconnected.
 ```
 
 **Test cases:**
-- Happy path: a successful extraction writes one attempt row with `arithmetic_pass = true`.
+- Happy path: a document matching a registered vendor's signature routes to the
+  deterministic pdfplumber path and lands in that vendor's `extracted.stmt_<vendor_slug>`.
+- Happy path: a document from a vendor not in `extracted.vendor_registry` routes to the
+  Claude-primary path without error, and a provisional vendor record is created.
+- Happy path: a successful extraction writes one attempt row with `arithmetic_pass = true`,
+  and `extracted.document.vendor_id`/`statement_period` are populated.
 - Failure case: a failed extraction (arithmetic mismatch) still writes an attempt row,
   with `arithmetic_pass = false`, BEFORE any retry logic fires.
 - Failure case: attempting to modify an existing attempt row via the application layer
   fails.
+- Happy path: a different document for the same vendor/period/entity (now known, post-
+  identification) is version-chained — `is_latest_version` flip, `previous_statement_id`
+  set — with no human-reviewed flag.
+- Failure case: two documents for the same vendor/period never both show
+  `is_latest_version = true` simultaneously.
 
 **Verification command:**
 ```bash
 ./scripts/test_extraction_attempt_recording.sh
 ```
 
-**Invariant enforcement:** S10, G1 (embedded above).
+**Invariant enforcement:** S10, G1, S2 (embedded above).
 
 **Regression classification:** HARNESS-CANDIDATE.
 
@@ -708,6 +778,56 @@ queryable summary; the Document Detail screen consuming it is built in Session 6
 
 ---
 
+## Task 3.6 — Silver normalization (`extracted` → `silver.statement_line`) [NEW 2026-08-27 — PHASE4_GATE_RECORD.md Finding 1]
+
+**Description:** Transform validated rows from `extracted.stmt_<vendor_slug>` (per-vendor
+raw tables) and `extracted.extraction_attempt` (Claude/pdfplumber-fallback path) into the
+unified `silver.statement_line` schema Task 5.2's matching reads from. Only rows belonging
+to a document whose latest extraction attempt passed Task 3.2's validation gate are
+eligible for promotion — this is the "proceed to Silver" step Task 3.2 refers to but does
+not itself implement.
+
+**CC prompt:**
+```
+Implement the extracted -> silver.statement_line normalization step. Runs automatically as
+part of the same pipeline as Task 3.2/3.3 once a document's latest extraction attempt
+passes validation (G2) — not a separate user-triggered action. Input: the validated
+document's rows from its extracted.stmt_<vendor_slug> raw table (or
+extracted.extraction_attempt for Claude/pdfplumber-fallback-extracted documents). Output:
+one silver.statement_line row per statement line, in the unified schema regardless of
+which vendor/path produced it. A document that fails validation produces zero
+silver.statement_line rows. Apply this TASK-SCOPED invariant inline:
+
+- S6 — If normalization rules change, historical matching can still identify which
+  normalization logic version produced a given silver.statement_line row. Write a
+  normalization_version field on every row at write time; never rewrite historical rows'
+  version tag when rules change — only new rows pick up new logic.
+```
+
+**Test cases:**
+- Happy path: a document that passes Task 3.2's validation gate produces one or more
+  `silver.statement_line` rows.
+- Failure case: a document that fails validation produces zero `silver.statement_line`
+  rows — normalization never runs on unvalidated data.
+- Happy path: every `silver.statement_line` row is tagged with the normalization logic
+  version that produced it.
+
+**Verification command:**
+```bash
+./scripts/test_silver_normalization.sh
+```
+
+**Invariant enforcement:** S6 (embedded above); gated on G2 (Task 3.2) — no invariant of
+its own beyond S6, but a regression here silently breaks Session 5's matching entirely
+since it reads from this table.
+
+**Regression classification:** HARNESS-CANDIDATE — Task 5.2 has no data to read without
+this step.
+
+**UI test spec:** N/A.
+
+---
+
 # Session 4 — Reference Data Ingestion (NetSuite/CCC Daily Batch)
 
 **Session goal:** NetSuite open invoices and CCC repair-order data are pulled daily into
@@ -841,6 +961,13 @@ same matching execution logic. Apply these TASK-SCOPED invariants inline:
 - S1 — Upload/intake never implicitly triggers matching. Neither invocation path should
   be reachable from the document-registration code path (Task 2.2) — matching must always
   be a deliberate, separate act.
+- G5 — A document/StatementLine cannot have multiple active processing owners
+  simultaneously. Before matching executes against a document's eligible StatementLines,
+  the executing path (manual or scheduled) must atomically acquire processing ownership
+  per document (row lock in `recon`'s Fabric SQL database, per G5's implementation note).
+  If the manual trigger and the scheduled batch job fire concurrently against overlapping
+  eligible documents, whichever path acquires ownership first processes those documents;
+  the other path must skip them, not process them a second time.
 ```
 
 **Test cases:**
@@ -848,13 +975,15 @@ same matching execution logic. Apply these TASK-SCOPED invariants inline:
   StatementLines.
 - Happy path: scheduled batch job executes matching on its configured cadence.
 - Failure case: uploading a document (Task 2.2's endpoint) does not itself invoke matching.
+- Failure case (G5): manual trigger and scheduled batch job invoked concurrently against
+  overlapping eligible documents — each document is matched exactly once, never twice.
 
 **Verification command:**
 ```bash
 ./scripts/test_matching_invocation.sh
 ```
 
-**Invariant enforcement:** S1 (embedded above).
+**Invariant enforcement:** S1, G5 (embedded above).
 
 **Regression classification:** REGRESSION-RELEVANT.
 
@@ -1342,62 +1471,23 @@ and I authorize proceeding to Phase 4 (Design Gate).
 
 ---
 
-## v1.1 Sign-Off Addendum (2026-08-26)
+## Final Sign-Off (2026-08-27)
 
 **Decision owner:** Vaishali
-**Date:** _______________________
-**Status:** DRAFT — pending sign-off. Carries forward the same two flagged items from
-INVARIANTS.md v1.3 and ARCHITECTURE.md v1.1:
+**Date:** 2026-08-27
+**Status:** SIGNED OFF — all items below confirmed, no longer draft/pending.
 
 1. **Task 3.2** — confidence floor removed from the validation gate (not lowered).
-2. **Task 2.2** — duplicate/conflict handling replaced with automatic version-chaining,
-   no human checkpoint.
+2. **Task 2.2** — duplicate/conflict handling via automatic version-chaining, no human
+   checkpoint.
+3. **Task 1.2** — `extracted` schema, per-vendor raw tables (Option A), `extracted.*`
+   propagated through Sessions 2–3, Fabric-compatible T-SQL requirement.
+4. **`artifact_type` column + structured pipeline result contract** — Tasks 1.2, 3.2, 5.2,
+   5.3, 5.4 (tracks ARCHITECTURE.md D-K).
 
-**New tasks added this revision (lower risk, mechanical, no separate sign-off needed):**
-- Task 2.4 — Extract action (upload/extract separation, D-I)
-- Task 3.5 — extraction-method summary endpoint
-- Task 6.1 (amended) — Reconcile action + reconciled/not-reconciled counts
-- Task 6.3 (amended) — amount-mismatch source-value drill-down
-- Task 6.5 — Document Detail screen
+Also confirmed, lower risk throughout: new Tasks 2.4, 3.5, 6.1 (amended), 6.3 (amended),
+6.5; `AZURE_SQL_SERVER` → `FABRIC_SQL_ENDPOINT` infrastructure update.
 
-**Infrastructure change (no sign-off needed, factual update):** all `AZURE_SQL_SERVER`
-placeholders replaced with the live Fabric SQL database connection pattern
-(`FABRIC_SQL_ENDPOINT`, `sqlcmd`).
-
-**Signature / confirmation:** [ ] I confirm the 2026-08-26 changes above are accurate to
-my decisions and I authorize this version for Phase 4 execution, with items 1–2 explicitly
-acknowledged as intentional trades (not oversights).
-
----
-
-## v1.2 Sign-Off Addendum (2026-08-27)
-
-**Decision owner:** Vaishali
-**Date:** _______________________
-**Status:** DRAFT — pending sign-off.
-
-**New this revision (mechanical, tracks ARCHITECTURE.md D-J):** Task 1.2 rewritten for the
-`extracted` schema and per-vendor raw tables; `extracted.*` references propagated through
-Sessions 2–3; Fabric-compatible T-SQL requirement added; Task 5.2 annotated as confirmed
-unaffected.
-
-**Not requiring separate sign-off** — this is schema relocation and a per-vendor raw-table
-pattern (Option A, confirmed), not a new behavioral trade like items 1–2 above.
-
-**Signature / confirmation:** [ ] I confirm the 2026-08-27 changes above are accurate to
-my decisions and I authorize this version for Phase 4 execution.
-
----
-
-## v1.3 Sign-Off Addendum (2026-08-27, same day as v1.2)
-
-**Decision owner:** Vaishali
-**Date:** _______________________
-**Status:** DRAFT — pending sign-off.
-
-**New this revision:** `artifact_type` column added to Task 1.2; structured result
-contract specified for Tasks 3.2, 5.2, 5.3; Task 5.4 sources from that contract. Tracks
-ARCHITECTURE.md D-K.
-
-**Signature / confirmation:** [ ] I confirm the 2026-08-27 changes above are accurate to
-my decisions and I authorize this version for Phase 4 execution.
+**Signature / confirmation:** [x] I confirm this execution plan, including all amendments
+through v1.3, is complete and accurate to my decisions, and I authorize proceeding to
+Phase 6.

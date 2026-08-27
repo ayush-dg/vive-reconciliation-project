@@ -12,6 +12,7 @@ frozen: true
 |---|---|---|---|
 | v1.0 | 2026-08-26 | Vaishali | Greenfield — Initial, derived from ARCHITECTURE.md v1.1, INVARIANTS.md v1.3, EXECUTION_PLAN.md v1.1, UI_SURFACE.md v1.1 |
 | v1.1 | 2026-08-27 | Vaishali | Section 3/4 updated for ARCHITECTURE.md D-J — VIVE intake data relocated to new `extracted` schema (`bronze`/`gold` unaffected, already host live NetSuite data) |
+| v1.2 | 2026-08-27 | Vaishali | Section 4 Auth corrected per PHASE4_GATE_RECORD.md Finding 5 — username/password is the actual v1 build target (matches UI_SURFACE.md/Task 1.3); Entra ID recorded as the stated end-goal, not this build's mechanism |
 
 ---
 
@@ -106,7 +107,11 @@ only.)*
 - **AI extraction:** Claude Sonnet 4.6 via Azure AI Foundry (primary, for non-known-vendor
   documents); deterministic `pdfplumber`-based extractors (known-vendor bypass — no LLM
   call); `pdfplumber`-based OCR fallback (AI-failure path only)
-- **Auth:** Entra ID
+- **Auth:** Username/password (v1 build target — this is what Task 1.3 and
+  `UI_SURFACE.md`'s Sign In spec actually build). **Entra ID is the stated end-goal**, not
+  implemented in this bounded build; the Sign In screen's "Sign in with company SSO" button
+  is a disabled placeholder per `UI_SURFACE.md`'s unresolved gap #1, not a working Entra ID
+  integration
 - **Orchestration:** n8n — triggers the monthly Run Creation API call and sends completion
   notifications only; does not orchestrate extraction or matching
 - **UI testing:** Playwright
@@ -136,12 +141,11 @@ files and reports them to the engineer before proceeding.
 ## Engineer Sign-Off
 
 **Decision owner:** Vaishali
-**Date:** _______________________
-**Status:** DRAFT — pending sign-off. Per PBVI Phase 4 Design Gate, this document cannot
-be frozen (`frozen: true` above is provisional) until ARCHITECTURE.md v1.1 and
-INVARIANTS.md v1.3's two flagged sign-off items (G2 confidence-floor removal, S2/OD4
-version-chaining) are confirmed — IC-2 above already reflects the amended G2, so
-confirming this Claude.md is confirming that amendment too.
-**Signature / confirmation:** [ ] I confirm the five sections above are complete and
+**Date:** 2026-08-27
+**Status:** SIGNED OFF. `frozen: true` above is now final, not provisional — all flagged
+items across ARCHITECTURE.md (through v1.3), INVARIANTS.md (through v1.4), EXECUTION_PLAN.md
+(through v1.3), and UI_SURFACE.md (through v1.2) are confirmed. IC-2 (amended G2) is
+confirmed as part of this sign-off.
+**Signature / confirmation:** [x] I confirm the five sections above are complete and
 accurate, the five-invariant hard cap is respected, CQ-001 is present, and I authorize
 this Claude.md for Phase 6 build sessions.
