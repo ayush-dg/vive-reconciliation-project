@@ -43,7 +43,7 @@ full reasoning and trade-offs discussed before this choice was made.
 | `brief/REQUIREMENTS_BRIEF.md` | Client input | PRESENT | Original content never modified after receipt, per directory contract. **Engagement-Side Addendum appended 2026-08-27** (not an edit to the original) recording §7's explicit supersession — see ARCHITECTURE.md D-L |
 | `brief/Reconciliation_Engine_Reusable_Components.docx` | Client input | PRESENT | Reusable-components requirements brief — informs future ENH scoping, not yet incorporated into `docs/ARCHITECTURE.md`'s core/adapter boundary (see Open Questions) |
 | `docs/prompts/` | CC execution prompts | PENDING | Not yet populated — created at Phase 6 session start |
-| `sessions/` | Session logs + verification records | PENDING | Populated as Phase 6 sessions run |
+| `sessions/` | Session logs + verification records | PRESENT | Populated as Phase 6 sessions run. `S01_SESSION_LOG.md` + `S01_VERIFICATION_RECORD.md` scaffolded 2026-08-27 on `session/s01_scaffolding-auth-db`. |
 | `verification/` | Sign-off checklists | PENDING | Populated at Phase 4 gate and beyond |
 | `discovery/` | BCE SIL artifacts | PENDING | Not yet applicable — produced at Phase 8 |
 | `enhancements/` | Enhancement registry | PENDING | Empty until first post-Phase-8 enhancement |
