@@ -65,7 +65,7 @@
 
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
-| 1.1 | Repository scaffolding + Playwright setup | | |
+| 1.1 | Repository scaffolding + Playwright setup | Completed | 758cf08 |
 | 1.2 | Database schema: `extracted`, `silver`, `recon` foundation tables | | |
 | 1.3 | Authentication (Sign In screen) | | |
 | 1.4 | Global elements (sidebar nav, logout, error boundary, loading, toast) | | |
