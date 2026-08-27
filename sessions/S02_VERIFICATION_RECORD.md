@@ -143,31 +143,57 @@ Source: EXECUTION_PLAN.md Session 2
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Document with zero extraction attempts | Status "Processing" | N/A | |
-| TC-2 | Document with one failed attempt | Status "Retrying (1/2)" | N/A | |
-| TC-3 | Document with two failed attempts | Status "Failed — see Exceptions" | N/A | |
+| TC-1 | Document with zero extraction attempts | Status "Processing" | N/A | PASS |
+| TC-2 | Document with one failed attempt | Status "Retrying (1/2)" | N/A | PASS |
+| TC-3 | Document with two failed attempts | Status "Failed — see Exceptions" | N/A | PASS |
+| Bonus | Attempt in progress (unvalidated) | "Processing" | N/A | PASS |
+| Bonus | Validation passed, no match yet | "Processing" (not "Reconciled") | N/A | PASS |
+| Bonus | `recon.match` exists | "Reconciled" (forward-compat, no live pipeline yet) | N/A | PASS |
+
+`scripts/test_document_status_computation.sh` (→ `.mjs`): 10/10 checks PASS (3 required + 7 added, see below).
 
 ### Challenge Agent Output
-[Populated during task execution.]
+Run via an independent subagent (no build-session context), evidence-only.
+
+**Verdict:** FINDINGS — 4 items. Finding 1 is a real, significant logic bug (not just a coverage gap) — the badge computation used *lifetime* failed-attempt count instead of the *latest* attempt's outcome, so a document that failed once then succeeded on its retry stayed permanently mislabeled "Retrying (1/2)" — exactly Task 3.3's own stated happy path ("attempt 1 fails, attempt 2 succeeds → proceeds to matching-eligible").
+
+**Findings (from the challenge):**
+1. **(Real bug)** A document whose attempt 1 failed and attempt 2 succeeded reads as "Retrying (1/2)" forever — `failedCount` counted all-time failures, not whether the *latest* attempt was still unresolved.
+2. The "Reconciled" branch hardcoded `attemptCount: 0` regardless of real attempt history — untested against a document with real prior attempts before its match.
+3. A document with failed attempts *and* a (data-inconsistent) `recon.match` row silently reports "Reconciled" with no documented rationale for why the match takes precedence.
+4. `computeDocumentStatus()` called with an unknown `document_id` silently returns a plausible-looking "Processing" result — indistinguishable from a legitimate brand-new document. (Also noted, lower-severity: no test exercised 3+ attempt rows, an S7-violating state this function doesn't write but should degrade sanely against.)
+
+**Assessment of the Task 2.3/2.4 badge-value tension** (documented in `documentStatus.ts`'s header comment — Task 2.4's "Registered"/pre-Processing language vs. UI_SURFACE.md's fixed four-badge set with no "Registered" value): confirmed defensible by the challenge agent, no better resolution found. Not re-litigated as a finding.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (stuck-Retrying bug) | TEST | Rewrote the computation to key off the **latest** attempt's outcome: succeeded or in-progress → "Processing"; failed → "Retrying (N/2)" or "Failed" based on total failure count against the S7 bound. Added a dedicated test: attempt 1 fails, attempt 2 succeeds → "Processing" | PASS |
+| 2 (hardcoded attemptCount in Reconciled branch) | TEST | Reconciled branch now reports the real `attempts.length`; added a test with 2 prior attempts before the match | PASS |
+| 3 (undocumented match-precedence) | ACCEPT (documented, not changed) | Added an explicit code comment: IC-2/G2 guarantee a `recon.match` row can only exist for a document whose latest extraction already passed validation, so a match is treated as the authoritative terminal signal — trusting that upstream guarantee, not re-deriving it from (or contradicting it against) attempt history here | N/A — no behavior change, rationale documented |
+| 4 (unknown document_id) | TEST | Added an existence check — throws a clear error instead of returning a plausible-but-wrong "Processing" result; added a test | PASS |
+| Untested (3+ attempts, S7-violating input) | TEST | Added a test confirming 3 failed attempt rows still resolve to "Failed — see Exceptions" (not a malformed label or crash) — the branch ordering already handled this correctly, now it's asserted, not accidental | PASS |
 
 ### Code Review
-Invariant enforcement: None new (relies on G1/S7's underlying data — no extraction service exists yet in Session 2, so this task's own tests exercise the computation against directly-inserted `extraction_attempt` rows, not a live pipeline).
+Invariant enforcement: confirmed accurate as originally stated — "None new (relies on G1/S7's underlying data)." This task is a pure reader of attempt data; it cannot violate G1 (append-only writes happen elsewhere) or S7 (attempt-count enforcement is Task 3.3's job, not yet built). Its behavior when fed an S7-violating input (3+ attempts) is now tested, per Finding disposition above, even though enforcing S7 itself remains correctly out of this task's scope.
 
 ### Scope Decisions
-[Recorded during task execution.]
+- Verification command satisfies EXECUTION_PLAN.md's literal path (`./scripts/test_document_status_computation.sh`) via a thin `tsx` wrapper, consistent with every other verification script this project.
+- `computeDocumentStatus()` is exposed as a plain function returning `{ badge, label, attemptCount }` (not a DB view) — "a queryable field/view" per Task 2.3's own wording, interpreted as "queryable from application code," since Session 6 (the actual consumer) doesn't exist yet to dictate a concrete interface shape.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** PASS
 
 ---
 
