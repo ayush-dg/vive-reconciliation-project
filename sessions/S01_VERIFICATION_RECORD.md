@@ -1,0 +1,319 @@
+**Session:** Session 1 — Scaffolding + Auth + DB Schema Foundation
+**Date:** 2026-08-27
+**Engineer:** Vaishali
+
+## Task 1.1 — Repository scaffolding + Playwright setup
+
+### Test Cases Applied
+Source: EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | `npx playwright --version` | Returns a version string | N/A | PASS — `Version 1.62.1` |
+| TC-2 | Missing `FABRIC_SQL_ENDPOINT` env var | Falls back to local SQLite without crashing | N/A | PASS — `npm run test:db-fallback` (scripts/verify_db_fallback.mjs): `{"mode":"sqlite","ok":true}` |
+
+### Challenge Agent Output
+Run via an independent subagent (no build-session context), evidence-only, per `tools/challenge.sh`'s prompt contract.
+
+**Verdict:** FINDINGS — 6 items (all dispositioned below; commit proceeded after fixes/rationale, not before).
+
+**Untested scenarios:**
+1. `db.ts`'s connection logic had no automated/reproducible test — the task's own specified failure-case test was verified only ad hoc.
+2. Root route (`/`) redirected to `/login`, which didn't exist in this diff — confirmed 404 via live dev server.
+3. `db.ts` was not called from anywhere in the app — no boot hook, no health route.
+
+**Unverified assumptions:**
+1. `getSqlitePath()` resolves against `process.cwd()` with no validation — confirmed to silently open a different DB file when launched from an unexpected working directory.
+2. Committed `next-env.d.ts` diverges from the state `npm run dev` (the exact command Playwright's `webServer` invokes) regenerates on first run.
+3. Module-level singletons (`sqliteInstance`, `fabricPoolPromise`) have no invalidation path if the driving env var changes mid-process.
+
+**Invariant coverage gaps:** NONE — Task 1.1 is explicitly "None task-scoped (pure scaffolding)"; no schema/data created by this diff.
+
+**Scope boundary observations:** None raised — all findings were fixable within Task 1.1's own file set (`src/lib/db.ts`, `src/app/page.tsx`, plus one new health route and one new verification script, both within Claude.md's `/src/**` and `/scripts/**` scope).
+
+**Structural complexity check (all six functions):** CLEAN — single stateable purpose each, no conditional nesting beyond one level.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (db.ts untested) | TEST | Added `scripts/verify_db_fallback.mjs` + `npm run test:db-fallback` — reproducible, non-ad-hoc check of the exact Task 1.1 failure case | PASS — see TC-2 above |
+| 2 (root route 404s) | TEST | Removed the premature `redirect('/login')` (Task 1.3 owns wiring root -> `/login` once it exists); replaced with a neutral scaffold placeholder | PASS — `npm run build` succeeds, `/` renders statically, no dead redirect |
+| 3 (db.ts unreachable) | TEST | Added `src/app/api/health/route.ts` — a minimal `GET` handler calling `pingDb()`, giving the connection module a real request path | PASS — appears as `ƒ /api/health` in `next build` route output |
+| 4 (cwd-relative SQLite path) | ACCEPT | `process.cwd()` is the app root at runtime for both `next dev`/`next start` locally and standard App Service deployments — documented in a code comment; not changed, since anchoring elsewhere would fight the deployment convention rather than follow it | N/A — no test required |
+| 5 (`next-env.d.ts` drift) | ACCEPT | Standard Next.js framework self-maintenance behaviour (regenerates on first `next dev`/`next build`), identical across every Next.js 13+ project — not a defect introduced by this task | N/A — no test required |
+| 6 (no singleton invalidation) | ACCEPT | Env-var-driven config is read once at process start per standard 12-factor/App Service convention; runtime env-var mutation without a process restart is out of scope for this system | N/A — no test required |
+
+### Code Review
+Not invariant-touching — pure scaffolding. GLOBAL invariants apply implicitly to all subsequent tasks, not to this one directly.
+
+### Scope Decisions
+- Framework: Next.js 16 (App Router) + TypeScript, chosen over the originally-installed 14.2.5 after `npm audit` surfaced multiple HIGH-severity advisories against 14.2.5 with no fix short of a major bump — greenfield project, zero cost to start on a patched major version instead of pinning a vulnerable one. React bumped 18 -> 19 to match.
+- Local dev DB driver: `better-sqlite3` (installs via prebuilt binary on this platform, no native toolchain required). Fabric path: `mssql` (untested — no live Fabric endpoint available; required starting Session 4 per EXECUTION_PLAN.md).
+- Added `src/app/api/health/route.ts` and `scripts/verify_db_fallback.mjs` beyond the CC prompt's literal text, in direct response to Challenge Agent findings 1 and 3 — both stay inside Task 1.1's own stated deliverable (the DB connection module) and inside Claude.md's `/src/**` and `/scripts/**` scope, not scope creep into a later task.
+
+### BCE Impact
+No BCE artifact impact — `discovery/` is empty pre-Phase 8.
+
+### Verification Verdict
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching) — N/A, not invariant-touching
+[x] Scope decisions documented
+
+**Status:** PASS
+
+---
+
+## Task 1.2 — Database schema: `extracted`, `silver`, `recon` foundation tables
+
+### Test Cases Applied
+Source: EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | Insert `extracted.document` row with all required fields | Succeeds | N/A | PASS |
+| TC-2 | Insert `extracted.document` row with `legal_entity_id = NULL` | Rejected by the database — INVARIANT TOUCH: S4 | N/A | PASS — `NOT NULL constraint failed` |
+| TC-3 | Vendor registry lookup for a known `vendor_id` | Resolves to the correct `extracted.stmt_<vendor_slug>` table name | N/A | PASS |
+| TC-4 | Insert `recon.exception` row with an unrecognized `category` value | Rejected — INVARIANT TOUCH: S5 | N/A | PASS — `CHECK constraint failed` |
+| TC-5 | UPDATE on an existing `extracted.extraction_attempt` row, or any `extracted.stmt_*` row | Fails or is blocked by trigger — INVARIANT TOUCH: G1 | N/A | PASS — both cases (TC-5, TC-5b) |
+| TC-6 | Run migration scripts against both SQLite (local dev) and a real Fabric SQL database connection | Clean run on both, no dialect-specific syntax that only works on one | N/A | PARTIAL — SQLite: PASS (`npm run migrate`). Fabric: NOT RUN — no live `FABRIC_SQL_ENDPOINT` in this environment; see Known Untested Scenarios below. One deliberate, documented dialect fork exists (schema-qualified vs flattened table names — see both migration files' headers) — "no syntax rework" is satisfied at the logical-schema level, not as byte-identical SQL text. |
+
+### Challenge Agent Output
+Run via an independent subagent (no build-session context), evidence-only.
+
+**Verdict:** FINDINGS — 1 item (SQL-injection-shaped gap in vendor slug handling) required a fix; the rest were coverage gaps addressed by extending the test script.
+
+**Untested scenarios (from the challenge, since fixed):**
+1. G1's FK-validity half (invalid `document_id` rejected) — TC-5/5b only covered the append-only half.
+2. G4's UNIQUE `content_sha256` duplicate-rejection — present in schema, had zero test coverage.
+3. Migration idempotency on re-run — only "applies cleanly to a fresh db" had been checked; raw `CREATE TABLE` (no `IF NOT EXISTS`) would have failed loudly on a second run via any path bypassing `_migrations` bookkeeping.
+4. `provider_used` / `extraction_route` CHECK constraints — untested (only `category`'s CHECK was tested).
+
+**Unverified assumptions (since fixed):**
+1. `vendorSlug` was interpolated unvalidated, unquoted, directly into `CREATE TABLE`/`CREATE TRIGGER`/`RAISERROR` DDL text in both `vendorStmtTableDdlFabric` and `vendorStmtTableDdlSqlite`. Challenge agent empirically confirmed a crafted slug (`"x (y int); DROP TABLE extracted_document; --"`) executes as multiple statements via `better-sqlite3`'s `db.exec()`, actually dropping the table. Real risk per ARCHITECTURE.md D-L: vendor slugs can originate from Claude's document-content-based identification for unknown vendors, not only a curated list.
+
+**Invariant coverage gaps:**
+- S10 — flagged by the challenge agent as not schema-testable in principle: S10 is a write-*ordering* invariant (extraction_attempt written before validation decides pass/fail), and no validation-gate code exists yet (Task 3.2, Session 3). This task supplies the tables to write into; the ordering guarantee itself is Task 3.1/3.2's responsibility, not Task 1.2's. Noted, not a gap in this task's own deliverable.
+- G1, S4, S5, S11 — all closed by the (now-extended) test script; see Code Review below.
+
+**Scope boundary observations:** None — all fixes stayed inside this task's own file set (`src/lib/schema.ts`, `migrations/001_foundation_schema.sqlite.sql`, `scripts/test_foundation_schema.mjs`), within Claude.md's `/migrations/**`, `/src/**`, `/scripts/**` scope.
+
+**Structural complexity check:** CLEAN across all new functions in the diff — single stateable purpose each, no conditional nesting beyond two levels.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (vendor slug DDL injection) | TEST | Added `assertValidVendorSlug()` in `src/lib/schema.ts` (allowlist regex `^[a-z][a-z0-9_]{0,62}$`), enforced at the single choke point (`vendorStmtTableBaseName`) both DDL-generating functions in `vendorSchema.ts` already route through — no bypass path | PASS — malicious slug now rejected before any DDL string is built; `extracted_document` confirmed to still exist afterward |
+| Untested #1 (G1 FK-validity) | TEST | Added a check inserting an `extraction_attempt` against a nonexistent `document_id` | PASS — `FOREIGN KEY constraint failed` |
+| Untested #2 (G4 UNIQUE) | TEST | Added a duplicate-`content_sha256` insert check | PASS — `UNIQUE constraint failed` |
+| Untested #3 (migration idempotency) | TEST | Added `IF NOT EXISTS` to every `CREATE TABLE`/`CREATE TRIGGER` in the SQLite migration (belt-and-suspenders alongside `_migrations` bookkeeping) + a re-run check | PASS — second `runMigrations()` call: 0 applied, 1 skipped, no error |
+| Untested #4 (CHECK constraints) | TEST | Added invalid-value checks for both `provider_used` and `extraction_route` | PASS — both rejected |
+| S10 (write-ordering, not schema-testable) | ACCEPT | Correctly out of this task's scope per Task 1.2's own description — S10 belongs to Task 3.1's write-before-validation sequencing, not the schema itself | N/A — no test required |
+
+### Code Review
+Required — this task touches S4, S5, S10, S11, G1.
+
+| Invariant | Enforcement point to check | Result |
+|---|---|---|
+| S4 | `NOT NULL` on `extracted.document.legal_entity_id` (both migration files) | CONFIRMED — schema-level, no application-layer bypass possible; TC-2 PASS |
+| S5 | `CHECK` on `recon.exception.category` against fixed enum (both migration files) | CONFIRMED — schema-level; TC-4 PASS. Enum itself is an explicitly-flagged minimal placeholder (2 values), finalized at Task 5.4 |
+| S10 | N/A at schema level (write-ordering invariant, not a schema constraint) — see Invariant coverage gaps above | N/A for this task; correctly deferred |
+| S11 | `BEFORE UPDATE OF amount` trigger on `silver_statement_line` (SQLite) / `AFTER UPDATE` + `IF UPDATE(amount)` trigger (Fabric) | CONFIRMED for SQLite (tested). Fabric trigger syntax reviewed by inspection only — not run against a live Fabric endpoint; flagged as a Known Untested Scenario, including the open question of whether the target Fabric SQL surface supports DML triggers at all |
+| G1 | FK `extraction_attempt.document_id` → `extracted.document` (tested, both valid and invalid cases) + append-only trigger on `extraction_attempt` and every `extracted.stmt_*` table (tested, both the fixed table and a generated vendor table) | CONFIRMED for SQLite. Fabric: FK/trigger syntax reviewed by inspection; not run live |
+
+### Scope Decisions
+- **PK generation strategy:** application-generated TEXT/NVARCHAR UUIDs on every table, not `IDENTITY`/`AUTOINCREMENT` — sidesteps that specific SQLite/T-SQL dialect gap entirely (same column type/constraint works unmodified in both).
+- **Cross-dialect rendering:** one canonical Fabric T-SQL file (`001_foundation_schema.sql`, matches the literal Verification Command) plus one SQLite-equivalent companion file (`001_foundation_schema.sqlite.sql`), rather than one shared literal SQL text. Root cause: SQLite does not enforce foreign keys across ATTACHed databases, and G1/S11's FK and cross-schema constraints are load-bearing — an ATTACH-based single-file-per-schema rendering would have silently stopped enforcing exactly what this migration exists to enforce. Full rationale documented in both files' headers.
+- **`recon.exception.category` enum:** minimal 2-value placeholder (`amount_mismatch`, `not_posted`) — the only values named anywhere in the signed-off docs as of this migration. Explicitly flagged as non-final; Task 5.4 owns the real enum. Adding values later is a new migration (CHECK constraints aren't app-layer config).
+- **Per-vendor raw tables:** generator function only (`vendorSchema.ts`), no concrete vendor tables created by this migration — no vendors are known/seeded yet (data baseline = Migrated only, no Seeded component).
+- **Vendor slug validation:** added in direct response to the Challenge Agent's Finding 1 (see above) — allowlist regex, not an escaping/sanitization approach, since these values become SQL identifiers (table/trigger names), not string literals.
+- **Fabric path genuinely untestable here:** no live `FABRIC_SQL_ENDPOINT` in this sandbox. `migrations/001_foundation_schema.sql` was reviewed by inspection for T-SQL correctness but the literal EXECUTION_PLAN.md Verification Command (`sqlcmd -i ...`) was not run. Flagged, not silently assumed to pass — see Known Untested Scenarios below and re-run this task's Fabric-side verification once Session 4 provisions a live endpoint.
+
+### Known Untested Scenarios (informational — not gate-blocking for Session 1-3 local dev)
+- The literal EXECUTION_PLAN.md Verification Command (`sqlcmd` against `$FABRIC_SQL_ENDPOINT`) — no live Fabric endpoint available.
+- Whether Fabric's specific SQL surface supports `AFTER UPDATE` DML triggers with `RAISERROR`/`ROLLBACK TRANSACTION` identically to Azure SQL DB (some Fabric SQL surfaces, e.g. Warehouse, don't support triggers at all) — requires a live connection to confirm.
+- `CREATE SCHEMA extracted;` succeeding against the live `recon` Fabric SQL database (permissions, pre-existing schema conflicts).
+- Cross-schema FK enforcement on the real multi-schema Fabric database (the SQLite file structurally cannot validate this, by design — see Scope Decisions).
+
+### BCE Impact
+No BCE artifact impact — `discovery/` is empty pre-Phase 8.
+
+### Verification Verdict
+[x] All planned cases passed (TC-6 PARTIAL — Fabric half not runnable in this environment, see Known Untested Scenarios; SQLite half PASS)
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching)
+[x] Scope decisions documented
+
+**Status:** PASS (with one documented partial: Fabric-side of TC-6 requires a live endpoint not available in this environment)
+
+---
+
+## Task 1.3 — Authentication (Sign In screen)
+
+### Test Cases Applied
+Source: EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | Valid credentials submitted | Redirect to `/home` | WRITTEN — 2 assertions (both seeded users, per OD5) | PASS |
+| TC-2 | Invalid credentials submitted | Inline error shown, no redirect | WRITTEN — 2 assertions | PASS |
+| TC-3 | Session idle for 30+ minutes | Redirect to `/login` on next action | WRITTEN — 1 assertion (crafted stale token, not a real 30-min wait) | PASS |
+| TC-4 (UI_SURFACE.md) | SSO button present | Visible but disabled, "Coming soon" | WRITTEN — 2 assertions | PASS |
+
+`ui_tests/sign-in.spec.ts`: 5 tests, all PASS (`npx playwright test ui_tests/sign-in.spec.ts`).
+
+### Challenge Agent Output
+Run via an independent subagent (no build-session context), evidence-only.
+
+**Verdict:** FINDINGS — 3 items (2 real gaps in code, 1 stale-documentation report that turned out to be self-resolved by Next.js's own tooling — see below).
+
+**Untested scenarios (from the challenge):**
+1. Second, distinct named user login — only `testuser` was exercised; OD5 requires genuinely multiple named accounts, not asserted by schema shape alone.
+2. Bootstrapping a user against live Fabric — no automated/documented path existed.
+3. A stolen/copied session token remains valid after `logoutAction` clears the browser's own cookie (stateless HMAC tokens have no server-side revocation list).
+4. A deleted/deactivated user's already-issued session token keeps working — `verifySessionToken` never re-queries `recon.app_user`.
+5. Session cookies omitted `secure: true` despite the target stack (Azure App Service) serving HTTPS.
+
+**Unverified assumptions:** The challenge agent flagged that its own task packet claimed the middleware file was "left as `middleware.ts`" — factually wrong at review time. Investigated: Next.js 16's dev/build tooling had already auto-migrated `src/middleware.ts` -> `src/proxy.ts` (renaming the exported function `middleware` -> `proxy` too) transparently during an earlier `npm run build` in this task, before the challenge agent ran. Self-resolved by the framework, not a defect — the packet text describing the file was simply stale by the time of review.
+
+**Invariant coverage gaps:** NONE — explicitly checked G1-G5 and G3 in particular (no LLM call, no document/extraction/matching path exists anywhere in this diff); EXECUTION_PLAN.md's "None task-scoped directly" holds.
+
+**Scope boundary observations:** None — all fixes stayed inside this task's own files (`src/lib/session.ts`, `src/lib/migrate.ts`, `src/app/login/actions.ts`, `src/proxy.ts`, `scripts/seed_users.mjs`, `ui_tests/*`).
+
+**Structural complexity check:** CLEAN across every new function/component.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (Fabric provisioning message misdirects) | TEST | `migrate.ts`'s Fabric-mode error now lists every pending `migrations/*.sql` file (not a hardcoded, now-stale single filename); `seed_users.mjs`'s Fabric-mode exit message now explains there is no automated path and points to the manual `sqlcmd` + `hashPassword()` workaround, with a pointer to this record | PASS — messages now accurate; live Fabric seeding itself remains genuinely out of reach in this environment (no endpoint) and is recorded below as a Known Untested Scenario, not silently treated as solved |
+| 2 (cookies missing `secure`) | TEST | Added `sessionCookieOptions()` in `src/lib/session.ts` (single source of truth: `secure: NODE_ENV === 'production'`), used at both cookie-set sites (`actions.ts`, `proxy.ts`) | PASS — `npx tsc --noEmit`, `npm run build`, and the full Playwright suite all still pass after the change |
+| 3 (stale "middleware.ts" claim) | ACCEPT | Confirmed self-resolved by Next.js 16's own tooling (file + export already renamed to `proxy.ts`/`proxy` by the time of review) — no code change needed, only this record's own language corrected | N/A — verified via `ls`/`git status`/file contents, not a test |
+| Untested #1 (second user) | TEST | Added a second seeded user (`testuser2`) in `ui_tests/global-setup.ts` and a dedicated spec asserting independent sign-in | PASS |
+| Untested #3/#4 (no session revocation) | ACCEPT (documented limitation, not fixed) | Server-side session revocation (a sessions table checked per-request, or re-querying `recon.app_user` on every verify) is a real architecture gap for a stateless-HMAC design, but building it is materially more than Task 1.3's literal scope ("Sign In screen") and no invariant/requirement doc mandates it. Flagged explicitly rather than silently accepted — see Known Untested Scenarios below for a recommended follow-up | N/A — no test added; documented as a known limitation |
+
+### Code Review
+Not invariant-touching per EXECUTION_PLAN.md ("None task-scoped directly — authentication is
+infrastructure") — confirmed by the challenge agent's explicit G1-G5/G3 check, not just asserted.
+OD5's multi-user resolution (multiple named users share one role) is a design constraint reflected
+in the CC prompt and now exercised by two distinct seeded accounts in `ui_tests/sign-in.spec.ts`,
+not a GLOBAL/TASK-SCOPED invariant.
+
+### Scope Decisions
+- **User table gap (flagged, filled minimally):** no task in EXECUTION_PLAN.md provisions the
+  `recon.app_user` table or the first user account. Added `migrations/002_auth_users.sql`(.sqlite.sql)
+  and `scripts/seed_users.mjs` — the minimum needed for Task 1.3's own stated deliverable, not a
+  user-management screen (none exists in UI_SURFACE.md's Screen Inventory). Real production user
+  provisioning remains undecided anywhere in the signed-off docs.
+- **Session mechanism:** custom HMAC-signed cookie token (Web Crypto, Edge-runtime-safe — required
+  because `src/proxy.ts` runs on Next's Edge runtime, which restricts Node APIs), not a library like
+  next-auth/iron-session. Password hashing: Node's built-in `scrypt`, not bcrypt/argon2, to avoid an
+  extra native dependency.
+- **`/home` placeholder:** thin placeholder page added so Task 1.3's own required redirect target
+  (`/home`, per its explicit test case and UI_SURFACE.md) renders instead of 404ing — same reasoning
+  as Task 1.1's root-page fix. Not Task 6.1's real Home screen (status badges, summary stats,
+  Uploaded Statements panel) — that remains fully deferred to Session 6.
+- **Root page rewired:** `src/app/page.tsx` now redirects to `/login` (was a neutral placeholder
+  since Task 1.1, when `/login` didn't exist yet) — safe now that this task builds `/login`.
+- **No server-side session revocation** — see Finding dispositions above; accepted as a documented
+  limitation, not built, since it exceeds this task's literal scope.
+
+### Known Untested Scenarios (informational — not gate-blocking)
+- Real Entra ID / SSO login flow — explicitly deferred, disabled placeholder by design (UI_SURFACE.md gap #1).
+- Sidebar logout button click flow — Task 1.4 builds the sidebar UI that calls `logoutAction`; no UI trigger exists yet.
+- Production `SESSION_SECRET` provisioning/rotation — deployment/ops concern.
+- Live Fabric `recon.app_user` creation/seeding — no live endpoint in this environment; messaging fixed (Finding 1) but the workflow itself is unautomated and untested.
+- Brute-force/rate-limiting protection on login attempts — no mechanism exists or was scoped anywhere in the signed-off docs; would be new functionality, not a test.
+- **Recommended follow-up (not this session's job to schedule):** server-side session revocation (sessions table, or re-check `recon.app_user` on every `verifySessionToken` call) if stronger logout/deactivation guarantees are ever required.
+
+### BCE Impact
+No BCE artifact impact — `discovery/` is empty pre-Phase 8.
+
+### Verification Verdict
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching) — N/A, confirmed not invariant-touching
+[x] Scope decisions documented
+
+**Status:** PASS
+
+---
+
+## Task 1.4 — Global elements (sidebar nav, logout, error boundary, loading, toast)
+
+### Test Cases Applied
+Source: EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | Sidebar renders | All three active nav items (Home, Upload, Exceptions) present, logout clickable | WRITTEN — 5 assertions (incl. signed-in username) | PASS |
+| TC-2 | Click a disabled Admin nav item | No navigation occurs | WRITTEN — 3 assertions | PASS |
+| TC-3 | Simulated API error triggered | Inline message with Retry action shown | WRITTEN — 3 assertions | PASS |
+| TC-4 (added) | Logout | Redirects to `/login`, session actually invalidated server-side (not just a client redirect) | WRITTEN — 2 assertions | PASS |
+| TC-5 (added) | Toast (success + error variants) | Appears bottom-right, dismissible | WRITTEN — 7 assertions across 2 tests | PASS |
+| TC-6 (added) | App-level loading spinner | Renders during a slow route transition | WRITTEN — 2 assertions | PASS |
+| TC-7 (added) | Unauthenticated access to an (app)-group route | Redirects to `/login` | WRITTEN — 1 assertion | PASS |
+
+`ui_tests/global-elements.spec.ts`: 8 tests, all PASS. Full suite (`npx playwright test`): 13/13 PASS.
+
+### Challenge Agent Output
+Run via an independent subagent (no build-session context), evidence-only.
+
+**Verdict:** FINDINGS — 5 items, all genuine test-coverage gaps (no code defects found) — every named Task 1.4 deliverable (sidebar, logout, error boundary, loading, toast) now has an executing UI-level test, not just file-existence-by-inspection.
+
+**Untested scenarios (from the challenge, since closed):**
+1. Sidebar's displayed username was never asserted against the actual signed-in user — only element presence was checked, not correctness. The very reason `SessionPayload` gained a `username` field this task.
+2. Toast notification system had zero UI-level coverage — only `toastStore.ts`'s framework-agnostic logic was unit-tested (via plain Node), never `ToastProvider.tsx` actually rendering.
+3. App-level loading spinner (`loading.tsx`) never rendered in any test — asserted only by reading the file, not by execution.
+4. Logout test only checked the URL after clicking — never confirmed the session was actually invalidated server-side (vs. e.g. a client-only redirect leaving a still-valid cookie).
+5. `dev-test-error`'s claimed auth-gating (behind `proxy.ts`) was asserted in scope-decision text but never verified by an unauthenticated-access test.
+
+**Unverified assumptions:** covered by Untested #5 above (same finding, framed as an assumption in the review).
+
+**Invariant coverage gaps:** NONE — confirmed accurate. EXECUTION_PLAN.md states "Invariant enforcement: None task-scoped" for Task 1.4; no G1-G5/S1-S11 entry references sidebar/logout/error-boundary/loading/toast. This is global UI chrome with no data-integrity, concurrency, or AI-safety surface.
+
+**Scope boundary observations:** None — all additions (`dev-test-toast`, `dev-test-loading` pages, expanded spec assertions) stayed inside `/src/**` and `/ui_tests/**`, and exist solely as test scaffolding (not linked from any real navigation), same pattern as `dev-test-error`.
+
+**Structural complexity check:** CLEAN across every new function/component in the diff.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (username never asserted) | TEST | Added `expect(page.getByTestId('sidebar-username')).toHaveText(TEST_USERNAME)` to the sidebar test | PASS |
+| 2 (toast has no UI test) | TEST | Added `src/app/(app)/dev-test-toast/page.tsx` (test-only trigger, same pattern as `dev-test-error`) + 2 new tests: success-toast visibility/position/dismiss, error-toast variant | PASS — both, incl. a bottom-right position check via `boundingBox()` against the viewport |
+| 3 (loading spinner never rendered) | TEST | Added `src/app/(app)/dev-test-loading/page.tsx` (async Server Component with a deliberate 1s delay) + a test asserting the spinner is visible before the delayed content resolves | PASS |
+| 4 (logout doesn't verify invalidation) | TEST | Extended the logout test: after the redirect, a second direct `page.goto('/home')` must also bounce to `/login`, not momentarily render authenticated content | PASS |
+| 5 (auth-gating on dev-test-error unverified) | TEST | Added a test hitting `/dev-test-error` with no session cookie set at all, asserting redirect to `/login` | PASS |
+
+### Code Review
+Not invariant-touching — confirmed accurate by the challenge agent's explicit check against every GLOBAL and TASK-SCOPED invariant in INVARIANTS.md; none reference global UI chrome.
+
+### Scope Decisions
+- **Route restructuring:** moved `/home` under a new `(app)` route group (`src/app/(app)/`) with its own `layout.tsx` (Sidebar + ToastProvider), `loading.tsx`, and `error.tsx` — necessary so global elements apply to "all authenticated screens" (UI_SURFACE.md) without also appearing on `/login`. `/login` stays outside the group.
+- **Admin sub-items:** represented by a single disabled "Settings" placeholder button — no specific Admin item list is named anywhere in the signed-off docs (UI_SURFACE.md only says "Admin group present but disabled/non-functional").
+- **Toast architecture:** framework-agnostic store (`toastStore.ts`, plain add/dismiss/subscribe/auto-expire logic, unit-tested via plain Node without a testing-library dependency) + a thin React subscriber (`ToastProvider.tsx`). Avoids adding jsdom/React Testing Library as new dependencies while still getting real automated coverage of the core logic.
+- **Session payload gained `username`:** denormalized onto the signed cookie (not looked up per-request from the DB) so the sidebar can display it cheaply. Threads through `session.ts`, `login/actions.ts`, `proxy.ts`'s per-request refresh, and the Task 1.3 tests that manually craft tokens — all updated in this task since Sidebar is what actually needs the value.
+- **Test-only trigger pages** (`dev-test-error`, `dev-test-toast`, `dev-test-loading`): not gated by `NODE_ENV`, so they ship (as authenticated-only, non-sensitive routes) in production builds too — chosen over environment-gating so the Playwright suite behaves identically against `next dev` and a production build, rather than passing in one and 404ing in the other. Flagged for the engineer to reconsider at Phase 8 (UI harness assembly / production readiness), not silently treated as final.
+- **`__test-error` → `dev-test-error` rename:** Next.js treats any `_`-prefixed route segment as a private, non-routable folder — the original name 404'd. Caught and fixed within this task (see Untested Scenarios in the commit history), not shipped broken.
+
+### BCE Impact
+No BCE artifact impact — `discovery/` is empty pre-Phase 8.
+
+### Verification Verdict
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching) — N/A, confirmed not invariant-touching
+[x] Scope decisions documented
+
+**Status:** PASS

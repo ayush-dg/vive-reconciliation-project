@@ -17,6 +17,31 @@ tfplan*
 crash.log
 crash.*.log
 netsuite_ingest/
-node_modules/
-tsconfig.tsbuildinfo
 
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+.env
+.env.local
+*.tsbuildinfo
+
+# Local SQLite dev database
+.data/
+*.local.db
+*.local.db-*
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# Next.js 16 auto-generates these at repo root on every `next dev`/`next build`
+# (node_modules/next/dist/server/lib/generate-agent-files.js). They collide with
+# this project's PBVI root-stub convention (Claude.md.ROOT_STUB.txt -> docs/Claude.md)
+# — see PROJECT_MANIFEST.md and S01_SESSION_LOG.md Out of Scope Observations.
+# Left untracked rather than committed or deleted outright.
+/AGENTS.md
+/CLAUDE.md

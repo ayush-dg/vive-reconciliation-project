@@ -43,12 +43,13 @@ full reasoning and trade-offs discussed before this choice was made.
 | `brief/REQUIREMENTS_BRIEF.md` | Client input | PRESENT | Original content never modified after receipt, per directory contract. **Engagement-Side Addendum appended 2026-08-27** (not an edit to the original) recording §7's explicit supersession — see ARCHITECTURE.md D-L |
 | `brief/Reconciliation_Engine_Reusable_Components.docx` | Client input | PRESENT | Reusable-components requirements brief — informs future ENH scoping, not yet incorporated into `docs/ARCHITECTURE.md`'s core/adapter boundary (see Open Questions) |
 | `docs/prompts/` | CC execution prompts | PENDING | Not yet populated — created at Phase 6 session start |
-| `sessions/` | Session logs + verification records | PENDING | Populated as Phase 6 sessions run |
+| `sessions/` | Session logs + verification records | PRESENT | Populated as Phase 6 sessions run. `S01_SESSION_LOG.md` + `S01_VERIFICATION_RECORD.md` scaffolded 2026-08-27 on `session/s01_scaffolding-auth-db`. |
 | `verification/` | Sign-off checklists | PENDING | Populated at Phase 4 gate and beyond |
 | `discovery/` | BCE SIL artifacts | PENDING | Not yet applicable — produced at Phase 8 |
 | `enhancements/` | Enhancement registry | PENDING | Empty until first post-Phase-8 enhancement |
 | `tools/` | Agentic build scripts | PRESENT | Five standard DG-Forge automation scripts (`challenge.sh`, `resume_challenge.sh`, `resume_session.sh`, `monitor.sh`, `launch.sh`) sourced 2026-08-27 from the local `dg-os` repository ahead of Session 1, per `pbvi_core.md`'s Directory Creation convention. |
 | `.claude/SKILL.md` | DG-Forge methodology reference (PBVI, monolithic pre-split) | PRESENT | Copied 2026-08-27 from `dg-os/skills/PBVI/SKILL.md` per `pbvi_build.md`'s Phase 6 setup requirement. Frontmatter version v4.9 — matches this project's declared METHODOLOGY_VERSION exactly (dg-os's current default is the split v5.0 pbvi_core.md/pbvi_build.md/pbvi_plan.md; this older monolithic copy was selected instead to avoid a version mismatch). Never edited locally — refresh from DG-Forge source on explicit migration only. |
+| `ui_tests/` | Non-standard registered directory — Playwright UI test specs | PRESENT | Registered 2026-08-27 per Task 1.1 (EXECUTION_PLAN.md Session 1). Phase: Phase 6. Owner: CC. One spec file per screen/flow, per each task's UI test spec. |
 
 ---
 
