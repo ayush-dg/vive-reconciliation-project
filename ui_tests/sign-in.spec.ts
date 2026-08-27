@@ -45,6 +45,7 @@ test.describe('Sign In', () => {
     process.env.SESSION_SECRET = TEST_SESSION_SECRET;
     const staleToken = await signSessionToken({
       userId: 'irrelevant-for-this-test',
+      username: 'irrelevant-for-this-test',
       lastSeenAt: Date.now() - 31 * 60 * 1000,
     });
 

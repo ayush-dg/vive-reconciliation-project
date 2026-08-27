@@ -22,7 +22,7 @@ export async function loginAction(_prevState: LoginState, formData: FormData): P
     return { error: 'Invalid username or password.' };
   }
 
-  const token = await signSessionToken({ userId: user.userId, lastSeenAt: Date.now() });
+  const token = await signSessionToken({ userId: user.userId, username: user.username, lastSeenAt: Date.now() });
   const store = await cookies();
   store.set(SESSION_COOKIE_NAME, token, sessionCookieOptions());
 

@@ -254,44 +254,66 @@ Source: EXECUTION_PLAN.md Session 1
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Sidebar renders | All three active nav items (Home, Upload, Exceptions) present, logout clickable | | |
-| TC-2 | Click a disabled Admin nav item | No navigation occurs | | |
-| TC-3 | Simulated API error triggered | Inline message with Retry action shown | | |
+| TC-1 | Sidebar renders | All three active nav items (Home, Upload, Exceptions) present, logout clickable | WRITTEN — 5 assertions (incl. signed-in username) | PASS |
+| TC-2 | Click a disabled Admin nav item | No navigation occurs | WRITTEN — 3 assertions | PASS |
+| TC-3 | Simulated API error triggered | Inline message with Retry action shown | WRITTEN — 3 assertions | PASS |
+| TC-4 (added) | Logout | Redirects to `/login`, session actually invalidated server-side (not just a client redirect) | WRITTEN — 2 assertions | PASS |
+| TC-5 (added) | Toast (success + error variants) | Appears bottom-right, dismissible | WRITTEN — 7 assertions across 2 tests | PASS |
+| TC-6 (added) | App-level loading spinner | Renders during a slow route transition | WRITTEN — 2 assertions | PASS |
+| TC-7 (added) | Unauthenticated access to an (app)-group route | Redirects to `/login` | WRITTEN — 1 assertion | PASS |
+
+`ui_tests/global-elements.spec.ts`: 8 tests, all PASS. Full suite (`npx playwright test`): 13/13 PASS.
 
 ### Challenge Agent Output
-[Written by the build agent. Populated during task execution.]
+Run via an independent subagent (no build-session context), evidence-only.
 
-**Verdict:**
+**Verdict:** FINDINGS — 5 items, all genuine test-coverage gaps (no code defects found) — every named Task 1.4 deliverable (sidebar, logout, error boundary, loading, toast) now has an executing UI-level test, not just file-existence-by-inspection.
 
-**Untested scenarios:**
+**Untested scenarios (from the challenge, since closed):**
+1. Sidebar's displayed username was never asserted against the actual signed-in user — only element presence was checked, not correctness. The very reason `SessionPayload` gained a `username` field this task.
+2. Toast notification system had zero UI-level coverage — only `toastStore.ts`'s framework-agnostic logic was unit-tested (via plain Node), never `ToastProvider.tsx` actually rendering.
+3. App-level loading spinner (`loading.tsx`) never rendered in any test — asserted only by reading the file, not by execution.
+4. Logout test only checked the URL after clicking — never confirmed the session was actually invalidated server-side (vs. e.g. a client-only redirect leaving a still-valid cookie).
+5. `dev-test-error`'s claimed auth-gating (behind `proxy.ts`) was asserted in scope-decision text but never verified by an unauthenticated-access test.
 
-**Unverified assumptions:**
+**Unverified assumptions:** covered by Untested #5 above (same finding, framed as an assumption in the review).
 
-**Invariant coverage gaps:**
+**Invariant coverage gaps:** NONE — confirmed accurate. EXECUTION_PLAN.md states "Invariant enforcement: None task-scoped" for Task 1.4; no G1-G5/S1-S11 entry references sidebar/logout/error-boundary/loading/toast. This is global UI chrome with no data-integrity, concurrency, or AI-safety surface.
 
-**Scope boundary observations:**
+**Scope boundary observations:** None — all additions (`dev-test-toast`, `dev-test-loading` pages, expanded spec assertions) stayed inside `/src/**` and `/ui_tests/**`, and exist solely as test scaffolding (not linked from any real navigation), same pattern as `dev-test-error`.
 
-**Finding dispositions (FINDINGS verdict only):**
+**Structural complexity check:** CLEAN across every new function/component in the diff.
+
+**Finding dispositions:**
 
 | Finding # | Disposition | Rationale / Test case added | Test result |
 |-----------|-------------|------------------------------|-------------|
-|           |             |                              |             |
+| 1 (username never asserted) | TEST | Added `expect(page.getByTestId('sidebar-username')).toHaveText(TEST_USERNAME)` to the sidebar test | PASS |
+| 2 (toast has no UI test) | TEST | Added `src/app/(app)/dev-test-toast/page.tsx` (test-only trigger, same pattern as `dev-test-error`) + 2 new tests: success-toast visibility/position/dismiss, error-toast variant | PASS — both, incl. a bottom-right position check via `boundingBox()` against the viewport |
+| 3 (loading spinner never rendered) | TEST | Added `src/app/(app)/dev-test-loading/page.tsx` (async Server Component with a deliberate 1s delay) + a test asserting the spinner is visible before the delayed content resolves | PASS |
+| 4 (logout doesn't verify invalidation) | TEST | Extended the logout test: after the redirect, a second direct `page.goto('/home')` must also bounce to `/login`, not momentarily render authenticated content | PASS |
+| 5 (auth-gating on dev-test-error unverified) | TEST | Added a test hitting `/dev-test-error` with no session cookie set at all, asserting redirect to `/login` | PASS |
 
 ### Code Review
-Not invariant-touching.
+Not invariant-touching — confirmed accurate by the challenge agent's explicit check against every GLOBAL and TASK-SCOPED invariant in INVARIANTS.md; none reference global UI chrome.
 
 ### Scope Decisions
-[Recorded during task execution.]
+- **Route restructuring:** moved `/home` under a new `(app)` route group (`src/app/(app)/`) with its own `layout.tsx` (Sidebar + ToastProvider), `loading.tsx`, and `error.tsx` — necessary so global elements apply to "all authenticated screens" (UI_SURFACE.md) without also appearing on `/login`. `/login` stays outside the group.
+- **Admin sub-items:** represented by a single disabled "Settings" placeholder button — no specific Admin item list is named anywhere in the signed-off docs (UI_SURFACE.md only says "Admin group present but disabled/non-functional").
+- **Toast architecture:** framework-agnostic store (`toastStore.ts`, plain add/dismiss/subscribe/auto-expire logic, unit-tested via plain Node without a testing-library dependency) + a thin React subscriber (`ToastProvider.tsx`). Avoids adding jsdom/React Testing Library as new dependencies while still getting real automated coverage of the core logic.
+- **Session payload gained `username`:** denormalized onto the signed cookie (not looked up per-request from the DB) so the sidebar can display it cheaply. Threads through `session.ts`, `login/actions.ts`, `proxy.ts`'s per-request refresh, and the Task 1.3 tests that manually craft tokens — all updated in this task since Sidebar is what actually needs the value.
+- **Test-only trigger pages** (`dev-test-error`, `dev-test-toast`, `dev-test-loading`): not gated by `NODE_ENV`, so they ship (as authenticated-only, non-sensitive routes) in production builds too — chosen over environment-gating so the Playwright suite behaves identically against `next dev` and a production build, rather than passing in one and 404ing in the other. Flagged for the engineer to reconsider at Phase 8 (UI harness assembly / production readiness), not silently treated as final.
+- **`__test-error` → `dev-test-error` rename:** Next.js treats any `_`-prefixed route segment as a private, non-routable folder — the original name 404'd. Caught and fixed within this task (see Untested Scenarios in the commit history), not shipped broken.
 
 ### BCE Impact
 No BCE artifact impact — `discovery/` is empty pre-Phase 8.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded
+[x] Code review complete (if invariant-touching) — N/A, confirmed not invariant-touching
+[x] Scope decisions documented
 
-**Status:**
+**Status:** PASS

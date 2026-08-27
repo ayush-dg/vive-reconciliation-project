@@ -1,9 +1,9 @@
 /**
  * Session-cookie signing/verification (Task 1.3). Deliberately Edge-runtime-safe
  * (Web Crypto `crypto.subtle`, `btoa`/`atob` — no `node:crypto`, no `Buffer`)
- * because src/middleware.ts runs on Next.js's Edge runtime and imports this
- * module directly; it is also used from Node-runtime server actions, where the
- * same Web Crypto globals are available (Node 20+).
+ * because src/proxy.ts runs on Next.js's Edge runtime and imports this module
+ * directly; it is also used from Node-runtime server actions, where the same
+ * Web Crypto globals are available (Node 20+).
  */
 
 export const SESSION_COOKIE_NAME = 'vive_session';
@@ -30,6 +30,7 @@ export function getIdleTimeoutMs(): number {
 
 export type SessionPayload = {
   userId: string;
+  username: string; // denormalized for display (sidebar user block) — avoids a DB lookup per request
   lastSeenAt: number; // epoch ms
 };
 
@@ -86,7 +87,13 @@ export async function verifySessionToken(token: string | undefined): Promise<Ses
     if (!valid) return null;
 
     const payload = JSON.parse(new TextDecoder().decode(fromBase64Url(payloadB64))) as SessionPayload;
-    if (typeof payload.userId !== 'string' || typeof payload.lastSeenAt !== 'number') return null;
+    if (
+      typeof payload.userId !== 'string' ||
+      typeof payload.username !== 'string' ||
+      typeof payload.lastSeenAt !== 'number'
+    ) {
+      return null;
+    }
     return payload;
   } catch {
     return null;

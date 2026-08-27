@@ -21,7 +21,11 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  const refreshed = await signSessionToken({ userId: payload.userId, lastSeenAt: Date.now() });
+  const refreshed = await signSessionToken({
+    userId: payload.userId,
+    username: payload.username,
+    lastSeenAt: Date.now(),
+  });
   const response = NextResponse.next();
   response.cookies.set(SESSION_COOKIE_NAME, refreshed, sessionCookieOptions());
   return response;
