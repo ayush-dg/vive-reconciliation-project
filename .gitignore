@@ -17,3 +17,6 @@ tfplan*
 crash.log
 crash.*.log
 netsuite_ingest/
+node_modules/
+tsconfig.tsbuildinfo
+
