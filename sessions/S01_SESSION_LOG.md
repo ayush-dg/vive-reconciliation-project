@@ -66,7 +66,7 @@
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
 | 1.1 | Repository scaffolding + Playwright setup | Completed | 758cf08 |
-| 1.2 | Database schema: `extracted`, `silver`, `recon` foundation tables | | |
+| 1.2 | Database schema: `extracted`, `silver`, `recon` foundation tables | Completed | 6c07ed7 |
 | 1.3 | Authentication (Sign In screen) | | |
 | 1.4 | Global elements (sidebar nav, logout, error boundary, loading, toast) | | |
 
@@ -92,6 +92,10 @@ Leave this table empty if the session was not resumed.
 |------|---------------|-----------|
 | Pre-Build | Used `.claude/SKILL.md` (v4.9, monolithic) as the authoritative methodology reference for this session instead of the local `dg-os` repo's current v5.0 split (`pbvi_core.md`/`pbvi_build.md`/`pbvi_plan.md`) | Exact version match against `Claude.md`'s declared `METHODOLOGY_VERSION: PBVI v4.9` — avoids building against a methodology version the project was never authored under |
 | Pre-Build | Session branch created off `feature/pbvi_execution`, not `main` | `main` still holds the full prior brownfield VIVE implementation (src/, web/, discovery/, etc.); `feature/pbvi_execution` is the correct current greenfield state. Engineer-confirmed. |
+| 1.1 | Bumped Next.js 14.2.5 -> 16.3.3 (and React 18 -> 19) before first commit | `npm audit` surfaced multiple HIGH-severity advisories against 14.2.5 with no fix short of a major bump; greenfield project, zero migration cost to start patched |
+| 1.2 | Application-generated TEXT UUID primary keys everywhere, not `IDENTITY`/`AUTOINCREMENT` | Sidesteps the SQLite/T-SQL PK-generation dialect gap entirely — same column type/constraint works unmodified in both engines |
+| 1.2 | Two migration files per logical migration (`001_foundation_schema.sql` Fabric T-SQL + `.sqlite.sql` companion), not one shared literal SQL text | SQLite does not enforce foreign keys across ATTACHed databases; since G1/S11's FK and cross-schema constraints are load-bearing, an ATTACH-based single-file rendering would silently stop enforcing them. Full rationale in both files' headers |
+| 1.2 | `recon.exception.category` CHECK enum seeded with only 2 placeholder values (`amount_mismatch`, `not_posted`) | No canonical enum exists anywhere in signed-off docs yet — Task 5.4 owns finalizing it. Flagged as non-final in the migration's own comments, not silently treated as complete |
 
 ---
 
