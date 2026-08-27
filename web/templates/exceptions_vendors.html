@@ -20,9 +20,9 @@
   <a href="/exceptions/{{ v.url_name }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}">
     <div class="vendor-card-head">
       <div class="vendor-card-id">
-        <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--success-tint);color:var(--success)"{% endif %}>{{ v.vendor_name | initials }}</div>
+        <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--success-tint);color:var(--success)"{% endif %}>{{ v.vendor_display_name | initials }}</div>
         <div>
-          <div class="vendor-card-name">{{ v.vendor_name }}</div>
+          <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ v.vendor_display_name }}</div>
           <div class="vendor-card-meta">{{ v.statement_period | period_label }} · {{ v.total_invoice_count }} invoices · {{ v.statement_total | money_short }}</div>
         </div>
       </div>

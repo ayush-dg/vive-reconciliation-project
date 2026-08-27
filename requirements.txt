@@ -9,6 +9,8 @@ pytesseract==0.3.13
 pdf2image==1.17.0
 pypdf>=6.0.0
 azure-storage-blob>=12.19.0
+azure-identity>=1.19.0  # ClientSecretCredential/AzureCliCredential for Fabric auth (src/lakehouse/connection.py) -- was previously an undeclared transitive dep
+deltalake>=1.6.0  # Bronze writes to per-vendor Fabric Lakehouse Delta tables
 pyodbc>=5.0.0
 pytest==9.1.1
 fastapi>=0.110.0

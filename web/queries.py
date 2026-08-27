@@ -19,13 +19,22 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.lakehouse.connection import execute_query, execute_sql, execute_query_fabric, execute_sql_fabric
+# recon_query/recon_sql: Fabric Warehouse (silver.recon_*), used only by the
+# Exceptions page functions below -- see migrations/013_add_recon_tables.sql's
+# history (started on the local backend, moved to Fabric 2026-08-26 per the
+# user). Home dashboard/Reports/Upload/Batches still use execute_query/
+# execute_sql (gold_* / local backend) -- deliberately not touched.
+from src.lakehouse.fabric_sql import execute_warehouse_query as recon_query, execute_warehouse_sql as recon_sql
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
+from src.vendor_identity import display_name as vendor_display_name
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
     "Amount Mismatch": "amount mismatch",
     "EXTRACTION_INCOMPLETE": "extraction incomplete",
+    "Not Found in NetSuite": "not found in NetSuite",
+    "Vendor Not Resolved in NetSuite": "vendor not resolved",
 }
 
 
@@ -148,6 +157,42 @@ def get_recent_runs(limit: int = 10) -> list:
     return _with_live_exception_counts(rows)
 
 
+def get_recent_recon_runs(limit: int = 10) -> list:
+    """Home page's "Reconciliation runs" panel -- completed statements that
+    have gone through the NetSuite matching flow (src/matching/fabric_matching.py),
+    NOT get_recent_runs()'s gold_reconciliation_summary (a different,
+    voucher-based flow -- see get_vendor_summaries()'s docstring for the
+    same distinction on the Exceptions page).
+
+    Reads silver.recon_summary (Fabric Warehouse) for the reconciliation
+    numbers, then a local jobs lookup per row for job_id (recon_summary has
+    no job_id column -- jobs lives on a different database engine entirely,
+    so this can't be a single query/join). Trusts recon_summary's own
+    stored matched_count/exception_count rather than re-deriving live
+    counts per row (unlike get_recent_runs()'s _with_live_exception_counts())
+    -- an extra Fabric round trip per row on top of the ones this already
+    costs would make the Home page even slower for a value that's already
+    kept fresh by resolve_exception()'s _recompute_summary_counts() call."""
+    rows = recon_query(
+        f"""
+        SELECT TOP {int(limit)} statement_id, vendor_name, statement_period,
+               total_invoice_count, matched_count, exception_count,
+               overall_status, reconciliation_timestamp
+        FROM silver.recon_summary
+        WHERE is_latest_version = 1
+        ORDER BY reconciliation_timestamp DESC
+        """
+    )
+    for row in rows:
+        job_rows = execute_query(
+            "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
+            [row["statement_id"]],
+        )
+        row["job_id"] = job_rows[0]["job_id"] if job_rows else None
+        row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
+    return rows
+
+
 def get_open_exceptions_count() -> int:
     """
     Live count of OPEN gold_exceptions rows, scoped to each vendor+period's
@@ -168,6 +213,26 @@ def get_open_exceptions_count() -> int:
         SELECT COUNT(*) AS c
         FROM gold_exceptions ge
         INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
+        WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
+        """
+    )
+    return rows[0]["c"] or 0 if rows else 0
+
+
+def get_open_recon_exceptions_count() -> int:
+    """Live count of OPEN recon_exceptions rows (see
+    src/matching/fabric_matching.py), same is_latest_version scoping as
+    get_open_exceptions_count(). Used only for the sidebar's Exceptions
+    nav-item dot (web/deps.py sidebar_context()) -- kept separate from
+    get_open_exceptions_count() rather than repointing that function,
+    since it's shared with get_kpis()'s Home dashboard card, which stays
+    on gold_exceptions (scoped with the user 2026-08-26: only the
+    Exceptions page itself moves to recon_*, not Home/Reports)."""
+    rows = recon_query(
+        """
+        SELECT COUNT(*) AS c
+        FROM silver.recon_exceptions ge
+        INNER JOIN silver.recon_summary s ON ge.statement_id = s.statement_id
         WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
         """
     )
@@ -263,12 +328,18 @@ def get_vendor_summaries() -> list:
     such a vendor's exceptions are real and OPEN but never show up on the
     exceptions page — the vendor cards only ever queried
     gold_reconciliation_summary. See _get_exceptions_only_vendors()."""
-    rows = execute_query(
+    # NOTE: recon_summary/recon_exceptions (new NetSuite matching flow --
+    # see src/matching/fabric_matching.py), NOT gold_reconciliation_summary/
+    # gold_exceptions. That old-engine data is untouched by this page now --
+    # scoped this way deliberately with the user 2026-08-26, since gold_*
+    # reflects a different (voucher-based) matching flow this page no
+    # longer shows. Home dashboard KPIs and Reports still read gold_*.
+    rows = recon_query(
         """
         SELECT statement_id, vendor_name, statement_period, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
-        FROM gold_reconciliation_summary
+        FROM silver.recon_summary
         WHERE is_latest_version = 1
         ORDER BY reconciliation_timestamp ASC
         """
@@ -279,10 +350,10 @@ def get_vendor_summaries() -> list:
     vendors = list(latest_by_vendor.values())
 
     for vendor in vendors:
-        reason_rows = execute_query(
+        reason_rows = recon_query(
             """
             SELECT exception_reason, COUNT(*) AS c
-            FROM gold_exceptions
+            FROM silver.recon_exceptions
             WHERE statement_id = ? AND exception_status = 'OPEN'
             GROUP BY exception_reason
             """,
@@ -299,6 +370,8 @@ def get_vendor_summaries() -> list:
         vendor["exception_count"] = sum(r["c"] for r in reason_rows)
 
     vendors.extend(_get_exceptions_only_vendors())
+    for vendor in vendors:
+        vendor["vendor_display_name"] = vendor_display_name(vendor["vendor_name"])
     return sorted(vendors, key=lambda v: v["vendor_name"] or "")
 
 
@@ -318,13 +391,13 @@ def _get_exceptions_only_vendors() -> list:
     show up as a second, duplicate-looking card here — there's no reliable
     way to link the two without a real vendor identity on gold_exceptions.
     """
-    orphan_rows = execute_query(
+    orphan_rows = recon_query(
         """
         SELECT ge.source_file, ge.exception_reason, COUNT(*) AS c
-        FROM gold_exceptions ge
+        FROM silver.recon_exceptions ge
         WHERE ge.exception_status = 'OPEN'
           AND NOT EXISTS (
-              SELECT 1 FROM gold_reconciliation_summary s
+              SELECT 1 FROM silver.recon_summary s
               WHERE s.statement_id = ge.statement_id
           )
         GROUP BY ge.source_file, ge.exception_reason
@@ -375,14 +448,13 @@ def get_vendor_latest_statement(vendor_name: str):
     # someone re-ran matching on its old statement_id after the fact and
     # bumped its reconciliation_timestamp -- see get_vendor_summaries()'s
     # docstring for the same reasoning applied to the vendor card list.
-    rows = execute_query(
+    rows = recon_query(
         """
-        SELECT statement_id, vendor_name, statement_period, total_invoice_count,
+        SELECT TOP 1 statement_id, vendor_name, statement_period, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status
-        FROM gold_reconciliation_summary
+        FROM silver.recon_summary
         WHERE vendor_name = ? AND is_latest_version = 1
         ORDER BY reconciliation_timestamp DESC
-        LIMIT 1
         """,
         [vendor_name],
     )
@@ -402,13 +474,13 @@ def get_exceptions_only_vendor(vendor_name: str):
     card link) and matches it against vendor_name, since gold_exceptions
     has no vendor_name column to look up directly. Returns None if
     vendor_name doesn't match any orphaned source_file."""
-    orphan_source_files = execute_query(
+    orphan_source_files = recon_query(
         """
         SELECT DISTINCT ge.source_file
-        FROM gold_exceptions ge
+        FROM silver.recon_exceptions ge
         WHERE ge.exception_status = 'OPEN'
           AND NOT EXISTS (
-              SELECT 1 FROM gold_reconciliation_summary s
+              SELECT 1 FROM silver.recon_summary s
               WHERE s.statement_id = ge.statement_id
           )
         """
@@ -421,13 +493,13 @@ def get_exceptions_only_vendor(vendor_name: str):
     if not source_file:
         return None
 
-    count_rows = execute_query(
+    count_rows = recon_query(
         """
         SELECT COUNT(*) AS c
-        FROM gold_exceptions ge
+        FROM silver.recon_exceptions ge
         WHERE ge.source_file = ? AND ge.exception_status = 'OPEN'
           AND NOT EXISTS (
-              SELECT 1 FROM gold_reconciliation_summary s
+              SELECT 1 FROM silver.recon_summary s
               WHERE s.statement_id = ge.statement_id
           )
         """,
@@ -454,10 +526,15 @@ _REASON_FILTER_SQL = {
 
 
 _OPEN_EXCEPTIONS_SELECT = """
-    SELECT ge.*, s.invoice_date AS invoice_date
-    FROM gold_exceptions ge
-    LEFT JOIN silver_reconciliation_standard s ON ge.statement_record_id = s.record_id
+    SELECT ge.*, NULL AS invoice_date
+    FROM silver.recon_exceptions ge
 """
+# No invoice_date join here (unlike the old gold_exceptions version) --
+# silver_reconciliation_standard lives on Azure SQL/SQLite; the new Silver
+# this data is matched against (silver.statement_line) lives in Fabric, a
+# different database engine entirely -- no single SQL query can join across
+# both. NULL AS invoice_date keeps the column present (friendly_date
+# renders it as "—") rather than letting templates hit a missing key.
 
 
 def _parse_datetime(value):
@@ -501,14 +578,14 @@ def _with_aging_fields(rows: list) -> list:
 def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
     reason = _REASON_FILTER_SQL.get(reason_filter)
     if reason:
-        return _with_aging_fields(execute_query(
+        return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + """
             WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
             ORDER BY ge.invoice_number
             """,
             [statement_id, reason],
         ))
-    return _with_aging_fields(execute_query(
+    return _with_aging_fields(recon_query(
         _OPEN_EXCEPTIONS_SELECT + """
         WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN'
         ORDER BY ge.invoice_number
@@ -518,11 +595,11 @@ def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
 
 
 def get_exception_counts(statement_id: str):
-    total = execute_query(
-        "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = ?", [statement_id]
+    total = recon_query(
+        "SELECT COUNT(*) AS c FROM silver.recon_exceptions WHERE statement_id = ?", [statement_id]
     )[0]["c"] or 0
-    resolved = execute_query(
-        "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = ? AND exception_status != 'OPEN'",
+    resolved = recon_query(
+        "SELECT COUNT(*) AS c FROM silver.recon_exceptions WHERE statement_id = ? AND exception_status != 'OPEN'",
         [statement_id],
     )[0]["c"] or 0
     return total, resolved
@@ -540,7 +617,7 @@ def get_exception_counts(statement_id: str):
 _ORPHAN_EXCEPTIONS_WHERE = """
     ge.source_file = ?
     AND NOT EXISTS (
-        SELECT 1 FROM gold_reconciliation_summary s
+        SELECT 1 FROM silver.recon_summary s
         WHERE s.statement_id = ge.statement_id
     )
 """
@@ -549,14 +626,14 @@ _ORPHAN_EXCEPTIONS_WHERE = """
 def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None) -> list:
     reason = _REASON_FILTER_SQL.get(reason_filter)
     if reason:
-        return _with_aging_fields(execute_query(
+        return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
             WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
             ORDER BY ge.invoice_number
             """,
             [source_file, reason],
         ))
-    return _with_aging_fields(execute_query(
+    return _with_aging_fields(recon_query(
         _OPEN_EXCEPTIONS_SELECT + f"""
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
         ORDER BY ge.invoice_number
@@ -566,13 +643,13 @@ def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = N
 
 
 def get_exception_counts_for_source_file(source_file: str):
-    total = execute_query(
-        f"SELECT COUNT(*) AS c FROM gold_exceptions ge WHERE {_ORPHAN_EXCEPTIONS_WHERE}",
+    total = recon_query(
+        f"SELECT COUNT(*) AS c FROM silver.recon_exceptions ge WHERE {_ORPHAN_EXCEPTIONS_WHERE}",
         [source_file],
     )[0]["c"] or 0
-    resolved = execute_query(
+    resolved = recon_query(
         f"""
-        SELECT COUNT(*) AS c FROM gold_exceptions ge
+        SELECT COUNT(*) AS c FROM silver.recon_exceptions ge
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status != 'OPEN'
         """,
         [source_file],
@@ -604,12 +681,12 @@ def _recompute_summary_counts(statement_id: str) -> None:
     its statement ever reached a full pipeline run) makes this UPDATE a
     harmless no-op.
     """
-    live_count = execute_query(
-        "SELECT COUNT(*) AS c FROM gold_exceptions WHERE statement_id = ? AND exception_status = 'OPEN'",
+    live_count = recon_query(
+        "SELECT COUNT(*) AS c FROM silver.recon_exceptions WHERE statement_id = ? AND exception_status = 'OPEN'",
         [statement_id],
     )[0]["c"] or 0
-    execute_sql(
-        "UPDATE gold_reconciliation_summary SET exception_count = ?, overall_status = ? WHERE statement_id = ?",
+    recon_sql(
+        "UPDATE silver.recon_summary SET exception_count = ?, overall_status = ? WHERE statement_id = ?",
         [live_count, score_overall_status(live_count), statement_id],
     )
 
@@ -628,8 +705,8 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
         [exception_id, statement_id, vendor_name, invoice_number, reason_code,
          disposition_status, notes, disposed_by, now],
     )
-    execute_sql(
-        "UPDATE gold_exceptions SET exception_status = 'RESOLVED', date_resolved = ? WHERE exception_id = ?",
+    recon_sql(
+        "UPDATE silver.recon_exceptions SET exception_status = 'RESOLVED', date_resolved = ? WHERE exception_id = ?",
         [now, exception_id],
     )
     _recompute_summary_counts(statement_id)
@@ -640,9 +717,9 @@ def escalate_exception(exception_id: str, escalated_by: str) -> None:
     "Escalate" button. Does not touch exception_status: an escalated
     exception is still OPEN, just flagged for follow-up, not resolved."""
     now = datetime.now(timezone.utc).isoformat()
-    execute_sql(
+    recon_sql(
         """
-        UPDATE gold_exceptions
+        UPDATE silver.recon_exceptions
         SET escalation_status = 'ESCALATED', escalated_by = ?, escalated_at = ?
         WHERE exception_id = ?
         """,
@@ -658,9 +735,9 @@ def get_exception_aging_summary(vendor_name: str):
     exceptions_review() in web/routers/exceptions.py."""
     statement = get_vendor_latest_statement(vendor_name)
     if statement:
-        rows = execute_query(
+        rows = recon_query(
             """
-            SELECT MIN(date_raised) AS oldest_date_raised FROM gold_exceptions
+            SELECT MIN(date_raised) AS oldest_date_raised FROM silver.recon_exceptions
             WHERE statement_id = ? AND exception_status = 'OPEN'
             """,
             [statement["statement_id"]],
@@ -669,9 +746,9 @@ def get_exception_aging_summary(vendor_name: str):
         statement = get_exceptions_only_vendor(vendor_name)
         if not statement:
             return None
-        rows = execute_query(
+        rows = recon_query(
             f"""
-            SELECT MIN(ge.date_raised) AS oldest_date_raised FROM gold_exceptions ge
+            SELECT MIN(ge.date_raised) AS oldest_date_raised FROM silver.recon_exceptions ge
             WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
             """,
             [statement["source_file"]],
@@ -706,9 +783,9 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
     exceptions_review() in web/routers/exceptions.py."""
     statement = get_vendor_latest_statement(vendor_name)
     if statement:
-        rows = execute_query(
+        rows = recon_query(
             """
-            SELECT COUNT(*) AS c FROM gold_exceptions
+            SELECT COUNT(*) AS c FROM silver.recon_exceptions
             WHERE statement_id = ? AND exception_status = 'OPEN' AND match_confidence >= ?
             """,
             [statement["statement_id"], threshold],
@@ -718,9 +795,9 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
     statement = get_exceptions_only_vendor(vendor_name)
     if not statement:
         return 0
-    rows = execute_query(
+    rows = recon_query(
         f"""
-        SELECT COUNT(*) AS c FROM gold_exceptions ge
+        SELECT COUNT(*) AS c FROM silver.recon_exceptions ge
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.match_confidence >= ?
         """,
         [statement["source_file"], threshold],
@@ -736,9 +813,9 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
     exceptions approved."""
     statement = get_vendor_latest_statement(vendor_name)
     if statement:
-        candidates = execute_query(
+        candidates = recon_query(
             """
-            SELECT * FROM gold_exceptions
+            SELECT * FROM silver.recon_exceptions
             WHERE statement_id = ? AND exception_status = 'OPEN' AND match_confidence >= ?
             """,
             [statement["statement_id"], threshold],
@@ -747,9 +824,9 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
         statement = get_exceptions_only_vendor(vendor_name)
         if not statement:
             return 0
-        candidates = execute_query(
+        candidates = recon_query(
             f"""
-            SELECT ge.* FROM gold_exceptions ge
+            SELECT ge.* FROM silver.recon_exceptions ge
             WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.match_confidence >= ?
             """,
             [statement["source_file"], threshold],
@@ -1367,15 +1444,18 @@ def get_review_queue_item(review_id: str):
 
 def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
     """Approves or flags a review queue row. Flagging also raises a
-    gold_exceptions row so the item surfaces on the normal exceptions page
-    too -- DUPLICATE_RECORD keeps its own reason so it reads distinctly
-    from EXTRACTION_INCOMPLETE (every other rejection_category, e.g.
-    MISSING_MANDATORY_FIELD, is genuinely an incomplete extraction).
+    recon_exceptions row (NOT gold_exceptions -- retargeted 2026-08-26
+    alongside the rest of the exceptions page, see
+    migrations/013_add_recon_tables.sql) so the item surfaces on the
+    normal exceptions page too -- DUPLICATE_RECORD keeps its own reason so
+    it reads distinctly from EXTRACTION_INCOMPLETE (every other
+    rejection_category, e.g. MISSING_MANDATORY_FIELD, is genuinely an
+    incomplete extraction).
 
     Only the review-queue UPDATE below is Fabric (see get_review_queue_item()
-    above) — the gold_exceptions INSERT and _recompute_summary_counts()'s
-    gold_reconciliation_summary update stay on Azure SQL via execute_sql(),
-    untouched by validation_document_review_queue's cutover."""
+    above) — the recon_exceptions INSERT and _recompute_summary_counts()'s
+    recon_summary update stay on Azure SQL via execute_sql(), untouched by
+    validation_document_review_queue's cutover."""
     item = get_review_queue_item(review_id)
     if not item:
         return
@@ -1401,9 +1481,9 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
             score_exception_confidence("EXTRACTION_INCOMPLETE")
             if exception_reason == "EXTRACTION_INCOMPLETE" else None
         )
-        execute_sql(
+        recon_sql(
             """
-            INSERT INTO gold_exceptions (
+            INSERT INTO silver.recon_exceptions (
                 exception_id, invoice_number, statement_amount, erp_amount,
                 match_status, exception_reason, exception_status,
                 source_file, statement_id, date_raised, statement_period,
@@ -1425,7 +1505,7 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
             ],
         )
         # A newly-raised OPEN exception can undercount an existing
-        # gold_reconciliation_summary row the same way a resolution can
+        # recon_summary row the same way a resolution can
         # overcount it — see _recompute_summary_counts()'s docstring. A
         # no-op if this statement_id has no summary row yet (the common
         # case: review-queue items are usually raised before a statement

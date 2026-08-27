@@ -1,0 +1,38 @@
+name: 'vive_recon'
+version: '1.0.0'
+config-version: 2
+
+profile: 'vive_recon'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  # known_vendor_ids -- one entry per vendor with a bronze.bronze_<id>_raw
+  # table in the Fabric Lakehouse -- is supplied via `dbt run --vars` by
+  # src/lakehouse/fabric_dbt_runner.py, which discovers it live from the
+  # Lakehouse (see _discover_known_vendor_ids() there) rather than reading
+  # a hand-maintained list. Nothing needs editing here when a vendor is
+  # renamed or onboarded. This empty default only applies to a manual
+  # `dbt run` invoked outside that path.
+  known_vendor_ids: []
+
+models:
+  vive_recon:
+    silver:
+      +materialized: incremental
+      +incremental_strategy: merge
+      # unique_key is set per-model (statement.sql, statement_line.sql) --
+      # merge upserts by that key so a re-run of the same statement_id
+      # doesn't duplicate rows, matching the app's existing
+      # DELETE-then-INSERT idempotency pattern for Bronze/Silver writes.
+      # No +schema override -- profiles.yml's default `schema: silver`
+      # already targets the right place. Setting +schema: silver here too
+      # triggers dbt's default generate_schema_name macro, which
+      # concatenates default + custom into "silver_silver".

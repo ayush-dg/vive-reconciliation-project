@@ -68,6 +68,7 @@ from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
+from src.lakehouse.fabric_bronze import write_bronze_fabric
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
@@ -1162,6 +1163,19 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         pdf_path, statement_period, vendor_id, version_info
     )
     print(f"  Bronze rows written: {bronze_count}")
+
+    # Additive Fabric Lakehouse write (new Bronze/Silver dbt pipeline,
+    # dbt/) -- never instead of the write above. Same inputs, one more
+    # place a copy of the data lands: bronze.bronze_<vendor_id>_raw,
+    # written generically for any vendor_id (extraction already normalizes
+    # every vendor into this shape -- see fabric_bronze.py's docstring).
+    # Silently a no-op when Fabric isn't configured (FABRIC_CLIENT_ID/etc
+    # unset in .env) -- the common case for local dev/tests -- and never
+    # raises, so a Fabric-side failure can't break this pipeline.
+    write_bronze_fabric(
+        valid_invoices, schema_result, statement_id,
+        pdf_path, statement_period, vendor_id, version_info
+    )
 
     # Write invalid to review queue
     if invalid_invoices:

@@ -89,6 +89,29 @@ def main():
     statement_id = intake_result["statement_id"]
     print(f"    Statement ID: {statement_id}")
 
+    # Fabric Silver build (dbt/) -- additive to Phase 1, scoped to this
+    # statement. Best-effort: a skip/failure here never stops the pipeline
+    # -- Phase 2 (Matching) below still runs against the existing
+    # Silver/Gold tables regardless. See src/lakehouse/fabric_dbt_runner.py.
+    from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build
+    if run_dbt_silver_build(statement_id):
+        print(f"    Fabric Silver build: OK")
+
+        # NetSuite matching -- additive, only meaningful once Silver exists
+        # for this statement, so nested under the build succeeding. Writes
+        # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
+        # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
+        # same as everything else here.
+        from src.matching.fabric_matching import run_fabric_matching
+        match_result = run_fabric_matching(statement_id)
+        if "error" in match_result or match_result.get("skipped"):
+            print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+        else:
+            print(f"    NetSuite matching: {match_result['matched']} matched, "
+                  f"{match_result['exceptions']} exceptions")
+    else:
+        print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+
     if intake_result.get("bronze_count", 0) == 0:
         print(f"\n{'#'*65}")
         print(f"  PIPELINE STOPPED — no invoices extracted")

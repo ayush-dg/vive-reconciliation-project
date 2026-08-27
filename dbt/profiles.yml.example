@@ -1,0 +1,41 @@
+# Template for ~/.dbt/profiles.yml (or set DBT_PROFILES_DIR to point here).
+# Not committed with real values -- client_secret is a real credential.
+#
+# Requires a Fabric-scoped service principal (Azure AD App Registration)
+# granted access to the FABRIC_WORKSPACE_ID workspace, since AzureCliCredential
+# (what src/lakehouse/connection.py's get_fabric_connection() uses) needs the
+# `az` CLI installed + `az login` run, which dbt runs (local or scheduled)
+# can't depend on. See dbt/README.md for what's needed to provision one.
+#
+# server/database below reuse the same Fabric Warehouse already configured
+# for the app's Recon-table cut-over -- see FABRIC_SQL_ENDPOINT /
+# FABRIC_WAREHOUSE_NAME in .env. FABRIC_CLIENT_ID / FABRIC_CLIENT_SECRET
+# don't exist yet -- added once the service principal is created.
+
+vive_recon:
+  target: dev
+  outputs:
+    dev:
+      type: fabric
+      driver: 'ODBC Driver 18 for SQL Server'
+      server: "{{ env_var('FABRIC_SQL_ENDPOINT') }}"
+      port: 1433
+      database: "{{ env_var('FABRIC_WAREHOUSE_NAME') }}"
+      schema: silver
+      # NOT authentication: ActiveDirectoryServicePrincipal -- that path hits
+      # a confirmed dbt-fabric/mssql-python bug (adapter emits an "Authority
+      # Id" connection-string keyword the installed mssql-python driver
+      # rejects: "Connection string parsing failed: Unknown keyword
+      # 'authority id' is not recognized", see
+      # https://github.com/microsoft/mssql-python/issues/539). token_credential
+      # instead pre-fetches the AAD token via azure-identity and attaches it
+      # out-of-band (SQL_COPT_SS_ACCESS_TOKEN), sidestepping that code path --
+      # same mechanism src/lakehouse/connection.py's get_fabric_connection()
+      # already uses successfully with AzureCliCredential.
+      authentication: token_credential
+      credential_class: azure.identity.ClientSecretCredential
+      credential_kwargs:
+        tenant_id: "{{ env_var('FABRIC_TENANT_ID') }}"
+        client_id: "{{ env_var('FABRIC_CLIENT_ID') }}"
+        client_secret: "{{ env_var('FABRIC_CLIENT_SECRET') }}"
+      threads: 4

@@ -1,0 +1,7 @@
+# dbt tooling for the Bronze (Fabric Lakehouse) -> Silver (Fabric Warehouse)
+# normalization layer. Isolated from the main app's requirements.txt on
+# purpose -- dbt-core pins its own click/requests/jinja2/protobuf versions
+# that can collide with the app's. Install into the project venv:
+#   venv/Scripts/python.exe -m pip install -r dbt/requirements-dbt.txt
+dbt-core==1.12.3
+dbt-fabric==1.11.1

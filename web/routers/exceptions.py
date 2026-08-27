@@ -14,6 +14,7 @@ from fastapi.responses import RedirectResponse
 
 from web.deps import render, require_login, sidebar_context
 from web import queries
+from src.vendor_identity import display_name as vendor_display_name
 
 router = APIRouter()
 
@@ -22,6 +23,9 @@ REASON_BADGE = {
     "Amount Mismatch": {"label": "Amount mismatch", "css": "warning"},
     "EXTRACTION_INCOMPLETE": {"label": "Extraction incomplete", "css": "grey"},
     "DUPLICATE_RECORD": {"label": "Duplicate record", "css": "info"},
+    # New reasons from src/matching/fabric_matching.py's NetSuite matching.
+    "Not Found in NetSuite": {"label": "Not found in NetSuite", "css": "danger"},
+    "Vendor Not Resolved in NetSuite": {"label": "Vendor not resolved", "css": "grey"},
 }
 
 # Bulk approve only ever targets exceptions the matching engine scored
@@ -75,6 +79,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         ctx = {
             "active_page": "exceptions",
             "vendor_name": vendor_name,
+            "vendor_display_name": vendor_display_name(vendor_name),
             "not_found": True,
             **sidebar_context(request),
         }
@@ -100,6 +105,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
     ctx = {
         "active_page": "exceptions",
         "vendor_name": vendor_name,
+        "vendor_display_name": vendor_display_name(vendor_name),
         "vendor_url_name": quote(vendor_name, safe=""),
         "not_found": False,
         "statement": statement,

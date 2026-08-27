@@ -4,8 +4,8 @@
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
-    <div class="eyebrow"><a href="/exceptions" style="color:var(--navy-2)">Exceptions</a> / {{ vendor_name }}</div>
-    <h1>{{ vendor_name }}</h1>
+    <div class="eyebrow"><a href="/exceptions" style="color:var(--navy-2)">Exceptions</a> / {{ vendor_display_name }}</div>
+    <h1 title="{{ vendor_name }}">{{ vendor_display_name }}</h1>
   </div>
   {% if not not_found %}
   <div class="topbar-actions">
@@ -18,7 +18,7 @@
 {% block body %}
 {% if not_found %}
 <div class="content">
-  <div class="empty-state">No reconciliation run found for "{{ vendor_name }}".</div>
+  <div class="empty-state">No reconciliation run found for "{{ vendor_display_name }}".</div>
 </div>
 {% else %}
 <div class="content">
@@ -106,7 +106,7 @@
     <div class="sec-label" style="margin-top:6px">Invoice details</div>
     <div class="field-grid">
       <div class="field-box"><div class="fb-label">Invoice number</div><div class="fb-value">{{ selected.invoice_number }}</div></div>
-      <div class="field-box"><div class="fb-label">Vendor</div><div class="fb-value">{{ vendor_name }}</div></div>
+      <div class="field-box"><div class="fb-label">Vendor</div><div class="fb-value" title="{{ vendor_name }}">{{ vendor_display_name }}</div></div>
       <div class="field-box"><div class="fb-label">Invoice date</div><div class="fb-value">{{ selected.invoice_date | friendly_date }}</div></div>
       <div class="field-box"><div class="fb-label">Statement amount</div><div class="fb-value">{{ selected.statement_amount | money }}</div></div>
       <div class="field-box">
@@ -130,7 +130,7 @@
     <div class="sec-label">Why this is an exception</div>
     <div class="why-box">
       {% if selected.exception_reason == 'Invoice Missing' %}
-      Invoice #{{ selected.invoice_number }} appears on the {{ vendor_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
+      Invoice #{{ selected.invoice_number }} appears on the {{ vendor_display_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
       {% elif selected.exception_reason == 'Amount Mismatch' %}
       Invoice #{{ selected.invoice_number }} was found in the ERP, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
       {% elif selected.exception_reason == 'EXTRACTION_INCOMPLETE' %}
@@ -142,7 +142,7 @@
 
     <div class="note-field">
       <label>Add a note <span class="field-hint">(optional)</span></label>
-      <textarea rows="3" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
+      <textarea rows="4" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
     </div>
 
     <div class="detail-actions">
@@ -154,7 +154,7 @@
     </div>
     </form>
     {% else %}
-    <div class="empty-state">🎉 All exceptions resolved for {{ vendor_name }}.</div>
+    <div class="empty-state">🎉 All exceptions resolved for {{ vendor_display_name }}.</div>
     {% endif %}
   </div>
 </div>

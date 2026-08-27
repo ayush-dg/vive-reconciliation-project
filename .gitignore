@@ -1,9 +1,15 @@
 __pycache__/
 *.pyc
 .env
+dbt/profiles.yml
+dbt/.user.yml
+dbt/vive_recon/target/
+dbt/vive_recon/logs/
+dbt/vive_recon/dbt_packages/
 lakehouse/reconciliation.db*
 lakehouse/ai_call_slots/
 lakehouse/fabric_token_cache.json
+sample_data/
 logs/*.log
 *.egg-info/
 .venv/

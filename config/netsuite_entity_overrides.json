@@ -1,0 +1,18 @@
+{
+  "BALD_HILL": {
+    "entity_ids": ["3482", "4121"],
+    "note": "Bald Hill Dodge Chrysler (3482) + Bald Hill Kia (4121), both bill through one consolidated statement -- confirmed 2026-08-24. Dynamic name lookup can't find both: they're separate NetSuite vendor records with different company names, and neither matches the statement's own vendor name exactly. Key renamed from BALD_HILL_DODGE_CHRYSLER_JEEP_KIA to BALD_HILL 2026-08-27 to match config/vendor_aliases.json's renamed vendor_id -- same entity_ids, no re-tracing needed."
+  },
+  "BERLIN_CITY_AUTO_GROUP": {
+    "entity_ids": ["25530", "6696", "6697", "497086", "6683"],
+    "note": "Berlin City Toyota (25530), Berlin City Honda of Portland (6696), Berlin City Nissan (6697), Berlin City Lexus of Portland (497086) -- derived 2026-08-26 by tracing all 89 exception invoice_numbers from a real statement (STMT-53731B9C) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 85 of 89 matched, split across exactly these 4 entities (42/24/15/4), none under the parent 'Berlin City Auto Group' (6683) that dynamic name lookup had picked. 6683 kept in the list too as a fallback in case a future statement's invoices DO land there -- NOT independently confirmed the way Bald Hill's mapping was, worth a sanity check against a second statement."
+  },
+  "NUCAR": {
+    "entity_ids": ["2330", "2331", "287097", "2399"],
+    "note": "Nucar Hyundai of Norwood (2330), Nucar Toyota of Norwood (2331), Nucar Volkswagen of Norwood (287097) -- derived 2026-08-26 by tracing all 57 exception invoice_numbers from a real statement (STMT-27F34603) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 45 of 57 matched under exactly these 3 entities (8/28/9). Nucar Honda of Norwood (2399) added too even though it had 0 hits in this batch -- it's literally the statement's own group label ('DCD BH, INC. DBA NUCAR HONDA OF NORWOOD'), so a future statement is likely to need it. Deliberately did NOT include entity 134807 (Lehigh Valley Honda) despite one tranid match there -- unrelated dealer, mismatching amount (223.42 vs NetSuite's 465.03), a coincidental tranid collision, not a real match. 'DCD Parts Distribution LLC' (the statement's other group label, ~12 remaining invoices, several with R/reversal suffixes) has NO known NetSuite entity yet -- searched every name variant, nothing found; still unresolved -- turns out that's expected, per the user 2026-08-27: 'DCD' isn't actually this vendor's real name, it's Nucar, so its NetSuite entity will surface once extracted-name-to-vendor mapping is fixed, not through more NetSuite-side searching. Key renamed from DCD_AUTOMOTIVE_HOLDINGS to NUCAR 2026-08-27 to match config/vendor_aliases.json's renamed vendor_id -- same entity_ids, no re-tracing needed."
+  },
+  "KSI_TRADING_CORP": {
+    "entity_ids": ["8726"],
+    "note": "Plain 'KSI' (8726, active) -- derived 2026-08-26 by tracing all 69 invoice_numbers from a real statement (local bronze_vendor_statement_raw, statement_id TEST-WIRING-KSI-003) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 67 of 69 matched, all under entity 8726, amounts tying out correctly (e.g. a -15.0 credit line matches NetSuite's 15 before sign). 'KSI Auto Parts' (1759, also active, a plausible name match) got zero hits -- not the right entity despite the name similarity. Two other candidates ('KSI TRADING CORP - Clarkstown' 5662, 'KSI Auto Parts - Rockland' 5857) are both inactive and weren't tested, but 8726 alone already accounts for 67/69 -- no reason to expect them relevant."
+  }
+}

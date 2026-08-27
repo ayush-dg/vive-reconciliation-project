@@ -61,3 +61,24 @@ def resolve_vendor_id(vendor_name) -> str:
     if not vendor_name or not str(vendor_name).strip():
         return None
     return _load_lookup().get(_normalize(vendor_name))
+
+
+def display_name(vendor_name) -> str:
+    """Best-effort clean display label for a vendor: resolves vendor_name
+    to its canonical vendor_id (config/vendor_aliases.json) and prettifies
+    that -- e.g. "Bald Hill Dodge Chrysler Jeep Kia" (the full legal name
+    as extracted off that statement's letterhead) resolves to vendor_id
+    BALD_HILL, displayed as "Bald Hill" -- rather than showing whatever
+    long-form name happens to be printed on any one PDF. Falls back to
+    vendor_name itself, unchanged, when there's no alias entry (most
+    vendors don't have one yet) or vendor_name is falsy.
+
+    This is purely a display transform -- callers that need the real
+    identity (routing, DB lookups keyed on vendor_name) must keep using
+    vendor_name/vendor_id directly, not this."""
+    if not vendor_name or not str(vendor_name).strip():
+        return vendor_name
+    vendor_id = resolve_vendor_id(vendor_name)
+    if not vendor_id:
+        return vendor_name
+    return vendor_id.replace("_", " ").title()

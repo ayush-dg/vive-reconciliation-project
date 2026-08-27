@@ -42,9 +42,9 @@
     <div class="nav-group-label">Workspace</div>
     <a href="/" class="nav-item {{ 'active' if active_page == 'home' }}"><svg class="icon"><use href="#i-home"/></svg> Home</a>
     <a href="/upload" class="nav-item {{ 'active' if active_page == 'upload' }}"><svg class="icon"><use href="#i-upload"/></svg> Upload PDF</a>
-    <div class="nav-item disabled" style="pointer-events:none;opacity:0.5;"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
+    <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
       {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
-    </div>
+    </a>
     <div class="nav-item disabled" style="pointer-events:none;opacity:0.5;"><svg class="icon"><use href="#i-folder"/></svg> Review queue
       {% if pending_review_count %}<div class="nav-dot"></div>{% endif %}
     </div>

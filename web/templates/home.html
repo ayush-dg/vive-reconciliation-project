@@ -54,8 +54,8 @@
 <div class="panel">
   <div class="panel-head">
     <div>
-      <h2>Recent jobs</h2>
-      <div class="sub">Your most recently submitted statements</div>
+      <h2>Active jobs</h2>
+      <div class="sub">Statements still processing, or that need attention</div>
     </div>
     <a href="/jobs/history" class="link-arrow">Job history <svg class="icon"><use href="#i-arrow-right"/></svg></a>
   </div>
@@ -99,7 +99,7 @@
       </tr>
     </thead>
   </table>
-  <div class="empty-state">No recent jobs — upload a statement to get started.</div>
+  <div class="empty-state">No active jobs — upload a statement to get started.</div>
   {% endif %}
 </div>
 
@@ -166,7 +166,7 @@
     <tbody>
       {% for run in runs %}
       <tr>
-        <td><div class="vendor-cell"><div class="vendor-chip">{{ run.vendor_name | initials }}</div><div class="vendor-name">{{ run.vendor_name }}</div></div></td>
+        <td><div class="vendor-cell"><div class="vendor-chip">{{ run.vendor_display_name | initials }}</div><div class="vendor-name" title="{{ run.vendor_name }}">{{ run.vendor_display_name }}</div></div></td>
         <td style="color:var(--text-muted)">{{ run.statement_period | period_label }}</td>
         <td class="mono">{{ run.total_invoice_count }}</td>
         <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
@@ -180,8 +180,13 @@
         </td>
         <td style="color:var(--text-muted)">{{ run.reconciliation_timestamp | friendly_dt }}</td>
         <td>
-          <a href="/exceptions/{{ run.vendor_name | urlname }}" class="link-arrow">
-            {{ "View" if run.exception_count == 0 else "Review" }} <svg class="icon"><use href="#i-arrow-right"/></svg>
+          {% if run.job_id %}
+          <a href="/jobs/{{ run.job_id }}/extracted" class="link-arrow" style="margin-right:18px; white-space:nowrap">
+            Extracted data <svg class="icon"><use href="#i-arrow-right"/></svg>
+          </a>
+          {% endif %}
+          <a href="/exceptions/{{ run.vendor_name | urlname }}" class="link-arrow" style="white-space:nowrap">
+            {{ "View" if run.exception_count == 0 else "Review" }} exceptions <svg class="icon"><use href="#i-arrow-right"/></svg>
           </a>
         </td>
       </tr>
