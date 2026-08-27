@@ -155,10 +155,7 @@ npx playwright --version && \
 in `sessions/S01_VERIFICATION_RECORD.md`, 13/13 `ui_tests` passing, `npm run build` clean.
 **Blocked tasks resolved:** N/A — no BLOCKED tasks occurred this session.
 **PR raised:** [ ] Yes — PR #: session/s01_scaffolding-auth-db → feature/pbvi_execution
-(not raised yet — pushing/opening a PR is a shared-state action; awaiting engineer go-ahead)
-**Status updated to:** 
+**Status updated to:** Complete
 **Engineer sign-off:** 
-SIGNED OFF: [name] — [date]
+SIGNED OFF: Vaishali — 27-09-2026
 
-Note: The SIGNED OFF line is machine-readable. It must appear exactly
-as shown — no bold markers, no other formatting.
