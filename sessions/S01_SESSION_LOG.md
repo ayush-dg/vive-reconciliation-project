@@ -55,9 +55,9 @@
 - Integration points: none — Session 1 has no external integration. Fabric becomes required starting Session 4; local SQLite fallback per Task 1.1.
 - Entities affected (schema only, no data): `extracted.document`, `extracted.extraction_attempt`, `extracted.vendor_registry`, `extracted.stmt_<vendor_slug>` (generator/template only — no live vendor rows yet), `silver.statement_line`, `recon.exception`, `recon.match`.
 
-**Engineer response:** [pending]
-**Engineer notes:** [pending]
-**Proceed to first task:** [pending]
+**Engineer response:** CONFIRMED
+**Engineer notes:** Engineer confirmed via "proceed" in the build session, without opening the structured gate question — interpretation accepted as presented.
+**Proceed to first task:** YES
 
 ---
 
