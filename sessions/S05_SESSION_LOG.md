@@ -90,7 +90,7 @@ Task 4.3 would have handled before Session 4 was removed (S8, amended).
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
 | 5.1 | Matching invocation (manual + scheduled) | Completed | 7e17c0f |
-| 5.2 | Deterministic matching (SQL-based) | | |
+| 5.2 | Deterministic matching (SQL-based) | Completed | 2c4ebd9 |
 | 5.3 | AI-assisted residual matching | | |
 | 5.4 | Exception category enum + schema wiring | | |
 
@@ -113,6 +113,9 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 | Pre-Build | Session 4's removal (NetSuite/CCC ingestion externally owned) and S8's amendment (capture-at-match-time, no built snapshot mechanism) are adopted as-is per the 2026-08-28 planning correction (`feature/pbvi_execution` commit `b5e8d16`), committed immediately before this session | Direct engineer confirmation via Lakehouse inspection; not re-litigated here — matches this project's Loop-rule discipline of correcting plans against build-time discovery rather than building against a stale assumption. |
 | Pre-Build | `bronze.netsuite_vendorbill` has no local equivalent in this project's SQLite fallback (bronze/silver/gold have never been created by this build's own migrations — always "existing live Fabric data," per Claude.md Section 4 and every prior session's schema work). A local, explicitly-flagged test/dev-only stand-in table will be built and seeded with fixture rows carrying the confirmed audit columns (`_run_id`/`_extracted_at`/`_updated_at`/`_source_system`) plus the business columns needed for the recon-key match (vendor bill document number, amount, vendor identifier) | Consistent with this project's established env-driven-fallback precedent (Fabric when live, local fallback for sandbox testing) applied to a table this build reads but doesn't own — without it, Task 5.2's core matching logic would have zero real, executable test coverage in this environment, the same gap this project has avoided at every prior opportunity (real Python subprocess for pdfplumber, real fetch interception for Claude, etc.). Clearly labeled as a fixture/stand-in, never presented as a claim about the real Lakehouse table's actual business schema (which is not documented anywhere beyond the 4 audit columns and the NetSuite-Bill-doc-number recon key). |
 | Pre-Build | CCC's real table name is **not** engineer-confirmed the way NetSuite's `bronze.netsuite_vendorbill` was — ARCHITECTURE.md D-M/D9 only name it as "equivalent CCC tables," a placeholder. Proceeding with a similarly-flagged local stand-in for Task 5.3, since that task's own spec frames CCC corroboration as "where available," not a hard dependency | Flagged to the engineer before this session started; engineer said proceed. Task 5.3's own text ("using CCC repair-order data as corroborating evidence... where available") already anticipates CCC data may be absent/partial, so building the mechanism generically against a placeholder doesn't block real functionality — it can be repointed to the real table name once confirmed, without a design change. |
+| 5.2 | Deterministic matching extended beyond Task 5.2's own literal 2 test cases (matched / NOT_POSTED) to also compare amounts once a doc-number match is found, producing `AMOUNT_MISMATCH` | `recon.exception.category`'s enum includes `amount_mismatch` (Task 1.2's schema) and UI_SURFACE.md's Exception Detail screen expects an amount-mismatch drill-down — no other task in this session produces this category, so without this extension it would be dead, unreachable schema. |
+| 5.2 | A NOT_POSTED exception's S8 capture, when nothing matched by doc number, uses the reference table's own most-recently-extracted row overall as the "state of NetSuite data checked" marker (null only if the table is genuinely empty) | S8 (amended)'s text doesn't spell out this exact mechanic for the no-match case; this is the most defensible reading of "what state was checked" when no specific row exists to attribute the capture to. |
+| 5.2 | `recon.exception` gained an `evidence` column (migration 005), not in Task 1.2's original schema | UI_SURFACE.md's Exception Detail screen (v1.4) explicitly reads `recon.exception.evidence` for the amount-mismatch drill-down; D-K's structured result contract needs somewhere to persist its evidence field for a later screen to read without a live re-query. |
 
 ---
 
@@ -128,7 +131,7 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 
 | Task | Observation | Nature | Recommended action |
 |------|-------------|--------|--------------------|
-|      |             |        |                    |
+| 5.2 | UI_SURFACE.md v1.4's Exception Detail screen (line 299) still names `silver.ccc_ro` as the source for CCC corroborating evidence — a Silver transform this project (correctly) no longer builds per D-M/D9's Session-4 removal (no NetSuite/CCC Silver copy is built at all). The 2026-08-28 amendment log only updated the amount-mismatch row (line 301) for this, not the CCC-evidence row. This build instead captures CCC corroboration directly into `recon.exception.evidence` (Task 5.3), consistent with how amount-mismatch's NetSuite evidence already works | Planning-doc inconsistency (stale cross-reference), not a code defect | Engineer should update UI_SURFACE.md line 299 to read `recon.exception.evidence` instead of `silver.ccc_ro`, matching line 301's already-correct wording, when next revising UI_SURFACE.md |
 
 ---
 
