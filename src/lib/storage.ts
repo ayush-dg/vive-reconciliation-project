@@ -32,3 +32,9 @@ export function saveDocumentFile(contentSha256: string, bytes: Buffer): string {
 export function documentFileExists(contentSha256: string): boolean {
   return fs.existsSync(path.join(getUploadsDir(), `${contentSha256}.pdf`));
 }
+
+/** Reads back a previously-saved document's bytes (Task 3.1's extraction
+ * pipeline — needs the actual PDF content to extract from). */
+export function readDocumentFile(contentSha256: string): Buffer {
+  return fs.readFileSync(path.join(getUploadsDir(), `${contentSha256}.pdf`));
+}
