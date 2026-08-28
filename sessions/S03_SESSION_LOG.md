@@ -67,7 +67,7 @@ continuation authorization, consistent with Sessions 1-2.
 
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
-| 3.1 | Vendor identification, extraction routing, attempt recording | | |
+| 3.1 | Vendor identification, extraction routing, attempt recording | Completed | 3297366 |
 | 3.2 | Arithmetic and structural validation gate | | |
 | 3.3 | Bounded retry logic (max 2 attempts) | | |
 | 3.4 | Prompt injection defense | | |
@@ -94,6 +94,7 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 | Pre-Build | Claude Sonnet extraction is env-driven: real Anthropic API call when `ANTHROPIC_API_KEY` is set, a deterministic mock otherwise — same fallback pattern as `db.ts` (SQLite/Fabric) and `storage.ts` (local/blob) | No `ANTHROPIC_API_KEY` available in this environment. Consistent with the project's established engineering pattern rather than a new one-off decision. |
 | Pre-Build | Automated tests **always** use the mock extraction path, regardless of whether a real key is present later | Unlike the DB/storage fallbacks (pure infra availability), a live Anthropic key means real per-call billing. Repeated full-suite test runs (this project's own established habit — 2-3x per task for stability checks) against a live API would accumulate real cost. An explicit opt-in env var (`EXTRACTION_LIVE_TESTS=1`) is required to exercise the real API path in tests; never the default. |
 | Pre-Build | Test PDF fixtures generated via **PyMuPDF (fitz)** | Available in this environment (`pip list` confirms); `reportlab`/`fpdf` are not installed. Used only to construct simple, known-content PDFs for testing the deterministic extraction path — not a runtime dependency of the app itself. |
+| 3.1 | Tasks 3.2 (`validationGate.ts`), 3.3 (bounded retry loop in `extractionPipeline.ts`), 3.5 (`extractionMethodSummary.ts`), and 3.6 (`silverNormalization.ts`, migration 003) were written and committed alongside 3.1, since the pipeline orchestrator needs all of them to run end-to-end | Mirrors Session 2's Task 2.1→2.2 pattern (`documents.ts`'s dedup logic written in 2.1, given its own dedicated verification pass in 2.2). Each of 3.2/3.3/3.5/3.6 still gets its own dedicated test script, independent challenge-agent review, and its own commit — this entry records that the code predates those commits, not that verification is being skipped. |
 
 ---
 
