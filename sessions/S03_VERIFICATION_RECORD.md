@@ -221,30 +221,94 @@ Source: EXECUTION_PLAN.md Session 3
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Attempt 1 fails, attempt 2 succeeds | Proceeds to matching-eligible | N/A | |
-| TC-2 | Attempt 1 fails, attempt 2 fails | Flagged `OCR_LOW_CONFIDENCE`, no 3rd attempt — INVARIANT TOUCH: S7 | N/A | |
+| TC-1 | Attempt 1 fails, attempt 2 succeeds | Proceeds to matching-eligible | N/A | PASS |
+| TC-2 | Attempt 1 fails, attempt 2 fails | Flagged `OCR_LOW_CONFIDENCE`, no 3rd attempt — INVARIANT TOUCH: S7 | N/A | PASS |
+
+TC-1 is constructed by seeding a failed `attempt_no=1` row directly (both the mock and
+pdfplumber extractors are pure functions of the PDF bytes, so a single document cannot
+naturally fail then succeed across two consecutive real calls) — flagged and challenged,
+see disposition below. Plus 2 cases added during this task's challenge review: TC-3 (S7's
+bound and S10's write-guarantee hold when every attempt throws, not just fails validation)
+and TC-4 (the bound and per-attempt raw-row write hold on the deterministic pdfplumber
+route too). 15/15 checks pass via `./scripts/test_bounded_retry.sh`.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 3.3
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Invariant/requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | The retry loop's actual single-invocation "real failure → real success" continuation is never executed — TC-1 seeds attempt_no=1 directly instead. Under the deterministic mock/pdfplumber extractors this exact branch is unreachable in this environment; would only fire via genuine Claude API nondeterminism in production. | S7 |
+| 2 | The try/catch block added in Task 3.1's disposition (subprocess spawn error, missing document file) was never triggered by any test in Task 3.1 or 3.3 | S7 (bound under exceptions), S10 (write-guarantee under exceptions) |
+| 3 | Bounded retry never exercised against the deterministic pdfplumber route — only the Claude-mock route is used in test_bounded_retry.mjs | S7, S10 (per-attempt raw-row traceability for the deterministic route) |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | TC-1's seeded-attempt-1 construction is equivalent coverage for "attempt 1 fails, attempt 2 succeeds" | Actually models a resume-across-two-invocations scenario, not the loop's real intra-call continuation | Yes — distinguishable by inspection; true intra-call coverage is blocked by extractor determinism, not by scope |
+| 2 | MAX_ATTEMPTS = 2 in extractionPipeline.ts and documentStatus.ts stay in sync | Two independent literal constants in separate files, nothing enforces they match | Partial — no exported constant to compare today |
+
+### Invariant Coverage Gaps
+| Invariant | Enforcement point touched | Tested |
+|-----------|--------------------------|--------|
+| S7 | `while (attemptNo < MAX_ATTEMPTS)` guard + bound-exhaustion return | Partial — fail→fail (TC-2), stray re-invocation (TC-2), resume-style fail-then-succeed (TC-1, seeded). Not covered: bound holding under thrown exceptions; real intra-call fail→succeed. |
+
+### Known Untested Scenarios (out of scope — not findings)
+- Real Claude Sonnet API nondeterminism producing a genuine attempt-1-fail/attempt-2-succeed result — requires live key + billing
+- Concurrent/racing direct calls bypassing the G5 lock — accepted Task 2.4 design, different task's enforcement point
+- Fabric/SQL Server production retry behavior — different session (assertSqliteMode hard-blocks it here)
+
+### Structural Complexity Check
+CLEAN — single stateable purpose, depth 2 throughout (while → try/catch, while → if, none nested inside another).
+
+### Challenge Verdict
+FINDINGS — 3 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: S7.
+S7 reviewed against the challenge output.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (TC-1 doesn't cover the real intra-call fail→succeed continuation)** —
+ACCEPTED, not fixed. The deterministic mock/pdfplumber extractors are pure functions of
+the PDF bytes; producing a genuine "attempt 1 really fails, attempt 2 really succeeds"
+sequence within one call would require either non-deterministic test fixtures or a
+dependency-injection seam into `identifyAndExtract` that doesn't exist in this bounded
+build. TC-2 already proves the loop continues past a real failure; TC-1 (even
+seed-constructed) already proves the loop correctly promotes to Silver and terminates on a
+real success. Between them, every line the intra-call transition would execute is already
+covered — only the exact chaining of "real fail, same call, real succeed" is synthetic.
+Documented here so a future session doesn't rediscover this as new; genuine coverage would
+require `EXTRACTION_LIVE_TESTS=1` against the real, non-deterministic Claude API.
+
+**Finding 2 (exception path under S7/S10 untested)** — FIXED (test coverage, no code
+change — the exception-handling code itself was already correct per Task 3.1's Finding 3
+disposition). Added TC-3: deletes the document's stored file so both attempts throw,
+confirms exactly 2 attempt rows are written (not silently omitted), both recorded as failed
+(`arithmetic_pass=0`, `structural_pass=0`, `provider_used=null`), and the document
+correctly surfaces as `Failed — see Exceptions` rather than being stuck unbounded.
+
+**Finding 3 (deterministic route untested under retry)** — FIXED (test coverage). Added
+TC-4: registers a `deterministic`-route vendor, drives an arithmetic-mismatch document
+through both attempts, confirms exactly 2 attempts both routed via
+`python_library_pdfplumber`, and confirms one raw row is written to the vendor's
+`stmt_<vendor_slug>` table per attempt (2 total) — not just on eventual success.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (2 fixed via added test coverage, 1 accepted with rationale)
+[x] Pre-commit declaration recorded
+[x] Code review complete (S7)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 
