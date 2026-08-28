@@ -1,6 +1,17 @@
 # ARCHITECTURE.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.4 (2026-08-27 — PHASE4_GATE_RECORD.md remediation, Findings 2 and 6)
+**Version:** 1.5 (2026-08-28 — build-time correction, discovered mid-Session-4)
+
+## v1.5 Changelog (2026-08-28)
+
+**D9 amended** — NetSuite/CCC ingestion is externally owned (a separate Fabric pipeline),
+not built by this project as originally assumed. **New D-M** — reproducibility (S8) is
+satisfied by capturing `_run_id`/`_extracted_at`/`_source_system` off the specific rows
+matched against, at match time, since the external pipeline's Lakehouse tables are
+upsert-in-place (confirmed 2026-08-28) with no retained history. Removes the premise of
+EXECUTION_PLAN.md's original Tasks 4.1/4.2/4.3 — see that document's Session 4 stub and
+Session 5 amendments. This is a Loop-rule correction (`pbvi_core.md`): Session 4's actual
+build surfaced that Phase 1/3 planning assumed infrastructure this build doesn't own.
 
 ## v1.4 Changelog (2026-08-27, remediates PHASE4_GATE_RECORD.md Findings 2 and 6)
 
@@ -104,8 +115,13 @@ the deferred capabilities.
   The extraction-confidence floor is no longer part of this gate — a low-confidence but
   structurally/arithmetically valid row proceeds to Silver, with confidence carried as
   metadata rather than a retry/block trigger. See INVARIANTS.md G2.
-- **D9** — NetSuite and CCC reference data ingested via an internally-owned daily batch job,
-  Bronze→Silver; matching never calls either API live.
+- **D9 (amended 2026-08-28)** — NetSuite and CCC reference data ingestion is **externally
+  owned** — a separate Fabric pipeline already lands and upserts this data into the
+  Lakehouse (`bronze.netsuite_vendorbill` and equivalent CCC tables), independent of this
+  build. This
+  build never calls either API live and never builds or operates the ingestion job
+  itself; it only reads what's already landed. See D-M for what this means for
+  reproducibility (S8).
 - **D17** — document ingestion and reconciliation execution remain separate acts; a file
   landing in storage does not implicitly trigger matching.
 - **Document-level `legal_entity_id`** — tagged on every `extracted.document` record at
@@ -347,6 +363,57 @@ This closes Finding 2 (unknown-vendor statements previously had no defined landi
 routing) without requiring a generic raw-table fallback — Claude-extracted rows already have
 a defined home in `extracted.extraction_attempt.raw_output`, consistent with Task 3.6's
 normalization step already reading from both sources.
+
+### D-M — Reference-data reproducibility captured at match time, not via a built snapshot mechanism [NEW 2026-08-28]
+**Decision:** D9 (amended) established that NetSuite/CCC ingestion is externally owned. This
+build confirmed (2026-08-28, direct inspection via the Lakehouse SQL analytics endpoint)
+that the authoritative NetSuite reference table is **`bronze.netsuite_vendorbill`** —
+engineer-confirmed as the table to match against. It's tagged with `_run_id`,
+`_extracted_at`, `_updated_at`, and `_source_system` on every row, but is **upsert-in-place**
+(1,296,022 total rows = 1,296,022 distinct transaction IDs; no historical versions
+retained). This means S8 reproducibility cannot be satisfied by querying the table after
+the fact — by the time anyone asks "what did NetSuite say when this match was made," the
+row may have already been upserted to a newer state.
+
+**Note on a second, similarly-named table:** `bronze.netsuite_netsuite_vendorbill` (double-
+prefixed) also exists, is actively updated (unlike the table above, which hasn't changed
+since 2026-08-21), and is genuinely append-only — the same transaction ID recurs across
+multiple `_run_id`s with full history retained. **This build does not use it** — the
+engineer confirmed `bronze.netsuite_vendorbill` (singular prefix) is the correct source.
+Recorded here so a future engineer investigating this table naming doesn't have to
+re-derive which one is authoritative.
+
+Therefore: **at match time**, Session 5's matching tasks read `_run_id`, `_extracted_at`,
+and `_source_system` off the specific NetSuite/CCC row(s) being evaluated, and copy those
+values onto the `recon.match`/`recon.exception` row being created. The captured values are
+this build's proof of what was actually seen, independent of what the source table looks
+like later. No new versioning infrastructure, formal `ReferenceSnapshot` entity, or
+Bronze→Silver batch job is built by this project — the mechanism is entirely: read three
+existing columns, write them alongside the decision they informed.
+
+**This replaces original Task 4.3's premise** (that this build's own ingestion job would
+stamp a `snapshot_version`) and **removes Tasks 4.1/4.2 entirely** (the pulls are not this
+build's job at all). See EXECUTION_PLAN.md Session 4 (now a stub) and Task 5.2/5.4
+amendments.
+
+**Rationale:** Building a formal snapshot/versioning layer over data this project doesn't
+own and can't control the retention policy of would be complexity with no payoff — the
+three columns already answer the reproducibility question at the only moment it can be
+answered (match time), sourced from infrastructure that already exists.
+
+**Alternatives rejected:**
+- *Ask the ingestion pipeline's owners to add history/versioning* — out of this build's
+  control and scope; also unnecessary, since capture-at-match-time works today with what
+  already exists.
+- *Snapshot entire matched rows into a new table* — rejected as unneeded ceremony; the
+  three-column marker (`_run_id`/`_extracted_at`/`_source_system`) is sufficient to answer
+  "what version was this matched against," and a full row copy adds storage and complexity
+  without adding reproducibility value beyond that.
+
+**Revisit condition:** If the external pipeline is ever changed to retain history (e.g.,
+SCD2 or Delta time-travel relied upon deliberately), this capture mechanism can be
+strengthened without changing `recon.match`/`recon.exception`'s schema — the three captured
+values remain valid regardless of what the source table does going forward.
 
 ### D-G — Exception schema forward-compatibility (Explore evaluation criterion, not a fact)
 **Decision:** The exception data model in this build must be structured so that BCE can add

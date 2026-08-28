@@ -1,8 +1,25 @@
 # EXECUTION_PLAN.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.5 (2026-08-27 — PHASE4_GATE_RECORD.md remediation)
-**Traces to:** `docs/ARCHITECTURE.md` v1.4, `docs/INVARIANTS.md` v1.4, `docs/UI_SURFACE.md` v1.3
+**Version:** 1.6 (2026-08-28 — build-time correction, discovered mid-Session-4)
+**Traces to:** `docs/ARCHITECTURE.md` v1.5, `docs/INVARIANTS.md` v1.6, `docs/UI_SURFACE.md` v1.4
 **APPLICATION_SURFACE:** UI+API — Session 1 includes Playwright scaffolding per PBVI-011.
+
+## v1.6 Changelog (2026-08-28)
+
+**Session 4 removed** (Tasks 4.1/4.2/4.3) — NetSuite/CCC ingestion is externally owned, not
+built by this project (ARCHITECTURE.md D9 amended). Confirmed 2026-08-28 by direct
+inspection: the authoritative table is `bronze.netsuite_vendorbill` (engineer-confirmed —
+a second, similarly-named `bronze.netsuite_netsuite_vendorbill` table also exists and is
+NOT used, see ARCHITECTURE.md D-M) — upsert-in-place (row count = distinct ID count),
+tagged with `_run_id`/`_extracted_at`/`_updated_at`/`_source_system`. **Task 4.3's
+reproducibility job moves to Task 5.2/5.4** — capture those three columns off the specific
+row(s) read at match time, since there's no retained history to reference after the fact
+(ARCHITECTURE.md D-M, INVARIANTS.md S8 amended). Task 1.2's `recon.match`/`recon.exception`
+schema updated: `snapshot_version` replaced with `reference_run_id`/`reference_extracted_at`/
+`reference_source_system`. Task 6.3's amount-mismatch drill-down updated to source the
+NetSuite value from the captured `evidence` field, not a live re-query. This is a Loop-rule
+correction (`pbvi_core.md`) — Session 4's actual build surfaced that Phase 1/3 planning
+assumed infrastructure this build doesn't own.
 
 ## v1.5 Changelog (2026-08-27, remediates PHASE4_GATE_RECORD.md Finding 2)
 
@@ -88,8 +105,8 @@ blocker — noted per-task where relevant.)
 | 1 | Scaffolding + Auth + DB schema foundation | 4 | 2 days |
 | 2 | Document intake (Upload screen + storage + Extract trigger) | 4 | 2 days |
 | 3 | Extraction service (routed Claude/pdfplumber, arithmetic+structural gate, retries, method summary) | 5 | 3.5 days |
-| 4 | Reference data ingestion (NetSuite/CCC daily batch → Silver, live Fabric) | 3 | 2 days |
-| 5 | Matching service (deterministic + AI-assisted residual) | 4 | 3 days |
+| 4 | **REMOVED 2026-08-28** — NetSuite/CCC ingestion is externally owned, not this build's job | 0 | — |
+| 5 | Matching service (deterministic + AI-assisted residual, incl. reference-data capture moved from Session 4) | 4 | 3 days |
 | 6 | Home dashboard + Exceptions + Document Detail screens | 5 | 3 days |
 | 7 | Reporting (Gold integration) | 2 | 1 day |
 
@@ -189,8 +206,15 @@ Create database migration scripts for:
   layer. Coexists in the silver schema with any existing NetSuite-derived Silver tables —
   do not modify those.
 - recon.exception (exception_id, statement_line_id FK, category — CHECK constraint against
-  a fixed enum, owner NULLABLE, aging_started_at NULLABLE, run_reference NULLABLE, created_at)
-- recon.match (match_id, statement_line_id FK, snapshot_version NOT NULL, created_at)
+  a fixed enum, owner NULLABLE, aging_started_at NULLABLE, run_reference NULLABLE,
+  reference_run_id NULLABLE, reference_extracted_at NULLABLE, reference_source_system
+  NULLABLE — per ARCHITECTURE.md D-M/INVARIANTS.md S8 amended; NULLABLE here since not
+  every exception depends on reference data (e.g. an arithmetic-mismatch exception never
+  touched NetSuite/CCC), created_at)
+- recon.match (match_id, statement_line_id FK, reference_run_id NOT NULL,
+  reference_extracted_at NOT NULL, reference_source_system NOT NULL — per ARCHITECTURE.md
+  D-M/INVARIANTS.md S8 amended, replaces the original snapshot_version column; every Match
+  depends on reference data by definition, so NOT NULL here, created_at)
 
 Every table enforces its stated invariant at the schema level where the invariant text
 says "DB-enforced" (see embedded invariant list below). Apply these TASK-SCOPED invariants
@@ -828,111 +852,25 @@ this step.
 
 ---
 
-# Session 4 — Reference Data Ingestion (NetSuite/CCC Daily Batch)
+# Session 4 — REMOVED 2026-08-28 (see ARCHITECTURE.md D-M)
 
-**Session goal:** NetSuite open invoices and CCC repair-order data are pulled daily into
-versioned Silver snapshots, with no live calls from the matching path.
+**This session no longer exists as originally planned.** It was written assuming this
+build would ingest NetSuite/CCC data itself (Bronze→Silver, self-stamped snapshot
+versions). Discovered mid-Session-4 build (2026-08-28): NetSuite/CCC ingestion is
+**externally owned** — a separate Fabric pipeline already lands this data into the
+Lakehouse, upsert-in-place, tagged with `_run_id`/`_extracted_at`/`_updated_at`/
+`_source_system`. This build does not build, own, or verify that pipeline.
 
-**Integration check:**
-```bash
-./scripts/run_reference_ingestion_smoke_test.sh
-```
+- **Task 4.1 (NetSuite pull) — REMOVED.** Not this build's job.
+- **Task 4.2 (CCC pull) — REMOVED.** Not this build's job.
+- **Task 4.3 (snapshot version-binding) — MOVED to Session 5.** The reproducibility
+  requirement (S8) it existed to satisfy is now met by Task 5.2/5.4 capturing the existing
+  pipeline's own audit columns at match time — see those tasks' 2026-08-28 amendments and
+  ARCHITECTURE.md D-M for the full reasoning (upsert-in-place means there's nothing to
+  version-bind to *except* at the moment of matching).
 
-## Task 4.1 — Scheduled daily batch pull (NetSuite)
-
-**Description:** Implement the daily batch job pulling NetSuite open invoices into
-`bronze.netsuite_raw` → `silver.netsuite_invoice`, stamped with a snapshot version.
-
-**CC prompt:**
-```
-Implement the scheduled daily batch pull for NetSuite open invoices, per v3.3 D9.
-Bronze -> Silver, stamped with netsuite_snapshot_version = load_date. This is a
-timer-triggered job (Azure Function per v3.3's D15), not user-invoked.
-```
-
-**Test cases:**
-- Happy path: running the batch job produces a new versioned snapshot in Silver.
-- Failure case: a partial pull failure does not silently publish an incomplete snapshot as
-  available (flagged for Phase 3's own follow-up — see Task 4.3).
-
-**Verification command:**
-```bash
-./scripts/test_netsuite_batch_pull.sh
-```
-
-**Invariant enforcement:** None new task-scoped for this specific task (G4's hash
-idempotency doesn't directly apply to reference data, which isn't content-addressed the
-same way documents are).
-
-**Regression classification:** NOT-REGRESSION-RELEVANT — requires live NetSuite
-connectivity, not portable to a bare repo checkout.
-
-**UI test spec:** N/A.
-
----
-
-## Task 4.2 — Scheduled daily batch pull (CCC)
-
-**Description:** Same pattern as Task 4.1, for CCC repair-order data.
-
-**CC prompt:**
-```
-Implement the scheduled daily batch pull for CCC repair-order data, per v3.3 §11.2 (D9).
-Bronze -> Silver (bronze.ccc_raw -> silver.ccc_ro), stamped with
-ccc_snapshot_version = load_date. Confirm with existing framework (per v3.3's note) whether
-this reuses an existing CCC ingestion pipeline rather than duplicating it — do not build a
-second CCC ingestion path if one already exists.
-```
-
-**Test cases:**
-- Happy path: running the batch job produces a new versioned CCC snapshot in Silver.
-- Failure case: FK orphan rate against `dim_ro` is checked before matching logic depends
-  on RO keys (per v3.3's noted 87% orphan rate risk on `production_schedule`).
-
-**Verification command:**
-```bash
-./scripts/test_ccc_batch_pull.sh
-```
-
-**Invariant enforcement:** None new task-scoped.
-
-**Regression classification:** NOT-REGRESSION-RELEVANT — requires live CCC connectivity.
-
-**UI test spec:** N/A.
-
----
-
-## Task 4.3 — Snapshot version-binding enforcement
-
-**Description:** Ensure every Match and Exception references exactly one immutable
-snapshot version — no ambiguous or unversioned reference data resolution.
-
-**CC prompt:**
-```
-Implement snapshot version-binding: recon.match and any exception referencing reference
-data must carry a non-null snapshot_version foreign key at write time. Apply this
-TASK-SCOPED invariant inline:
-
-- S8 — Every Match and Exception that depends on reference data must reference exactly
-  one immutable ReferenceSnapshot version. Matching must never resolve reference data from
-  an unversioned or live source.
-```
-
-**Test cases:**
-- Happy path: a match created against a specific snapshot version carries that version's
-  ID.
-- Failure case: attempting to write a match with a null snapshot reference is rejected.
-
-**Verification command:**
-```bash
-./scripts/test_snapshot_version_binding.sh
-```
-
-**Invariant enforcement:** S8 (embedded above).
-
-**Regression classification:** HARNESS-CANDIDATE — directly tied to S8.
-
-**UI test spec:** N/A.
+No tasks remain in this session. Session numbering elsewhere in this document is
+unchanged — Session 5 still follows immediately below.
 
 ---
 
@@ -991,32 +929,51 @@ same matching execution logic. Apply these TASK-SCOPED invariants inline:
 
 ---
 
-## Task 5.2 — Deterministic matching (SQL-based)
+## Task 5.2 — Deterministic matching (SQL-based) [amended 2026-08-28 — reference-data capture, was Task 4.3]
 
 **Description:** Implement the deterministic-first matching pass — SQL-based comparison
-of StatementLine data against Silver reference data (NetSuite Bill document number as
-recon key, per project convention). **Confirmed unaffected by the 2026-08-27 `extracted`
-schema change (D-J)** — this task reads only `silver.statement_line`, which stays a single
-vendor-agnostic table regardless of how many per-vendor raw tables feed it.
+of StatementLine data against the NetSuite reference table (NetSuite Bill document number
+as recon key, per project convention). **Confirmed unaffected by the 2026-08-27 `extracted`
+schema change (D-J)** — this task reads only `silver.statement_line` on the statement
+side. **Amended 2026-08-28:** the NetSuite/CCC side is read directly from
+**`bronze.netsuite_vendorbill`**, the externally-owned Lakehouse table (engineer-confirmed
+— see ARCHITECTURE.md D-M for the second, similarly-named table that is NOT used), not a
+Silver copy this build produces — no such Silver transform exists or is built here
+(ARCHITECTURE.md D9 amended). This task now also owns the S8 reference-data capture that
+was Task 4.3's job before Session 4 was removed.
 
 **CC prompt:**
 ```
 Implement deterministic SQL-based matching: recon key is vendor invoice number matched
 to NetSuite Bill document number (not check/payment number, per prior project
-convention). Matching reads only from Silver — no live NetSuite/CCC calls. Return each
-line's outcome via the structured result contract (ARCHITECTURE.md D-K): stage
-("deterministic_match"), status (matched/unmatched), candidate_ids (the NetSuite record
-matched against, if any), reason_codes (e.g. NOT_POSTED), evidence (the compared values),
-requires_review (true for any unmatched line). Apply this TASK-SCOPED invariant inline:
+convention). Matching reads only from bronze.netsuite_vendorbill — no live NetSuite/CCC
+calls, no separate Silver copy, and NOT bronze.netsuite_netsuite_vendorbill (a
+similarly-named table that is not the correct source — see ARCHITECTURE.md D-M). Return
+each line's outcome via the structured
+result contract (ARCHITECTURE.md D-K): stage ("deterministic_match"), status
+(matched/unmatched), candidate_ids (the NetSuite record matched against, if any),
+reason_codes (e.g. NOT_POSTED), evidence (the compared values), requires_review (true for
+any unmatched line). Apply this TASK-SCOPED invariant inline:
 
-- S8 — Every match references exactly one immutable snapshot version (from Task 4.3).
+- S8 (amended 2026-08-28) — For every row read from the NetSuite/CCC table during this
+  match (whether it produces a Match or a no-match Exception), capture that row's
+  _run_id, _extracted_at, and _source_system, and write those three values onto the
+  recon.match row (reference_run_id/reference_extracted_at/reference_source_system, all
+  NOT NULL — Task 1.2) or, for a no-match Exception, onto the same-named nullable columns
+  on recon.exception. This is the only reproducibility mechanism — the source table is
+  upsert-in-place with no retained history, so these three values must be captured at the
+  moment of the query, not resolved later.
 ```
 
 **Test cases:**
 - Happy path: a StatementLine with a matching NetSuite Bill document number produces a
-  Match record.
+  Match record, with `reference_run_id`/`reference_extracted_at`/`reference_source_system`
+  populated from the specific NetSuite row matched.
 - Happy path: a StatementLine with no corresponding NetSuite record produces an Exception
-  (category: appropriate closed-enum value, e.g., `NOT_POSTED`).
+  (category: appropriate closed-enum value, e.g., `NOT_POSTED`), with the same three
+  reference columns populated to record what state of NetSuite data was checked.
+- Failure case: attempting to write a Match with any of the three reference columns null
+  is rejected.
 - Failure case: matching logic never makes a live API call (verify via absence of live
   NetSuite/CCC calls in logs during a matching run).
 
@@ -1025,12 +982,12 @@ requires_review (true for any unmatched line). Apply this TASK-SCOPED invariant 
 ./scripts/test_deterministic_matching.sh
 ```
 
-**Invariant enforcement:** S8 (embedded above); G-level (Global) live-call prohibition —
-NOTE: the original G1 (no live calls) was removed from the Global set per engineer
-direction on 2026-08-17 (see INVARIANTS.md's Removed Invariants note) — this task should
-still avoid live calls as an architectural default (ARCHITECTURE.md D-B/D9), but this is
-no longer an enforced invariant, only a design convention. Flagging this explicitly since
-it changes what CC must treat as a hard constraint vs. a soft convention.
+**Invariant enforcement:** S8, amended (embedded above); G-level (Global) live-call
+prohibition — NOTE: the original G1 (no live calls) was removed from the Global set per
+engineer direction on 2026-08-17 (see INVARIANTS.md's Removed Invariants note) — this task
+should still avoid live calls as an architectural default (ARCHITECTURE.md D-B/D9), but
+this is no longer an enforced invariant, only a design convention. Flagging this explicitly
+since it changes what CC must treat as a hard constraint vs. a soft convention.
 
 **Regression classification:** HARNESS-CANDIDATE — directly tied to S8.
 
@@ -1101,7 +1058,11 @@ category/reason_codes/evidence directly from each stage's structured result cont
 possible_duplicate_correction in this enum — that case is fully resolved by Task 2.2's
 version-chaining and never reaches Exceptions. Confirm the owner, aging_started_at, and
 run_reference columns exist (from Task 1.2) and remain NULL — they are not populated by
-this build, only reserved for BCE. Apply this TASK-SCOPED invariant inline:
+this build, only reserved for BCE. **Amended 2026-08-28:** where an exception stems from
+a reference-data check (Task 5.2's NOT_POSTED no-match path), also carry through
+reference_run_id/reference_extracted_at/reference_source_system from that stage's result
+(S8, amended) — leave them NULL for exceptions that never touched reference data (e.g. an
+arithmetic-mismatch exception from Task 3.2). Apply this TASK-SCOPED invariant inline:
 
 - S5 — Exception.category uses a fixed, approved set of categories and is never arbitrary
   free text.
@@ -1111,13 +1072,17 @@ this build, only reserved for BCE. Apply this TASK-SCOPED invariant inline:
 - Happy path: every exception-producing path writes a valid enum category.
 - Failure case: attempting to write an unrecognized category string is rejected.
 - Happy path: owner/aging_started_at/run_reference remain NULL after any exception is created.
+- Happy path: a NOT_POSTED exception (Task 5.2's no-match path) carries non-NULL
+  reference_run_id/reference_extracted_at/reference_source_system.
+- Happy path: an arithmetic-mismatch exception (Task 3.2) leaves those three reference
+  columns NULL — it never touched reference data.
 
 **Verification command:**
 ```bash
 ./scripts/test_exception_schema_wiring.sh
 ```
 
-**Invariant enforcement:** S5 (embedded above).
+**Invariant enforcement:** S5, S8 amended (embedded above).
 
 **Regression classification:** HARNESS-CANDIDATE — directly tied to S5.
 
@@ -1250,9 +1215,11 @@ present (per Task 5.3's residual-matching output), and the source statement line
 extraction record. No approve/dispute actions — confirmed absent per D-C. Only action is
 "Back to list". NEW: for exceptions with category = amount_mismatch (or equivalent enum
 value from Task 5.4), add an expandable/dropdown section showing the corresponding
-NetSuite record's value from the Silver ReferenceSnapshot (Task 4.3's version-bound
-snapshot) side-by-side with the extracted statement value, so the user can see exactly
-what's in the Fabric source table for that invoice. Collapsed by default; not shown for
+NetSuite record's value (from the `evidence` field of Task 5.2's D-K structured result,
+already captured at match time) side-by-side with the extracted statement value, plus a
+small "as of" caption sourced from the exception's reference_extracted_at column (amended
+2026-08-28, per ARCHITECTURE.md D-M) — never a live re-query, since the Lakehouse table
+may have since been upserted to a different value. Collapsed by default; not shown for
 non-amount-mismatch exception types.
 ```
 
