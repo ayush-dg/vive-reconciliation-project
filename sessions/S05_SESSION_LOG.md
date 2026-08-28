@@ -91,7 +91,7 @@ Task 4.3 would have handled before Session 4 was removed (S8, amended).
 |---------|-----------|--------|--------|
 | 5.1 | Matching invocation (manual + scheduled) | Completed | 7e17c0f |
 | 5.2 | Deterministic matching (SQL-based) | Completed | 2c4ebd9 |
-| 5.3 | AI-assisted residual matching | | |
+| 5.3 | AI-assisted residual matching | Completed | 396e25c |
 | 5.4 | Exception category enum + schema wiring | | |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
