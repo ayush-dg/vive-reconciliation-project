@@ -79,9 +79,14 @@ function reconcile(documentId) {
   db.prepare(
     `INSERT INTO silver_statement_line (line_id, document_id, vendor_id, amount) VALUES (?, ?, ?, 100.00)`
   ).run(lineId, documentId, vendorId);
+  // snapshot_version was replaced by reference_run_id/reference_extracted_at/
+  // reference_source_system in migration 005 (Session 5, S8 amended) — this script
+  // predates that change and was never updated until Session 6 re-ran it.
   db.prepare(
-    `INSERT INTO recon_match (match_id, statement_line_id, snapshot_version) VALUES (?, ?, 'test-snapshot-1')`
+    `INSERT INTO recon_match (match_id, statement_line_id, reference_run_id, reference_extracted_at, reference_source_system)
+     VALUES (?, ?, 'test-run-1', '2026-08-27T00:00:00Z', 'netsuite')`
   ).run(crypto.randomUUID(), lineId);
+  return lineId;
 }
 
 // --- Bonus: a recon.match exists -> "Reconciled" (forward-compat, no live pipeline) ---
@@ -134,6 +139,55 @@ check(
   'S7-violating 3-failed-attempt input still resolves to Failed, not a malformed label',
   statusThreeAttempts.label === 'Failed — see Exceptions'
 );
+
+// --- Session 6 challenge-review fix: a document with SOME lines matched and at least
+// one line left as an open exception must NOT read as fully "Reconciled" — the previous
+// "any match exists" check silently under-reported unresolved work. ---
+{
+  const documentId = newDoc();
+  insertAttempt(documentId, 1, { arithmeticPass: 1, structuralPass: 1 });
+  const matchedLineId = reconcile(documentId); // 1 matched line
+
+  const vendorId = makeVendor();
+  const openLineId = crypto.randomUUID();
+  db.prepare(
+    `INSERT INTO silver_statement_line (line_id, document_id, vendor_id, amount) VALUES (?, ?, ?, 50.00)`
+  ).run(openLineId, documentId, vendorId);
+  db.prepare(
+    `INSERT INTO recon_exception (exception_id, statement_line_id, category, reason_codes, evidence) VALUES (?, ?, 'not_posted', '[]', '{}')`
+  ).run(crypto.randomUUID(), openLineId);
+
+  const status = computeDocumentStatus(documentId);
+  check(
+    'Partial match (1 matched, 1 open exception) does NOT read as Reconciled',
+    status.badge !== 'Reconciled'
+  );
+  check(
+    'Partial match surfaces as "Failed — see Exceptions" (the closed 4-value badge set\'s closest fit)',
+    status.label === 'Failed — see Exceptions'
+  );
+  void matchedLineId;
+}
+
+// --- Session 6 challenge-review fix: a document fully matched on every line reads as
+// Reconciled (the corrected, "all lines" version of the original Bonus case above). ---
+{
+  const documentId = newDoc();
+  insertAttempt(documentId, 1, { arithmeticPass: 1, structuralPass: 1 });
+  reconcile(documentId);
+  const status = computeDocumentStatus(documentId);
+  check('A document with every line matched reads as Reconciled', status.badge === 'Reconciled');
+}
+
+// --- Session 6 challenge-review fix: a document with zero exceptions/matches but that
+// had a matching-unrelated failed extraction attempt still resolves via the existing
+// Retrying/Failed extraction logic, not accidentally treated as "has an exception". ---
+{
+  const documentId = newDoc();
+  insertAttempt(documentId, 1, { arithmeticPass: 0, structuralPass: 1 });
+  const status = computeDocumentStatus(documentId);
+  check('An extraction-retry document with no matching activity yet is unaffected by the new exception check', status.label === 'Retrying (1/2)');
+}
 
 await closeDb();
 

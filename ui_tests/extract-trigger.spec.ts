@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import { TEST_USERNAME, TEST_SESSION_SECRET } from './global-setup';
 import { SESSION_COOKIE_NAME, signSessionToken } from '../src/lib/session';
 import { getSqliteDb } from '../src/lib/db';
+import { makeTestPdf } from '../scripts/testPdfFixture.mjs';
 
 async function signInViaCookie(context: import('@playwright/test').BrowserContext) {
   process.env.SESSION_SECRET = TEST_SESSION_SECRET;
@@ -12,10 +13,21 @@ async function signInViaCookie(context: import('@playwright/test').BrowserContex
   ]);
 }
 
+// Real, pdfplumber-parseable PDF bytes (via PyMuPDF) — a plain `%PDF-1.4 ...` text buffer
+// (this fixture's original form, written in Session 2 against Session 2's own stub
+// extraction) is not valid PDF structure. Session 3's real pipeline always runs a genuine
+// pdfplumber parse as its vendor-routing "peek" regardless of which path is ultimately
+// chosen (vendorIdentification.ts), so invalid PDF bytes now genuinely fail extraction
+// (2 failed attempts, "Failed — see Exceptions") — a real, previously undetected
+// regression this task's own Playwright run surfaced; see sessions/S06_SESSION_LOG.md's
+// Deviations entry. Marker-format text (VENDOR:/TOTAL:/INVOICE:) matches what Session 3's
+// own mock/pdfplumber extractors parse.
 async function uploadFixture(page: import('@playwright/test').Page, label: string) {
+  const text = `VENDOR: Extract_Trigger_${label.replace(/[^a-zA-Z0-9]/g, '_')}\nTOTAL: 10.00\nINVOICE: INV-${label} | RO: - | AMOUNT: 10.00 | DATE: 2026-08-01`;
+  const bytes = makeTestPdf(text);
   const res = await page.request.post('/api/documents', {
     multipart: {
-      file: { name: `${label}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from(`%PDF-1.4 ${label} ${Math.random()}`) },
+      file: { name: `${label}.pdf`, mimeType: 'application/pdf', buffer: bytes },
       legalEntityId: 'vive-holdings',
     },
   });
@@ -132,12 +144,16 @@ test.describe('Extract action', () => {
   }) => {
     await signInViaCookie(context);
     const documentId = await uploadFixture(page, 'extract-retrying-badge');
-    await page.request.post(`/api/documents/${documentId}/extract`);
 
-    // Synthesize a failed extraction attempt directly (Session 3's real
-    // pipeline doesn't exist yet) — same technique as
-    // scripts/test_document_status.mjs (Task 2.3).
+    // This test constructs a specific attempt-history shape directly (one failed attempt,
+    // no second yet) rather than calling the real Extract endpoint — Session 3's real
+    // pipeline runs its bounded retry loop synchronously within that one request, so by
+    // the time it returns, "exactly 1 failed attempt, no 2nd yet" is not an observable
+    // state through the real endpoint. Flips the same G5 lock column the real endpoint
+    // would (status='processing'), then synthesizes the attempt row directly — same
+    // technique as scripts/test_document_status.mjs (Task 2.3).
     const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET status = 'processing' WHERE document_id = ?`).run(documentId);
     db.prepare(
       `INSERT INTO extracted_extraction_attempt (attempt_id, document_id, attempt_no, arithmetic_pass, structural_pass)
        VALUES (?, ?, 1, 0, 1)`

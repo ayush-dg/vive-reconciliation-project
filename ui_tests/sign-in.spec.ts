@@ -9,7 +9,9 @@ test.describe('Sign In', () => {
     await page.getByLabel('Password').fill(TEST_PASSWORD);
     await page.getByTestId('sign-in-submit').click();
     await page.waitForURL('/home');
-    await expect(page.getByTestId('home-placeholder')).toBeVisible();
+    // Task 1.3's placeholder (home-placeholder) was replaced by the real Home screen
+    // (Task 6.1, Session 6) — home-summary-stats is the real screen's own landmark.
+    await expect(page.getByTestId('home-summary-stats')).toBeVisible();
   });
 
   test('a second, distinct named user account can also sign in independently (OD5)', async ({ page }) => {
@@ -18,7 +20,9 @@ test.describe('Sign In', () => {
     await page.getByLabel('Password').fill(TEST_PASSWORD_2);
     await page.getByTestId('sign-in-submit').click();
     await page.waitForURL('/home');
-    await expect(page.getByTestId('home-placeholder')).toBeVisible();
+    // Task 1.3's placeholder (home-placeholder) was replaced by the real Home screen
+    // (Task 6.1, Session 6) — home-summary-stats is the real screen's own landmark.
+    await expect(page.getByTestId('home-summary-stats')).toBeVisible();
   });
 
   test('invalid credentials show inline error, remain on /login', async ({ page }) => {
