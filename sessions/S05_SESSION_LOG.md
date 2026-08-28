@@ -7,7 +7,7 @@
 **Claude.md version:** v1.2
 **Execution mode:** [x] Autonomous (sequential, no interruption, no prediction)
                   | [ ] Manual (prediction discipline, prediction before verification)
-**Status:** In Progress
+**Status:** Completed
 
 ## Pre-Build Validation — 2026-08-28
 
@@ -144,10 +144,17 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED
-**All tasks verified:** [ ] Yes
-**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
-**PR raised:** [ ] Yes — PR #: session/s05_matching-service → feature/pbvi_execution
-**Status updated to:**
+**Session integration check:** [x] PASSED — `./scripts/run_matching_service_smoke_test.sh`
+  (all 4 tasks' dedicated test scripts, typecheck, and a new end-to-end round trip
+  composing Session 3's real extraction pipeline with Session 5's real matching pipeline
+  for the first time: register → extract → Silver → match → Match/Exception, both via the
+  manual per-document trigger and the scheduled batch path, confirming G5's lock and
+  matching's repeatable-operation semantics)
+**All tasks verified:** [x] Yes — 5.1 (7e17c0f), 5.2 (2c4ebd9), 5.3 (396e25c), 5.4 (59e9481)
+**Blocked tasks resolved:** [x] Yes — N/A, no BLOCKED tasks occurred
+**PR raised:** [ ] Not yet — `gh` CLI unavailable in this environment (same limitation
+  noted at Sessions 2/3's wrap-up); title/description prepared for the engineer to open
+  manually on request.
+**Status updated to:** Completed
 **Engineer sign-off:**
-SIGNED OFF: [name] — [date]
+SIGNED OFF: [pending engineer review] — 2026-08-28
