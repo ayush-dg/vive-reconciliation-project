@@ -17,6 +17,7 @@
     "test:document-status": "tsx scripts/test_document_status.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "better-sqlite3": "^11.3.0",
     "mssql": "^11.0.1",
     "next": "^16.3.3",

@@ -1,4 +1,5 @@
 import { getSqliteDb, getDbMode } from './db';
+import { runExtractionPipeline } from './extractionPipeline';
 
 /**
  * Extract trigger (Task 2.4) — D-I: extraction is a separate, explicit user
@@ -13,21 +14,6 @@ function assertSqliteMode() {
   if (getDbMode() !== 'sqlite') {
     throw new Error('extraction.ts only supports the local SQLite fallback — Fabric required starting Session 4.');
   }
-}
-
-/**
- * Session 3 (not yet built) implements the real extraction pipeline —
- * vendor identification/routing, Claude/pdfplumber extraction, the
- * arithmetic+structural validation gate, bounded retry. This is a stub Task
- * 2.4 wires the G5-guarded trigger through, per Task 2.4's own CC prompt
- * ("call a new extraction-trigger endpoint that invokes Session 3's
- * extraction service"). Intentionally does nothing beyond acknowledging
- * invocation — building the real pipeline here would be Session 3's scope,
- * not this task's.
- */
-async function startExtractionPipelineStub(documentId: string): Promise<void> {
-  // No-op — see docstring. Session 3 replaces this with the real pipeline.
-  void documentId;
 }
 
 export type TriggerExtractionResult =
@@ -55,6 +41,11 @@ export async function triggerExtraction(documentId: string): Promise<TriggerExtr
     return { ok: false, reason: 'already_processing' };
   }
 
-  await startExtractionPipelineStub(documentId);
+  // Awaited synchronously — this bounded build has no background-job/queue
+  // infrastructure (n8n, per Claude.md's Fixed Stack, only orchestrates the
+  // monthly Run Creation call, not per-document extraction), and Extract is
+  // a deliberate, low-frequency manual trigger, not a high-throughput path.
+  // Session 3 replaces what was a no-op stub through Session 2.
+  await runExtractionPipeline(documentId);
   return { ok: true, status: 'processing' };
 }
