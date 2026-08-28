@@ -206,30 +206,101 @@ Source: EXECUTION_PLAN.md Session 5
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Residual line with CCC RO corroboration | Produces an actionable exception category with a specific suggested action, but is NOT marked as an approved match | N/A | |
-| TC-2 | Any code path from this pass | No path allows directly setting a final "matched"/"reconciled" status without deterministic confirmation — INVARIANT TOUCH: AI-write-authority non-negotiable | N/A | |
+| TC-1 | Residual line with CCC RO corroboration | Produces an actionable exception category with a specific suggested action, but is NOT marked as an approved match | N/A | PASS |
+| TC-2 | Any code path from this pass | No path allows directly setting a final "matched"/"reconciled" status without deterministic confirmation — INVARIANT TOUCH: AI-write-authority non-negotiable | N/A | PASS |
+
+Plus TC-3–TC-6 (structural AI-write-authority checks, no-corroboration case, graceful
+degradation when CCC's table is absent, G3 fetch-interception test), and 3 more added
+during this task's challenge review (TC-7–TC-9 below). 20/20 checks pass via
+`./scripts/test_ai_residual_matching.sh`.
+
+**Scope Decisions made during this task's own build:**
+1. CCC's real table name is unconfirmed (see Session Log Decision Log) —
+   `findCccCorroboration()` degrades to "no corroboration" on any query failure against
+   its placeholder name, per this task's own "where available" framing.
+2. Corroboration matching is amount-proximity only (±0.01 tolerance), a deliberately
+   narrow heuristic per the task's own framing, not a claim of correctness against CCC's
+   unconfirmed real schema.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 5.3
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Invariant/requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | Multiple CCC rows within tolerance for the same line | No ORDER BY, single .get() — an arbitrary row was chosen and asserted as corroborating evidence with no signal other equally-qualifying ROs existed | G3 (evidence quality); AI-write-authority's "defensible suggestion" intent |
+| 2 | Claude live-path response with no tool_use block | proposeActionViaClaudeLive's fallback branch existed but was never exercised by any test | Core AI-write-authority non-negotiable (must never crash or produce a non-proposed status) |
+| 3 | End-to-end: residual evidence actually lands in persisted recon_exception.evidence | Only the isolated runResidualMatch() return value and pipeline-level ok/processed flags were checked — never the written row's contents | Task 5.3's own stated happy-path test case |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | The catch-all in findCccCorroboration() degrades identically whether the table is genuinely missing or a real bug occurs | No error-type discrimination, no logging — any error looked the same as "table doesn't exist," forever indistinguishable in production | Yes — trigger a non-missing-table failure |
+| 2 | TC-6's adversarial-injection test exercised G3 for reference-data content reaching the model | The adversarial text was seeded into the CCC fixture's vendor_name field, which findCccCorroboration()'s SELECT list never queries — the assertion was vacuously true regardless of any real G3 mechanism | Yes — the injection point should be ro_number, the field actually forwarded |
+
+### Invariant Coverage Gaps
+| Invariant | Enforcement point touched | Tested |
+|-----------|--------------------------|--------|
+| G3 | RESIDUAL_SYSTEM_PROMPT (fixed) + JSON-only data passing | Partial — TC-6 confirmed the system/data split structurally, but its adversarial vector never actually reached the model (Unverified Assumption 2) |
+| Core AI-write-authority non-negotiable | ResidualMatchOutcome.status literal type, TC-3's structural checks | Solid for this module in isolation; weaker one level up — nothing confirmed the outcome can't be mis-surfaced once it reaches matchingPipeline.ts/exceptionWriter.ts |
+
+### Known Untested Scenarios (out of scope — not findings)
+- Real CCC production table name/schema shape — unconfirmed, out of this session's control
+- Real Claude Sonnet model output quality — requires live billed API call
+- Concurrency/locking around invoking the residual pass at scale — Task 5.1's own scope
+
+### Structural Complexity Check
+CLEAN across all functions in aiResidualMatching.ts.
+
+### Challenge Verdict
+FINDINGS — 4 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: G3; AI-write-authority non-negotiable.
+G3 and the AI-write-authority non-negotiable reviewed against the challenge output.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (vacuous G3 adversarial test)** — FIXED. TC-6 rewritten to seed the adversarial
+text into `ro_number` (the field `findCccCorroboration()` actually selects and forwards)
+instead of the never-queried `vendor_name`, plus a new assertion confirming the adversarial
+text genuinely reaches the request payload (proving the test isn't vacuous) alongside the
+existing confirmation that the system prompt stays byte-identical to the fixed constant.
+
+**Finding 2 (ambiguous corroboration untested and non-deterministic)** — FIXED.
+`findCccCorroboration()`'s query now orders by `ABS(amount - ?) ASC` so multiple candidates
+within tolerance resolve deterministically to the objectively closest amount match, not an
+arbitrary row. Verified via new TC-8.
+
+**Finding 3 (catch-all swallows genuine bugs silently)** — FIXED. Added a `console.error`
+in the catch block identifying the failure before degrading to "no corroboration" —
+doesn't change the graceful-degradation behavior (still required given CCC's unconfirmed
+schema), just keeps a real bug visible rather than permanently indistinguishable from the
+accepted missing-table case.
+
+**Finding 4 (end-to-end evidence persistence untested)** — FIXED (test coverage; the
+wiring was already correct). Added TC-9, driving an unmatched-with-CCC-corroboration line
+through the real `triggerMatchingForDocument` → `matchingPipeline.ts` → `writeException()`
+path and confirming the persisted `recon_exception.evidence` JSON contains the residual
+pass's corroboration and suggested action.
+
+Also added TC-7 (no-tool_use branch, mirroring Task 3.4's equivalent test) while addressing
+Finding 2 from the Untested Scenarios table, closing that gap alongside the others.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (4 fixed)
+[x] Pre-commit declaration recorded
+[x] Code review complete (G3, AI-write-authority)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 
