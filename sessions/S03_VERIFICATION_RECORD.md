@@ -423,30 +423,96 @@ Source: EXECUTION_PLAN.md Session 3
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Document extracted entirely via claude_sonnet | Summary with only that key populated | N/A | |
-| TC-2 | Document with some pdfplumber-fallback rows | Both providers shown with correct counts | N/A | |
+| TC-1 | Document extracted entirely via claude_sonnet | Summary with only that key populated | N/A | PASS |
+| TC-2 | Document with some pdfplumber-fallback rows | Both providers shown with correct counts | N/A | PASS |
+
+Plus TC-3 (zero attempts → empty summary), TC-4 (deterministic route counts correctly), and
+3 more added during this task's challenge review (TC-5–TC-7 below). 12/12 checks pass via
+`./scripts/test_extraction_method_summary.sh`.
+
+**Scope gap observed, not fixed here (recorded in `S03_SESSION_LOG.md`'s Out of Scope
+Observations):** Claude.md's Fixed Stack and this task's own spec name `pdfplumber_fallback`
+as a third provider value (an "AI-failure path only" OCR fallback), but no task's CC prompt
+in this session (3.1's vendor routing, 3.3's bounded retry) ever specifies when a failed
+Claude attempt should switch providers rather than simply retry Claude again —
+`extractionPipeline.ts`'s retry loop always re-invokes the same routing. No code path in
+this build ever produces a `pdfplumber_fallback` attempt row. TC-2 seeds this value directly
+to test the aggregation logic in isolation (same pattern `documentStatus.ts`'s own tests
+already use), which is sound for testing this task's actual scope (a pure GROUP BY/count
+endpoint, agnostic to which provider values occur) — the missing fallback-routing logic
+itself belongs to a different task/session, not this one.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 3.5
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Invariant/requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | getExtractionMethodSummary called with a nonexistent/mistyped documentId | Returns {} silently — identical to a legitimate zero-attempt document. documentStatus.ts (Task 2.3) explicitly guards this exact ambiguity by throwing; this module had no such check. | Breaks parity with the codebase's own established defensive pattern |
+| 2 | An attempt row with provider_used IS NULL (extractionPipeline.ts's catch-block path) | The query's AND provider_used IS NOT NULL filter silently excluded these rows — a document with only NULL-provider failures rendered the same {} as zero attempts or an invalid ID | S10 honored at storage, re-introduced as an effective omission at the read layer |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | Per-document granularity alone satisfies the "per-document (and/or per-batch)" spec wording | No batch entry point exists | No — no batch consumer exists to exercise; defensible reading, not verified |
+| 2 | Cross-document isolation of the WHERE document_id = ? filter is correct | Only verified incidentally via test ordering, not a designed two-document assertion | Yes — not written |
+
+### Invariant Coverage Gaps
+None new per the task spec — agrees with the spec's own "Invariant enforcement: None new" statement.
+
+### Known Untested Scenarios (out of scope — not findings)
+- pdfplumber_fallback never actually produced by a live pipeline run — scoped to Tasks 3.1/3.3, not re-flagged here
+- Fabric (non-SQLite) mode — assertSqliteMode() hard-blocks it, Session 4+ concern
+- Session 6's Document Detail screen consuming this summary — explicitly out of scope per the task's own text
+- A real multi-document/batch consumer — none exists yet
+
+### Structural Complexity Check
+CLEAN — single stateable purpose, no nesting beyond a single loop.
+
+### Challenge Verdict
+FINDINGS — 2 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: None new (relies on Task 3.1/3.2's provider field).
+No new invariant enforcement per the task's own spec — agreed. Confirmed no invariant
+regression from the fixes below.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (no document-existence check)** — FIXED. `getExtractionMethodSummary()` now
+checks `extracted_document` existence first and throws for an unknown `documentId`, matching
+`documentStatus.ts`'s established pattern for the identical "unknown ID vs. zero rows"
+ambiguity. Verified via new TC-5.
+
+**Finding 2 (NULL `provider_used` silently dropped)** — FIXED. The query now `COALESCE`s
+`provider_used` to an explicit `'unknown'` bucket instead of filtering NULL rows out, so a
+document whose only attempts were catastrophic pre-provider-selection failures is
+distinguishable from a genuine zero-attempt document. Verified via new TC-6.
+
+**Unverified Assumption #2 (cross-document isolation untested by design)** — FIXED (test
+coverage). Added TC-7: two documents with the same provider, explicitly asserted to see
+only their own counts.
+
+**Unverified Assumption #1 (batch granularity)** — ACCEPTED, not fixed. No batch consumer
+exists anywhere in the codebase yet (Session 6, Task 6.5, builds the only consumer, and it
+is per-document per its own task text); per-document granularity is a defensible reading of
+"and/or," and building an unrequested batch endpoint now would be speculative scope beyond
+this task's literal ask.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (2 fixed, 1 assumption fixed via test, 1 accepted with rationale)
+[x] Pre-commit declaration recorded
+[x] Code review complete (no new invariants; regression-checked)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 

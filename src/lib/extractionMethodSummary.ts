@@ -16,11 +16,26 @@ export type ExtractionMethodSummary = Record<string, number>;
 export function getExtractionMethodSummary(documentId: string): ExtractionMethodSummary {
   assertSqliteMode();
   const db = getSqliteDb();
+
+  // A nonexistent document and a real document with zero attempts would
+  // otherwise both silently return {} — the same ambiguity documentStatus.ts
+  // (Task 2.3) already guards against for this exact table. Fail loudly
+  // instead of a plausible-looking but wrong empty summary.
+  const documentExists = db.prepare('SELECT 1 FROM extracted_document WHERE document_id = ?').get(documentId);
+  if (!documentExists) {
+    throw new Error(`getExtractionMethodSummary: no document found with id "${documentId}".`);
+  }
+
+  // provider_used is only NULL for a catastrophic pre-provider-selection
+  // failure (extractionPipeline.ts's catch block, before a provider was ever
+  // chosen). COALESCE to an explicit "unknown" bucket rather than filtering
+  // these rows out — otherwise "zero attempts" and "attempts that failed
+  // before extraction even started" render as the identical {} output.
   const rows = db
     .prepare(
-      `SELECT provider_used, COUNT(*) AS n FROM extracted_extraction_attempt
-       WHERE document_id = ? AND provider_used IS NOT NULL
-       GROUP BY provider_used`
+      `SELECT COALESCE(provider_used, 'unknown') AS provider_used, COUNT(*) AS n FROM extracted_extraction_attempt
+       WHERE document_id = ?
+       GROUP BY COALESCE(provider_used, 'unknown')`
     )
     .all(documentId) as { provider_used: string; n: number }[];
 
