@@ -7,7 +7,7 @@
 **Claude.md version:** v1.2
 **Execution mode:** [x] Autonomous (sequential, no interruption, no prediction)
                   | [ ] Manual (prediction discipline, prediction before verification)
-**Status:** In Progress
+**Status:** Completed
 
 ## Pre-Build Validation — 2026-08-27
 
@@ -123,10 +123,16 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED
-**All tasks verified:** [ ] Yes
-**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
-**PR raised:** [ ] Yes — PR #: session/s03_extraction-service → feature/pbvi_execution
-**Status updated to:** 
-**Engineer sign-off:** 
-SIGNED OFF: [name] — [date]
+**Session integration check:** [x] PASSED — `./scripts/run_extraction_service_smoke_test.sh`
+  (all 6 tasks' dedicated test scripts, typecheck, and a new end-to-end round trip through
+  the real `registerDocument` → `triggerExtraction` → Silver → status → summary path,
+  exercising G5's lock via a real second concurrent-style trigger rejection)
+**All tasks verified:** [x] Yes — 3.1 (3297366), 3.2 (2b24787), 3.3 (6952bb8), 3.4 (bba3ac2),
+  3.5 (1e7ac21), 3.6 (fad4efd)
+**Blocked tasks resolved:** [x] Yes — N/A, no BLOCKED tasks occurred
+**PR raised:** [ ] Not yet — `gh` CLI unavailable in this environment (same limitation
+  noted at Session 2's wrap-up); title/description prepared for the engineer to open
+  manually, see below.
+**Status updated to:** Completed
+**Engineer sign-off:**
+SIGNED OFF: [pending engineer review] — 2026-08-28
