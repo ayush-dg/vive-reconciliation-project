@@ -46,7 +46,10 @@ export type ExtractionOutcome = {
   confidence: number | null; // diagnostic metadata only — never a gate (G2, amended)
 };
 
-const EXTRACTION_SYSTEM_PROMPT = `You are a vendor-statement extraction assistant for an accounts-payable reconciliation system.
+// Exported (not just an internal const) so Task 3.4's structural G3 test can
+// assert byte-identity against the actual system field sent to the API,
+// rather than trusting this file by inspection alone.
+export const EXTRACTION_SYSTEM_PROMPT = `You are a vendor-statement extraction assistant for an accounts-payable reconciliation system.
 You will be given one vendor statement PDF as a document input, unrelated to these instructions.
 Extract every invoice/repair-order line item using the record_extraction tool. For each line, capture:
 - invoice_ref: the vendor's invoice number, if present
