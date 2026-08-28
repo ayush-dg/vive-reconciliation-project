@@ -1,11 +1,13 @@
 import { getSqliteDb, getDbMode } from './db';
+import { runMatchingForDocument } from './matchingPipeline';
 
 /**
  * Matching invocation (Task 5.1) — manual (per-document) and scheduled (batch) entry
- * points, both converging on the same per-document matching execution logic (currently a
- * stub — Task 5.2 replaces it with real deterministic matching, the same
- * Session-2-stub -> Session-3-real-pipeline precedent Task 2.4/3.1 already established
- * for extraction).
+ * points, both converging on the same per-document matching execution logic
+ * (matchingPipeline.ts's runMatchingForDocument, wired in below — Tasks 5.2/5.3/5.4's
+ * real deterministic + AI-assisted + exception-wiring pipeline, replacing this task's own
+ * original placeholder no-op, the same Session-2-stub -> Session-3-real-pipeline
+ * precedent Task 2.4/3.1 already established for extraction).
  *
  * G5 — a document cannot have multiple active matching owners simultaneously. Acquired
  * via an atomic INSERT into recon.document_lock (the table's own PRIMARY KEY is the
@@ -23,11 +25,9 @@ function assertSqliteMode() {
   }
 }
 
-/** Task 5.2 replaces this with real deterministic matching (SQL-based, against
- * bronze.netsuite_vendorbill) plus Task 5.3's AI-assisted residual pass. */
-async function matchDocumentStub(documentId: string): Promise<void> {
-  void documentId;
-}
+// Session-2-stub -> Session-3-real-pipeline precedent applied here too: Task 5.2/5.3/5.4
+// replaced the placeholder no-op with the real matchingPipeline.ts orchestrator.
+const matchDocument = runMatchingForDocument;
 
 // A lock abandoned by a hard process crash between acquire and release (the only way
 // one can be abandoned — a thrown exception is already handled by triggerMatching-
@@ -79,7 +79,7 @@ export async function triggerMatchingForDocument(documentId: string): Promise<Tr
   }
 
   try {
-    await matchDocumentStub(documentId);
+    await matchDocument(documentId);
   } finally {
     releaseMatchingLock(documentId);
   }
@@ -122,7 +122,7 @@ export async function runScheduledMatchingBatch(): Promise<ScheduledMatchingBatc
       continue;
     }
     try {
-      await matchDocumentStub(documentId);
+      await matchDocument(documentId);
       processed.push(documentId);
     } finally {
       releaseMatchingLock(documentId);

@@ -97,32 +97,105 @@ Source: EXECUTION_PLAN.md Session 5
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | StatementLine with a matching NetSuite Bill document number | Produces a Match record, with `reference_run_id`/`reference_extracted_at`/`reference_source_system` populated from the specific NetSuite row matched | N/A | |
-| TC-2 | StatementLine with no corresponding NetSuite record | Produces an Exception (category e.g. `NOT_POSTED`), with the same 3 reference columns populated | N/A | |
-| TC-3 | Attempt to write a Match with any of the 3 reference columns null | Rejected — INVARIANT TOUCH: S8 (amended) | N/A | |
-| TC-4 | Matching logic execution | Never makes a live NetSuite/CCC API call | N/A | |
+| TC-1 | StatementLine with a matching NetSuite Bill document number | Produces a Match record, with `reference_run_id`/`reference_extracted_at`/`reference_source_system` populated from the specific NetSuite row matched | N/A | PASS |
+| TC-2 | StatementLine with no corresponding NetSuite record | Produces an Exception (category e.g. `NOT_POSTED`), with the same 3 reference columns populated | N/A | PASS |
+| TC-3 | Attempt to write a Match with any of the 3 reference columns null | Rejected — INVARIANT TOUCH: S8 (amended) | N/A | PASS |
+| TC-4 | Matching logic execution | Never makes a live NetSuite/CCC API call | N/A | PASS |
+
+Plus TC-5/TC-6 (amount-mismatch outcome, `writeMatch` FK rejection), and 4 more added
+during this task's challenge review (TC-7–TC-10 below). 19/19 checks pass via
+`./scripts/test_deterministic_matching.sh`.
+
+**Scope Decisions made during this task's own build (not fixes, documented up front):**
+1. Task 5.2's own spec names only 2 outcomes (matched / NOT_POSTED), but
+   `recon.exception.category`'s enum also includes `amount_mismatch`, and UI_SURFACE.md's
+   Exception Detail screen expects an amount-mismatch drill-down from
+   `recon.exception.evidence`. No other task produces `amount_mismatch` — extended
+   deterministic matching to compare amounts once a doc-number match is found (within
+   tolerance → Match; outside → unmatched with reason `AMOUNT_MISMATCH`), the only way this
+   category is reachable at all.
+2. For a NOT_POSTED case, S8 (amended) requires capturing "what state of NetSuite data was
+   checked" even though nothing matched. Interpreted as: capture the reference table's own
+   most-recently-extracted row overall (`ORDER BY _extracted_at DESC LIMIT 1`) — answering
+   "what was the data's state as of this check" in the absence of a specific matched row.
+3. `recon.exception.evidence` (not in Task 1.2's original schema) added via migration 005 —
+   read back by UI_SURFACE.md's Exception Detail screen.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 5.2
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Invariant/requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | Case/whitespace mismatch between Silver's normalized_invoice_ref and bill_document_number read raw, no normalization/collation applied on the read side | Every fixture row in every test seeded already-matching case — a real NetSuite row stored differently-cased would silently fall through to NOT_POSTED even though a true match exists | Core recon-key correctness; indirectly S8 |
+| 2 | Duplicate bill_document_number values across multiple rows (structurally possible — PK is transaction_id) | findReferenceRowByDocNumber used bare .get() with no ORDER BY/tie-break; which row's S8 data got captured was arbitrary | S8 — reproducibility capture could be non-deterministic |
+| 3 | End-to-end AMOUNT_MISMATCH path through runMatchingForDocument -> writeException -> recon_exception | TC-5 only unit-tested matchStatementLine directly; no test confirmed the category/reference columns land correctly through the full pipeline | Task 5.2/5.4 wiring correctness |
+| 4 | NOT_POSTED capture when bronze_netsuite_vendorbill has zero rows total | TC-1's seed row was already present by the time TC-2 ran, so the true-empty-table null-capture branch was never hit | S8's "what state was checked" guarantee, true-empty case |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | bill_document_number is stored in the same casing/trim convention as Silver's normalized ref | No normalization/COLLATE NOCASE applied on the read side | Yes — differently-cased fixture row |
+| 2 | bill_document_number is effectively unique in practice | No uniqueness enforced in the fixture or production table description | Yes — seed two rows, same doc number |
+| 3 | A NOT_POSTED exception's watermark being "most recent row overall" is acceptable even for a genuinely empty table | Interpretation stated as a Scope Decision; its all-null edge case untested | Yes — run against a zero-row table |
+
+### Invariant Coverage Gaps
+| Invariant | Enforcement point touched | Tested |
+|-----------|--------------------------|--------|
+| S8 (amended) | findReferenceRowByDocNumber, findLatestReferenceWatermark, writeMatch, writeException | Partial — matched-row capture and no-row-found-against-a-non-empty-table capture tested; NOT NULL enforcement on Match tested. Not tested: true-empty-table watermark, duplicate-doc-number tie-break, case/whitespace false-negative risk. |
+
+### Known Untested Scenarios (out of scope — not findings)
+- G5 concurrent-lock behavior — owned and tested by Task 5.1
+- Live Claude API call path in residual matching — Task 5.3's own test file
+- Real bronze.netsuite_vendorbill production schema/casing — requires live Fabric access
+- CCC corroboration-found path — Task 5.3's own fixture/tests
+
+### Structural Complexity Check
+CLEAN across deterministicMatching.ts and matchingPipeline.ts (one borderline-but-fine 2-level nesting noted in runMatchingForDocument, a narrow defensive guard not branching logic).
+
+### Challenge Verdict
+FINDINGS — 4 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: S8 (amended).
+S8 (amended) reviewed against the challenge output.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (casing/whitespace false-negative risk)** — FIXED.
+`findReferenceRowByDocNumber`'s SQL now applies `UPPER(TRIM(bill_document_number))` on the
+read side, matching Silver's own trim+uppercase normalization, so a real-world casing or
+whitespace difference no longer produces a false NOT_POSTED. Verified via new TC-7.
+
+**Finding 2 (duplicate doc-number tie-break)** — FIXED. Added
+`ORDER BY _extracted_at DESC LIMIT 1` to the same query, so duplicate
+`bill_document_number` rows resolve deterministically to the most-recently-extracted one,
+not an arbitrary row. Verified via new TC-8.
+
+**Finding 3 (AMOUNT_MISMATCH untested end-to-end)** — FIXED (test coverage; the pipeline
+wiring was already correct). Added TC-9, driving a genuine amount mismatch through
+`triggerMatchingForDocument` and confirming the resulting `recon_exception` row's category
+and reference columns.
+
+**Finding 4 (true-empty-table watermark untested)** — FIXED (test coverage; the null-return
+branch was already correct). Added TC-10, temporarily clearing the fixture table (restored
+after) to confirm a NOT_POSTED outcome against a genuinely empty reference table leaves
+`reference: null` rather than fabricating a watermark.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (4 fixed)
+[x] Pre-commit declaration recorded
+[x] Code review complete (S8)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 

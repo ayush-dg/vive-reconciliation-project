@@ -11,6 +11,7 @@ import {
   releaseMatchingLock,
 } from '../src/lib/matchingInvocation.ts';
 import { makeTestPdf } from './testPdfFixture.mjs';
+import { ensureNetsuiteVendorBillFixtureTable } from './netsuiteVendorBillFixture.mjs';
 
 let failures = 0;
 function check(label, condition) {
@@ -24,6 +25,7 @@ function check(label, condition) {
 
 runMigrations();
 const db = getSqliteDb();
+ensureNetsuiteVendorBillFixtureTable(); // this task's own pipeline is now real (Task 5.2/5.3/5.4 wired in), not a stub
 
 function registerTestDoc(legalEntityId = 'entity-1') {
   const bytes = makeTestPdf(`irrelevant-${crypto.randomUUID()}`);
