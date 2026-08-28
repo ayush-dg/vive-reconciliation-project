@@ -68,7 +68,7 @@ continuation authorization, consistent with Sessions 1-2.
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
 | 3.1 | Vendor identification, extraction routing, attempt recording | Completed | 3297366 |
-| 3.2 | Arithmetic and structural validation gate | | |
+| 3.2 | Arithmetic and structural validation gate | Completed | 2b24787 |
 | 3.3 | Bounded retry logic (max 2 attempts) | | |
 | 3.4 | Prompt injection defense | | |
 | 3.5 | Extraction-method summary endpoint | | |
