@@ -63,11 +63,11 @@ authorization, consistent with every prior session.
 
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
-| 6.1 | Home screen (statement list + status badges + summary stats + Reconcile action) | | |
+| 6.1 | Home screen (statement list + status badges + summary stats + Reconcile action) | Completed | eac7f14 |
 | 6.2 | Exceptions list screen | | |
 | 6.3 | Exception Detail screen | | |
 | 6.4 | Global error/loading state wiring | | |
-| 6.5 | Document Detail screen (extraction summary) | | |
+| 6.5 | Document Detail screen (extraction summary) | Completed | eac7f14 |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
 
