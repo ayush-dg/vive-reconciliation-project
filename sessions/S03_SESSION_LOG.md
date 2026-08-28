@@ -71,7 +71,7 @@ continuation authorization, consistent with Sessions 1-2.
 | 3.2 | Arithmetic and structural validation gate | Completed | 2b24787 |
 | 3.3 | Bounded retry logic (max 2 attempts) | Completed | 6952bb8 |
 | 3.4 | Prompt injection defense | Completed | bba3ac2 |
-| 3.5 | Extraction-method summary endpoint | | |
+| 3.5 | Extraction-method summary endpoint | Completed | 1e7ac21 |
 | 3.6 | Silver normalization | | |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
@@ -110,7 +110,7 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 
 | Task | Observation | Nature | Recommended action |
 |------|-------------|--------|--------------------|
-|      |             |        |                    |
+| 3.5 | Claude.md's Fixed Stack (Section 4) and Task 3.2/3.5's own specs name three extraction provider values — `python_library_pdfplumber`, `claude_sonnet`, `pdfplumber_fallback` (an "AI-failure path only" OCR fallback) — but no task's CC prompt in this session (3.1's vendor routing, 3.3's bounded retry) ever specifies when or how a failed Claude attempt should switch providers rather than simply retry Claude again. `extractionPipeline.ts`'s retry loop always re-invokes the same `identifyAndExtract` routing on every attempt. No code path in this build ever produces a `pdfplumber_fallback` attempt row — it is a documented provider value with no implementing logic anywhere in the codebase. | Plan gap (spec names a mechanism no task operationalizes), not a code defect | A future session (or an amendment to Task 3.3's spec) should decide: does a 2nd Claude failure fall back to a pdfplumber OCR attempt before being flagged `OCR_LOW_CONFIDENCE`, or is `pdfplumber_fallback` dead terminology to remove from the docs? Flagging for engineer decision rather than resolving unilaterally, since it changes S7's retry semantics. |
 
 ---
 
