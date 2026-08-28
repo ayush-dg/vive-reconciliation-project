@@ -36,6 +36,23 @@ function getExistingAttemptCount(documentId: string): number {
   return row.n;
 }
 
+// Idempotency guard: nothing else in this codebase stops a direct call to
+// runExtractionPipeline (bypassing extraction.ts's G5 lock, e.g. a future
+// batch-reprocessing caller) from re-running an already-succeeded document —
+// re-entering the loop would write a duplicate attempt row and a duplicate
+// silver_statement_line row for the same statement line, with no DB-level
+// uniqueness constraint to catch it either.
+function hasAlreadySucceeded(documentId: string): boolean {
+  const db = getSqliteDb();
+  const latest = db
+    .prepare(
+      `SELECT arithmetic_pass, structural_pass FROM extracted_extraction_attempt
+       WHERE document_id = ? ORDER BY attempt_no DESC LIMIT 1`
+    )
+    .get(documentId) as { arithmetic_pass: number | null; structural_pass: number | null } | undefined;
+  return !!latest && latest.arithmetic_pass === 1 && latest.structural_pass === 1;
+}
+
 export async function runExtractionPipeline(documentId: string): Promise<void> {
   assertSqliteMode();
   const db = getSqliteDb();
@@ -45,6 +62,10 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
     .get(documentId) as { content_sha256: string; legal_entity_id: string } | undefined;
   if (!document) {
     throw new Error(`runExtractionPipeline: document ${documentId} not found.`);
+  }
+
+  if (hasAlreadySucceeded(documentId)) {
+    return; // already promoted to Silver — never reprocess (idempotency guard)
   }
 
   let attemptNo = getExistingAttemptCount(documentId);
@@ -112,7 +133,18 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
     }
 
     if (arithmeticPass && structuralPass && extracted && vendor) {
-      normalizeToSilver(documentId, vendor.vendorId, extracted);
+      try {
+        normalizeToSilver(documentId, vendor.vendorId, extracted);
+      } catch (err) {
+        // The attempt row above is already committed and correctly reflects
+        // that extraction validation passed (G1 forbids rewriting it, and
+        // that fact is true) — but an unexpected failure at this downstream
+        // step must not vanish as an unhandled rejection with no diagnostic
+        // trail. Re-thrown with context rather than silently swallowed.
+        throw new Error(
+          `runExtractionPipeline: document ${documentId} passed validation on attempt ${attemptNo} but Silver normalization failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
       return; // success — no further attempts
     }
 
