@@ -73,8 +73,13 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
       extracted = result.outcome.extracted;
 
       const validation = validateExtraction(extracted);
-      arithmeticPass = !validation.reasonCodes.includes('ARITHMETIC_MISMATCH');
-      structuralPass = !validation.reasonCodes.includes('MISSING_IDENTIFIER') && extracted !== null;
+      // Both flags require extracted !== null — otherwise a total extraction
+      // failure (EXTRACTION_ERROR, neither reason code present) would record
+      // arithmetic_pass=1 despite arithmetic never having been assessed at
+      // all, the same misleading "looks healthy" audit-trail gap Task 3.1's
+      // structural_pass fix closed for the missing-vendor case.
+      arithmeticPass = extracted !== null && !validation.reasonCodes.includes('ARITHMETIC_MISMATCH');
+      structuralPass = extracted !== null && !validation.reasonCodes.includes('MISSING_IDENTIFIER');
     } catch (err) {
       rawOutput = `attempt failed before extraction outcome was available: ${err instanceof Error ? err.message : String(err)}`;
     }

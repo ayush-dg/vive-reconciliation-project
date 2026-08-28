@@ -151,6 +151,18 @@ function registerTestDoc(text, legalEntityId = 'entity-1') {
   check('TC-7: never both documents show is_latest_version=1 simultaneously', bothLatest === 1);
 }
 
+// --- TC-8 (Task 3.2 challenge-review regression): a garbled, non-numeric
+// TOTAL must record arithmetic_pass=0, not silently 1 — NaN comparisons in
+// the old arithmetic check were always false, so a corrupted total looked
+// arithmetically fine forever. ---
+{
+  const text = 'VENDOR: Garbled_Total_Vendor\nTOTAL: not-a-number\nINVOICE: INV-50 | RO: - | AMOUNT: 25.00 | DATE: 2026-07-13\n';
+  const documentId = registerTestDoc(text);
+  await runExtractionPipeline(documentId);
+  const attempt = db.prepare('SELECT arithmetic_pass FROM extracted_extraction_attempt WHERE document_id = ?').get(documentId);
+  check('TC-8: garbled non-numeric TOTAL records arithmetic_pass=0', attempt.arithmetic_pass === 0);
+}
+
 await closeDb();
 
 if (failures > 0) {

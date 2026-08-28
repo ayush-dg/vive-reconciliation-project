@@ -124,33 +124,93 @@ Source: EXECUTION_PLAN.md Session 3
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Lines sum correctly, valid dates/amounts | Eligible for matching, regardless of confidence | N/A | |
-| TC-2 | Lines sum incorrectly | Not eligible, triggers retry path | N/A | |
-| TC-3 | Line missing invoice_number, no ro_number fallback | Not eligible, triggers retry path | N/A | |
-| TC-4 | Low-confidence but structurally/arithmetically valid | Proceeds to Silver | N/A | |
-| TC-5 | Blank-amount (credit/payment) line, valid invoice_number | Reaches Silver, not diverted | N/A | |
+| TC-1 | Lines sum correctly, valid dates/amounts | Eligible for matching, regardless of confidence | N/A | PASS |
+| TC-2 | Lines sum incorrectly | Not eligible, triggers retry path | N/A | PASS |
+| TC-3 | Line missing invoice_number, no ro_number fallback | Not eligible, triggers retry path | N/A | PASS |
+| TC-4 | Low-confidence but structurally/arithmetically valid | Proceeds to Silver | N/A | PASS |
+| TC-5 | Blank-amount (credit/payment) line, valid invoice_number | Reaches Silver, not diverted | N/A | PASS |
+
+Plus 3 additional cases added during this task's own build/review: TC-6 (null extraction →
+`EXTRACTION_ERROR`), TC-7 (missing vendor name → structural fail — regression for Task
+3.1's Finding 2), TC-8 (unparseable date → structural fail). 16/16 checks pass via
+`./scripts/test_validation_gate.sh`.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 3.2
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Invariant/requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | Empty `lines` array with `statementTotal` equal to the empty sum | Confirmed: returns status 'pass' — a document with zero line items can reach Silver. | G2 |
+| 2 | Simultaneous structural AND arithmetic failure together | Confirmed working correctly (both reason codes appear, no evidence-key collision) — previously unverified. | G2 |
+| 3 | NaN numeric values reaching validateExtraction for statementTotal/line.amount | Directly reachable via aiProvider.ts's mock regex path (Number(garbledText) produces NaN, not null). No TC covered this. | G2 |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | statementTotal/line.amount, when not null, are always finite numbers | aiProvider.ts can produce NaN via Number(garbledText) | Yes — confirmed breaks the arithmetic check |
+| 2 | extractionPipeline.ts's derived arithmeticPass/structuralPass are a complete, faithful re-derivation of validation.status | EXTRACTION_ERROR (null-extraction path) belongs to neither the arithmetic nor structural reason-code bucket, so arithmeticPass defaulted to true | Yes — confirmed by reading the null-input early return against the caller's derivation logic |
+
+### Invariant Coverage Gaps
+| Invariant | Enforcement point touched | Tested |
+|-----------|--------------------------|--------|
+| G2 | Arithmetic branch (`statementTotal === null` guard + tolerance comparison) | Partially — confirmed a NaN statementTotal (or NaN line amount) bypasses both the null guard and the `>` comparison (`NaN > x` is always false), silently reporting pass/no-mismatch. Live G2 bypass for a reachable input shape. |
+
+### Known Untested Scenarios (out of scope — not findings)
+- Real Claude Sonnet live-call output producing NaN/non-conforming values — requires ANTHROPIC_API_KEY + EXTRACTION_LIVE_TESTS=1
+- Downstream effect of a NaN-driven false pass reaching normalizeToSilver/matching — different task/session scope
+- Whether misleading arithmetic_pass=1 rows are surfaced to a user in Task 2.3's status computation — requires DB/UI integration check outside this task's files
+
+### Structural Complexity Check
+`isParseableDate` and `validateExtraction`: both CLEAN — single stateable purpose, no nesting beyond two levels.
+
+### Challenge Verdict
+FINDINGS — 2 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: G2 (amended).
+G2 (amended) reviewed against the challenge output. Both findings were confirmed as live
+bypasses, not false positives, and fixed.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (NaN `statementTotal` bypasses the arithmetic gate)** — FIXED.
+`validateExtraction()` now explicitly checks `Number.isNaN(extracted.statementTotal)`
+alongside the `=== null` guard (a NaN total is not caught by either the null check or the
+`diff > tolerance` comparison, since NaN comparisons are always false), and guards the
+computed `diff` itself the same way. Verified with a new TC-9 (`statementTotal: Number('xyz')`
+→ `ARITHMETIC_MISMATCH`) plus a pipeline-level regression added to Task 3.1's script (TC-8:
+a garbled `TOTAL: not-a-number` now records `arithmetic_pass=0`, confirmed previously
+recorded `1`).
+
+**Finding 2 (misleading `arithmetic_pass=1`/`structural_pass` derivation on total
+extraction failure)** — FIXED. `extractionPipeline.ts`'s derived flags now both require
+`extracted !== null` (`arithmeticPass = extracted !== null && !reasonCodes.includes(...)`,
+same for `structuralPass`), so an `EXTRACTION_ERROR` attempt (extraction failed entirely)
+correctly records both flags as `0` instead of a misleading partial pass — matching the
+same audit-trail-integrity principle behind Task 3.1's Finding 2 fix.
+
+**Untested Scenario #1 (empty `lines` array passes)** — ACCEPTED, not fixed. Not called out
+by Task 3.2's own spec or by G2/IC-2's literal text (which name arithmetic + structural
+checks on the lines that exist, not a minimum line count), and pdfplumber/Claude extraction
+returning zero lines for a real vendor statement is not a scenario either extractor path
+in this build is expected to produce. No corresponding defect identified — noted here so a
+future session doesn't rediscover it as new.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (2 fixed)
+[x] Pre-commit declaration recorded
+[x] Code review complete (G2)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 
