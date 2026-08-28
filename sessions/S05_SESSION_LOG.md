@@ -89,7 +89,7 @@ Task 4.3 would have handled before Session 4 was removed (S8, amended).
 
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
-| 5.1 | Matching invocation (manual + scheduled) | | |
+| 5.1 | Matching invocation (manual + scheduled) | Completed | 7e17c0f |
 | 5.2 | Deterministic matching (SQL-based) | | |
 | 5.3 | AI-assisted residual matching | | |
 | 5.4 | Exception category enum + schema wiring | | |
