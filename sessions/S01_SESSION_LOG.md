@@ -154,7 +154,7 @@ npx playwright --version && \
 **All tasks verified:** [x] Yes — all 4 tasks (1.1–1.4) Completed, PASS verdicts recorded
 in `sessions/S01_VERIFICATION_RECORD.md`, 13/13 `ui_tests` passing, `npm run build` clean.
 **Blocked tasks resolved:** N/A — no BLOCKED tasks occurred this session.
-**PR raised:** [ ] Yes — PR #: session/s01_scaffolding-auth-db → feature/pbvi_execution
+**PR raised:** [x] Yes — PR #: session/s01_scaffolding-auth-db → feature/pbvi_execution
 **Status updated to:** Complete
 **Engineer sign-off:** 
 SIGNED OFF: Vaishali — 27-09-2026

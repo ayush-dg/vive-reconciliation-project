@@ -14,9 +14,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div style={{ display: 'flex' }}>
+    <div className="app-shell">
       <Sidebar username={session.username} />
-      <main style={{ flex: 1 }}>{children}</main>
+      <main className="app-main">{children}</main>
       <ToastProvider />
     </div>
   );

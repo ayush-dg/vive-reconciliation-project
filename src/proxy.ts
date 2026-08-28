@@ -35,8 +35,13 @@ export const config = {
   matcher: [
     /*
      * Match every route except: /login, /api/health, Next internals, and
-     * common static-asset paths.
+     * static assets (favicon.ico, anything under public/ served by
+     * extension — e.g. /vive-logo.png). The original pattern only excluded
+     * favicon.ico by name, not asset paths in general — public/vive-logo.png
+     * was getting redirected to /login like any other unauthenticated route,
+     * which is what actually broke next/image's optimizer (it received a
+     * redirect response, not image bytes, and reported "not a valid image").
      */
-    '/((?!login|api/health|_next/static|_next/image|favicon.ico).*)',
+    '/((?!login|api/health|_next/static|_next/image|.*\\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|map)$).*)',
   ],
 };

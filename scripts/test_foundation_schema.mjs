@@ -22,7 +22,7 @@ function check(label, condition) {
   }
 }
 
-runMigrations();
+const { applied: firstRunApplied, skipped: firstRunSkipped } = runMigrations();
 const db = getSqliteDb();
 
 // --- TC-1: insert extracted_document with all required fields succeeds ---
@@ -164,11 +164,16 @@ try {
 }
 
 // --- Challenge Agent Finding: migration idempotency — re-running does not fail ---
+// Compares against the first run's own totals rather than a hardcoded count,
+// so this stays correct as more migration files are added in later sessions
+// (it originally hardcoded "1", which went stale the moment Task 1.3 added
+// a second migration file).
 try {
+  const totalMigrationFiles = firstRunApplied.length + firstRunSkipped.length;
   const second = runMigrations();
   check(
     `Migration re-run is idempotent (applied=${second.applied.length}, skipped=${second.skipped.length})`,
-    second.applied.length === 0 && second.skipped.length === 1
+    second.applied.length === 0 && second.skipped.length === totalMigrationFiles
   );
 } catch (e) {
   check(`Migration re-run is idempotent (${e.message})`, false);
