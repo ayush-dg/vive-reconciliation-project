@@ -1,7 +1,15 @@
 # INVARIANTS.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.5
+**Version:** 1.6
 **Status:** COMPLETE
+
+## v1.6 Changelog (2026-08-28, build-time correction discovered mid-Session-4)
+
+**S8 amended** — reworded away from a formal `ReferenceSnapshot` entity this build was
+assumed to create. NetSuite/CCC ingestion is externally owned (ARCHITECTURE.md D9 amended)
+and the Lakehouse table is upsert-in-place with no retained history (confirmed 2026-08-28).
+S8 is now satisfied by capturing the external pipeline's own `_run_id`/`_extracted_at`/
+`_source_system` columns at match time. See ARCHITECTURE.md D-M.
 
 ## v1.5 Changelog (2026-08-27)
 
@@ -347,15 +355,25 @@ ARCHITECTURE.md.
 
 ---
 
-## S8 — Reference data is version-bound (demoted from G6)
+## S8 — Reference data is version-bound (demoted from G6) [AMENDED 2026-08-28]
 
-**Invariant:** Every Match and Exception that depends on reference data must reference
-exactly one immutable `ReferenceSnapshot` version. Matching must never resolve reference
-data from an unversioned or live source.
+**Invariant:** Every Match and Exception that depends on reference data must carry the
+specific `_run_id`, `_extracted_at`, and `_source_system` of the NetSuite/CCC row(s) it was
+evaluated against — captured at match time, not resolved after the fact. Matching must
+never resolve reference data from a live source.
 
-**Violation:** A match or exception has no snapshot reference, references multiple
-snapshots ambiguously, or uses reference data that cannot be tied to the exact version
-used for the decision.
+**Amendment (2026-08-28):** Originally written assuming this build would ingest NetSuite/CCC
+data itself and stamp a formal `ReferenceSnapshot` version (per the now-amended
+ARCHITECTURE.md D9). Confirmed 2026-08-28: ingestion is externally owned, and the
+Lakehouse's NetSuite table is upsert-in-place with no retained history — there is no
+"snapshot" to reference after the fact. The invariant is satisfied instead by reading the
+external pipeline's own `_run_id`/`_extracted_at`/`_source_system` columns off the exact
+rows queried, at the moment of matching, and copying them onto the Match/Exception record.
+See ARCHITECTURE.md D-M.
+
+**Violation:** A match or exception that depended on reference data has no captured
+`_run_id`/`_extracted_at`/`_source_system`, or the matching logic resolves reference data
+from a live API call instead of the already-landed Lakehouse table.
 
 **Classification rationale:** Applies specifically to the matching task; demoted from
 Global per the five-cap.

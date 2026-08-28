@@ -1,9 +1,10 @@
 # UI_SURFACE.md — VIVE Statement Reconciliation (Bounded First Build)
-## Version: v1.3 · 2026-08-27
+## Version: v1.4 · 2026-08-28
 
 ## Amendment Log
 | Date | Screen/Section | Change | Reason |
 |---|---|---|---|
+| 2026-08-28 | Exception Detail | Amount-mismatch NetSuite value now sourced from `recon.exception.evidence` (captured at match time), not `silver.reference_snapshot` | EXECUTION_PLAN.md Session 4 removed — NetSuite/CCC ingestion is externally owned, no Silver snapshot layer is built by this project (ARCHITECTURE.md D-M) |
 | 2026-08-27 | Upload | Vendor removed as a form field — app identifies vendor during extraction, not the user at upload; uploaded-document list shows "Identifying…" until extraction completes | Resolves gap #3, per ARCHITECTURE.md D-L amendment (PHASE4_GATE_RECORD.md Finding 2) |
 | 2026-08-27 | Home, Document Detail | Data-source references updated `bronze.document`/`bronze.extraction_attempt` → `extracted.document`/`extracted.extraction_attempt` | ARCHITECTURE.md D-J — VIVE intake data relocated to new `extracted` schema, separate from `bronze` (which hosts live NetSuite data) |
 | 2026-08-26 | Home | Added reconciled/not-reconciled counts to Summary stats; added Reconcile action per row | New requirement — manual reconcile trigger + outcome visibility |
@@ -297,7 +298,7 @@ document list (below the drop-zone) and Home's Uploaded Statements panel show ve
 | Main | Exception full record | `recon.exception` | — |
 | Related | Corroborating evidence (CCC RO confirmation, v3.3 §11.4) | `silver.ccc_ro` | Present only when CCC evidence exists |
 | Related | Source statement line / extraction record | Bronze/Silver | Raw extracted line this exception traces to |
-| Related — **amount-mismatch only (added 2026-08-26)** | Expandable/dropdown: statement value vs. NetSuite/Fabric source value for the invoice | `silver.reference_snapshot` (Task 4.3's version-bound snapshot) | Collapsed by default; shown only when `exception.category = amount_mismatch` |
+| Related — **amount-mismatch only (added 2026-08-26)** | Expandable/dropdown: statement value vs. NetSuite/Fabric source value for the invoice | `recon.exception.evidence` (captured at match time, per EXECUTION_PLAN.md Task 5.2 amended 2026-08-28 — never a live re-query) | Collapsed by default; shown only when `exception.category = amount_mismatch` |
 
 ### Actions
 | Label | Scope | Trigger | Condition | Outcome |
