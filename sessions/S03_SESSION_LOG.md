@@ -1,0 +1,131 @@
+# SESSION_LOG.md
+
+## Session: Session 3 — Extraction Service
+**Date started:** 2026-08-27
+**Engineer:** Vaishali
+**Branch:** session/s03_extraction-service
+**Claude.md version:** v1.2
+**Execution mode:** [x] Autonomous (sequential, no interruption, no prediction)
+                  | [ ] Manual (prediction discipline, prediction before verification)
+**Status:** In Progress
+
+## Pre-Build Validation — 2026-08-27
+
+### Schema Validation
+**Verdict:** WARN — identical to Sessions 1-2 (METHODOLOGY_VERSION mismatch only, resolved
+via `.claude/SKILL.md` v4.9). Claude.md unchanged since Session 1.
+
+### Interpretation Confirmation
+
+**Modules I will modify:**
+- `/src/lib/vendorIdentification.ts` — Task 3.1: vendor registry match/routing, provisional
+  vendor creation, version-chaining (moved from Task 2.2)
+- `/src/lib/pdfplumberExtractor.ts` + `/scripts/pdfplumber_extract.py` — known-vendor
+  deterministic extraction (real Python subprocess — pdfplumber is available in this
+  environment; see Decision Log for why this isn't a JS substitute)
+- `/src/lib/aiProvider.ts` — Claude Sonnet extraction, env-driven (real API when
+  `ANTHROPIC_API_KEY` set, deterministic mock otherwise — no key available in this
+  environment; see Decision Log)
+- `/src/lib/validationGate.ts` — Task 3.2: arithmetic + structural validation
+- `/src/lib/extractionPipeline.ts` — orchestration: route → extract → record attempt →
+  validate → bounded retry (Task 3.3) → Silver normalization (Task 3.6) on pass
+- `/src/lib/extractionMethodSummary.ts` — Task 3.5
+- `/src/lib/silverNormalization.ts` — Task 3.6
+- `/src/lib/extraction.ts` — replaces Session 2's `startExtractionPipelineStub()` no-op with
+  a real call into the pipeline above
+- `/scripts/**` — verification scripts per task
+- `/sessions/S03_SESSION_LOG.md`, `/sessions/S03_VERIFICATION_RECORD.md`
+
+**Invariants I will respect:**
+- S10, G1 — `extracted.extraction_attempt` / `extracted.stmt_*` written before validation,
+  append-only (Task 3.1)
+- S2 — vendor/period/entity version-chaining (Task 3.1, moved from Task 2.2)
+- G2 (amended) — structural + arithmetic validation only, confidence is metadata (Task 3.2)
+- S7 — max 2 attempts before `OCR_LOW_CONFIDENCE` (Task 3.3)
+- G3 — extracted content is data, never instructions, to any LLM call (Task 3.4, and
+  structurally throughout the Claude provider)
+- S6 — normalization_version on every `silver.statement_line` row (Task 3.6)
+- IC-1–IC-5 (GLOBAL) apply throughout.
+
+**Blast radius:**
+- In scope: file list above.
+- Out of scope: `/docs/**`, matching service (Session 5), Home/Exceptions screens
+  (Session 6), Fabric wiring (Session 4).
+- Integration points (new this session): Anthropic API (env-gated, mock-by-default even
+  when a key is present — see Decision Log), a Python subprocess for pdfplumber.
+- Entities affected: `extracted.extraction_attempt` (first real writes), `extracted.stmt_*`
+  (first real per-vendor writes), `extracted.vendor_registry` (first provisional-vendor
+  writes), `silver.statement_line` (first writes — Task 3.6).
+
+**Engineer response:** Treated as CONFIRMED — engineer's "continue with session 3" is
+continuation authorization, consistent with Sessions 1-2.
+**Proceed to first task:** YES
+
+---
+
+## Tasks
+
+| Task Id | Task Name | Status | Commit |
+|---------|-----------|--------|--------|
+| 3.1 | Vendor identification, extraction routing, attempt recording | | |
+| 3.2 | Arithmetic and structural validation gate | | |
+| 3.3 | Bounded retry logic (max 2 attempts) | | |
+| 3.4 | Prompt injection defense | | |
+| 3.5 | Extraction-method summary endpoint | | |
+| 3.6 | Silver normalization | | |
+
+Valid Status values: Completed | BLOCKED | SKIPPED
+
+---
+
+## Resumed Sessions (Autonomous mode only)
+
+| Resumed at | Resumed from Task | Blocking issue resolution | Resolved at | Root cause |
+|------------|-------------------|--------------------------|-------------|------------|
+|            |                   |                           |             |            |
+
+---
+
+## Decision Log
+
+| Task | Decision made | Rationale |
+|------|---------------|-----------|
+| Pre-Build | Known-vendor deterministic extraction uses a **real Python subprocess invoking pdfplumber** (`scripts/pdfplumber_extract.py`), not a JS/Node substitute | Claude.md's Fixed Stack names "deterministic pdfplumber-based extractors" explicitly. Python 3.14 + pdfplumber 0.11.10 are actually installed in this environment, so faithful implementation is possible — substituting a JS library would be a real, avoidable architecture deviation. Flagging the polyglot dependency itself: Azure App Service deployment will need a Python runtime alongside Node, not evaluated here. |
+| Pre-Build | Claude Sonnet extraction is env-driven: real Anthropic API call when `ANTHROPIC_API_KEY` is set, a deterministic mock otherwise — same fallback pattern as `db.ts` (SQLite/Fabric) and `storage.ts` (local/blob) | No `ANTHROPIC_API_KEY` available in this environment. Consistent with the project's established engineering pattern rather than a new one-off decision. |
+| Pre-Build | Automated tests **always** use the mock extraction path, regardless of whether a real key is present later | Unlike the DB/storage fallbacks (pure infra availability), a live Anthropic key means real per-call billing. Repeated full-suite test runs (this project's own established habit — 2-3x per task for stability checks) against a live API would accumulate real cost. An explicit opt-in env var (`EXTRACTION_LIVE_TESTS=1`) is required to exercise the real API path in tests; never the default. |
+| Pre-Build | Test PDF fixtures generated via **PyMuPDF (fitz)** | Available in this environment (`pip list` confirms); `reportlab`/`fpdf` are not installed. Used only to construct simple, known-content PDFs for testing the deterministic extraction path — not a runtime dependency of the app itself. |
+
+---
+
+## Deviations
+
+| Task | Deviation observed | Action taken |
+|------|--------------------|--------------|
+|      |                    |              |
+
+---
+
+## Out of Scope Observations
+
+| Task | Observation | Nature | Recommended action |
+|------|-------------|--------|--------------------|
+|      |             |        |                    |
+
+---
+
+## Claude.md Changes
+
+| Change | Reason | New Claude.md version | Tasks re-verified |
+|--------|--------|-----------------------|-------------------|
+| None   |        |                       |                   |
+
+---
+
+## Session Completion
+**Session integration check:** [ ] PASSED
+**All tasks verified:** [ ] Yes
+**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
+**PR raised:** [ ] Yes — PR #: session/s03_extraction-service → feature/pbvi_execution
+**Status updated to:** 
+**Engineer sign-off:** 
+SIGNED OFF: [name] — [date]
