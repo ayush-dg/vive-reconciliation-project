@@ -311,30 +311,86 @@ Source: EXECUTION_PLAN.md Session 5
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Every exception-producing path | Writes a valid enum category | N/A | |
-| TC-2 | Attempt to write an unrecognized category string | Rejected — INVARIANT TOUCH: S5 | N/A | |
-| TC-3 | Any exception created | `owner`/`aging_started_at`/`run_reference` remain NULL | N/A | |
-| TC-4 | NOT_POSTED exception (Task 5.2's no-match path) | Carries non-NULL `reference_run_id`/`reference_extracted_at`/`reference_source_system` | N/A | |
-| TC-5 | Arithmetic-mismatch exception (Task 3.2) | Leaves the 3 reference columns NULL — never touched reference data | N/A | |
+| TC-1 | Every exception-producing path | Writes a valid enum category | N/A | PASS |
+| TC-2 | Attempt to write an unrecognized category string | Rejected — INVARIANT TOUCH: S5 | N/A | PASS |
+| TC-3 | Any exception created | `owner`/`aging_started_at`/`run_reference` remain NULL | N/A | PASS |
+| TC-4 | NOT_POSTED exception (Task 5.2's no-match path) | Carries non-NULL `reference_run_id`/`reference_extracted_at`/`reference_source_system` | N/A | PASS |
+| TC-5 | Arithmetic-mismatch exception (Task 3.2) | Leaves the 3 reference columns NULL — never touched reference data | N/A | SUBSTITUTED (see below) |
+
+Plus TC-6 (evidence persisted as parseable JSON), and TC-7 added during this task's
+challenge review (`reason_codes` persistence). 11/11 checks pass via
+`./scripts/test_exception_schema_wiring.sh`.
+
+**TC-5's literal scenario is not constructible in this build** (recorded as an Out of
+Scope Observation in `sessions/S05_SESSION_LOG.md`, not fixed by inventing a new
+exception-producing path): Task 3.2's validation gate blocks a line from ever being
+promoted to `silver.statement_line` when arithmetic fails, so it can never acquire a
+`statement_line_id` to attach a `recon.exception` row to (`NOT NULL` FK). TC-5 instead
+drives the real, reachable NULL-reference case end-to-end: a `not_posted` exception
+produced while the reference table is genuinely empty.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 5.4
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Invariant/requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | The real, reachable NULL-reference case (not_posted against a genuinely empty reference table) was never driven end-to-end through writeException/recon_exception. TC-5 instead called writeException directly with category='amount_mismatch'+reference=null, a pairing deterministicMatching.ts's AMOUNT_MISMATCH branch can never actually produce (it only fires after a reference row was found, always setting reference non-null). | S8-amended's NULL-reference requirement was verified only against a manufactured, unreachable state, not any state the live system can actually produce |
+| 2 | reason_codes — named explicitly by D-K's contract and this task's own CC prompt — is computed by both matching stages but never persisted anywhere in recon_exception; confirmed via a live probe through the real pipeline showing no reason_codes key at any level of the persisted evidence, and no schema column existed for it | Once a category is written, the specific reason is unrecoverable from the DB — undermines D-K's stated purpose |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | TC-5's own comment claimed "amount_mismatch/not_posted both always touch reference data by definition" as justification for its synthetic pairing — factually wrong for not_posted, which Task 5.2's own TC-10 already proves can legitimately have reference: null | Direct code read of deterministicMatching.ts's AMOUNT_MISMATCH branch (always non-null reference) plus Task 5.2's TC-10 | Yes — confirmed by reading both files |
+| 2 | matchingPipeline.ts re-derives category from outcome.reasonCodes.includes('AMOUNT_MISMATCH') rather than MatchOutcome carrying a category field directly, a structural mismatch with the CC prompt's "rather than re-deriving them" language | MatchOutcome has no category field | Partially — mapping correctness is tested (Task 5.2's TC-9); the contract-fidelity observation itself isn't a separate pass/fail test |
+
+### Invariant Coverage Gaps
+| Invariant | Enforcement point touched | Tested |
+|-----------|--------------------------|--------|
+| S5 | exceptionWriter.ts's VALID_CATEGORIES check + DB CHECK constraint | Yes — both layers confirmed |
+| S8 amended (exceptions) | matchingPipeline.ts forwarding outcome.reference into writeException; deterministicMatching.ts's watermark/exact-row capture | Partial — non-NULL cases (not_posted watermark, amount_mismatch exact row) tested end-to-end; the NULL case was only tested via an unreachable synthetic pairing |
+
+### Known Untested Scenarios (out of scope — not findings)
+- EXECUTION_PLAN.md's literal "arithmetic-mismatch exception" test case — already recorded as a stale planning-doc inconsistency, architecturally unconstructible
+- Fabric/T-SQL behavior of the category CHECK constraint — requires live Fabric connectivity
+- Concurrent/multi-owner writes to recon.exception — different invariant/session scope
+
+### Structural Complexity Check
+CLEAN — writeException has a single stateable purpose, no nesting beyond one level.
+
+### Challenge Verdict
+FINDINGS — 2 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: S5; S8 (amended).
+S5 and S8 (amended, for exceptions) reviewed against the challenge output.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (TC-5 tested an unreachable state instead of the real one)** — FIXED. TC-5
+rewritten to temporarily empty the shared `bronze_netsuite_vendorbill` fixture (restored
+after, same technique as Task 5.2's TC-10) and drive a genuine `not_posted` exception
+end-to-end through `triggerMatchingForDocument`, confirming the persisted row's 3
+reference columns are actually NULL — not just at `matchStatementLine()`'s return value,
+but as written to `recon_exception`.
+
+**Finding 2 (`reason_codes` computed but never persisted)** — FIXED. Added migration 006
+(`recon.exception.reason_codes`, `NOT NULL DEFAULT '[]'`), extended `writeException()`'s
+`ExceptionInput` with a required `reasonCodes: string[]` field (JSON-serialized on write),
+and updated `matchingPipeline.ts` to forward both stages' reason codes
+(`[...outcome.reasonCodes, ...residual.reasonCodes]`). Verified via new TC-7.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed (TC-5 substituted with a sound, reachable equivalent)
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (2 fixed)
+[x] Pre-commit declaration recorded
+[x] Code review complete (S5, S8)
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed

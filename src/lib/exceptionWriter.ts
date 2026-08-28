@@ -26,6 +26,11 @@ function assertSqliteMode() {
 export type ExceptionInput = {
   statementLineId: string;
   category: ExceptionCategory;
+  // D-K's structured result contract names reason_codes as its own field, distinct from
+  // evidence — persisted so the specific reason (e.g. AMOUNT_MISMATCH vs. NOT_POSTED,
+  // CCC_CORROBORATED vs. NO_CCC_CORROBORATION) is queryable directly, not just
+  // heuristically re-derivable from evidence's nested shape.
+  reasonCodes: string[];
   evidence: Record<string, unknown>;
   // NULL for an exception that never touched reference data (per ARCHITECTURE.md D-M /
   // INVARIANTS.md S8 amended) — populated for a NOT_POSTED/AMOUNT_MISMATCH exception that
@@ -42,12 +47,13 @@ export function writeException(input: ExceptionInput): void {
   const db = getSqliteDb();
   db.prepare(
     `INSERT INTO recon_exception
-       (exception_id, statement_line_id, category, reference_run_id, reference_extracted_at, reference_source_system, evidence)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+       (exception_id, statement_line_id, category, reason_codes, reference_run_id, reference_extracted_at, reference_source_system, evidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     crypto.randomUUID(),
     input.statementLineId,
     input.category,
+    JSON.stringify(input.reasonCodes),
     input.reference?.runId ?? null,
     input.reference?.extractedAt ?? null,
     input.reference?.sourceSystem ?? null,

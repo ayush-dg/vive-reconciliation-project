@@ -58,6 +58,7 @@ export async function runMatchingForDocument(documentId: string): Promise<void> 
     writeException({
       statementLineId: line.lineId,
       category,
+      reasonCodes: [...outcome.reasonCodes, ...residual.reasonCodes],
       evidence: { deterministic: outcome.evidence, residual: residual.evidence },
       reference: outcome.reference,
     });
