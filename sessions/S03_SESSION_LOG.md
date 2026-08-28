@@ -70,7 +70,7 @@ continuation authorization, consistent with Sessions 1-2.
 | 3.1 | Vendor identification, extraction routing, attempt recording | Completed | 3297366 |
 | 3.2 | Arithmetic and structural validation gate | Completed | 2b24787 |
 | 3.3 | Bounded retry logic (max 2 attempts) | Completed | 6952bb8 |
-| 3.4 | Prompt injection defense | | |
+| 3.4 | Prompt injection defense | Completed | bba3ac2 |
 | 3.5 | Extraction-method summary endpoint | | |
 | 3.6 | Silver normalization | | |
 
