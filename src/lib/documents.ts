@@ -144,11 +144,25 @@ export type ApiDocument = {
   content_sha256: string;
   legal_entity_id: string;
   vendor_id: string | null;
+  vendor_slug: string | null;
   statement_period: string | null;
   status: string;
   status_badge: { badge: string; label: string };
   upload_timestamp: string;
 };
+
+/** Human-readable vendor identifier for display (Task 6.1/6.5) — vendor_id is an opaque
+ * UUID; extracted.vendor_registry.vendor_slug (e.g. "fred_beans") is what a screen should
+ * actually show. Lives here, not documentDetail.ts, since documentDetail.ts already
+ * depends on this module (getDocumentById) — a reverse dependency would cycle. */
+export function resolveVendorSlug(vendorId: string | null): string | null {
+  if (!vendorId) return null;
+  const db = getSqliteDb();
+  const row = db.prepare('SELECT vendor_slug FROM extracted_vendor_registry WHERE vendor_id = ?').get(vendorId) as
+    | { vendor_slug: string }
+    | undefined;
+  return row?.vendor_slug ?? null;
+}
 
 export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; label: string }): ApiDocument {
   return {
@@ -156,6 +170,7 @@ export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; la
     content_sha256: doc.contentSha256,
     legal_entity_id: doc.legalEntityId,
     vendor_id: doc.vendorId,
+    vendor_slug: resolveVendorSlug(doc.vendorId),
     statement_period: doc.statementPeriod,
     status: doc.status,
     status_badge: statusBadge,

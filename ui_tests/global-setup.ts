@@ -6,6 +6,8 @@ import crypto from 'node:crypto';
 import { getSqliteDb, closeDb } from '../src/lib/db';
 import { runMigrations } from '../src/lib/migrate';
 import { hashPassword } from '../src/lib/auth';
+import { ensureNetsuiteVendorBillFixtureTable } from '../scripts/netsuiteVendorBillFixture.mjs';
+import { ensureCccRepairOrderFixtureTable } from '../scripts/cccRepairOrderFixture.mjs';
 
 export const TEST_USERNAME = 'testuser';
 export const TEST_PASSWORD = 'TestPassword123!';
@@ -30,5 +32,12 @@ export default async function globalSetup() {
   const db = getSqliteDb();
   seedUser(db, TEST_USERNAME, TEST_PASSWORD, 'Test User');
   seedUser(db, TEST_USERNAME_2, TEST_PASSWORD_2, 'Second Test User');
+  // Session 5's matching pipeline always queries bronze_netsuite_vendorbill (Task 5.2),
+  // regardless of whether a given test cares about NetSuite/CCC data specifically — any
+  // spec that calls /api/documents/:id/match needs these tables to already exist, or it
+  // crashes with "no such table" depending on which spec/worker happens to run first.
+  // Created once here, globally, so test order/parallelism can't matter.
+  ensureNetsuiteVendorBillFixtureTable();
+  ensureCccRepairOrderFixtureTable();
   await closeDb();
 }

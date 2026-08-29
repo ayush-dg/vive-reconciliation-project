@@ -26,6 +26,16 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       SESSION_SECRET: TEST_SESSION_SECRET,
+      // Every module in src/lib (Sessions 1-5) still throws on Fabric mode —
+      // "Fabric required starting Session N" — none of them has a real
+      // implementation yet. .env now carries a real FABRIC_SQL_ENDPOINT
+      // value (added outside this dev loop, presumably for a separate live-
+      // Fabric effort); left as-is, Next's automatic .env loading would
+      // route every DB call in this suite to Fabric mode and break the
+      // entire app locally. Overridden to empty here only for the
+      // Playwright-launched dev server, forcing the local SQLite fallback
+      // every session's tests have always assumed — .env itself is untouched.
+      FABRIC_SQL_ENDPOINT: '',
     },
   },
 });
