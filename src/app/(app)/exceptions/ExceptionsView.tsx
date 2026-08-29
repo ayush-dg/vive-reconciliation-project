@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import InlineLoadError from '@/components/InlineLoadError';
 import type { ExceptionsListResult } from '@/lib/exceptionsList';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -77,19 +78,7 @@ export default function ExceptionsView({ initial }: { initial: ExceptionsListRes
             </button>
           </form>
 
-          {loadError && (
-            <div className="error-boundary" role="alert" data-testid="exceptions-load-error">
-              <p>Something went wrong. Please try again.</p>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => load(lastAttempt.search, lastAttempt.page)}
-                data-testid="exceptions-load-retry"
-              >
-                Retry
-              </button>
-            </div>
-          )}
+          {loadError && <InlineLoadError onRetry={() => load(lastAttempt.search, lastAttempt.page)} />}
 
           <table data-testid="exceptions-table">
             <thead>

@@ -251,30 +251,88 @@ Source: EXECUTION_PLAN.md Session 6
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Simulated slow network | Same spinner style on all three screens | `loading-error-consistency.spec.ts` | |
-| TC-2 | Simulated API failure | Same inline error + Retry pattern on all three screens | `loading-error-consistency.spec.ts` | |
+| TC-1 | Simulated slow network | Same spinner style on all three screens | `loading-error-consistency.spec.ts` | PASS (structural — see Scope Decisions) |
+| TC-2 | Simulated API failure | Same inline error + Retry pattern on all three screens | `loading-error-consistency.spec.ts` | PASS |
+
+Plus a structural no-override-file check, an SSR not-found cross-screen identity check, and
+a genuinely cross-screen client-refetch identity check added during this task's own
+challenge review. 4/4 test scenarios pass.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Task 6.4
+
+### Concrete Defects
+| # | Defect | Evidence | Impact |
+|---|--------|----------|--------|
+| 1 | HomeView.tsx's refresh() had no error handling — a failed /api/documents or /api/home-summary response left stale data with zero user-facing signal, reproducing the exact bug Task 6.2's own review found and fixed for Exceptions | HomeView.tsx refresh() | Contradicts the Error state requirement |
+| 2 | DocumentDetailView.tsx's refresh() had the identical silent-failure gap | DocumentDetailView.tsx refresh() | Same |
+| 3 | Neither refresh() had its own try/catch, so a network failure inside it was caught by the CALLER's try/catch, producing a misleading "action failed" toast even when the preceding Extract/Reconcile POST actually succeeded | handleExtract/handleReconcile in both files | User told an action failed when it actually started successfully |
+| 4 | Exceptions' own Task 6.2 fix hand-duplicated error.tsx's markup with DIFFERENT testids (exceptions-load-error/-retry vs. error-boundary/error-retry) rather than reusing a shared component — combined with Findings 1-2, the four screens exhibited THREE different behaviors on the exact scenario Task 6.4 exists to unify | grep confirmed only 2 hand-written occurrences of .error-boundary in src/ | Directly contradicts this task's own "no screen inventing its own pattern" mandate |
+
+### Untested Scenarios
+| # | Scenario | Why it matters |
+|---|----------|-----------------|
+| 1 | Home's/Document Detail's refresh() failure path — no test exercised it at all |
+| 2 | Exceptions' locally-duplicated error UI never compared against error.tsx's rendered output cross-screen |
+| 3 | No test asserted a loading indicator during Exceptions' search/pagination or Home/Document Detail's Extract/Reconcile fetch |
+
+### Known Untested Scenarios (out of scope — not findings)
+- Real network-latency race to observe the spinner mid-transition — local SQLite fetches are near-instant; already an accepted gap, and dev-test-loading/global-elements.spec.ts already prove the shared mechanism works generically
+
+### Challenge Verdict
+FINDINGS — 4 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: None task-scoped.
+No new task-scoped invariants.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Findings 1-4 (silent refresh failures on Home/Document Detail, misleading toast, and
+Exceptions' own hand-duplicated error UI)** — FIXED together, at the root: extracted a
+genuinely shared `src/components/InlineLoadError.tsx` (reusing `error.tsx`'s exact
+`error-boundary`/`error-retry` testids and markup) and wired it into all three screens.
+`HomeView.tsx`'s and `DocumentDetailView.tsx`'s `refresh()` functions were rewritten to
+never throw — each catches its own failure and sets a local error state — so a failed
+refresh can no longer be misattributed to the preceding action by the caller's own
+try/catch (Finding 3). `ExceptionsView.tsx`'s prior hand-duplicated markup (added during
+Task 6.2's own review) was replaced with the shared component. Verified via: two new
+per-screen regression tests (`home.spec.ts`, `document-detail.spec.ts`) each confirming a
+successful action + failed refresh shows a correct "success" toast alongside the shared
+error, with Retry recovering; and one new cross-screen test in
+`loading-error-consistency.spec.ts` directly confirming all three screens render
+byte-identical `error-boundary` markup for their respective client-refetch failures — the
+genuinely direct proof of this task's "one shared pattern" mandate, which no test
+previously attempted.
+
+**Untested Scenario 3 (loading indicator during client-side fetches)** — ACCEPTED, not
+built or tested. UI_SURFACE.md's "simple spinner" default is specifically the SSR/route-
+transition `loading.tsx` mechanism (Session 1); none of Home/Exceptions/Document Detail's
+CC prompts call for a distinct in-place spinner during a client-side refetch, and adding
+one now would be unrequested scope beyond fixing the actual defects found.
+
+**Test-infrastructure observation (not a code defect):** running the full, now
+60-test-strong Playwright suite at this project's default worker concurrency
+(`workers: undefined`, i.e. CPU-core-count on this machine) produced transient
+`ECONNRESET`/timeout failures under the added load from this session's new tests; the same
+tests pass reliably in isolation and at `--workers=2`. Recorded here as a real, growing
+resource-contention signal for a future session to consider (e.g. lowering local default
+concurrency), not something this task's own code should paper over.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS)
+[x] All FINDINGS dispositioned (4 fixed at the root, 1 untested scenario accepted)
+[x] Pre-commit declaration recorded
+[x] Code review complete
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 

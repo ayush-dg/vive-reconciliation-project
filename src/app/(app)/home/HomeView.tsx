@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import InlineLoadError from '@/components/InlineLoadError';
 import type { ApiDocument } from '@/lib/documents';
 import type { HomeSummaryStats } from '@/lib/homeSummary';
 
@@ -31,17 +32,27 @@ export default function HomeView({
   const [stats, setStats] = useState(initialStats);
   const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
   const [reconcilingIds, setReconcilingIds] = useState<Set<string>>(new Set());
+  const [loadError, setLoadError] = useState(false);
   const { showSuccess, showError } = useToast();
 
-  // Manual refresh only (UI_SURFACE.md's resolved default — no polling infra).
+  // Manual refresh only (UI_SURFACE.md's resolved default — no polling infra). Never
+  // throws — a failure here sets its own inline error state rather than propagating into
+  // handleExtract/handleReconcile's try/catch, which would otherwise misreport a
+  // successful Extract/Reconcile POST as a failed action just because the follow-up
+  // refresh happened to fail.
   async function refresh() {
-    const [docsRes, statsRes] = await Promise.all([fetch('/api/documents'), fetch('/api/home-summary')]);
-    if (docsRes.ok) {
+    try {
+      const [docsRes, statsRes] = await Promise.all([fetch('/api/documents'), fetch('/api/home-summary')]);
+      if (!docsRes.ok || !statsRes.ok) {
+        setLoadError(true);
+        return;
+      }
       const data = (await docsRes.json()) as { documents: ApiDocument[] };
       setDocuments(data.documents);
-    }
-    if (statsRes.ok) {
       setStats((await statsRes.json()) as HomeSummaryStats);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     }
   }
 
@@ -143,6 +154,8 @@ export default function HomeView({
             <div className="stat-label">Not reconciled</div>
           </div>
         </div>
+
+        {loadError && <InlineLoadError onRetry={refresh} />}
 
         <div className="panel" style={{ marginTop: 20 }}>
           <div className="panel-head">

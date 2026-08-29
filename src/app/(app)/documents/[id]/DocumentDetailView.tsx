@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import InlineLoadError from '@/components/InlineLoadError';
 import type { DocumentDetailData } from '@/lib/documentDetail';
 
 // Labels per UI_SURFACE.md Document Detail: "pdfplumber_fallback labeled plainly as 'via
@@ -26,12 +27,24 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
   const [detail, setDetail] = useState(initialDetail);
   const [extracting, setExtracting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const { showSuccess, showError } = useToast();
 
+  // Never throws — a failure here sets its own inline error state rather than
+  // propagating into handleExtract/handleReconcile's try/catch, which would otherwise
+  // misreport a successful Extract/Reconcile POST as a failed action just because the
+  // follow-up refresh happened to fail.
   async function refresh() {
-    const res = await fetch(`/api/documents/${detail.documentId}/detail`);
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/documents/${detail.documentId}/detail`);
+      if (!res.ok) {
+        setLoadError(true);
+        return;
+      }
       setDetail((await res.json()) as DocumentDetailData);
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
     }
   }
 
@@ -101,6 +114,8 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
       </div>
 
       <div className="content">
+        {loadError && <InlineLoadError onRetry={refresh} />}
+
         <div className="panel" style={{ padding: 20, marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <span

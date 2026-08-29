@@ -106,4 +106,38 @@ test.describe('Home screen', () => {
     await expect(page).toHaveURL(`/documents/${documentId}`);
     await expect(page.getByTestId('document-detail-status-badge')).toBeVisible();
   });
+
+  // Task 6.4 challenge-review addition: HomeView.tsx's refresh() previously swallowed a
+  // failed /api/documents or /api/home-summary response with zero user-facing signal —
+  // the same defect Task 6.2's own review found and fixed for Exceptions, generalized
+  // here via the shared InlineLoadError component (error-boundary/error-retry testids,
+  // not a screen-specific duplicate).
+  test('a failed post-action refresh shows the shared inline error, and Retry recovers — without misreporting the action itself as failed', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_RefreshError_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, `INV-H-REFRESH-${crypto.randomUUID().slice(0, 8)}`, '18.00'));
+
+    await page.goto('/home');
+    let shouldFail = true;
+    await page.route('**/api/documents', (route) => {
+      if (route.request().method() === 'GET' && shouldFail) {
+        shouldFail = false;
+        return route.fulfill({ status: 500, body: JSON.stringify({ error: 'simulated failure' }) });
+      }
+      return route.continue();
+    });
+
+    await page.getByTestId(`home-extract-button-${documentId}`).click();
+    // The POST itself succeeded — the toast must say so, not "failed", even though the
+    // follow-up refresh() GET is about to fail.
+    await expect(page.getByTestId('toast-success')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('error-boundary')).toBeVisible();
+
+    await page.getByTestId('error-retry').click();
+    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
+    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toBeVisible();
+  });
 });

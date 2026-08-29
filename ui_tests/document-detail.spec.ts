@@ -141,4 +141,34 @@ test.describe('Document Detail screen', () => {
     await expect(page.getByTestId('document-detail-status-badge')).toHaveText('Failed — see Exceptions');
     await expect(page.getByTestId('document-detail-reconcile-button')).toHaveCount(0);
   });
+
+  // Task 6.4 challenge-review addition: DocumentDetailView.tsx's refresh() previously
+  // swallowed a failed /api/documents/:id/detail response with zero user-facing signal —
+  // same defect as Home's, generalized via the shared InlineLoadError component.
+  test('a failed post-action refresh shows the shared inline error, and Retry recovers — without misreporting the action itself as failed', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendor = `DocDetail_RefreshError_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, `INV-DD-REFRESH-${crypto.randomUUID().slice(0, 8)}`, '22.00'));
+
+    await page.goto(`/documents/${documentId}`);
+    let shouldFail = true;
+    await page.route(`**/api/documents/${documentId}/detail`, (route) => {
+      if (shouldFail) {
+        shouldFail = false;
+        return route.fulfill({ status: 500, body: JSON.stringify({ error: 'simulated failure' }) });
+      }
+      return route.continue();
+    });
+
+    await page.getByTestId('document-detail-extract-button').click();
+    await expect(page.getByTestId('toast-success')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('error-boundary')).toBeVisible();
+
+    await page.getByTestId('error-retry').click();
+    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
+    await expect(page.getByTestId('document-detail-status-badge')).toBeVisible();
+  });
 });

@@ -164,10 +164,12 @@ test.describe('Exceptions list screen', () => {
 
     await page.getByTestId('exceptions-search-input').fill(vendor.toLowerCase());
     await page.getByTestId('exceptions-search-submit').click();
-    await expect(page.getByTestId('exceptions-load-error')).toBeVisible();
+    // Shared InlineLoadError component (Task 6.4) — same testids as the global SSR error
+    // boundary (error.tsx), not a screen-specific duplicate.
+    await expect(page.getByTestId('error-boundary')).toBeVisible();
 
-    await page.getByTestId('exceptions-load-retry').click();
-    await expect(page.getByTestId('exceptions-load-error')).toHaveCount(0);
+    await page.getByTestId('error-retry').click();
+    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
     await expect(page.getByTestId('exceptions-table')).toContainText(vendor.toLowerCase());
   });
 
