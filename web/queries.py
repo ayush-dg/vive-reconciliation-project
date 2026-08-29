@@ -162,16 +162,26 @@ def get_open_exceptions_count() -> int:
     exception_count (see _with_live_exception_counts()) disagree — the
     whole point of both is to describe the same "open exceptions right
     now" state.
-    """
-    rows = execute_query(
-        """
-        SELECT COUNT(*) AS c
-        FROM gold_exceptions ge
-        INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
-        WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
-        """
-    )
-    return rows[0]["c"] or 0 if rows else 0
+
+    Called from sidebar_context() on every page (see web/deps.py) -- wrapped
+    in a broad try/except so a transient DB/connectivity failure here only
+    degrades the sidebar's nav-dot count to 0 instead of taking down every
+    page in the app (same defensive posture as get_pending_review_count()
+    below, added 2026-08-29 after a Fabric auth failure here crashed
+    /exceptions, /upload, and /jobs/history in production)."""
+    try:
+        rows = execute_query(
+            """
+            SELECT COUNT(*) AS c
+            FROM gold_exceptions ge
+            INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
+            WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
+            """
+        )
+        return rows[0]["c"] or 0 if rows else 0
+    except Exception as e:
+        print(f"[queries] get_open_exceptions_count failed, defaulting to 0: {e}")
+        return 0
 
 
 def _live_total_invoice_count(statement_id: str) -> int:
@@ -1362,10 +1372,21 @@ def _parse_review_row(row: dict) -> dict:
 def get_pending_review_count() -> int:
     # validation_document_review_queue is cut over to Fabric Warehouse —
     # see get_fabric_connection() in src/lakehouse/connection.py.
-    rows = execute_query_fabric(
-        "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
-    )
-    return rows[0]["c"] or 0 if rows else 0
+    #
+    # Called from sidebar_context() on every page (see web/deps.py) --
+    # wrapped in a broad try/except so a transient Fabric connectivity/auth
+    # failure here only degrades the sidebar's nav-dot count to 0 instead
+    # of taking down every page in the app (added 2026-08-29 after a Fabric
+    # auth failure here crashed /exceptions, /upload, and /jobs/history in
+    # production).
+    try:
+        rows = execute_query_fabric(
+            "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
+        )
+        return rows[0]["c"] or 0 if rows else 0
+    except Exception as e:
+        print(f"[queries] get_pending_review_count failed, defaulting to 0: {e}")
+        return 0
 
 
 def get_review_queue_vendors() -> list:

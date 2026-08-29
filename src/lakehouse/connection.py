@@ -69,14 +69,21 @@ def _using_fabric_sqldb():
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 
 
-# This uses an Azure CLI-issued token (AzureCliCredential + SQL_COPT_SS_ACCESS_TOKEN)
+# This uses a service-principal token (ClientSecretCredential + SQL_COPT_SS_ACCESS_TOKEN)
 # instead of the ODBC driver's Authentication=ActiveDirectoryInteractive keyword.
 # Interactive auth was tried first and fails on this machine with FA004/0x534 —
-# the Windows WAM broker can't complete the sign-in. The CLI-token approach
-# sidesteps the driver's own auth flow entirely and was confirmed working; it
-# requires `az login` to have been run once already in this environment — it
-# reuses that session rather than prompting for one. Do not switch this to
-# Authentication=ActiveDirectoryInteractive — same WAM-broker failure mode.
+# the Windows WAM broker can't complete the sign-in. The token-based approach
+# sidesteps the driver's own auth flow entirely.
+# [Corrected 2026-08-29 — this previously used AzureCliCredential, which shells
+# out to the `az` binary. That worked on a dev machine with `az login` already
+# run, but the production App Service container has no `az` CLI at all, so
+# every page touching sidebar_context() (get_pending_review_count()) crashed
+# with CredentialUnavailableError: "Azure CLI not found on path". Confirmed via
+# live container logs 2026-08-29. ClientSecretCredential authenticates directly
+# with FABRIC_CLIENT_ID/FABRIC_CLIENT_SECRET/FABRIC_TENANT_ID — no CLI binary,
+# no interactive session, works identically on a laptop or inside a container.]
+# Do not switch this to Authentication=ActiveDirectoryInteractive — same
+# WAM-broker failure mode.
 #
 # Repointed 2026-08-06 from Fabric Warehouse to a real "SQL database in
 # Fabric" item (FABRIC_SQLDB_ENDPOINT/FABRIC_SQLDB_NAME) — same auth
@@ -106,8 +113,8 @@ def get_fabric_connection():
     test that already relies on it to get a clean local run (e.g.
     tests/test_level2_matching_integration.py) is unaffected, since a test
     environment with AZURE_SQL_SERVER unset also has FABRIC_SQLDB_ENDPOINT
-    unset. Real Fabric (Azure CLI token auth) is only used when Fabric
-    itself is genuinely configured."""
+    unset. Real Fabric (service-principal token auth) is only used when
+    Fabric itself is genuinely configured."""
     if not _using_fabric_sqldb():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
@@ -117,13 +124,15 @@ def get_fabric_connection():
     import struct
 
     import pyodbc
-    from azure.identity import AzureCliCredential
+    from azure.identity import ClientSecretCredential
 
     endpoint = os.getenv("FABRIC_SQLDB_ENDPOINT")
     database = os.getenv("FABRIC_SQLDB_NAME")
     tenant_id = os.getenv("FABRIC_TENANT_ID")
+    client_id = os.getenv("FABRIC_CLIENT_ID")
+    client_secret = os.getenv("FABRIC_CLIENT_SECRET")
 
-    credential = AzureCliCredential(tenant_id=tenant_id)
+    credential = ClientSecretCredential(tenant_id=tenant_id, client_id=client_id, client_secret=client_secret)
     token = credential.get_token("https://database.windows.net/.default")
     token_bytes = token.token.encode("utf-16-le")
     token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
