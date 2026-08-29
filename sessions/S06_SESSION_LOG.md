@@ -64,8 +64,8 @@ authorization, consistent with every prior session.
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
 | 6.1 | Home screen (statement list + status badges + summary stats + Reconcile action) | Completed | eac7f14 |
-| 6.2 | Exceptions list screen | | |
-| 6.3 | Exception Detail screen | | |
+| 6.2 | Exceptions list screen | Completed | 9b7f283 |
+| 6.3 | Exception Detail screen | Completed | 9b7f283 |
 | 6.4 | Global error/loading state wiring | | |
 | 6.5 | Document Detail screen (extraction summary) | Completed | eac7f14 |
 
@@ -106,7 +106,7 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 
 | Task | Observation | Nature | Recommended action |
 |------|-------------|--------|--------------------|
-|      |             |        |                    |
+| 6.2 | UI_SURFACE.md's Exceptions "List Configuration" table marks 4 of 6 columns (Vendor, Statement, Invoice Ref, Date) as `Sortable: Y`, but Task 6.2's own CC prompt text names only pagination (50/page) and search (vendor/invoice ref) as "resolved defaults" — no interactive column-sorting UI was built. The table also marks BOTH Amount and Date as `Default Sort: DESC` simultaneously, an internally conflicting spec. | Planning-doc gap/inconsistency, not a code defect | Engineer should confirm whether column sorting was actually intended for this build (and resolve the Amount-vs-Date default-sort conflict) before a future session either builds it or the docs are corrected to drop the per-column Sortable/Default-Sort claims |
 
 ---
 
