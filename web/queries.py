@@ -785,12 +785,14 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
 # ---------------------------------------------------------------------------
 
 def get_vendor_name_for_statement(statement_id: str):
-    # document_intake_log is cut over to Fabric Warehouse — see
-    # get_fabric_connection() in src/lakehouse/connection.py.
-    # execute_query_fabric() has no dialect translation, so no trailing
-    # LIMIT here (harmless to drop: write_intake_log() DELETEs any existing
-    # row for this statement_id before inserting, so there's at most one).
-    rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure SQL
+    # via execute_query() -- the Fabric SQL Database item this used to read
+    # is unreachable in production right now (FABRIC_CLIENT_ID lacks Read
+    # permission on it). Revert to execute_query_fabric() once that's
+    # granted. No trailing LIMIT here (harmless either way: write_intake_log()
+    # DELETEs any existing row for this statement_id before inserting, so
+    # there's at most one).
+    rows = execute_query(
         "SELECT vendor_name FROM document_intake_log WHERE statement_id = ?",
         [statement_id],
     )
@@ -1007,7 +1009,10 @@ def _resolve_bronze_statement_id(job: dict) -> str:
     except OSError:
         return statement_id
 
-    cached_rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): extraction_cache pointed back at Azure SQL --
+    # see get_vendor_name_for_statement()'s comment above for why. Revert
+    # to execute_query_fabric() once the Fabric permission issue is resolved.
+    cached_rows = execute_query(
         """
         SELECT statement_id, ingestion_timestamp FROM extraction_cache
         WHERE document_hash = ? AND row_count > 0
@@ -1306,12 +1311,13 @@ def get_statement_report(statement_id: str) -> dict:
     )
     summary = summary_rows[0] if summary_rows else None
 
-    # document_intake_log is cut over to Fabric Warehouse — see
-    # get_fabric_connection() in src/lakehouse/connection.py. No trailing
-    # LIMIT (execute_query_fabric() has no dialect translation): harmless
-    # to drop since write_intake_log() DELETEs any existing row for this
-    # statement_id first, so there's at most one anyway.
-    intake_rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure SQL
+    # -- see get_vendor_name_for_statement()'s comment above for why.
+    # Revert to execute_query_fabric() once the Fabric permission issue is
+    # resolved. No trailing LIMIT here (harmless either way: write_intake_log()
+    # DELETEs any existing row for this statement_id first, so there's at
+    # most one anyway).
+    intake_rows = execute_query(
         "SELECT * FROM document_intake_log WHERE statement_id = ?",
         [statement_id],
     )
@@ -1370,17 +1376,20 @@ def _parse_review_row(row: dict) -> dict:
 
 
 def get_pending_review_count() -> int:
-    # validation_document_review_queue is cut over to Fabric Warehouse —
-    # see get_fabric_connection() in src/lakehouse/connection.py.
+    # TEMPORARY (2026-08-29): validation_document_review_queue pointed back
+    # at Azure SQL via execute_query() -- the Fabric SQL Database item this
+    # used to read (get_fabric_connection() in src/lakehouse/connection.py)
+    # is unreachable in production right now (FABRIC_CLIENT_ID lacks Read
+    # permission on it). Revert to execute_query_fabric() once that's
+    # granted.
     #
     # Called from sidebar_context() on every page (see web/deps.py) --
-    # wrapped in a broad try/except so a transient Fabric connectivity/auth
-    # failure here only degrades the sidebar's nav-dot count to 0 instead
-    # of taking down every page in the app (added 2026-08-29 after a Fabric
-    # auth failure here crashed /exceptions, /upload, and /jobs/history in
-    # production).
+    # still wrapped in a broad try/except (kept even after this swap) so
+    # any transient DB connectivity failure here only degrades the
+    # sidebar's nav-dot count to 0 instead of taking down every page in
+    # the app.
     try:
-        rows = execute_query_fabric(
+        rows = execute_query(
             "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
         )
         return rows[0]["c"] or 0 if rows else 0
@@ -1391,8 +1400,13 @@ def get_pending_review_count() -> int:
 
 def get_review_queue_vendors() -> list:
     """One row per source_file with pending review rows, plus a
-    rejection_category breakdown for that source_file's footer note."""
-    rows = execute_query_fabric(
+    rejection_category breakdown for that source_file's footer note.
+
+    TEMPORARY (2026-08-29): validation_document_review_queue pointed back
+    at Azure SQL -- see get_pending_review_count()'s comment above for why.
+    Revert to execute_query_fabric() once the Fabric permission issue is
+    resolved."""
+    rows = execute_query(
         """
         SELECT source_file, COUNT(*) AS pending_count
         FROM validation_document_review_queue
@@ -1402,7 +1416,7 @@ def get_review_queue_vendors() -> list:
         """
     )
     for row in rows:
-        cat_rows = execute_query_fabric(
+        cat_rows = execute_query(
             """
             SELECT rejection_category, COUNT(*) AS c
             FROM validation_document_review_queue
@@ -1416,7 +1430,8 @@ def get_review_queue_vendors() -> list:
 
 
 def get_review_queue_for_vendor(source_file: str) -> list:
-    rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): see get_pending_review_count()'s comment above.
+    rows = execute_query(
         """
         SELECT * FROM validation_document_review_queue
         WHERE source_file = ? AND review_status = 'PENDING_REVIEW'
@@ -1428,7 +1443,8 @@ def get_review_queue_for_vendor(source_file: str) -> list:
 
 
 def get_review_queue_item(review_id: str):
-    rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): see get_pending_review_count()'s comment above.
+    rows = execute_query(
         "SELECT * FROM validation_document_review_queue WHERE review_id = ?",
         [review_id],
     )
@@ -1442,16 +1458,20 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
     from EXTRACTION_INCOMPLETE (every other rejection_category, e.g.
     MISSING_MANDATORY_FIELD, is genuinely an incomplete extraction).
 
-    Only the review-queue UPDATE below is Fabric (see get_review_queue_item()
-    above) — the gold_exceptions INSERT and _recompute_summary_counts()'s
-    gold_reconciliation_summary update stay on Azure SQL via execute_sql(),
-    untouched by validation_document_review_queue's cutover."""
+    The review-queue UPDATE below and the gold_exceptions INSERT/
+    _recompute_summary_counts()'s gold_reconciliation_summary update are
+    all on Azure SQL via execute_sql().
+
+    TEMPORARY (2026-08-29): the review-queue UPDATE was execute_sql_fabric()
+    -- see get_pending_review_count()'s comment for why it's pointed at
+    Azure SQL instead right now. Revert once the Fabric permission issue
+    is resolved."""
     item = get_review_queue_item(review_id)
     if not item:
         return
     now = datetime.now(timezone.utc).isoformat()
     status = "APPROVED" if action == "approve" else "FLAGGED"
-    execute_sql_fabric(
+    execute_sql(
         """
         UPDATE validation_document_review_queue
         SET review_status = ?, reviewed_by = ?, reviewed_timestamp = ?
