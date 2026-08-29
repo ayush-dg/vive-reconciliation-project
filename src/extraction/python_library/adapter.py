@@ -116,69 +116,20 @@ _STATEMENT_DATE_KEY = {
 # a charge, negative becomes a credit, the same charge/credit split Fred
 # Beans already does with two separate columns. Mutually exclusive with
 # charge_field/credit_field.
+# TEMPORARY (2026-08-29): 9 of the original 10 python-library modules were
+# removed from this map -- extract_statement, extract_astech, extract_empire,
+# extract_wilberts, extract_quirk, extract_nimey, extract_lia,
+# extract_precision, extract_adas. ROUTABLE_VENDOR_SIGNATURES below is built
+# from this dict's own keys, so removing an entry here is sufficient on its
+# own to send that vendor's statements through DocumentUnderstandingEngine
+# (AI) instead -- _determine_extraction_route() in
+# notebooks/01_document_intake.py needed no changes at all. extract_keystone
+# is deliberately the only survivor: its 4 ledger-specific passthrough
+# columns (balance_forward, period_activity, credit_applied,
+# payment_applied -- see its own entry below) have no equivalent in
+# ClaudeSonnetClient's generic AI extraction path, so it stays on the
+# deterministic pdfplumber parser to avoid losing that data.
 _FIELD_MAP = {
-    "extract_statement": {
-        "invoice_number": ("invoice_number", "remit_invoice_no"),
-        "date_field": "date", "due_date_field": None,
-        "charge_field": "charges", "credit_field": "credits",
-        "amount_due_field": "amount_due", "transaction_code_field": "transaction_code",
-    },
-    "extract_astech": {
-        "invoice_number": ("invoice_no",),
-        "date_field": "invoice_date", "due_date_field": "due_date",
-        "charge_field": "outstanding_amount", "credit_field": None,
-    },
-    "extract_empire": {
-        "invoice_number": ("doc_no",),
-        "date_field": "transaction_date", "due_date_field": "due_date",
-        "charge_field": "amount", "credit_field": None,
-    },
-    "extract_wilberts": {
-        "invoice_number": ("invoice_number",),
-        "date_field": "date", "due_date_field": None,
-        # "balance", not "amount" -- extract_wilberts.py's own docstring:
-        # the printed total reconciles against sum(balance), not
-        # sum(amount). They're identical for ordinary rows, but the one
-        # lump-sum "Payment" row has a non-zero amount (the payment total)
-        # and a zero balance (already absorbed by the credit rows it paid
-        # down) -- summing amount there double-counts it.
-        "charge_field": "balance", "credit_field": None,
-    },
-    "extract_quirk": {
-        "invoice_number": ("invoice",),
-        "date_field": "date", "due_date_field": None,
-        "signed_field": "amount",
-    },
-    "extract_nimey": {
-        "invoice_number": ("invoice_no",),
-        "date_field": "invoice_date", "due_date_field": None,
-        "charge_field": "purchases", "credit_field": "payments",
-    },
-    "extract_lia": {
-        "invoice_number": ("document_transaction",),
-        "date_field": "date", "due_date_field": None,
-        "charge_field": "purchases", "credit_field": "payments_credits",
-    },
-    "extract_precision": {
-        "invoice_number": ("invoice_no",),
-        "date_field": "date", "due_date_field": None,
-        "charge_field": "charge", "credit_field": "payment",
-    },
-    "extract_adas": {
-        "invoice_number": ("invoice_no",),
-        "date_field": "date", "due_date_field": "due_date",
-        # "amount", not "open_amount" -- Charges must always be the
-        # ORIGINAL invoice amount (extract_adas.py's own docstring), never
-        # the remaining unpaid balance. Confirmed via manual comparison
-        # against the real PDF (2026-08-24): invoices #14564-14748, already
-        # paid off before the statement period, show open_amount=0.00 but
-        # a real original amount (e.g. $536.00) -- using open_amount here
-        # was silently showing $0.00 in Charges for every closed invoice.
-        # (This module's own extract()/reconciles check, which does sum
-        # open_amount against the printed TOTAL DUE, is separate from this
-        # per-row Bronze/matching field and is unaffected by this change.)
-        "charge_field": "amount", "credit_field": None,
-    },
     "extract_keystone": {
         # Ledger-style statement (see extract_keystone.py's own docstring
         # and the Keystone investigation session): every row is EITHER a
