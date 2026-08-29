@@ -7,7 +7,7 @@
 **Claude.md version:** v1.2
 **Execution mode:** [x] Autonomous (sequential, no interruption, no prediction)
                   | [ ] Manual (prediction discipline, prediction before verification)
-**Status:** In Progress
+**Status:** Completed
 
 ## Pre-Build Validation — 2026-08-29
 
@@ -119,10 +119,18 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED
-**All tasks verified:** [ ] Yes
-**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
-**PR raised:** [ ] Yes — PR #: session/s06_home-exceptions-screens → feature/pbvi_execution
-**Status updated to:**
+**Session integration check:** [x] PASSED — `npx playwright test ui_tests/home.spec.ts
+  ui_tests/exceptions.spec.ts ui_tests/exception-detail.spec.ts` (EXECUTION_PLAN.md's
+  literal Session 6 command). Reliable at `--workers=2`; a default-concurrency run can hit
+  the resource-contention flakiness recorded in the Deviations table above — not a code
+  defect, confirmed by rerunning affected tests in isolation. Full 60-test suite (all six
+  sessions) also passes at `--workers=2`.
+**All tasks verified:** [x] Yes — 6.1 (eac7f14), 6.2 (9b7f283), 6.3 (9b7f283), 6.4
+  (c8a0893), 6.5 (eac7f14)
+**Blocked tasks resolved:** [x] Yes — N/A, no BLOCKED tasks occurred
+**PR raised:** [ ] Not yet — `gh` CLI unavailable in this environment (same limitation
+  noted at every prior session's wrap-up); title/description prepared for the engineer to
+  open manually on request.
+**Status updated to:** Completed
 **Engineer sign-off:**
-SIGNED OFF: [name] — [date]
+SIGNED OFF: [pending engineer review] — 2026-08-29
