@@ -38,3 +38,12 @@ scripts/test_foundry_full_extraction.py
 scripts/test_production_method_all_vendors.py
 scripts/test_extraction_consistency.py
 sample_data/Nucar Quonset 073026 2 (2) 3.pdf
+
+# Terraform deploy config (provider binaries under .terraform/ are 100s of MB)
+# and its packaged zip -- not needed inside the app image at all.
+deploy/
+deploy.zip
+
+# Stray pre-migration SQLite backup files -- don't match the lakehouse/*.db-*
+# pattern above (named ...db.pre-migration-NNN-backup, not ...db-*).
+lakehouse/*.pre-migration-*-backup
