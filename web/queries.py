@@ -1032,6 +1032,20 @@ def get_silver_row_count(statement_id: str) -> int:
     return rows[0]["c"] or 0 if rows else 0
 
 
+class _RowsWithColumns(list):
+    """A plain list of row dicts, with the ordered union of every row's
+    raw_columns keys attached as `.columns` -- lets extracted_data.html do
+    `{% for r in rows %}` exactly as before (this IS the rows list) while
+    also reading `rows.columns` for the flat full-data table's header row,
+    without jobs.py needing to change how it builds extracted_data.html's
+    context (it just does `"rows": queries.get_extracted_rows_for_job(...)`
+    today, unchanged)."""
+
+    def __init__(self, rows, columns):
+        super().__init__(rows)
+        self.columns = columns
+
+
 def get_extracted_rows_for_job(job_id: str) -> list:
     """The true raw extraction for Job History's "View extracted data"
     link, read directly from bronze_vendor_statement_raw -- every row and
@@ -1042,26 +1056,61 @@ def get_extracted_rows_for_job(job_id: str) -> list:
     different, earlier statement_id -- see _resolve_bronze_statement_id()).
 
     Column names are kept as invoice_number/charges/credits/amount_due
-    (aliased from Bronze's raw_-prefixed columns) so extracted_data.html
-    doesn't need to change."""
+    (aliased from Bronze's raw_-prefixed columns) so extracted_data.html's
+    existing 4-column summary table doesn't need to change.
+
+    raw_ai_response (the AI-extracted row's full as-printed columns_found
+    dict -- see ClaudeSonnetClient._row_to_invoice()'s "_raw_row" -- null
+    for python-library/pdfplumber rows, which never produce one, and for
+    jobs run before this column started being saved) is parsed into
+    raw_columns here so extracted_data.html can render it without also
+    needing to import json.
+
+    Returns a _RowsWithColumns: same list of row dicts as before, plus a
+    `.columns` attribute -- the ordered union of every row's raw_columns
+    keys (first-seen order), i.e. the real printed header names for this
+    job's flat full-data table. Empty when no row in this job has
+    raw_columns at all (every row went through a hardcoded pdfplumber
+    parser, or predates this column being saved) -- extracted_data.html
+    uses that to decide whether to render the full table or its
+    fixed-field-extraction fallback note."""
     job = get_job_by_id(job_id)
     if not job or not job.get("statement_id"):
-        return []
+        return _RowsWithColumns([], [])
     statement_id = _resolve_bronze_statement_id(job)
 
-    return execute_query(
+    rows = execute_query(
         """
         SELECT
             raw_invoice_number AS invoice_number,
             raw_charges AS charges,
             raw_credits AS credits,
-            raw_amount_due AS amount_due
+            raw_amount_due AS amount_due,
+            raw_ai_response
         FROM bronze_vendor_statement_raw
         WHERE statement_id = ?
         ORDER BY page_number, row_number
         """,
         [statement_id],
     )
+
+    columns = []
+    seen = set()
+    for row in rows:
+        raw_response = row.get("raw_ai_response")
+        try:
+            raw_columns = json.loads(raw_response) if raw_response else None
+        except (TypeError, ValueError):
+            raw_columns = None
+        row["raw_columns"] = raw_columns
+
+        if raw_columns:
+            for key in raw_columns.keys():
+                if key not in seen:
+                    seen.add(key)
+                    columns.append(key)
+
+    return _RowsWithColumns(rows, columns)
 
 
 # ---------------------------------------------------------------------------

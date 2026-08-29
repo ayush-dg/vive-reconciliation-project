@@ -12,10 +12,10 @@
 {% endblock %}
 
 {% block content %}
-<div class="section-header">
-  <div class="section-title">Extracted data ({{ rows | length }} rows)</div>
-</div>
 {% if rows %}
+<div class="section-header">
+  <div class="section-title">Summary ({{ rows | length }} rows)</div>
+</div>
 <table class="table">
   <thead>
     <tr><th>Invoice</th><th>Charges</th><th>Credits</th><th>Amount due</th></tr>
@@ -31,6 +31,41 @@
     {% endfor %}
   </tbody>
 </table>
+
+<div class="section-header" style="margin-top:2rem">
+  <div class="section-title">Full as-printed data</div>
+</div>
+{% if rows.columns %}
+<div class="table-responsive" style="overflow-x:auto">
+  <table class="table">
+    <thead>
+      <tr>
+        {% for col in rows.columns %}
+        <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        {% for col in rows.columns %}
+        <td>
+          {% if r.raw_columns and col in r.raw_columns and r.raw_columns[col] is not none %}
+          {{ r.raw_columns[col] }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">Full column data not available — this vendor uses fixed-field extraction.</div>
+{% endif %}
+
 {% else %}
 <div class="empty-state">No extracted rows found for this job.</div>
 {% endif %}
