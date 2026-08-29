@@ -9,6 +9,7 @@ pytesseract==0.3.13
 pdf2image==1.17.0
 pypdf>=6.0.0
 azure-storage-blob>=12.19.0
+azure-identity>=1.19.0  # required by src/lakehouse/connection.py's get_fabric_connection() -- was an undeclared transitive dependency; explicit now since production's real config exercises this code path
 pyodbc>=5.0.0
 pytest==9.1.1
 fastapi>=0.110.0
