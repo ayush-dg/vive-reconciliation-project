@@ -65,13 +65,16 @@ def generate_report(statement_id: str, run_explanations: bool = False,
 
     s = summary_rows[0]
 
-    # Get intake log for additional metadata. document_intake_log is cut
-    # over to Fabric Warehouse (see get_fabric_connection() in
-    # src/lakehouse/connection.py) — no trailing LIMIT here since
-    # execute_query_fabric() has no dialect translation; harmless to drop
-    # since write_intake_log() DELETEs any existing row for this
-    # statement_id first, so there's at most one anyway.
-    intake_rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure SQL
+    # via execute_query() -- the Fabric SQL Database item this used to read
+    # (get_fabric_connection() in src/lakehouse/connection.py) is unreachable
+    # in production right now (the FABRIC_CLIENT_ID service principal lacks
+    # Read permission on it). Revert to execute_query_fabric() once that
+    # permission is granted -- same swap already applied throughout
+    # notebooks/01_document_intake.py and web/queries.py. No trailing LIMIT
+    # here (harmless either way: write_intake_log() DELETEs any existing row
+    # for this statement_id first, so there's at most one anyway).
+    intake_rows = execute_query(
         "SELECT * FROM document_intake_log WHERE statement_id = ?",
         [statement_id]
     )
