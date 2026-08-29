@@ -86,32 +86,116 @@ Source: EXECUTION_PLAN.md Session 6
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Exceptions list | Populates with real data from Session 5's matching output | `exceptions.spec.ts` | |
-| TC-2 | Search by vendor name | Filters correctly | `exceptions.spec.ts` | |
-| TC-3 | Pagination | Shows 50 rows per page when more than 50 exist | `exceptions.spec.ts` | |
-| TC-4 | `possible_duplicate_correction` category | Never appears in the list | `exceptions.spec.ts` | |
+| TC-1 | Exceptions list | Populates with real data from Session 5's matching output | `exceptions.spec.ts` | PASS |
+| TC-2 | Search by vendor name | Filters correctly | `exceptions.spec.ts` | PASS |
+| TC-3 | Pagination | Shows 50 rows per page when more than 50 exist | `exceptions.spec.ts` | PASS |
+| TC-4 | `possible_duplicate_correction` category | Never appears in the list | `exceptions.spec.ts` | PASS |
+
+Plus an `amount_mismatch`-through-the-real-pipeline case, and 4 more added during this
+task's challenge review (no-bulk-selection, LIKE-wildcard escaping, load-error+Retry —
+below). 9/9 test scenarios pass.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+
+```
+## Challenge Agent — Tasks 6.2 + 6.3
+
+### Untested Scenarios
+| # | Scenario | Why it matters | Requirement at risk |
+|---|----------|----------------|-------------------|
+| 1 | Column sorting (Vendor/Statement/Invoice Ref/Date marked Sortable: Y in UI_SURFACE.md's List Configuration) is not implemented anywhere — no clickable header, no sort state, no API param | If intended, a silent gap; if descoped, undocumented (unlike search/pagination, which have explicit "resolved default" language) | UI_SURFACE.md List Configuration |
+| 2 | No test exercises a vendor_slug/invoice_ref containing % or _ through search | Unescaped LIKE wildcards produce broader-than-intended matches — vendor_slug is itself underscore-delimited by construction | Search correctness |
+| 3 | An amount_mismatch exception with NULL reference_extracted_at | The "as of" caption would silently omit with no indication it's intentionally absent | The caption's own justification (never a live re-query) |
+| 4 | A failed /api/exceptions fetch through the search/pagination client path | Reveals the silent-swallow behavior (Concrete Defect #1) | UI_SURFACE.md Exceptions Error state |
+
+### Unverified Assumptions
+| # | Assumption in code | Basis | Testable within task scope |
+|---|--------------------|-------|---------------------------|
+| 1 | The page query param is always a whole number >= 1; only Number.isFinite && > 0 was checked | api/exceptions/route.ts | Yes |
+| 2 | recon.exception.evidence is never SQL NULL, even though migration 005 makes it nullable — JSON.parse(null) doesn't throw, bypassing the try/catch | exceptionDetail.ts | Yes |
+| 3 | UI_SURFACE.md's own List Configuration marks BOTH Amount and Date as Default Sort: DESC — an internally conflicting spec; the code silently picks Date | docs/UI_SURFACE.md:277,279 vs. exceptionsList.ts | Not independently testable — a doc ambiguity |
+| 4 | Search assumes caller input never contains LIKE metacharacters requiring escaping | exceptionsList.ts | Yes — see Concrete Defect #2 |
+
+### Concrete Defects
+| # | Defect | Evidence | Impact |
+|---|--------|----------|--------|
+| 1 | ExceptionsView.tsx's load() silently discarded failed API responses — only branched on res.ok, nothing on the failure path | ExceptionsView.tsx's load() | A failing search/pagination click left stale/wrong data with zero error indication |
+| 2 | exceptionsList.ts's search LIKE clause interpolated raw input without escaping %/_ | exceptionsList.ts | A search term containing "_" (this project's own vendor_slug convention) could match unrelated rows differing by one character |
+| 3 | ui_tests/exceptions.spec.ts was missing the "No bulk-selection UI is present" test Task 6.2's own UI test spec explicitly requires | Full file read, no bulk-selection test existed | Underlying UI was correct; the required verification was simply never written |
+
+### Known Untested Scenarios (out of scope — not findings)
+- Fabric-mode behavior — assertSqliteMode() hard-blocks it, requires external state
+- Session idle-timeout interrupting mid-browse — different session's scope
+- Claude-live residual-match path affecting evidence content — requires live credentials
+- Real CCC production table name/schema — already flagged as an open question in Session 5
+- Multi-user/concurrent access to the same exception row — requires human interaction
+
+### Structural Complexity Check
+CLEAN across exceptionsList.ts and exceptionDetail.ts.
+
+### Challenge Verdict
+FINDINGS — 3 item(s) require engineer disposition before commit.
+```
 
 ### Code Review
-Invariant enforcement: None new task-scoped (relies on S5's schema wiring from Task 5.4).
+No new task-scoped invariants. Reviewed against S5's schema wiring (Task 5.4), which this
+task only reads from.
 
 ### Scope Decisions
-[Recorded during task execution.]
+
+**Finding 1 (silent error swallow)** — FIXED. `ExceptionsView.tsx`'s `load()` now sets an
+error state on a non-ok response or thrown fetch error, rendering the same inline
+`error-boundary`/Retry pattern used globally, with a Retry button that repeats the last
+attempted search/page. Verified via new test: a mocked 500 response shows the error, Retry
+recovers once the mock is lifted.
+
+**Finding 2 (unescaped LIKE wildcards)** — FIXED. Added `escapeLikePattern()` (escapes
+`\`, `%`, `_`) and an `ESCAPE '\'` clause on both LIKE comparisons. Verified via new test:
+searching for `wildcard_test_<id>` no longer also matches a decoy vendor
+`wildcardXtest_<id>` that would coincidentally match if `_` were treated as a wildcard.
+
+**Finding 3 (missing bulk-selection test)** — FIXED. Added the test EXECUTION_PLAN.md's UI
+test spec names, confirming zero `input[type="checkbox"]` elements render.
+
+**Unverified Assumption 1 (non-integer page param)** — FIXED. `api/exceptions/route.ts`
+now requires `Number.isInteger(page)`, not just `Number.isFinite`.
+
+**Unverified Assumption 2 (NULL evidence uncaught)** — FIXED. `exceptionDetail.ts` now
+guards `row.evidence` truthiness before attempting `JSON.parse`, so a NULL row (reachable
+only via direct DB manipulation today, since `exceptionWriter.ts`'s single write path
+always stringifies evidence) degrades to "no evidence shown" instead of throwing. Verified
+via new test seeding a NULL-evidence row directly and confirming the page renders without
+hitting the global error boundary.
+
+**Untested Scenario 1 (column sorting not implemented)** — ACCEPTED as an Out of Scope
+Observation (recorded in `sessions/S06_SESSION_LOG.md`), not built. Task 6.2's own CC
+prompt names only pagination and search as "resolved defaults" — UI_SURFACE.md's generic
+per-column `Sortable: Y` metadata reads as descriptive of the standard List-screen shape,
+not a literal requirement this task's own text calls for implementing. Flagged for
+engineer decision rather than silently built or silently dropped.
+
+**Unverified Assumption 3 (UI_SURFACE.md's own Amount/Date sort conflict)** — Recorded as
+an Out of Scope Observation (a planning-doc inconsistency, not a code defect) — Date DESC
+(most recent first) is the more defensible default given Amount isn't even sortable in
+this build yet.
+
+**Untested Scenario 3 (as-of caption silently absent for NULL reference_extracted_at)** —
+ACCEPTED, not fixed. A genuinely unknown timestamp showing no caption (rather than a
+fabricated one) is the honest degrade; the drill-down's numeric values remain correct and
+visible regardless.
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS, shared review with Task 6.3)
+[x] All FINDINGS dispositioned (3 fixed, 2 assumptions fixed, 2 accepted/recorded as scope gaps)
+[x] Pre-commit declaration recorded
+[x] Code review complete
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 
@@ -122,33 +206,41 @@ Source: EXECUTION_PLAN.md Session 6
 
 | Case | Scenario | Expected | UI Tests | Result |
 |------|----------|----------|----------|--------|
-| TC-1 | Exception with CCC evidence | Related panel shows it populated | `exception-detail.spec.ts` | |
-| TC-2 | Exception without CCC evidence | Shows "No CCC confirmation available" | `exception-detail.spec.ts` | |
-| TC-3 | `amount_mismatch` exception | Expandable section with statement + NetSuite value | `exception-detail.spec.ts` | |
-| TC-4 | Non-amount-mismatch exception | Does not show the drill-down section | `exception-detail.spec.ts` | |
-| TC-5 | Any exception | No approve/dispute button renders anywhere | `exception-detail.spec.ts` | |
+| TC-1 | Exception with CCC evidence | Related panel shows it populated | `exception-detail.spec.ts` | PASS |
+| TC-2 | Exception without CCC evidence | Shows "No CCC confirmation available" | `exception-detail.spec.ts` | PASS |
+| TC-3 | `amount_mismatch` exception | Expandable section with statement + NetSuite value | `exception-detail.spec.ts` | PASS |
+| TC-4 | Non-amount-mismatch exception | Does not show the drill-down section | `exception-detail.spec.ts` | PASS |
+| TC-5 | Any exception | No approve/dispute button renders anywhere | `exception-detail.spec.ts` | PASS |
+
+Plus "Back to list" navigation, and a NULL-evidence regression added during this task's
+challenge review (below). 7/7 test scenarios pass.
 
 ### Challenge Agent Output
-[Populated during task execution.]
+See Task 6.2's entry above — one combined review covered both tasks (`exceptionDetail.ts`
+and `exceptionsList.ts` share the same review pass, same rationale as Task 6.1+6.5's
+combined review: symmetric, tightly-coupled peers).
 
 ### Code Review
-Invariant enforcement: None new task-scoped.
+No new task-scoped invariants.
 
 ### Scope Decisions
-[Recorded during task execution.]
+Finding 2 (Unverified Assumption 2 — NULL evidence uncaught) belongs to this task's own
+`exceptionDetail.ts` — see the full disposition under Task 6.2's Scope Decisions above (the
+fix and its regression test are recorded there to avoid duplication, since the challenge
+review covered both files together).
 
 ### BCE Impact
 No BCE artifact impact.
 
 ### Verification Verdict
-[ ] All planned cases passed
-[ ] Challenge agent run — verdict recorded (CLEAN or FINDINGS)
-[ ] All FINDINGS dispositioned
-[ ] Pre-commit declaration recorded
-[ ] Code review complete (if invariant-touching)
-[ ] Scope decisions documented
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded (FINDINGS, shared review with Task 6.2)
+[x] All FINDINGS dispositioned (see Task 6.2's entry for the shared fixes)
+[x] Pre-commit declaration recorded
+[x] Code review complete
+[x] Scope decisions documented
 
-**Status:**
+**Status:** Completed
 
 ---
 
