@@ -66,7 +66,7 @@ authorization, consistent with every prior session.
 | 6.1 | Home screen (statement list + status badges + summary stats + Reconcile action) | Completed | eac7f14 |
 | 6.2 | Exceptions list screen | Completed | 9b7f283 |
 | 6.3 | Exception Detail screen | Completed | 9b7f283 |
-| 6.4 | Global error/loading state wiring | | |
+| 6.4 | Global error/loading state wiring | Completed | c8a0893 |
 | 6.5 | Document Detail screen (extraction summary) | Completed | eac7f14 |
 
 Valid Status values: Completed | BLOCKED | SKIPPED
@@ -98,7 +98,7 @@ Valid Status values: Completed | BLOCKED | SKIPPED
 
 | Task | Deviation observed | Action taken |
 |------|--------------------|--------------|
-|      |                    |              |
+| 6.4 | The full Playwright suite (now 60 tests across all six sessions) produces transient `ECONNRESET`/timeout failures at this project's default local worker concurrency (`workers: undefined` in `playwright.config.ts`, i.e. CPU-core-count) — one shared dev server process and one shared SQLite file under heavier concurrent load than earlier, smaller sessions exercised. Every test that failed this way passed reliably both in isolation and at `--workers=2`. | Not fixed — recorded as a real, growing resource-contention signal, not a logic defect. A future session may want to lower the local default worker count in `playwright.config.ts` if this keeps recurring as the suite grows further. |
 
 ---
 
