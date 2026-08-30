@@ -204,82 +204,8 @@ svg {
 }
 
 /* ================= LOGIN VIEW ================= */
-.login-shell {
+.login-view {
   min-height: 100vh;
-  display: flex;
-  background: var(--surface);
-}
-.login-hero {
-  flex: 1.15;
-  background: var(--navy);
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 64px 72px;
-  color: #fff;
-}
-.login-hero::after {
-  content: '';
-  position: absolute;
-  right: -140px;
-  bottom: -160px;
-  width: 640px;
-  height: 640px;
-  background:
-    linear-gradient(135deg, transparent 46%, rgba(255, 255, 255, 0.05) 47%, rgba(255, 255, 255, 0.05) 53%, transparent 54%),
-    linear-gradient(45deg, transparent 46%, rgba(255, 255, 255, 0.05) 47%, rgba(255, 255, 255, 0.05) 53%, transparent 54%);
-  transform: rotate(10deg);
-  pointer-events: none;
-}
-.login-hero-inner {
-  position: relative;
-  z-index: 1;
-  max-width: 460px;
-}
-.login-hero .eyebrow {
-  color: #9fb4c9;
-}
-.login-hero h1 {
-  font-family: var(--font-display-family);
-  font-weight: 700;
-  font-size: 44px;
-  line-height: 1.05;
-  margin: 14px 0 16px;
-  letter-spacing: -0.01em;
-}
-.login-hero h1 span {
-  color: #8fbeeb;
-}
-.login-hero p {
-  color: #b9c9d8;
-  font-size: 15.5px;
-  line-height: 1.55;
-  margin: 0 0 34px;
-}
-.login-stats {
-  display: flex;
-  gap: 30px;
-}
-.login-stat {
-  border-left: 2px solid #2a507a;
-  padding-left: 14px;
-}
-.login-stat .num {
-  font-family: var(--font-display-family);
-  font-weight: 700;
-  font-size: 26px;
-  display: block;
-}
-.login-stat .lbl {
-  font-size: 12.5px;
-  color: #9fb4c9;
-  margin-top: 2px;
-}
-
-.login-panel {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -333,6 +259,17 @@ svg {
   flex: 1;
   height: 1px;
   background: var(--border);
+}
+.login-alt-link {
+  display: block;
+  text-align: center;
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--navy-2);
+  font-weight: 600;
+}
+.login-alt-link:hover {
+  text-decoration: underline;
 }
 .login-foot {
   margin-top: 28px;

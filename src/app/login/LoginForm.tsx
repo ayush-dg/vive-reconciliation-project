@@ -45,6 +45,15 @@ export default function LoginForm() {
         </svg>
         Sign in with company SSO
       </button>
+
+      <a
+        className="login-alt-link"
+        href="#"
+        onClick={(e) => e.preventDefault()}
+        title="Coming soon"
+      >
+        Don&apos;t have access yet? Contact IT
+      </a>
     </form>
   );
 }
