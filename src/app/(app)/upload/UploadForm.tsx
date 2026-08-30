@@ -21,10 +21,16 @@ function formatUploadTimestamp(isoLike: string): string {
   });
 }
 
+// Legal Entity is no longer user-selected (engineer-directed simplification, 2026-08-30)
+// — no real legal-entity structure was ever specified (UI_SURFACE.md flagged this field's
+// provenance as an open architectural gap), so every upload is now assigned this single
+// fixed default. S4 (legal_entity_id must not be null) is still satisfied — more strongly
+// than before, in fact, since there is no longer a code path that can omit it.
+const DEFAULT_LEGAL_ENTITY_ID = LEGAL_ENTITIES[0].id;
+
 export default function UploadForm({ initialDocuments }: { initialDocuments: ApiDocument[] }) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [file, setFile] = useState<File | null>(null);
-  const [legalEntityId, setLegalEntityId] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -83,16 +89,12 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       setFileError('Select a PDF statement.');
       return;
     }
-    if (!legalEntityId) {
-      setFileError('Select a legal entity.');
-      return;
-    }
 
     setSubmitting(true);
     try {
       const body = new FormData();
       body.set('file', file);
-      body.set('legalEntityId', legalEntityId);
+      body.set('legalEntityId', DEFAULT_LEGAL_ENTITY_ID);
       const res = await fetch('/api/documents', { method: 'POST', body });
       const data = (await res.json()) as {
         document?: ApiDocument;
@@ -184,22 +186,6 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         </div>
 
         <form className="form-card" onSubmit={handleSubmit} data-testid="upload-form">
-          <div className="field">
-            <label htmlFor="legal-entity">Legal Entity</label>
-            <select
-              id="legal-entity"
-              value={legalEntityId}
-              onChange={(e) => setLegalEntityId(e.target.value)}
-              data-testid="legal-entity-select"
-            >
-              <option value="">Select legal entity…</option>
-              {LEGAL_ENTITIES.map((entity) => (
-                <option key={entity.id} value={entity.id}>
-                  {entity.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" style={{ width: 'auto', flex: 1 }} disabled={submitting} data-testid="upload-submit">
               {submitting ? 'Uploading…' : 'Upload statement'}

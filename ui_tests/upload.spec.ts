@@ -30,7 +30,6 @@ test.describe('Upload', () => {
     await expect(page.getByLabel(/vendor/i)).toHaveCount(0);
 
     await page.setInputFiles('#statement-file', samplePdf('fred-beans'));
-    await page.getByTestId('legal-entity-select').selectOption({ index: 1 });
     await page.getByTestId('upload-submit').click();
 
     await expect(page.getByTestId('toast-success')).toBeVisible();
@@ -41,23 +40,18 @@ test.describe('Upload', () => {
     await signInViaCookie(context);
     await page.goto('/upload');
 
-    await page.getByTestId('legal-entity-select').selectOption({ index: 1 });
     await page.getByTestId('upload-submit').click();
 
     await expect(page.getByTestId('upload-validation-error')).toBeVisible();
     await expect(page.getByTestId('upload-validation-error')).toHaveText('Select a PDF statement.');
   });
 
-  test('submitting without a legal entity shows a validation message (S4)', async ({ page, context }) => {
-    await signInViaCookie(context);
-    await page.goto('/upload');
-
-    await page.setInputFiles('#statement-file', samplePdf('no-entity'));
-    await page.getByTestId('upload-submit').click();
-
-    await expect(page.getByTestId('upload-validation-error')).toBeVisible();
-    await expect(page.getByTestId('upload-validation-error')).toHaveText('Select a legal entity.');
-  });
+  // The old "submitting without a legal entity shows a validation message (S4)" test is
+  // gone, not just updated — Legal Entity is no longer user-selected (engineer-directed
+  // simplification, 2026-08-30); every upload is assigned a fixed default client-side, so
+  // that state can no longer occur through the UI. S4 (legal_entity_id must not be null)
+  // is still enforced server-side in src/app/api/documents/route.ts, just no longer
+  // reachable as a client validation message.
 
   // The next two tests hit the API directly (page.request, sharing the
   // signed-in page's cookies) rather than driving the UI form and comparing
@@ -135,7 +129,6 @@ test.describe('Upload', () => {
       mimeType: '',
       buffer: Buffer.from('definitely not a PDF'),
     });
-    await page.getByTestId('legal-entity-select').selectOption({ index: 1 });
     await page.getByTestId('upload-submit').click();
 
     await expect(page.getByTestId('toast-error')).toContainText('PDF files only');
@@ -149,7 +142,6 @@ test.describe('Upload', () => {
     await page.goto('/upload');
 
     await page.setInputFiles('#statement-file', samplePdf('keystone'));
-    await page.getByTestId('legal-entity-select').selectOption({ index: 1 });
     await page.getByTestId('upload-submit').click();
 
     await expect(page.getByTestId('toast-success')).toBeVisible();
