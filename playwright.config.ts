@@ -36,6 +36,13 @@ export default defineConfig({
       // Playwright-launched dev server, forcing the local SQLite fallback
       // every session's tests have always assumed — .env itself is untouched.
       FABRIC_SQL_ENDPOINT: '',
+      // fabricLakehouse.ts's live-reference-lookup gate (isFabricLakehouseConfigured())
+      // is a separate concern from the app-state switch above, but .env.local (local-dev
+      // only, not committed) sets this for real so `npm run dev` can compare extracted
+      // statements against the live Lakehouse. Blanked here so automated tests keep
+      // exercising the local SQLite fixture path deterministically, not a live external
+      // dependency.
+      FABRIC_LAKEHOUSE_SQL_ENDPOINT: '',
     },
   },
 });

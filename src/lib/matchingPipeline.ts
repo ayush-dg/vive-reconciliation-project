@@ -42,7 +42,7 @@ export async function runMatchingForDocument(documentId: string): Promise<void> 
   const lines = getEligibleLinesForDocument(documentId);
 
   for (const line of lines) {
-    const outcome = matchStatementLine(line);
+    const outcome = await matchStatementLine(line);
 
     if (outcome.status === 'matched') {
       if (!outcome.reference) {

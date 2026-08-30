@@ -1,21 +1,24 @@
 import crypto from 'node:crypto';
 import { getSqliteDb, getDbMode } from './db';
+import { isFabricLakehouseConfigured, getReferenceRowByTranId, getLatestReferenceWatermark as getLiveLatestReferenceWatermark } from './fabricLakehouse';
 
 /**
  * Deterministic SQL-based matching (Task 5.2). Recon key: vendor invoice number
  * (silver.statement_line.normalized_invoice_ref) matched to NetSuite's Bill document
- * number, per project convention (not check/payment number). Reads
- * bronze.netsuite_vendorbill directly — the externally-owned Lakehouse table
- * (ARCHITECTURE.md D-M), NOT the similarly-named but incorrect
- * bronze.netsuite_netsuite_vendorbill. No live API call, no separate Silver copy of this
- * data is built.
+ * number — the real bronze.netsuite_vendorbill column is `tranid`, confirmed by direct
+ * Lakehouse inspection (engineer-confirmed 2026-08-30, not the fixture's invented
+ * `bill_document_number` name). Reads bronze.netsuite_vendorbill directly — the
+ * externally-owned Lakehouse table (ARCHITECTURE.md D-M), NOT the similarly-named but
+ * incorrect bronze.netsuite_netsuite_vendorbill. No separate Silver copy of this data is
+ * built.
  *
- * In this sandbox, bronze.netsuite_vendorbill has no real local equivalent (no live
- * Fabric/Lakehouse connectivity) — scripts/netsuiteVendorBillFixture.ts creates a
- * same-shape, test-only stand-in for exercising this module's own SQL logic. In local
- * SQLite mode without that fixture loaded, a query against this table fails loudly with a
- * clear "no such table" error — the honest behavior for data this build doesn't own or
- * mock, not a bug to paper over.
+ * Live vs. local fixture: when isFabricLakehouseConfigured() is true (FABRIC_CLIENT_ID/
+ * SECRET/TENANT_ID + FABRIC_LAKEHOUSE_SQL_ENDPOINT/NAME all set — see fabricLakehouse.ts),
+ * this reads the real Lakehouse table over the network. Otherwise it falls back to
+ * scripts/netsuiteVendorBillFixture.ts's same-shape local SQLite stand-in, which is what
+ * every automated test (none of which set those env vars) continues to exercise
+ * unchanged. This is a read-only, additive lookup — it does not affect getDbMode() or any
+ * other module's SQLite/Fabric switch.
  *
  * S8 (amended) — every reference row read during a match has its
  * _run_id/_extracted_at/_source_system captured onto the Match/Exception created from it,
@@ -23,7 +26,8 @@ import { getSqliteDb, getDbMode } from './db';
  * row is found at all (NOT_POSTED), the reference table's own most-recently-extracted row
  * overall is captured instead, answering "what state of NetSuite data was checked" even
  * though no specific row matched — the docs don't spell out this exact mechanic; recorded
- * as a Scope Decision in sessions/S05_VERIFICATION_RECORD.md.
+ * as a Scope Decision in sessions/S05_VERIFICATION_RECORD.md. The real live table already
+ * carries these same three columns verbatim, confirmed by direct query.
  */
 
 const AMOUNT_TOLERANCE = 0.01;
@@ -34,9 +38,9 @@ function assertSqliteMode() {
   }
 }
 
-type ReferenceRow = {
-  bill_document_number: string;
-  amount: number;
+type NormalizedReferenceRow = {
+  candidateKey: string;
+  refAmount: number;
   _run_id: string;
   _extracted_at: string;
   _source_system: string;
@@ -44,7 +48,13 @@ type ReferenceRow = {
 
 type ReferenceCapture = { runId: string; extractedAt: string; sourceSystem: string };
 
-function findReferenceRowByDocNumber(normalizedInvoiceRef: string): ReferenceRow | null {
+async function findReferenceRowByDocNumber(normalizedInvoiceRef: string): Promise<NormalizedReferenceRow | null> {
+  if (isFabricLakehouseConfigured()) {
+    const row = await getReferenceRowByTranId(normalizedInvoiceRef);
+    if (!row) return null;
+    return { candidateKey: row.tranid, refAmount: row.total, _run_id: row._run_id, _extracted_at: row._extracted_at, _source_system: row._source_system };
+  }
+
   const db = getSqliteDb();
   // normalizedInvoiceRef is already trimmed+uppercased (silverNormalization.ts); apply the
   // same normalization to bill_document_number on the read side so a real-world casing or
@@ -54,19 +64,25 @@ function findReferenceRowByDocNumber(normalizedInvoiceRef: string): ReferenceRow
   // deterministic (most-recently-extracted wins) rather than arbitrary.
   const row = db
     .prepare(
-      `SELECT bill_document_number, amount, _run_id, _extracted_at, _source_system
+      `SELECT bill_document_number AS candidateKey, amount AS refAmount, _run_id, _extracted_at, _source_system
        FROM bronze_netsuite_vendorbill
        WHERE UPPER(TRIM(bill_document_number)) = ?
        ORDER BY _extracted_at DESC LIMIT 1`
     )
-    .get(normalizedInvoiceRef) as ReferenceRow | undefined;
+    .get(normalizedInvoiceRef) as NormalizedReferenceRow | undefined;
   return row ?? null;
 }
 
 /** The reference table's own most-recently-extracted row overall — captured for a
  * NOT_POSTED exception (nothing matched, so there is no specific row to attribute the
  * capture to) so the exception still records what state of NetSuite data was checked. */
-function findLatestReferenceWatermark(): ReferenceCapture | null {
+async function findLatestReferenceWatermark(): Promise<ReferenceCapture | null> {
+  if (isFabricLakehouseConfigured()) {
+    const row = await getLiveLatestReferenceWatermark();
+    if (!row) return null;
+    return { runId: row._run_id, extractedAt: row._extracted_at, sourceSystem: row._source_system };
+  }
+
   const db = getSqliteDb();
   const row = db
     .prepare(
@@ -88,10 +104,10 @@ export type MatchOutcome = {
   reference: ReferenceCapture | null;
 };
 
-export function matchStatementLine(line: {
+export async function matchStatementLine(line: {
   normalizedInvoiceRef: string | null;
   amount: number;
-}): MatchOutcome {
+}): Promise<MatchOutcome> {
   if (!line.normalizedInvoiceRef) {
     // Defensive only — Task 3.2's validation gate already guarantees invoice_ref or
     // ro_number is present before a line reaches Silver; not reachable in practice, but
@@ -103,11 +119,11 @@ export function matchStatementLine(line: {
       reasonCodes: ['NOT_POSTED'],
       evidence: { reason: 'no invoice reference to match against' },
       requiresReview: true,
-      reference: findLatestReferenceWatermark(),
+      reference: await findLatestReferenceWatermark(),
     };
   }
 
-  const ref = findReferenceRowByDocNumber(line.normalizedInvoiceRef);
+  const ref = await findReferenceRowByDocNumber(line.normalizedInvoiceRef);
   if (!ref) {
     return {
       stage: 'deterministic_match',
@@ -116,20 +132,20 @@ export function matchStatementLine(line: {
       reasonCodes: ['NOT_POSTED'],
       evidence: { normalizedInvoiceRef: line.normalizedInvoiceRef },
       requiresReview: true,
-      reference: findLatestReferenceWatermark(),
+      reference: await findLatestReferenceWatermark(),
     };
   }
 
   const reference: ReferenceCapture = { runId: ref._run_id, extractedAt: ref._extracted_at, sourceSystem: ref._source_system };
-  const diff = Math.abs(line.amount - ref.amount);
+  const diff = Math.abs(line.amount - ref.refAmount);
 
   if (diff > AMOUNT_TOLERANCE) {
     return {
       stage: 'deterministic_match',
       status: 'unmatched',
-      candidateIds: [ref.bill_document_number],
+      candidateIds: [ref.candidateKey],
       reasonCodes: ['AMOUNT_MISMATCH'],
-      evidence: { statementAmount: line.amount, netsuiteAmount: ref.amount, diff },
+      evidence: { statementAmount: line.amount, netsuiteAmount: ref.refAmount, diff },
       requiresReview: true,
       reference,
     };
@@ -138,9 +154,9 @@ export function matchStatementLine(line: {
   return {
     stage: 'deterministic_match',
     status: 'matched',
-    candidateIds: [ref.bill_document_number],
+    candidateIds: [ref.candidateKey],
     reasonCodes: [],
-    evidence: { statementAmount: line.amount, netsuiteAmount: ref.amount },
+    evidence: { statementAmount: line.amount, netsuiteAmount: ref.refAmount },
     requiresReview: false,
     reference,
   };
