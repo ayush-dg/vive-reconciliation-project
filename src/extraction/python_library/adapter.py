@@ -123,44 +123,18 @@ _STATEMENT_DATE_KEY = {
 # from this dict's own keys, so removing an entry here is sufficient on its
 # own to send that vendor's statements through DocumentUnderstandingEngine
 # (AI) instead -- _determine_extraction_route() in
-# notebooks/01_document_intake.py needed no changes at all. extract_keystone
-# is deliberately the only survivor: its 4 ledger-specific passthrough
-# columns (balance_forward, period_activity, credit_applied,
-# payment_applied -- see its own entry below) have no equivalent in
-# ClaudeSonnetClient's generic AI extraction path, so it stays on the
-# deterministic pdfplumber parser to avoid losing that data.
+# notebooks/01_document_intake.py needed no changes at all.
+#
+# extract_keystone removed 2026-08-30: investigation confirmed its 4
+# "ledger-specific" passthrough columns (balance_forward, period_activity,
+# credit_applied, payment_applied) are ordinary printed columns with real
+# headers ("Balance Forward", "Period Activity", "Credit Applied", "Payment
+# Applied") -- read directly via x-position bucketing in extract_keystone.py,
+# not computed/derived by that parser. There was no technical reason this
+# vendor needed to stay on the deterministic parser; ClaudeSonnetClient's
+# column-agnostic approach (extract each column verbatim from columns_found)
+# handles it the same way it already handles every other AI-routed vendor.
 _FIELD_MAP = {
-    "extract_keystone": {
-        # Ledger-style statement (see extract_keystone.py's own docstring
-        # and the Keystone investigation session): every row is EITHER a
-        # new-charge row (period_activity populated) OR a settlement row
-        # (balance_forward/credit_applied/payment_applied populated),
-        # never both. No single field maps cleanly to the shared
-        # charge_field/credit_field roles, so "ledger_charge_credit"
-        # dispatches to _keystone_charge_credit() instead (see its own
-        # docstring) -- Charges = period_activity on a new-charge row,
-        # or balance_forward (what was owed coming into this period) on
-        # a settlement row; Credits = credit_applied when genuinely
-        # non-zero. amount_due_field (balance_due) is untouched --
-        # already correct, confirmed 2026-08-24. Every real field still
-        # reaches Bronze in its own dedicated column: reference_date ->
-        # raw_invoice_date, reference_number -> raw_invoice_number
-        # (invoice_number below), purchase_order_number -> raw_po_number
-        # (po_number_field below), balance_due -> raw_amount_due
-        # (amount_due_field below), and the remaining four via
-        # passthrough_fields.
-        "invoice_number": ("reference_number",),
-        "date_field": "reference_date", "due_date_field": None,
-        "po_number_field": "purchase_order_number",
-        "amount_due_field": "balance_due",
-        "ledger_charge_credit": True,
-        "passthrough_fields": {
-            "balance_forward": "balance_forward",
-            "period_activity": "period_activity",
-            "credit_applied": "credit_applied",
-            "payment_applied": "payment_applied",
-        },
-    },
 }
 
 
