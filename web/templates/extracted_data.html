@@ -14,26 +14,7 @@
 {% block content %}
 {% if rows %}
 <div class="section-header">
-  <div class="section-title">Summary ({{ rows | length }} rows)</div>
-</div>
-<table class="table">
-  <thead>
-    <tr><th>Invoice</th><th>Charges</th><th>Credits</th><th>Amount due</th></tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-    <tr>
-      <td>{{ r.invoice_number or "—" }}</td>
-      <td>{{ r.charges | money if r.charges is not none else "—" }}</td>
-      <td>{{ r.credits | money if r.credits is not none else "—" }}</td>
-      <td>{{ r.amount_due | money if r.amount_due is not none else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
-<div class="section-header" style="margin-top:2rem">
-  <div class="section-title">Full as-printed data</div>
+  <div class="section-title">Extracted Data ({{ rows | length }} rows)</div>
 </div>
 {% if rows.columns %}
 <div class="table-responsive" style="overflow-x:auto">
