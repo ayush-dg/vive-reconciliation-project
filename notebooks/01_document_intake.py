@@ -237,8 +237,23 @@ def validate_invoice(invoice: dict, rules: dict):
     if invoice.get("outstanding_amount") is None and invoice.get("amount") is not None:
         invoice["outstanding_amount"] = invoice["amount"]
 
+    def has_value(field):
+        val = invoice.get(field)
+        return val is not None and str(val).strip() != ""
+
+    # A row missing invoice_number is still genuine (not garbage) if it has
+    # a real description and/or amount -- e.g. a "Last payment of 1234.56
+    # received" summary/payment line has no document number by nature.
+    # get_skip_reason() applies this same carve-out earlier in the pipeline
+    # for the "no identifier at all" case; this mirrors it here so a row
+    # that survives that check isn't then rejected on the same grounds by
+    # this required_fields check (confirmed missing from Bronze for BERLIN
+    # HEW 0726 2026-08-29 before this carve-out existed).
     required = rules.get("required_fields", ["invoice_number", "outstanding_amount"])
+    has_other_content = has_value("description") or has_value("amount") or has_value("outstanding_amount")
     for field in required:
+        if field == "invoice_number" and has_other_content:
+            continue
         val = invoice.get(field)
         if val is None or str(val).strip() == "":
             return False, f"MISSING_MANDATORY_FIELD: {field} is required"
@@ -365,12 +380,19 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
 def get_skip_reason(invoice: dict) -> str:
     """
     A row is genuinely unusable — not just low-confidence — when it has
-    no invoice identifier at all (neither invoice_number nor ro_number),
-    since there's then no way to even reference which invoice this row
-    is. Returns a skip reason string for such rows, or "" if the row
-    should proceed to normal validation (validate_invoice), which may
-    still route it to the review queue for other reasons (low
-    confidence, bad field type, etc).
+    no invoice identifier at all (neither invoice_number nor ro_number)
+    AND no other real content either (no description, no amount), since
+    there's then no way to even reference which invoice this row is, nor
+    anything else on the row worth keeping. Returns a skip reason string
+    for such rows, or "" if the row should proceed to normal validation
+    (validate_invoice), which may still route it to the review queue for
+    other reasons (low confidence, bad field type, etc).
+
+    A row lacking only an invoice/RO number is NOT skipped here if it has
+    a real description and/or amount — e.g. a "Last payment of 1234.56
+    received" summary/payment line has no document number by nature but
+    is a genuine transaction, not empty garbage (confirmed missing from
+    Bronze for BERLIN HEW 0726 2026-08-29 before this carve-out existed).
 
     A blank amount alone is deliberately NOT treated as unusable here —
     removed 2026-08-23 (INV-04 amendment, see docs/INVARIANTS.md). Every
@@ -382,7 +404,13 @@ def get_skip_reason(invoice: dict) -> str:
         val = invoice.get(field)
         return val is not None and str(val).strip() != ""
 
-    if not has_value("invoice_number") and not has_value("ro_number"):
+    has_identifier = has_value("invoice_number") or has_value("ro_number")
+    has_other_content = (
+        has_value("description")
+        or has_value("amount")
+        or has_value("outstanding_amount")
+    )
+    if not has_identifier and not has_other_content:
         return "no invoice identifier found"
 
     return ""

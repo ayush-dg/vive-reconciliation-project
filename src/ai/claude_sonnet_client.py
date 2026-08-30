@@ -80,6 +80,25 @@ STEP 3: Extract every single data row exactly as printed. Every row object must 
 - Do NOT include a grand total, subtotal, or balance-forward row as if it
   were an invoice line — report those separately in statement-level totals
   only, never inside rows.
+- SETTLEMENT/CLOSING ROW WARNING — READ THIS BEFORE MAPPING ANY CHARGES
+  VALUE: many statements print a settlement/closing row where an original
+  charge has already been fully offset by a credit — this row prints a
+  value under CREDITS and a matching NEGATIVE value under AMOUNT DUE,
+  with CHARGES left blank on that printed line. If you find yourself
+  about to put a value into CHARGES because you are unsure which column
+  it belongs to, STOP — first check whether CREDITS and a negative AMOUNT
+  DUE are present on that same row instead. That exact shape (CREDITS
+  populated + AMOUNT DUE negative + CHARGES blank) means the value
+  belongs in CREDITS, not CHARGES, every time, with no exceptions. Two
+  worked examples:
+    Example A — printed: CHARGES=(blank), CREDITS=268.12,
+    AMOUNT DUE=-75.00. Correct: {"CHARGES": null, "CREDITS": 268.12,
+    "AMOUNT DUE": -75.00}. WRONG: {"CHARGES": 268.12, "CREDITS": null,
+    "AMOUNT DUE": -75.00}.
+    Example B — printed: CHARGES=(blank), CREDITS=749.40,
+    AMOUNT DUE=-125.00. Correct: {"CHARGES": null, "CREDITS": 749.40,
+    "AMOUNT DUE": -125.00}. WRONG: {"CHARGES": 749.40, "CREDITS": null,
+    "AMOUNT DUE": -125.00}.
 - Some columns represent a genuinely different TYPE of value than others on
   the same row — e.g. the ORIGINAL charge/invoice amount for a line is a
   different column than a running BALANCE/AMOUNT DUE figure, which is
@@ -98,9 +117,40 @@ STEP 3: Extract every single data row exactly as printed. Every row object must 
   own Charges/Credits/Amount Due value. Re-read this row's own printed
   line specifically; never carry a value forward or backward from an
   adjacent row just because the two rows look similar.
+- More generally, when a row has exactly ONE value present among several
+  charge-like/credit-like columns, place that value in the column it is
+  actually printed under — determined strictly by its horizontal position
+  under that column's header. NEVER default to "the first numeric column"
+  or "the Charges column" as a fallback when uncertain which column a lone
+  value belongs to; uncertainty about placement is not evidence that the
+  value belongs in Charges.
 - Numbers must be plain numbers (no $ signs, no thousands commas); use
   negative numbers for amounts shown in parentheses or with a leading or
   trailing minus sign.
+- A row with no invoice/document number is not automatically excluded —
+  but it is not automatically included either. Apply this test: KEEP it
+  only if it represents its OWN distinct transaction with its OWN date
+  and its OWN amount (e.g. "Last payment of 1234.56 received" — a real
+  payment event that happened on a specific day; a missing invoice
+  number is never by itself a reason to skip a row like this). EXCLUDE
+  it if it instead looks like a subtotal/recap line for a group of rows
+  above it — specifically: no date (or a blank/repeated date), and its
+  amount is close to or equal to the sum of several rows immediately
+  above it that share the same reference/source code (e.g. a running
+  total for one vendor-source group, printed right after that group's
+  individual lines). This is the SAME exclusion as the earlier "do NOT
+  include a grand total, subtotal, or balance-forward row" rule — a
+  no-invoice-number row does NOT get a pass from that rule just because
+  it lacks an invoice number; use the KEEP test above, not the mere
+  absence of an invoice number, to decide. Worked example: a page has
+  several individual charge rows for source code "220", followed by a
+  row simply labeled "220" with no date and an amount matching their
+  sum — EXCLUDE that recap row entirely (do not add it to "rows"). A
+  separate, unrelated payment line elsewhere on the same statement that
+  has its own date (e.g. "Last payment of 1234.56 received" dated
+  7/31) IS included, per the KEEP test above. For any row you do keep
+  under this rule, use null for whichever fields are genuinely blank or
+  not applicable on that row.
 - Include a "confidence" field (0.0-1.0) for every row: 0.9+ only if every
   character is unambiguous; lower it for anything uncertain — unclear
   handwriting/scan quality, an invoice number you had to guess between two
