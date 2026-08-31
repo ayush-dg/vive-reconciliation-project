@@ -1,15 +1,25 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { AnthropicFoundry } from '@anthropic-ai/foundry-sdk';
 
 /**
  * Claude Sonnet extraction (Task 3.1's "Claude-primary" path). Env-driven,
  * same fallback pattern as db.ts (SQLite/Fabric) and storage.ts (local/blob):
- * a real Anthropic API call when ANTHROPIC_API_KEY is set, a deterministic
- * mock otherwise — no key is available in this environment.
+ * a real live call when a key is configured, a deterministic mock otherwise.
+ *
+ * Two distinct live paths exist, checked in order (see extractViaClaude()):
+ * 1. Azure AI Foundry (AZURE_CLAUDE_API_KEY/ENDPOINT/SONNET_DEPLOYMENT) — this
+ *    project's actual currently-configured live credential (confirmed working
+ *    2026-08-30). Uses the dedicated @anthropic-ai/foundry-sdk client, not a
+ *    baseURL override on the direct client — Azure Foundry requires its own
+ *    package (resource-based routing, /deployments/<name>/messages path).
+ * 2. Direct Anthropic API (ANTHROPIC_API_KEY) — the original path, kept for
+ *    whenever a direct key is available instead of/alongside the Azure one.
  *
  * Unlike the DB/storage fallbacks, a live key means real per-call billing —
- * automated tests NEVER take the real-API path by default (see
- * shouldUseLiveExtraction()), regardless of whether a key is present. Only
- * an explicit EXTRACTION_LIVE_TESTS=1 opt-in exercises it.
+ * automated tests NEVER take a real-API path by default (see
+ * shouldUseLiveExtraction()/shouldUseAzureFoundryExtraction()), regardless of
+ * whether a key is present. Only an explicit EXTRACTION_LIVE_TESTS=1 opt-in
+ * exercises either.
  *
  * G3 — extracted content is model data, never model instructions. Enforced
  * structurally here: the model version is CLAUDE_MODEL_ID's own model choice
@@ -95,28 +105,18 @@ export function shouldUseLiveExtraction(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY) && process.env.EXTRACTION_LIVE_TESTS === '1';
 }
 
-async function extractViaClaudeLive(pdfBytes: Buffer): Promise<ExtractionOutcome> {
-  const client = new Anthropic();
-  const response = await client.messages.create({
-    model: CLAUDE_MODEL_ID,
-    max_tokens: 4096,
-    system: EXTRACTION_SYSTEM_PROMPT,
-    tools: [RECORD_EXTRACTION_TOOL],
-    tool_choice: { type: 'tool', name: 'record_extraction' },
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: pdfBytes.toString('base64') },
-          },
-          { type: 'text', text: 'Extract this vendor statement using the record_extraction tool.' },
-        ],
-      },
-    ],
-  });
+/** Same opt-in discipline as shouldUseLiveExtraction() (real per-call billing
+ * on Azure Foundry too), but gated on the Azure credential this project
+ * actually has configured, not the direct Anthropic one. */
+export function shouldUseAzureFoundryExtraction(): boolean {
+  return Boolean(process.env.AZURE_CLAUDE_API_KEY) && process.env.EXTRACTION_LIVE_TESTS === '1';
+}
 
+/** Shared between both live paths — Foundry's client is a subclass of the
+ * direct Anthropic client (same Messages API response shape), so this parsing
+ * logic is identical either way; only how the client/request gets built
+ * differs. */
+function parseRecordExtractionResponse(response: Anthropic.Message): ExtractionOutcome {
   const toolUse = response.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
   const rawOutput = JSON.stringify(response.content);
 
@@ -149,6 +149,51 @@ async function extractViaClaudeLive(pdfBytes: Buffer): Promise<ExtractionOutcome
     // rather than fabricating a number with no basis.
     confidence: null,
   };
+}
+
+function buildExtractionRequest(pdfBytes: Buffer) {
+  return {
+    max_tokens: 4096,
+    system: EXTRACTION_SYSTEM_PROMPT,
+    tools: [RECORD_EXTRACTION_TOOL],
+    tool_choice: { type: 'tool' as const, name: 'record_extraction' },
+    messages: [
+      {
+        role: 'user' as const,
+        content: [
+          {
+            type: 'document' as const,
+            source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: pdfBytes.toString('base64') },
+          },
+          { type: 'text' as const, text: 'Extract this vendor statement using the record_extraction tool.' },
+        ],
+      },
+    ],
+  };
+}
+
+async function extractViaClaudeLive(pdfBytes: Buffer): Promise<ExtractionOutcome> {
+  const client = new Anthropic();
+  const response = await client.messages.create({ model: CLAUDE_MODEL_ID, ...buildExtractionRequest(pdfBytes) });
+  return parseRecordExtractionResponse(response);
+}
+
+/** resource must be just the Azure resource name prefix (e.g. "foundry-vive-recon"),
+ * not the full hostname from AZURE_CLAUDE_ENDPOINT — the SDK appends its own
+ * ".services.ai.azure.com" suffix; passing the full hostname doubles it and
+ * fails DNS resolution (confirmed 2026-08-30). model must be the Azure
+ * deployment NAME (AZURE_CLAUDE_SONNET_DEPLOYMENT), not a raw Anthropic model
+ * ID — AZURE_CLAUDE_DEPLOYMENT ("claude-haiku-4-5") does not exist in this
+ * Azure resource (confirmed 404 DeploymentNotFound); only the Sonnet
+ * deployment is actually provisioned. */
+async function extractViaAzureFoundryClaude(pdfBytes: Buffer): Promise<ExtractionOutcome> {
+  const resource = new URL(process.env.AZURE_CLAUDE_ENDPOINT!).hostname.split('.')[0];
+  const client = new AnthropicFoundry({ apiKey: process.env.AZURE_CLAUDE_API_KEY, resource });
+  const response = await client.messages.create({
+    model: process.env.AZURE_CLAUDE_SONNET_DEPLOYMENT!,
+    ...buildExtractionRequest(pdfBytes),
+  });
+  return parseRecordExtractionResponse(response);
 }
 
 /**
@@ -192,10 +237,14 @@ async function extractViaMock(pdfText: string): Promise<ExtractionOutcome> {
 
 /** Entry point Task 3.1's routing calls for the Claude-primary path. Accepts
  * both the raw PDF bytes (for a real call) and its extracted text layer (for
- * the mock, which doesn't do its own PDF parsing). A live ANTHROPIC_API_KEY
- * alone is not enough to reach extractViaClaudeLive() — see
- * shouldUseLiveExtraction()'s own doc comment for why. */
+ * the mock, which doesn't do its own PDF parsing). A live key alone is not
+ * enough to reach either live path — see shouldUseAzureFoundryExtraction()/
+ * shouldUseLiveExtraction()'s own doc comments for why. Azure Foundry is
+ * checked first since it's this project's actual configured credential. */
 export async function extractViaClaude(pdfBytes: Buffer, pdfText: string): Promise<ExtractionOutcome> {
+  if (shouldUseAzureFoundryExtraction()) {
+    return extractViaAzureFoundryClaude(pdfBytes);
+  }
   if (shouldUseLiveExtraction()) {
     return extractViaClaudeLive(pdfBytes);
   }
