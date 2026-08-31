@@ -43,6 +43,11 @@ export default defineConfig({
       // exercising the local SQLite fixture path deterministically, not a live external
       // dependency.
       FABRIC_LAKEHOUSE_SQL_ENDPOINT: '',
+      // aiProvider.ts's live-extraction opt-in (Azure Foundry or direct Anthropic) —
+      // .env.local sets this for real so `npm run dev` exercises live Claude. Blanked
+      // here so automated tests keep using the deterministic mock, not a live, billed,
+      // network-dependent external call.
+      EXTRACTION_LIVE_TESTS: '',
     },
   },
 });
