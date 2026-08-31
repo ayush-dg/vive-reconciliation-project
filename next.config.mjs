@@ -7,6 +7,10 @@ const nextConfig = {
   // root-stub convention (Claude.md.ROOT_STUB.txt -> docs/Claude.md).
   // Disabled at the source instead of just gitignoring the generated files.
   agentRules: false,
+  // The dev-mode "Route/Bundler/Route Info/Preferences" indicator overlay —
+  // dev-only (never renders in production), but distracting during local
+  // testing and easy to mistake for a real app element.
+  devIndicators: false,
 };
 
 export default nextConfig;
