@@ -37,9 +37,12 @@ new-charge row, or balance_forward on a settlement row -- see that
 function's own docstring and migrations/012_add_keystone_ledger_columns.sql.
 """
 
+import datetime
 import os
 import re
 import sys
+
+from dateutil import parser as _dateutil_parser
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
@@ -51,7 +54,12 @@ _MONTH = {
     "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04", "MAY": "05", "JUN": "06",
     "JUL": "07", "AUG": "08", "SEP": "09", "OCT": "10", "NOV": "11", "DEC": "12",
 }
-_DATE_RE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})$")
+_DATE_RE = re.compile(r"^(\d{2})([A-Z]{3})(\d{2})$")  # "23DEC25" (Fred Beans, Lia)
+_DATE_RE_SPACED = re.compile(r"^(\d{1,2})\s+([A-Z]{3})\s+(\d{4})$")  # "31 JUL 2026" (Quirk)
+_SLASH_DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y")  # MM/DD/YYYY or MM/DD/YY, 1-2 digit
+# month/day both accepted by strptime -- covers Astech ("06/01/2026"),
+# Empire ("06/01/26"), Wilbert's ("07/31/26"), Nimey ("07/31/26"),
+# Precision ("7/1/2026"), Adas ("07/31/2026"), Keystone ("07/31/26")
 
 # Display vendor_name per module -- matches each module's own
 # VENDOR_SIGNATURE and (where one exists) config/vendor_aliases.json, the
@@ -89,11 +97,9 @@ _PRINTED_TOTAL_KEY = {
 
 # Which summary key holds the statement date, per module -- these
 # genuinely differ in both key name and printed format (DDMonYY, MM/DD/YY,
-# "DD MON YYYY", ...). _normalize_date() only understands DDMonYY and
-# safely passes any other format through unchanged (see its own
-# docstring), so a vendor not on that exact format just keeps its
-# as-printed date string rather than a normalized one -- no crash, just
-# non-uniform formatting until each format gets its own normalizer.
+# "DD MON YYYY", ...). _normalize_date() (see its own docstring) handles
+# every format actually in use across all 10 modules, converting each to
+# ISO YYYY-MM-DD.
 _STATEMENT_DATE_KEY = {
     "extract_statement": "statement_date",
     "extract_astech": "statement_as_of",
@@ -235,18 +241,47 @@ ROUTABLE_VENDOR_SIGNATURES = [
 
 
 def _normalize_date(raw):
-    """'23DEC25' -> '2025-12-23'. Returns the raw string unchanged if it
-    doesn't match the expected DDMonYY shape -- never guesses."""
+    """Converts any date format actually seen across our 10 vendor
+    modules to ISO 'YYYY-MM-DD': 'DDMonYY' ('23DEC25' -- Fred Beans,
+    Lia), 'DD MON YYYY' ('31 JUL 2026' -- Quirk), and 'MM/DD/YYYY' or
+    'MM/DD/YY' (Astech, Empire, Wilbert's, Nimey, Precision, Adas,
+    Keystone). Explicit format attempts first -- predictable, no
+    ambiguity for formats already confirmed real -- then
+    dateutil.parser as a catch-all so a future vendor's not-yet-seen
+    date format degrades to "parsed, most likely correctly" instead of
+    silently truncating into garbage the way a bare [:7] ISO-format
+    slice did before this existed (see notebooks/01_document_intake.py's
+    statement_period computation, the actual consumer of this output).
+    Returns the raw string unchanged if nothing can parse it -- still
+    never guesses when input is empty or genuinely unparseable."""
     if not raw:
         return None
+    raw = raw.strip()
+
     m = _DATE_RE.match(raw)
-    if not m:
+    if m:
+        day, mon, yy = m.groups()
+        month = _MONTH.get(mon)
+        if month:
+            return f"20{yy}-{month}-{day}"
+
+    m = _DATE_RE_SPACED.match(raw)
+    if m:
+        day, mon, yyyy = m.groups()
+        month = _MONTH.get(mon)
+        if month:
+            return f"{yyyy}-{month}-{int(day):02d}"
+
+    for fmt in _SLASH_DATE_FORMATS:
+        try:
+            return datetime.datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    try:
+        return _dateutil_parser.parse(raw, dayfirst=False).strftime("%Y-%m-%d")
+    except (ValueError, OverflowError, TypeError):
         return raw
-    day, mon, yy = m.groups()
-    month = _MONTH.get(mon)
-    if not month:
-        return raw
-    return f"20{yy}-{month}-{day}"
 
 
 def _parse_money(raw):

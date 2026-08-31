@@ -1119,11 +1119,15 @@ def get_extracted_rows_for_job(job_id: str) -> list:
     Returns a _RowsWithColumns: same list of row dicts as before, plus a
     `.columns` attribute -- the ordered union of every row's raw_columns
     keys (first-seen order), i.e. the real printed header names for this
-    job's flat full-data table. Empty when no row in this job has
-    raw_columns at all (every row went through a hardcoded pdfplumber
-    parser, or predates this column being saved) -- extracted_data.html
-    uses that to decide whether to render the full table or its
-    fixed-field-extraction fallback note. Also a `.aging_summary`
+    job's flat full-data table. Sourced from raw_ai_response when present
+    (AI-routed vendors); falls back to the dedicated Bronze columns
+    (charges/credits/amount_due/invoice_number/invoice_date/due_date/
+    ro_number/po_number/work_order_number/description, plus Keystone's 4
+    ledger columns) when it isn't (every python-library/pdfplumber
+    vendor). Only genuinely empty if a job predates both -- a job run
+    before raw_ai_response started being saved AND before this fallback
+    existed; extracted_data.html's "not available" note is now that rare
+    case, not the default for pdfplumber vendors. Also a `.aging_summary`
     attribute -- a dict, empty when this statement has none."""
     job = get_job_by_id(job_id)
     if not job or not job.get("statement_id"):
@@ -1137,7 +1141,10 @@ def get_extracted_rows_for_job(job_id: str) -> list:
             raw_charges AS charges,
             raw_credits AS credits,
             raw_amount_due AS amount_due,
-            raw_ai_response
+            raw_ai_response,
+            raw_invoice_date, raw_due_date, raw_ro_number, raw_po_number,
+            raw_work_order_number, raw_description,
+            raw_balance_forward, raw_period_activity, raw_credit_applied, raw_payment_applied
         FROM bronze_vendor_statement_raw
         WHERE statement_id = ?
         ORDER BY page_number, row_number
@@ -1158,6 +1165,40 @@ def get_extracted_rows_for_job(job_id: str) -> list:
         if raw_columns:
             for key in raw_columns.keys():
                 if key not in seen:
+                    seen.add(key)
+                    columns.append(key)
+
+    if not columns:
+        # No row in this job has raw_ai_response (every python-library/
+        # pdfplumber vendor, see get_extracted_rows_for_job()'s own
+        # docstring) -- fall back to the dedicated Bronze columns
+        # adapter.py's PythonLibraryExtractionEngine actually populates,
+        # same table format as the AI-sourced one above, just built from
+        # named columns instead of a JSON blob. A label is only added to
+        # `columns` if at least one row has a real value for it, so e.g.
+        # Keystone's 4 ledger columns don't show up as empty for every
+        # other vendor.
+        columns, seen = [], set()
+        for row in rows:
+            fallback = {
+                "Invoice Number": row.get("invoice_number"),
+                "Invoice Date": row.get("raw_invoice_date"),
+                "Due Date": row.get("raw_due_date"),
+                "Charges": row.get("charges"),
+                "Credits": row.get("credits"),
+                "Amount Due": row.get("amount_due"),
+                "RO Number": row.get("raw_ro_number"),
+                "PO Number": row.get("raw_po_number"),
+                "Work Order Number": row.get("raw_work_order_number"),
+                "Description": row.get("raw_description"),
+                "Balance Forward": row.get("raw_balance_forward"),
+                "Period Activity": row.get("raw_period_activity"),
+                "Credit Applied": row.get("raw_credit_applied"),
+                "Payment Applied": row.get("raw_payment_applied"),
+            }
+            row["raw_columns"] = fallback
+            for key, value in fallback.items():
+                if value is not None and key not in seen:
                     seen.add(key)
                     columns.append(key)
 

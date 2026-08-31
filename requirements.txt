@@ -1,4 +1,5 @@
 pdfplumber>=0.11.0
+python-dateutil>=2.9.0  # src/extraction/python_library/adapter.py's _normalize_date() catch-all for date formats not covered by its explicit format attempts -- was an undeclared transitive dependency; explicit now since production code imports it directly
 pymupdf>=1.24.0  # fitz -- used by src/extraction/python_library/extract_ksi.py's OCR vendor-detection path
 python-dotenv>=1.0.0
 anthropic==0.125.0
