@@ -46,11 +46,18 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
     }
   }
 
-  // D-I: this is the only place extraction is triggered — never automatic on
-  // upload. G5: the endpoint itself does the atomic ownership acquisition;
-  // this handler just reflects the outcome (success -> refresh so the button
-  // disappears once status flips; 409 -> already in progress).
-  async function handleExtract(documentId: string) {
+  // G5: the endpoint itself does the atomic ownership acquisition; this
+  // handler just reflects the outcome (success -> refresh so the button
+  // disappears once status flips; 409 -> already in progress). Server-side,
+  // registration (documents.ts) and extraction (extraction.ts) remain two
+  // distinct calls with G5's lock still enforced between them — D-I's actual
+  // separation is unchanged. What changed (2026-08-31, engineer-directed):
+  // the CLIENT now chains them automatically right after a successful
+  // upload (see handleSubmit's autoTriggered call below) instead of waiting
+  // for a second, separate click — `silent` suppresses the "Extraction
+  // started" toast for that case, since "Statement uploaded" already covers
+  // it; a real failure still surfaces normally either way.
+  async function handleExtract(documentId: string, options?: { silent?: boolean }) {
     setExtractingIds((prev) => new Set(prev).add(documentId));
     try {
       const res = await fetch(`/api/documents/${documentId}/extract`, { method: 'POST' });
@@ -64,7 +71,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         showError(data.error ?? 'Failed to start extraction.');
         return;
       }
-      showSuccess('Extraction started.');
+      if (!options?.silent) showSuccess('Extraction started.');
       await refreshDocuments();
     } catch {
       showError('Failed to start extraction — check your connection and try again.');
@@ -116,12 +123,21 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         showSuccess(
           data.duplicate
             ? 'This exact statement was already uploaded — no duplicate created.'
-            : 'Statement uploaded successfully.'
+            : 'Statement uploaded successfully — extraction starting…'
         );
       }
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-      await refreshDocuments();
+
+      // A genuinely new document starts extracting immediately, no separate
+      // click required (engineer-directed, 2026-08-31). A duplicate hit
+      // (existing document, possibly already extracted/extracting) is left
+      // alone — just refreshed, not re-triggered.
+      if (!data.duplicate && data.document) {
+        await handleExtract(data.document.document_id, { silent: true });
+      } else {
+        await refreshDocuments();
+      }
     } catch {
       showError('Upload failed — check your connection and try again.');
     } finally {
@@ -188,7 +204,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         <form className="form-card" onSubmit={handleSubmit} data-testid="upload-form">
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" style={{ width: 'auto', flex: 1 }} disabled={submitting} data-testid="upload-submit">
-              {submitting ? 'Uploading…' : 'Upload statement'}
+              {submitting ? 'Uploading & extracting…' : 'Upload statement'}
             </button>
           </div>
         </form>

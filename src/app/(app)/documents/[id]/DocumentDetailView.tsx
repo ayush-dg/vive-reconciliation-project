@@ -98,7 +98,9 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
   }
 
   const canExtract = detail.status === 'registered';
-  const canReconcile = detail.status === 'processing' && detail.statusBadge.badge === 'Processing';
+  // 'Extracted' (not 'Processing') — extraction must have actually succeeded
+  // before there's anything for Reconcile to match.
+  const canReconcile = detail.status === 'processing' && detail.statusBadge.badge === 'Extracted';
   const providerEntries = Object.entries(detail.extractionMethodSummary);
 
   return (
@@ -134,7 +136,7 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
                   onClick={handleExtract}
                   data-testid="document-detail-extract-button"
                 >
-                  {extracting ? 'Starting…' : 'Extract'}
+                  {extracting ? 'Extracting…' : 'Extract'}
                 </button>
               )}
               {canReconcile && (
@@ -145,7 +147,7 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
                   onClick={handleReconcile}
                   data-testid="document-detail-reconcile-button"
                 >
-                  {reconciling ? 'Starting…' : 'Reconcile'}
+                  {reconciling ? 'Reconciling…' : 'Reconcile'}
                 </button>
               )}
             </div>

@@ -660,6 +660,10 @@ tbody tr:hover {
   background: var(--navy-tint);
   color: var(--navy-2);
 }
+.status-badge.extracted {
+  background: var(--steel-tint);
+  color: var(--navy-2);
+}
 .status-badge.retrying {
   background: var(--warning-tint);
   color: var(--warning);

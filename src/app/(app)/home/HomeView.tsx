@@ -183,7 +183,9 @@ export default function HomeView({
               )}
               {documents.map((doc) => {
                 const canExtract = doc.status === 'registered';
-                const canReconcile = doc.status === 'processing' && doc.status_badge.badge === 'Processing';
+                // 'Extracted' (not 'Processing') — extraction must have actually
+                // succeeded before there's anything for Reconcile to match.
+                const canReconcile = doc.status === 'processing' && doc.status_badge.badge === 'Extracted';
                 return (
                   <tr key={doc.document_id} data-testid={`home-document-row-${doc.document_id}`}>
                     <td>
@@ -210,7 +212,7 @@ export default function HomeView({
                           onClick={() => handleExtract(doc.document_id)}
                           data-testid={`home-extract-button-${doc.document_id}`}
                         >
-                          {extractingIds.has(doc.document_id) ? 'Starting…' : 'Extract'}
+                          {extractingIds.has(doc.document_id) ? 'Extracting…' : 'Extract'}
                         </button>
                       )}
                       {canReconcile && (
@@ -221,7 +223,7 @@ export default function HomeView({
                           onClick={() => handleReconcile(doc.document_id)}
                           data-testid={`home-reconcile-button-${doc.document_id}`}
                         >
-                          {reconcilingIds.has(doc.document_id) ? 'Starting…' : 'Reconcile'}
+                          {reconcilingIds.has(doc.document_id) ? 'Reconciling…' : 'Reconcile'}
                         </button>
                       )}
                     </td>

@@ -8,8 +8,13 @@ import { getSqliteDb, getDbMode } from './db';
  * function is exercised here against directly-inserted extraction_attempt
  * rows, not a live pipeline.
  *
- * Status values (EXECUTION_PLAN.md Task 2.3, verbatim):
+ * Status values (EXECUTION_PLAN.md Task 2.3, verbatim, plus one deliberate addition):
  * "Processing" (no attempts yet or attempt in progress),
+ * "Extracted" (added 2026-08-31, engineer-directed — extraction succeeded, awaiting
+ *   Reconcile; UI_SURFACE.md's original four-value badge set folded this into
+ *   "Processing" too, which the engineer found ambiguous once real Reconcile latency
+ *   made "still extracting" vs. "done, waiting on you to reconcile" a meaningfully
+ *   different thing to communicate — a deliberate fifth value, not an oversight),
  * "Retrying (N/2)" (attempt N failed, retry pending),
  * "Failed — see Exceptions" (OCR_LOW_CONFIDENCE reached),
  * "Reconciled" (matched successfully).
@@ -27,7 +32,7 @@ import { getSqliteDb, getDbMode } from './db';
  * wording.
  */
 
-export type DocumentStatusBadge = 'Processing' | 'Retrying' | 'Failed' | 'Reconciled';
+export type DocumentStatusBadge = 'Processing' | 'Extracted' | 'Retrying' | 'Failed' | 'Reconciled';
 
 export type DocumentStatusResult = {
   badge: DocumentStatusBadge;
@@ -117,11 +122,21 @@ export function computeDocumentStatus(documentId: string): DocumentStatusResult 
   // retry that already happened and succeeded.
   const latest = attempts.at(-1);
   const latestFailed = latest ? latest.arithmetic_pass === 0 || latest.structural_pass === 0 : false;
+  const latestSucceeded = latest ? latest.arithmetic_pass === 1 && latest.structural_pass === 1 : false;
 
-  if (!latest || !latestFailed) {
-    // No attempts yet, latest attempt still in progress (both pass fields
-    // NULL), or latest attempt succeeded — all read as "Processing".
+  if (!latest || (!latestFailed && !latestSucceeded)) {
+    // No attempts recorded yet, or the latest attempt's pass fields are
+    // still NULL — an in-progress/unvalidated attempt (defensive; this
+    // build's pipeline is fully synchronous today, so this row shape isn't
+    // actually reachable in practice, but must not be misread as either a
+    // pass or a fail if it ever is). Neither case is "done" yet.
     return { badge: 'Processing', label: 'Processing', attemptCount: attempts.length };
+  }
+  if (latestSucceeded) {
+    // Latest attempt succeeded — distinct from "Processing" (see this
+    // file's top comment): extraction is genuinely done, only Reconcile is
+    // outstanding.
+    return { badge: 'Extracted', label: 'Extracted', attemptCount: attempts.length };
   }
 
   const failedCount = attempts.filter((a) => a.arithmetic_pass === 0 || a.structural_pass === 0).length;

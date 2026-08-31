@@ -44,7 +44,7 @@ test.describe('Extract action', () => {
     await expect(page.getByTestId(`extract-button-${documentId}`)).toBeVisible();
   });
 
-  test('clicking Extract transitions status to "Processing" and triggers Session 3\'s service', async ({
+  test('clicking Extract transitions status to "Extracted" and triggers Session 3\'s service', async ({
     page,
     context,
   }) => {
@@ -58,11 +58,13 @@ test.describe('Extract action', () => {
     // and the shared dev server/SQLite file is under concurrent load from
     // every other test in the suite; confirmed via a captured DOM snapshot
     // that a slow run still shows the request correctly in-flight
-    // ("Starting…", not an error), not a logic failure.
+    // ("Extracting…", not an error), not a logic failure.
     await expect(page.getByTestId('toast-success')).toBeVisible({ timeout: 15_000 });
-    // Task 2.3's computed display label ("Processing"), not the raw internal
+    // Task 2.3's computed display label — "Extracted" (2026-08-31 addition,
+    // distinct from "Processing"), since this fixture's marker-format text
+    // makes the mock extractor succeed on attempt 1. Not the raw internal
     // status column — see documents.ts's ApiDocument doc comment.
-    await expect(page.getByTestId(`status-badge-${documentId}`)).toHaveText('Processing');
+    await expect(page.getByTestId(`status-badge-${documentId}`)).toHaveText('Extracted');
   });
 
   test('Extract button is not shown once extraction has already started', async ({ page, context }) => {
@@ -75,10 +77,15 @@ test.describe('Extract action', () => {
     await expect(page.getByTestId(`extract-button-${documentId}`)).toHaveCount(0);
   });
 
-  test('uploading a document does not itself invoke extraction — status stays "registered" until Extract is clicked', async ({
+  test('a raw API upload (bypassing the Upload UI form) does not itself invoke extraction — status stays "registered" until Extract is triggered', async ({
     page,
     context,
   }) => {
+    // Auto-extraction-on-upload (engineer-directed, 2026-08-31) lives entirely in
+    // UploadForm.tsx's client-side handleSubmit — the server-side POST /api/documents
+    // route itself still only registers, exactly as before. A direct API call like this
+    // one (bypassing the browser form) never reaches that client code, so this remains
+    // true even after that change. See the next test for the actual UI-form behavior.
     await signInViaCookie(context);
     const uploadRes = await page.request.post('/api/documents', {
       multipart: {
@@ -91,6 +98,27 @@ test.describe('Extract action', () => {
 
     await page.goto('/upload');
     await expect(page.getByTestId(`extract-button-${uploadBody.document.document_id}`)).toBeVisible();
+  });
+
+  test('uploading through the actual Upload UI form starts extraction automatically — no separate Extract click needed', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    await page.goto('/upload');
+
+    const text = `VENDOR: Extract_Trigger_auto\nTOTAL: 10.00\nINVOICE: INV-auto | RO: - | AMOUNT: 10.00 | DATE: 2026-08-01`;
+    const bytes = makeTestPdf(text);
+    await page.setInputFiles('#statement-file', { name: 'auto-extract.pdf', mimeType: 'application/pdf', buffer: bytes });
+    await page.getByTestId('upload-submit').click();
+
+    // The single upload-submit click covers both upload and extraction (they're chained
+    // client-side) — by the time the page settles, the document should already be past
+    // "registered"/Extract-needed and showing a real computed badge, with no Extract
+    // button ever appearing for this row.
+    await expect(page.getByTestId('toast-success')).toBeVisible({ timeout: 15_000 });
+    const row = page.locator('[data-testid^="document-row-"]').first();
+    await expect(row.getByRole('button', { name: 'Extract' })).toHaveCount(0);
   });
 
   test('G5: triggering Extract twice in rapid succession results in exactly one extraction attempt — the second is rejected', async ({
