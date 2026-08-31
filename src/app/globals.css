@@ -504,7 +504,7 @@ tbody tr:hover {
 /* ---------- upload view ---------- */
 .upload-grid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1fr;
   gap: 20px;
   align-items: start;
 }
@@ -750,12 +750,6 @@ tbody tr:hover {
 }
 .toast button:hover {
   opacity: 1;
-}
-
-@media (max-width: 1080px) {
-  .upload-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ---------- Session 6: Home / Exceptions / Exception Detail / Document Detail ---------- */

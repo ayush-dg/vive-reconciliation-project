@@ -134,7 +134,7 @@ test.describe('Upload', () => {
     await expect(page.getByTestId('toast-error')).toContainText('PDF files only');
   });
 
-  test('uploaded-document list shows "Identifying…" for vendor on a freshly-registered row', async ({
+  test('uploaded-document list shows the uploaded file\'s own name, not the (unresolved) vendor', async ({
     page,
     context,
   }) => {
@@ -145,7 +145,9 @@ test.describe('Upload', () => {
     await page.getByTestId('upload-submit').click();
 
     await expect(page.getByTestId('toast-success')).toBeVisible();
-    await expect(page.getByTestId('vendor-identifying').first()).toBeVisible();
-    await expect(page.getByTestId('vendor-identifying').first()).toHaveText('Identifying…');
+    // The row's own upload-timestamp ordering means the fresh row is the first in the
+    // (most-recent-first) table — same landmark the old "Identifying…" placeholder used.
+    const firstFilenameCell = page.locator('[data-testid^="document-filename-"]').first();
+    await expect(firstFilenameCell).toHaveText(/keystone.*\.pdf/);
   });
 });

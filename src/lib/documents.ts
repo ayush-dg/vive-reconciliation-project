@@ -21,6 +21,12 @@ export type DocumentRow = {
   statementPeriod: string | null;
   status: string;
   uploadTimestamp: string;
+  /** The uploaded file's own name (e.g. "lia-statement-july.pdf") — shown on the Upload
+   * screen instead of vendor, which is frequently null while extraction is pending/failed
+   * and is a separate concept from what file the user actually uploaded. Null for
+   * documents registered before this column existed (migration 007) — only
+   * content_sha256 was ever stored for those, no filename is recoverable. */
+  originalFilename: string | null;
 };
 
 function assertSqliteMode() {
@@ -40,6 +46,7 @@ function rowToDocument(row: {
   statement_period: string | null;
   status: string;
   upload_timestamp: string;
+  original_filename: string | null;
 }): DocumentRow {
   return {
     documentId: row.document_id,
@@ -49,6 +56,7 @@ function rowToDocument(row: {
     statementPeriod: row.statement_period,
     status: row.status,
     uploadTimestamp: row.upload_timestamp,
+    originalFilename: row.original_filename,
   };
 }
 
@@ -57,7 +65,7 @@ export function findDocumentByHash(contentSha256: string): DocumentRow | null {
   const db = getSqliteDb();
   const row = db
     .prepare(
-      `SELECT document_id, content_sha256, legal_entity_id, vendor_id, statement_period, status, upload_timestamp
+      `SELECT document_id, content_sha256, legal_entity_id, vendor_id, statement_period, status, upload_timestamp, original_filename
        FROM extracted_document WHERE content_sha256 = ?`
     )
     .get(contentSha256) as Parameters<typeof rowToDocument>[0] | undefined;
@@ -75,8 +83,11 @@ export type RegisterResult = {
 };
 
 /** Registers an uploaded PDF. G4: byte-identical uploads are a no-op — the
- * existing document is returned, no new row, no re-registration. */
-export function registerDocument(fileBytes: Buffer, legalEntityId: string): RegisterResult {
+ * existing document is returned, no new row, no re-registration. originalFilename is
+ * best-effort display metadata (Upload screen), not part of the G4 identity/dedup key —
+ * a duplicate upload under a different filename still resolves to the existing document
+ * unchanged, same as legalEntityMismatch already does for a differing entity. */
+export function registerDocument(fileBytes: Buffer, legalEntityId: string, originalFilename: string | null = null): RegisterResult {
   assertSqliteMode();
   const contentSha256 = crypto.createHash('sha256').update(fileBytes).digest('hex');
 
@@ -95,9 +106,9 @@ export function registerDocument(fileBytes: Buffer, legalEntityId: string): Regi
   const documentId = crypto.randomUUID();
   try {
     db.prepare(
-      `INSERT INTO extracted_document (document_id, content_sha256, legal_entity_id)
-       VALUES (?, ?, ?)`
-    ).run(documentId, contentSha256, legalEntityId);
+      `INSERT INTO extracted_document (document_id, content_sha256, legal_entity_id, original_filename)
+       VALUES (?, ?, ?, ?)`
+    ).run(documentId, contentSha256, legalEntityId, originalFilename);
   } catch (err) {
     // Check-then-insert race: another request registered the same hash
     // between our findDocumentByHash() read and this INSERT (plausible under
@@ -119,8 +130,14 @@ export function listDocuments(): DocumentRow[] {
   const db = getSqliteDb();
   const rows = db
     .prepare(
-      `SELECT document_id, content_sha256, legal_entity_id, vendor_id, statement_period, status, upload_timestamp
-       FROM extracted_document ORDER BY upload_timestamp DESC`
+      // upload_timestamp has only whole-second resolution (SQLite's datetime('now')) — an
+      // upload burst within the same second (real under load, and routinely hit by this
+      // project's own test suite writing to the same local DB) ties on that column alone,
+      // sorting arbitrarily by document_id instead of actual upload order. rowid is
+      // SQLite's own monotonic insertion-order column (still present here since
+      // document_id is a TEXT, not INTEGER, primary key) and reliably breaks the tie.
+      `SELECT document_id, content_sha256, legal_entity_id, vendor_id, statement_period, status, upload_timestamp, original_filename
+       FROM extracted_document ORDER BY upload_timestamp DESC, rowid DESC`
     )
     .all() as Parameters<typeof rowToDocument>[0][];
   return rows.map(rowToDocument);
@@ -149,6 +166,7 @@ export type ApiDocument = {
   status: string;
   status_badge: { badge: string; label: string };
   upload_timestamp: string;
+  original_filename: string | null;
 };
 
 /** Human-readable vendor identifier for display (Task 6.1/6.5) — vendor_id is an opaque
@@ -175,6 +193,7 @@ export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; la
     status: doc.status,
     status_badge: statusBadge,
     upload_timestamp: doc.uploadTimestamp,
+    original_filename: doc.originalFilename,
   };
 }
 
@@ -194,7 +213,7 @@ export function getDocumentById(documentId: string): DocumentRow | null {
   const db = getSqliteDb();
   const row = db
     .prepare(
-      `SELECT document_id, content_sha256, legal_entity_id, vendor_id, statement_period, status, upload_timestamp
+      `SELECT document_id, content_sha256, legal_entity_id, vendor_id, statement_period, status, upload_timestamp, original_filename
        FROM extracted_document WHERE document_id = ?`
     )
     .get(documentId) as Parameters<typeof rowToDocument>[0] | undefined;

@@ -198,13 +198,13 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         <div className="panel-head">
           <div>
             <h2>Uploaded statements</h2>
-            <div className="sub">Vendor is identified automatically during extraction</div>
+            <div className="sub">Showing the file you uploaded — vendor is identified automatically during extraction</div>
           </div>
         </div>
         <table data-testid="uploaded-documents-table">
           <thead>
             <tr>
-              <th>Vendor</th>
+              <th>File Name</th>
               <th>Legal Entity</th>
               <th>Uploaded</th>
               <th>Action</th>
@@ -220,15 +220,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
             )}
             {documents.map((doc) => (
               <tr key={doc.document_id} data-testid={`document-row-${doc.document_id}`}>
-                <td>
-                  {doc.vendor_id ? (
-                    <span className="doc-list-vendor">{doc.vendor_id}</span>
-                  ) : (
-                    <span className="doc-list-vendor identifying" data-testid="vendor-identifying">
-                      Identifying…
-                    </span>
-                  )}
-                </td>
+                <td data-testid={`document-filename-${doc.document_id}`}>{doc.original_filename ?? '—'}</td>
                 <td>{LEGAL_ENTITIES.find((e) => e.id === doc.legal_entity_id)?.name ?? doc.legal_entity_id}</td>
                 <td className="mono">{formatUploadTimestamp(doc.upload_timestamp)}</td>
                 <td>

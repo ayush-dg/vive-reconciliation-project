@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  const { document, duplicate, legalEntityMismatch } = registerDocument(bytes, legalEntityId);
+  const { document, duplicate, legalEntityMismatch } = registerDocument(bytes, legalEntityId, file.name);
 
   const { badge, label } = computeDocumentStatus(document.documentId);
   return NextResponse.json(
