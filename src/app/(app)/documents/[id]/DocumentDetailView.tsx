@@ -172,7 +172,21 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
 
         <div className="panel">
           <div className="panel-head">
-            <h2>Extracted lines</h2>
+            <div>
+              <h2>Extracted lines ({detail.lines.length} total)</h2>
+              <div className="sub" data-testid="reconciliation-progress">
+                {(() => {
+                  const { totalLines, matchedLines, exceptionLines } = detail.reconciliation;
+                  const processed = matchedLines + exceptionLines;
+                  if (totalLines === 0) return 'No lines extracted yet.';
+                  if (processed === 0) return 'Reconciliation not started yet.';
+                  // matchingPipeline.ts commits a document's matching results atomically
+                  // (all lines at once) — processed is always either 0 or totalLines,
+                  // never a partial figure from a still-in-progress run.
+                  return `Reconciliation complete — ${matchedLines} matched, ${exceptionLines} exception${exceptionLines === 1 ? '' : 's'}.`;
+                })()}
+              </div>
+            </div>
           </div>
           <table data-testid="statement-lines-table">
             <thead>

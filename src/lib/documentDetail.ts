@@ -47,6 +47,45 @@ function getStatementLinesForDocument(documentId: string): StatementLineRow[] {
     .all(documentId) as StatementLineRow[];
 }
 
+/** Line-level reconciliation progress — distinct from the document-level status badge,
+ * which only says "Extracted" (extraction done, matching not yet run) or "Reconciled"/
+ * "Failed" (matching fully done). Added 2026-08-31 (engineer-directed) so a user can tell
+ * how many of a document's extracted lines have actually been resolved, not just whether
+ * extraction finished — matters now that Reconcile's real per-line Fabric lookups take
+ * genuine time. matchedLines + exceptionLines should always equal either 0 (matching
+ * hasn't run for this document at all) or totalLines (matching's atomic per-document
+ * commit, matchingPipeline.ts, means results only ever land all-at-once) — never a
+ * partial figure representing a still-in-progress run observed mid-flight.
+ */
+export type ReconciliationCounts = {
+  totalLines: number;
+  matchedLines: number;
+  exceptionLines: number;
+};
+
+function getReconciliationCounts(documentId: string, totalLines: number): ReconciliationCounts {
+  const db = getSqliteDb();
+  const matchedLines = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM recon_match m
+         JOIN silver_statement_line l ON l.line_id = m.statement_line_id
+         WHERE l.document_id = ?`
+      )
+      .get(documentId) as { n: number }
+  ).n;
+  const exceptionLines = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM recon_exception e
+         JOIN silver_statement_line l ON l.line_id = e.statement_line_id
+         WHERE l.document_id = ?`
+      )
+      .get(documentId) as { n: number }
+  ).n;
+  return { totalLines, matchedLines, exceptionLines };
+}
+
 export type DocumentDetailData = {
   documentId: string;
   vendorSlug: string | null;
@@ -55,6 +94,7 @@ export type DocumentDetailData = {
   statusBadge: { badge: string; label: string };
   extractionMethodSummary: Record<string, number>;
   lines: StatementLineRow[];
+  reconciliation: ReconciliationCounts;
 };
 
 export function getDocumentDetail(documentId: string): DocumentDetailData | null {
@@ -63,6 +103,7 @@ export function getDocumentDetail(documentId: string): DocumentDetailData | null
   if (!doc) return null;
 
   const { badge, label } = computeDocumentStatus(documentId);
+  const lines = getStatementLinesForDocument(documentId);
   return {
     documentId: doc.documentId,
     vendorSlug: resolveVendorSlug(doc.vendorId),
@@ -70,6 +111,7 @@ export function getDocumentDetail(documentId: string): DocumentDetailData | null
     status: doc.status,
     statusBadge: { badge, label },
     extractionMethodSummary: getExtractionMethodSummary(documentId),
-    lines: getStatementLinesForDocument(documentId),
+    lines,
+    reconciliation: getReconciliationCounts(documentId, lines.length),
   };
 }
