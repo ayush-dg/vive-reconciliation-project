@@ -19,6 +19,30 @@ function formatUploadTimestamp(isoLike: string): string {
   });
 }
 
+/** Home's own display mapping over status_badge (engineer-directed, 2026-08-31) — softer
+ * wording than the underlying badge value, which other screens/logic (canReconcile, etc.)
+ * still use unchanged: "Success" once extraction is done (not "Extracted"), and "Done"
+ * once reconciliation has run AT ALL, whether or not it left open exceptions — a
+ * reconciled-with-exceptions document previously showed the same alarming "Failed — see
+ * Exceptions" wording an outright extraction failure does, even though the process itself
+ * completed successfully; those are genuinely different situations (distinguished via
+ * open_exception_count, since status_badge's 'Failed' value alone covers both). A real
+ * extraction failure (exhausted retries, nothing to reconcile) still shows "Failed".
+ */
+function homeDisplayStatus(doc: ApiDocument): { label: string; showExceptionsLink: boolean; badgeClass: string } {
+  const badge = doc.status_badge.badge;
+  if (badge === 'Extracted') {
+    return { label: 'Success', showExceptionsLink: false, badgeClass: 'extracted' };
+  }
+  if (badge === 'Reconciled') {
+    return { label: 'Done', showExceptionsLink: false, badgeClass: 'reconciled' };
+  }
+  if (badge === 'Failed' && doc.open_exception_count > 0) {
+    return { label: 'Done', showExceptionsLink: true, badgeClass: 'reconciled' };
+  }
+  return { label: doc.status_badge.label, showExceptionsLink: false, badgeClass: badge.toLowerCase() };
+}
+
 type HomeData = { documents: ApiDocument[]; stats: HomeSummaryStats };
 
 export default function HomeView({
@@ -160,7 +184,7 @@ export default function HomeView({
         <div className="panel" style={{ marginTop: 20 }}>
           <div className="panel-head">
             <div>
-              <h2>Uploaded statements</h2>
+              <h2>Most recent uploads</h2>
             </div>
           </div>
           <table data-testid="home-statements-table">
@@ -186,6 +210,7 @@ export default function HomeView({
                 // 'Extracted' (not 'Processing') — extraction must have actually
                 // succeeded before there's anything for Reconcile to match.
                 const canReconcile = doc.status === 'processing' && doc.status_badge.badge === 'Extracted';
+                const displayStatus = homeDisplayStatus(doc);
                 return (
                   <tr key={doc.document_id} data-testid={`home-document-row-${doc.document_id}`}>
                     <td>
@@ -196,11 +221,20 @@ export default function HomeView({
                     <td className="mono">{doc.statement_period ?? '—'}</td>
                     <td>
                       <span
-                        className={`badge status-badge ${doc.status_badge.badge.toLowerCase()}`}
+                        className={`badge status-badge ${displayStatus.badgeClass}`}
                         data-testid={`home-status-badge-${doc.document_id}`}
                       >
-                        {doc.status_badge.label}
+                        {displayStatus.label}
                       </span>
+                      {displayStatus.showExceptionsLink && doc.vendor_slug && (
+                        <Link
+                          href={`/exceptions?search=${encodeURIComponent(doc.vendor_slug)}`}
+                          className="show-exceptions-link"
+                          data-testid={`home-show-exceptions-${doc.document_id}`}
+                        >
+                          Show exceptions →
+                        </Link>
+                      )}
                     </td>
                     <td className="mono">{formatUploadTimestamp(doc.upload_timestamp)}</td>
                     <td>

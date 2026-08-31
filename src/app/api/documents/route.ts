@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities';
-import { registerDocument, toApiDocument, listDocumentsWithStatusBadge } from '@/lib/documents';
+import { registerDocument, toApiDocument, listDocumentsWithStatusBadge, getOpenExceptionCount } from '@/lib/documents';
 import { computeDocumentStatus } from '@/lib/documentStatus';
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, per the Upload screen's stated limit
@@ -45,7 +45,11 @@ export async function POST(request: Request) {
 
   const { badge, label } = computeDocumentStatus(document.documentId);
   return NextResponse.json(
-    { document: toApiDocument(document, { badge, label }), duplicate, legalEntityMismatch },
+    {
+      document: toApiDocument(document, { badge, label }, getOpenExceptionCount(document.documentId)),
+      duplicate,
+      legalEntityMismatch,
+    },
     { status: duplicate ? 200 : 201 }
   );
 }

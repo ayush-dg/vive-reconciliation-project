@@ -167,6 +167,12 @@ export type ApiDocument = {
   status_badge: { badge: string; label: string };
   upload_timestamp: string;
   original_filename: string | null;
+  // Distinguishes the two real, different situations status_badge's 'Failed' value
+  // covers (2026-08-31, engineer-directed) — extraction exhausting its retries with
+  // nothing to reconcile at all vs. matching having actually run and produced an open
+  // exception. Home uses this to show "Done" + a "Show exceptions" link for the latter,
+  // reserving a plain "Failed" for a genuine extraction failure.
+  open_exception_count: number;
 };
 
 /** Human-readable vendor identifier for display (Task 6.1/6.5) — vendor_id is an opaque
@@ -182,7 +188,24 @@ export function resolveVendorSlug(vendorId: string | null): string | null {
   return row?.vendor_slug ?? null;
 }
 
-export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; label: string }): ApiDocument {
+export function getOpenExceptionCount(documentId: string): number {
+  const db = getSqliteDb();
+  return (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM recon_exception e
+         JOIN silver_statement_line l ON l.line_id = e.statement_line_id
+         WHERE l.document_id = ?`
+      )
+      .get(documentId) as { n: number }
+  ).n;
+}
+
+export function toApiDocument(
+  doc: DocumentRow,
+  statusBadge: { badge: string; label: string },
+  openExceptionCount: number
+): ApiDocument {
   return {
     document_id: doc.documentId,
     content_sha256: doc.contentSha256,
@@ -194,6 +217,7 @@ export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; la
     status_badge: statusBadge,
     upload_timestamp: doc.uploadTimestamp,
     original_filename: doc.originalFilename,
+    open_exception_count: openExceptionCount,
   };
 }
 
@@ -204,7 +228,7 @@ export function toApiDocument(doc: DocumentRow, statusBadge: { badge: string; la
 export function listDocumentsWithStatusBadge(): ApiDocument[] {
   return listDocuments().map((doc) => {
     const { badge, label } = computeDocumentStatus(doc.documentId);
-    return toApiDocument(doc, { badge, label });
+    return toApiDocument(doc, { badge, label }, getOpenExceptionCount(doc.documentId));
   });
 }
 

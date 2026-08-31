@@ -14,13 +14,22 @@ function categoryLabel(category: string): string {
   return CATEGORY_LABELS[category] ?? category;
 }
 
-export default function ExceptionsView({ initial }: { initial: ExceptionsListResult }) {
+export default function ExceptionsView({
+  initial,
+  initialSearch = '',
+}: {
+  initial: ExceptionsListResult;
+  // Set from the URL's own ?search= param (e.g. Home's "Show exceptions" link for a
+  // specific vendor, 2026-08-31) — page.tsx already applied it server-side for the
+  // initial render; seeded here too so the search box/state agree with what's shown.
+  initialSearch?: string;
+}) {
   const [result, setResult] = useState(initial);
-  const [searchInput, setSearchInput] = useState('');
-  const [appliedSearch, setAppliedSearch] = useState('');
+  const [searchInput, setSearchInput] = useState(initialSearch);
+  const [appliedSearch, setAppliedSearch] = useState(initialSearch);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [lastAttempt, setLastAttempt] = useState({ search: '', page: 1 });
+  const [lastAttempt, setLastAttempt] = useState({ search: initialSearch, page: 1 });
 
   async function load(search: string, page: number) {
     setLastAttempt({ search, page });
