@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import { getSqliteDb, getDbMode } from './db';
-import { isFabricLakehouseConfigured, getReferenceRowByTranId, getLatestReferenceWatermark as getLiveLatestReferenceWatermark } from './fabricLakehouse';
+import {
+  isFabricLakehouseConfigured,
+  getReferenceRowByTranId,
+  getCreditRowByTranId,
+  getLatestReferenceWatermark as getLiveLatestReferenceWatermark,
+} from './fabricLakehouse';
 
 /**
  * Deterministic SQL-based matching (Task 5.2). Recon key: vendor invoice number
@@ -41,6 +46,11 @@ function assertSqliteMode() {
 type NormalizedReferenceRow = {
   candidateKey: string;
   refAmount: number;
+  // true when this row came from bronze.netsuite_vendorcredit, not vendorbill — NetSuite
+  // stores a credit's total as a positive magnitude, while the statement shows the same
+  // amount as negative (confirmed 2026-08-31 against 4 real KSI credit-memo lines); the
+  // sign has to be flipped before comparing against the statement line's own amount.
+  isCredit: boolean;
   _run_id: string;
   _extracted_at: string;
   _source_system: string;
@@ -51,8 +61,16 @@ type ReferenceCapture = { runId: string; extractedAt: string; sourceSystem: stri
 async function findReferenceRowByDocNumber(normalizedInvoiceRef: string): Promise<NormalizedReferenceRow | null> {
   if (isFabricLakehouseConfigured()) {
     const row = await getReferenceRowByTranId(normalizedInvoiceRef);
-    if (!row) return null;
-    return { candidateKey: row.tranid, refAmount: row.total, _run_id: row._run_id, _extracted_at: row._extracted_at, _source_system: row._source_system };
+    if (row) {
+      return { candidateKey: row.tranid, refAmount: row.total, isCredit: false, _run_id: row._run_id, _extracted_at: row._extracted_at, _source_system: row._source_system };
+    }
+    // A miss against vendorbill may still be a genuine credit memo, recorded in NetSuite
+    // under a separate table (see fabricLakehouse.ts's getCreditRowByTranId doc comment).
+    // Tried second, not first/instead — most lines are ordinary bills, and this keeps
+    // that common case at one lookup, not two.
+    const creditRow = await getCreditRowByTranId(normalizedInvoiceRef);
+    if (!creditRow) return null;
+    return { candidateKey: creditRow.tranid, refAmount: creditRow.total, isCredit: true, _run_id: creditRow._run_id, _extracted_at: creditRow._extracted_at, _source_system: creditRow._source_system };
   }
 
   const db = getSqliteDb();
@@ -69,8 +87,10 @@ async function findReferenceRowByDocNumber(normalizedInvoiceRef: string): Promis
        WHERE UPPER(TRIM(bill_document_number)) = ?
        ORDER BY _extracted_at DESC LIMIT 1`
     )
-    .get(normalizedInvoiceRef) as NormalizedReferenceRow | undefined;
-  return row ?? null;
+    .get(normalizedInvoiceRef) as Omit<NormalizedReferenceRow, 'isCredit'> | undefined;
+  // No local fixture equivalent for vendorcredit — the live-only fallback above is what
+  // Fabric-configured runs exercise; local/test runs never see a credit-memo match.
+  return row ? { ...row, isCredit: false } : null;
 }
 
 /** The reference table's own most-recently-extracted row overall — captured for a
@@ -137,7 +157,11 @@ export async function matchStatementLine(line: {
   }
 
   const reference: ReferenceCapture = { runId: ref._run_id, extractedAt: ref._extracted_at, sourceSystem: ref._source_system };
-  const diff = Math.abs(line.amount - ref.refAmount);
+  // NetSuite stores a vendor credit's total as a positive magnitude; the statement shows
+  // the same amount as negative. Flip the reference's sign before comparing so a genuine
+  // credit-memo match isn't reported as a ~2x AMOUNT_MISMATCH.
+  const compareAmount = ref.isCredit ? -ref.refAmount : ref.refAmount;
+  const diff = Math.abs(line.amount - compareAmount);
 
   if (diff > AMOUNT_TOLERANCE) {
     return {

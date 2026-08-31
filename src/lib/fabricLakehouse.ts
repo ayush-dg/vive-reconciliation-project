@@ -127,6 +127,27 @@ export async function getReferenceRowByTranId(tranId: string): Promise<NetsuiteV
   return normalizeRow(row);
 }
 
+const CREDIT_TABLE = 'bronze.netsuite_vendorcredit';
+
+/** Same shape/columns as bronze.netsuite_vendorbill (confirmed 2026-08-31) — a statement
+ * line that comes back NOT_POSTED against vendorbill may still be a genuine credit memo
+ * recorded here instead (a real, live example: 4 credit-memo lines on a KSI statement
+ * existed only in vendorcredit, not vendorbill). SELECT only, same as above. */
+export async function getCreditRowByTranId(tranId: string): Promise<NetsuiteVendorBillRow | null> {
+  const accessToken = await getAccessToken();
+  const rows = await runQuery(
+    `SELECT TOP 1 tranid, total, _run_id, _extracted_at, _source_system
+     FROM ${CREDIT_TABLE}
+     WHERE UPPER(LTRIM(RTRIM(tranid))) = @tranId
+     ORDER BY _extracted_at DESC`,
+    [{ name: 'tranId', type: TYPES.NVarChar, value: tranId }],
+    accessToken
+  );
+  const row = rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return normalizeRow(row);
+}
+
 /** tedious returns this warehouse's `total` column as a string and `_extracted_at` as a
  * JS Date object (confirmed by direct query — neither is a documented type guarantee,
  * and both differ from the local SQLite fixture's plain TEXT/REAL columns). Normalized

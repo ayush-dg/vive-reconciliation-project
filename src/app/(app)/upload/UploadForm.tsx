@@ -129,14 +129,18 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
+      // Refresh immediately so the new row appears right away — extraction
+      // (below) can take real, multi-second time with live Claude, and
+      // waiting for it before the first refresh made a fresh upload look
+      // like nothing had happened (engineer-directed fix, 2026-08-31).
+      await refreshDocuments();
+
       // A genuinely new document starts extracting immediately, no separate
       // click required (engineer-directed, 2026-08-31). A duplicate hit
       // (existing document, possibly already extracted/extracting) is left
-      // alone — just refreshed, not re-triggered.
+      // alone — not re-triggered; the refresh above already covers it.
       if (!data.duplicate && data.document) {
         await handleExtract(data.document.document_id, { silent: true });
-      } else {
-        await refreshDocuments();
       }
     } catch {
       showError('Upload failed — check your connection and try again.');
