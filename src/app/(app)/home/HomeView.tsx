@@ -147,31 +147,31 @@ export default function HomeView({
 
       <div className="content">
         <div className="stat-cards" data-testid="home-summary-stats">
-          <div className="stat-card">
+          <div className="stat-card stat-card--navy">
             <div className="stat-value" data-testid="stat-documents-processed">
               {stats.documentsProcessed}
             </div>
             <div className="stat-label">Documents processed</div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card stat-card--warning">
             <div className="stat-value" data-testid="stat-open-exceptions">
               {stats.openExceptions}
             </div>
             <div className="stat-label">Open exceptions</div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card stat-card--danger">
             <div className="stat-value" data-testid="stat-extraction-failures">
               {stats.extractionFailures}
             </div>
             <div className="stat-label">Extraction failures</div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card stat-card--success">
             <div className="stat-value" data-testid="stat-reconciled">
               {stats.reconciledCount}
             </div>
             <div className="stat-label">Reconciled</div>
           </div>
-          <div className="stat-card">
+          <div className="stat-card stat-card--navy">
             <div className="stat-value" data-testid="stat-not-reconciled">
               {stats.notReconciledCount}
             </div>

@@ -779,9 +779,22 @@ tbody tr:hover {
 .stat-card {
   background: var(--surface);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   padding: 18px 20px;
+}
+.stat-card--navy {
+  border-left-color: var(--navy-2);
+}
+.stat-card--success {
+  border-left-color: var(--success);
+}
+.stat-card--warning {
+  border-left-color: var(--warning);
+}
+.stat-card--danger {
+  border-left-color: var(--danger);
 }
 .stat-value {
   font-family: var(--font-display-family);
