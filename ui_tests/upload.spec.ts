@@ -36,6 +36,42 @@ test.describe('Upload', () => {
     expect(new URL(page.url()).pathname).toBe('/upload');
   });
 
+  // Real complaint fixed 2026-08-31: the Upload button previously stayed disabled for the
+  // ENTIRE upload+auto-extraction chain (submitting only flipped false after extraction
+  // finished too), so a second PDF couldn't be uploaded until the first one's extraction
+  // completed — a real problem once extraction takes genuine multi-second time with live
+  // Claude. Delays the first document's extraction call to prove the button re-enables
+  // (and a second upload actually succeeds) well before that extraction resolves.
+  test('a second PDF can be uploaded while the first one is still extracting', async ({ page, context }) => {
+    await signInViaCookie(context);
+    await page.goto('/upload');
+
+    // Only the FIRST matching request is delayed — a second document's own extract call
+    // (unrelated to what's being proven here) passes straight through unaffected.
+    let capturedFirstUrl: string | null = null;
+    await page.route('**/api/documents/*/extract', async (route) => {
+      if (capturedFirstUrl === null) {
+        capturedFirstUrl = route.request().url();
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+      await route.continue();
+    });
+
+    await page.setInputFiles('#statement-file', samplePdf('first-pdf'));
+    await page.getByTestId('upload-submit').click();
+
+    // The button must already be enabled again — not waiting on the still-delayed
+    // extraction call (well under its 3s artificial delay above).
+    await expect(page.getByTestId('upload-submit')).toBeEnabled({ timeout: 2000 });
+    await expect(page.getByTestId('upload-submit')).toHaveText('Upload statement');
+
+    await page.setInputFiles('#statement-file', samplePdf('second-pdf'));
+    await page.getByTestId('upload-submit').click();
+    await expect(page.getByTestId('toast-success')).toBeVisible();
+
+    await page.unroute('**/api/documents/*/extract');
+  });
+
   test('submitting without a file shows a validation message', async ({ page, context }) => {
     await signInViaCookie(context);
     await page.goto('/upload');

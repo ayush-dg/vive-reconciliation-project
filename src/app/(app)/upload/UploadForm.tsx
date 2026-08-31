@@ -98,6 +98,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
     }
 
     setSubmitting(true);
+    let newDocumentId: string | null = null;
     try {
       const body = new FormData();
       body.set('file', file);
@@ -135,17 +136,25 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       // like nothing had happened (engineer-directed fix, 2026-08-31).
       await refreshDocuments();
 
-      // A genuinely new document starts extracting immediately, no separate
-      // click required (engineer-directed, 2026-08-31). A duplicate hit
-      // (existing document, possibly already extracted/extracting) is left
-      // alone — not re-triggered; the refresh above already covers it.
+      // A duplicate hit (existing document, possibly already extracted/extracting) is
+      // left alone — not re-triggered; the refresh above already covers it.
       if (!data.duplicate && data.document) {
-        await handleExtract(data.document.document_id, { silent: true });
+        newDocumentId = data.document.document_id;
       }
     } catch {
       showError('Upload failed — check your connection and try again.');
     } finally {
+      // Ends here, not after extraction — the Upload button (disabled={submitting})
+      // must not stay blocked for however long extraction takes, or a second PDF
+      // couldn't be uploaded until the first one finished extracting (real complaint,
+      // 2026-08-31 fix). Extraction still starts automatically, just as its own
+      // independent, non-blocking call below — extractingIds already tracks it
+      // per-document for that row's own "Extracting…" state.
       setSubmitting(false);
+    }
+
+    if (newDocumentId) {
+      void handleExtract(newDocumentId, { silent: true });
     }
   }
 
@@ -208,7 +217,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         <form className="form-card" onSubmit={handleSubmit} data-testid="upload-form">
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" style={{ width: 'auto', flex: 1 }} disabled={submitting} data-testid="upload-submit">
-              {submitting ? 'Uploading & extracting…' : 'Upload statement'}
+              {submitting ? 'Uploading…' : 'Upload statement'}
             </button>
           </div>
         </form>
