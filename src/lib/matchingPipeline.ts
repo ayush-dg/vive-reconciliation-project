@@ -34,14 +34,19 @@ function assertSqliteMode() {
   }
 }
 
-type EligibleLine = { lineId: string; normalizedInvoiceRef: string | null; amount: number };
+type EligibleLine = { lineId: string; normalizedInvoiceRef: string | null; amount: number; vendorSlug: string | null };
 
 function getEligibleLinesForDocument(documentId: string): EligibleLine[] {
   const db = getSqliteDb();
+  // vendorSlug (2026-08-31) — deterministicMatching.ts uses this to scope the NetSuite
+  // lookup to the statement's own vendor family, fixing a real cross-vendor tranid
+  // collision bug (see deterministicMatching.ts's vendorNamePrefixFromSlug doc comment).
   const rows = db
     .prepare(
-      `SELECT sl.line_id AS lineId, sl.normalized_invoice_ref AS normalizedInvoiceRef, sl.amount AS amount
+      `SELECT sl.line_id AS lineId, sl.normalized_invoice_ref AS normalizedInvoiceRef, sl.amount AS amount,
+              vr.vendor_slug AS vendorSlug
        FROM silver_statement_line sl
+       LEFT JOIN extracted_vendor_registry vr ON vr.vendor_id = sl.vendor_id
        WHERE sl.document_id = ?
          AND NOT EXISTS (SELECT 1 FROM recon_match m WHERE m.statement_line_id = sl.line_id)
          AND NOT EXISTS (SELECT 1 FROM recon_exception e WHERE e.statement_line_id = sl.line_id)`

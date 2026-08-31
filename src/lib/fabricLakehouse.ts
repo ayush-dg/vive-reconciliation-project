@@ -111,20 +111,82 @@ export type NetsuiteVendorBillRow = {
   _source_system: string;
 };
 
-/** SELECT only — no write path exists in this module by design. */
-export async function getReferenceRowByTranId(tranId: string): Promise<NetsuiteVendorBillRow | null> {
+/**
+ * Real, confirmed bug (2026-08-31): NetSuite's `tranid` is not unique across vendors — a
+ * bill number can and does repeat between completely unrelated companies (confirmed
+ * directly: a real Bald Hill Dodge statement had 6 of 11 lines silently matched against
+ * the WRONG vendor's bill — Taylor's, Faulkner Subaru, etc. — because the old query only
+ * filtered by tranid). Fixed two ways, layered:
+ * 1. Vendor-scoped first: join to bronze.netsuite_vendor and restrict to entities whose
+ *    name starts with the statement's own vendor's first name-token (e.g. "fred" for
+ *    "Fred Beans" — confirmed 2026-08-31 that Fred Beans' own 4+ shop entities never
+ *    collide with each other on tranid, so this alone fully resolves a multi-entity vendor
+ *    family without needing to know exactly which specific shop issued the statement).
+ * 2. Amount-closest as the tie-break within whatever candidate set results, and as a full
+ *    fallback (unscoped) when no vendor name is available or the scoped search finds
+ *    nothing — never worse than the old behavior, and still correct even if vendor
+ *    name-matching itself fails for some reason.
+ */
+async function findBillOrCreditRow(
+  table: string,
+  tranId: string,
+  vendorNamePrefix: string | null,
+  amount: number
+): Promise<NetsuiteVendorBillRow | null> {
   const accessToken = await getAccessToken();
+
+  if (vendorNamePrefix) {
+    const scopedRows = await runQuery(
+      `SELECT TOP 1 b.tranid, b.total, b._run_id, b._extracted_at, b._source_system
+       FROM ${table} b
+       JOIN bronze.netsuite_vendor v ON v.id = b.entity
+       WHERE UPPER(LTRIM(RTRIM(b.tranid))) = @tranId
+         AND LOWER(v.entityid) LIKE @vendorPrefix
+       ORDER BY ABS(b.total - @amount) ASC, b._extracted_at DESC`,
+      [
+        { name: 'tranId', type: TYPES.NVarChar, value: tranId },
+        { name: 'vendorPrefix', type: TYPES.NVarChar, value: `${vendorNamePrefix.toLowerCase()}%` },
+        { name: 'amount', type: TYPES.Float, value: amount },
+      ],
+      accessToken
+    );
+    const scopedRow = scopedRows[0] as Record<string, unknown> | undefined;
+    // Once a vendor is known, trust the scoped result either way — found, or genuinely
+    // not posted for THIS vendor. Falling through to an unscoped search here would
+    // reintroduce the exact cross-vendor collision bug this whole fix exists to close:
+    // confirmed live (2026-08-31) — Bald Hill's own bill #178375 genuinely doesn't exist
+    // in NetSuite, and an unscoped fallback matched Toyota & Volvo of Keene's unrelated
+    // #178375 instead, silently reporting a wrong-vendor "mismatch" rather than a correct
+    // NOT_POSTED. A false NOT_POSTED (human reviews it) is the safe failure direction here;
+    // a false cross-vendor match (looks resolved, is actually wrong) is not.
+    return scopedRow ? normalizeRow(scopedRow) : null;
+  }
+
+  // No vendor known at all (document's vendor was never resolved) — unscoped,
+  // amount-closest is the best available signal.
   const rows = await runQuery(
     `SELECT TOP 1 tranid, total, _run_id, _extracted_at, _source_system
-     FROM ${REFERENCE_TABLE}
+     FROM ${table}
      WHERE UPPER(LTRIM(RTRIM(tranid))) = @tranId
-     ORDER BY _extracted_at DESC`,
-    [{ name: 'tranId', type: TYPES.NVarChar, value: tranId }],
+     ORDER BY ABS(total - @amount) ASC, _extracted_at DESC`,
+    [
+      { name: 'tranId', type: TYPES.NVarChar, value: tranId },
+      { name: 'amount', type: TYPES.Float, value: amount },
+    ],
     accessToken
   );
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row) return null;
   return normalizeRow(row);
+}
+
+/** SELECT only — no write path exists in this module by design. */
+export async function getReferenceRowByTranId(
+  tranId: string,
+  vendorNamePrefix: string | null,
+  amount: number
+): Promise<NetsuiteVendorBillRow | null> {
+  return findBillOrCreditRow(REFERENCE_TABLE, tranId, vendorNamePrefix, amount);
 }
 
 const CREDIT_TABLE = 'bronze.netsuite_vendorcredit';
@@ -133,19 +195,12 @@ const CREDIT_TABLE = 'bronze.netsuite_vendorcredit';
  * line that comes back NOT_POSTED against vendorbill may still be a genuine credit memo
  * recorded here instead (a real, live example: 4 credit-memo lines on a KSI statement
  * existed only in vendorcredit, not vendorbill). SELECT only, same as above. */
-export async function getCreditRowByTranId(tranId: string): Promise<NetsuiteVendorBillRow | null> {
-  const accessToken = await getAccessToken();
-  const rows = await runQuery(
-    `SELECT TOP 1 tranid, total, _run_id, _extracted_at, _source_system
-     FROM ${CREDIT_TABLE}
-     WHERE UPPER(LTRIM(RTRIM(tranid))) = @tranId
-     ORDER BY _extracted_at DESC`,
-    [{ name: 'tranId', type: TYPES.NVarChar, value: tranId }],
-    accessToken
-  );
-  const row = rows[0] as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return normalizeRow(row);
+export async function getCreditRowByTranId(
+  tranId: string,
+  vendorNamePrefix: string | null,
+  amount: number
+): Promise<NetsuiteVendorBillRow | null> {
+  return findBillOrCreditRow(CREDIT_TABLE, tranId, vendorNamePrefix, amount);
 }
 
 /** tedious returns this warehouse's `total` column as a string and `_extracted_at` as a

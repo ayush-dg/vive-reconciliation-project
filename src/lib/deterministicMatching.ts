@@ -58,9 +58,28 @@ type NormalizedReferenceRow = {
 
 type ReferenceCapture = { runId: string; extractedAt: string; sourceSystem: string };
 
-async function findReferenceRowByDocNumber(normalizedInvoiceRef: string): Promise<NormalizedReferenceRow | null> {
+/** The first name-token of a vendor_slug (e.g. "fred" from "fred_beans_ford_of_
+ * mechanicsburg") — used to scope the NetSuite lookup to just that vendor's family of
+ * entities. Deliberately just the first token, not several: dealer/vendor group names are
+ * reliably identified by their leading word in practice (confirmed 2026-08-31 against
+ * real data — "bald hill%"/"fred beans%" both correctly isolate their own family with no
+ * false negatives), and a single-token prefix is far less likely to accidentally exclude
+ * the real entity than guessing how many words belong to "the brand" for an
+ * unfamiliar vendor name shape. */
+function vendorNamePrefixFromSlug(vendorSlug: string | null): string | null {
+  if (!vendorSlug) return null;
+  const firstToken = vendorSlug.split('_')[0];
+  return firstToken || null;
+}
+
+async function findReferenceRowByDocNumber(
+  normalizedInvoiceRef: string,
+  vendorSlug: string | null,
+  amount: number
+): Promise<NormalizedReferenceRow | null> {
   if (isFabricLakehouseConfigured()) {
-    const row = await getReferenceRowByTranId(normalizedInvoiceRef);
+    const vendorNamePrefix = vendorNamePrefixFromSlug(vendorSlug);
+    const row = await getReferenceRowByTranId(normalizedInvoiceRef, vendorNamePrefix, amount);
     if (row) {
       return { candidateKey: row.tranid, refAmount: row.total, isCredit: false, _run_id: row._run_id, _extracted_at: row._extracted_at, _source_system: row._source_system };
     }
@@ -68,7 +87,7 @@ async function findReferenceRowByDocNumber(normalizedInvoiceRef: string): Promis
     // under a separate table (see fabricLakehouse.ts's getCreditRowByTranId doc comment).
     // Tried second, not first/instead — most lines are ordinary bills, and this keeps
     // that common case at one lookup, not two.
-    const creditRow = await getCreditRowByTranId(normalizedInvoiceRef);
+    const creditRow = await getCreditRowByTranId(normalizedInvoiceRef, vendorNamePrefix, amount);
     if (!creditRow) return null;
     return { candidateKey: creditRow.tranid, refAmount: creditRow.total, isCredit: true, _run_id: creditRow._run_id, _extracted_at: creditRow._extracted_at, _source_system: creditRow._source_system };
   }
@@ -78,16 +97,19 @@ async function findReferenceRowByDocNumber(normalizedInvoiceRef: string): Promis
   // same normalization to bill_document_number on the read side so a real-world casing or
   // whitespace difference in the source data doesn't silently produce a false NOT_POSTED.
   // bill_document_number has no uniqueness constraint (the reference table's PK is
-  // transaction_id) — ORDER BY _extracted_at DESC makes the choice among duplicates
-  // deterministic (most-recently-extracted wins) rather than arbitrary.
+  // transaction_id) — ORDER BY closest-amount-first, then _extracted_at DESC, makes the
+  // choice among duplicates deterministic AND correct (2026-08-31 — plain most-recent-wins
+  // was a real bug once tranid collisions across vendors were confirmed live; this local
+  // fixture has no vendor table to scope by, so amount-closest is its only defense) rather
+  // than arbitrary.
   const row = db
     .prepare(
       `SELECT bill_document_number AS candidateKey, amount AS refAmount, _run_id, _extracted_at, _source_system
        FROM bronze_netsuite_vendorbill
        WHERE UPPER(TRIM(bill_document_number)) = ?
-       ORDER BY _extracted_at DESC LIMIT 1`
+       ORDER BY ABS(amount - ?) ASC, _extracted_at DESC LIMIT 1`
     )
-    .get(normalizedInvoiceRef) as Omit<NormalizedReferenceRow, 'isCredit'> | undefined;
+    .get(normalizedInvoiceRef, amount) as Omit<NormalizedReferenceRow, 'isCredit'> | undefined;
   // No local fixture equivalent for vendorcredit — the live-only fallback above is what
   // Fabric-configured runs exercise; local/test runs never see a credit-memo match.
   return row ? { ...row, isCredit: false } : null;
@@ -127,6 +149,7 @@ export type MatchOutcome = {
 export async function matchStatementLine(line: {
   normalizedInvoiceRef: string | null;
   amount: number;
+  vendorSlug: string | null;
 }): Promise<MatchOutcome> {
   if (!line.normalizedInvoiceRef) {
     // Defensive only — Task 3.2's validation gate already guarantees invoice_ref or
@@ -143,7 +166,7 @@ export async function matchStatementLine(line: {
     };
   }
 
-  const ref = await findReferenceRowByDocNumber(line.normalizedInvoiceRef);
+  const ref = await findReferenceRowByDocNumber(line.normalizedInvoiceRef, line.vendorSlug, line.amount);
   if (!ref) {
     return {
       stage: 'deterministic_match',
