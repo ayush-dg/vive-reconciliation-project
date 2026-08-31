@@ -760,6 +760,14 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     stmt = schema_result.get("statement_metadata", {})
     conf = schema_result.get("extraction_confidence", {})
     warnings = schema_result.get("warnings", [])
+    # Statement-level aging bucket totals (see adapter.py's
+    # PythonLibraryExtractionEngine.understand() -- generic "aging_"-prefix
+    # pass-through, empty for every vendor that doesn't print one, and for
+    # every AI-routed vendor, which never sets this key at all). JSON only
+    # when non-empty so unrelated statements store a clean NULL, not a
+    # stray "{}" string.
+    aging_summary = schema_result.get("aging_summary") or {}
+    raw_aging_summary = json.dumps(aging_summary) if aging_summary else None
 
     execute_sql(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
@@ -774,8 +782,9 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             vendor_name, shop_or_entity, statement_date, statement_period,
             currency, statement_total_as_printed,
             extraction_confidence_overall, extraction_model, extraction_method,
-            routing_decision, statement_id, invoice_count, warnings, schema_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            routing_decision, statement_id, invoice_count, warnings, schema_version,
+            raw_aging_summary
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             document_id,
@@ -798,6 +807,7 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             invoice_count,
             json.dumps(warnings),
             "1.0",
+            raw_aging_summary,
         ]
     )
 

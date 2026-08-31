@@ -150,6 +150,67 @@ def parse_aging_current(last_page_text):
     return None
 
 
+# x0 tolerance between a bucket header word and the money value printed
+# beneath it -- measured directly from this document (Current: header
+# x0=42.4, value x0=51.6, diff=9.2; Balance Due: header x0=393.8, value
+# x0=409.7, diff=15.9), rounded up generously since a wider bucket label
+# (e.g. "Over 120 Days") can shift its own value's left edge further.
+AGING_VALUE_X_TOLERANCE = 25
+# A bucket header word can sit up to this many points below the header
+# row's own top before a money word is no longer considered "under" it
+# (observed max diff on this document: 691.8 - 674.7 = 17.1).
+AGING_VALUE_TOP_WINDOW = 25
+
+
+def parse_aging_summary(words):
+    """Statement-level aging bucket row (Current / 31-60 Days / 61-90 Days /
+    91-120 Days / Over 120 Days / Balance Due) -- same "find header row,
+    scan the next rows for money aligned under it" technique as
+    extract_quirk.py's parse_grand_total(). Returns a dict of flat scalar
+    fields; a bucket with nothing printed beneath it (a genuinely zero/blank
+    aging bucket for this account) is None, never a fabricated 0.00 and
+    never merged into line_items (INV-03: no summary/total row may ever be
+    ingested as if it were a real invoice line)."""
+    rows = group_rows(words)
+    header_row = None
+    for row in rows:
+        texts = {w["text"] for w in row}
+        if "Current" in texts and "Balance" in texts and "Due" in texts:
+            header_row = row
+            break
+    if header_row is None:
+        return {}
+
+    anchors = {}
+    for w in header_row:
+        if w["text"] == "Current":
+            anchors["aging_current"] = w["x0"]
+        elif w["text"] == "31-60":
+            anchors["aging_31_60"] = w["x0"]
+        elif w["text"] == "61-90":
+            anchors["aging_61_90"] = w["x0"]
+        elif w["text"] == "91-120":
+            anchors["aging_91_120"] = w["x0"]
+        elif w["text"] == "Over":
+            anchors["aging_over_120"] = w["x0"]
+        elif w["text"] == "Balance":
+            anchors.setdefault("aging_balance_due_printed", w["x0"])
+
+    result = {name: None for name in anchors}
+    header_top = header_row[0]["top"]
+    for row in rows:
+        row_top = row[0]["top"]
+        if row_top <= header_top or row_top > header_top + AGING_VALUE_TOP_WINDOW:
+            continue
+        for w in row:
+            if not MONEY_RE.match(w["text"]):
+                continue
+            for name, anchor_x0 in anchors.items():
+                if result[name] is None and abs(w["x0"] - anchor_x0) < AGING_VALUE_X_TOLERANCE:
+                    result[name] = clean_money(w["text"])
+    return result
+
+
 def extract(pdf_path):
     """Returns {"line_items": [...], "fieldnames": [...], "summary": {...}, "full_text": None}."""
     line_items = []
@@ -215,6 +276,11 @@ def extract(pdf_path):
     summary["total_computed"] = f"{computed_total:,.2f}"
     summary["total_printed"] = printed_total_str
     summary["reconciles"] = printed_total is not None and computed_total == printed_total
+    # Statement-level aging bucket totals (never merged into line_items --
+    # see parse_aging_summary()'s own docstring / INV-03). words here is the
+    # last page's words, left over from the page loop above -- the aging row
+    # only ever appears on the final page.
+    summary.update(parse_aging_summary(words))
 
     return {
         "line_items": line_items,

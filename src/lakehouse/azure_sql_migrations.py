@@ -385,6 +385,14 @@ COLUMNS = {
         ("raw_credit_applied", "ALTER TABLE bronze_vendor_statement_raw ADD raw_credit_applied NVARCHAR(MAX)"),
         ("raw_payment_applied", "ALTER TABLE bronze_vendor_statement_raw ADD raw_payment_applied NVARCHAR(MAX)"),
     ],
+    "document_intake_log": [
+        # migrations/013_add_aging_summary_column.sql (SQLite side of this
+        # same change) -- see src/extraction/python_library/adapter.py's
+        # generic "aging_" prefix pass-through and extract_wilberts.py's /
+        # extract_quirk.py's parse_aging_summary(). NULL for every vendor
+        # that doesn't print an aging bucket summary.
+        ("raw_aging_summary", "ALTER TABLE document_intake_log ADD raw_aging_summary NVARCHAR(MAX)"),
+    ],
     "silver_reconciliation_standard": [
         ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),
         ("credits", "ALTER TABLE silver_reconciliation_standard ADD credits FLOAT"),

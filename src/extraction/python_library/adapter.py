@@ -116,25 +116,110 @@ _STATEMENT_DATE_KEY = {
 # a charge, negative becomes a credit, the same charge/credit split Fred
 # Beans already does with two separate columns. Mutually exclusive with
 # charge_field/credit_field.
-# TEMPORARY (2026-08-29): 9 of the original 10 python-library modules were
-# removed from this map -- extract_statement, extract_astech, extract_empire,
-# extract_wilberts, extract_quirk, extract_nimey, extract_lia,
-# extract_precision, extract_adas. ROUTABLE_VENDOR_SIGNATURES below is built
-# from this dict's own keys, so removing an entry here is sufficient on its
-# own to send that vendor's statements through DocumentUnderstandingEngine
-# (AI) instead -- _determine_extraction_route() in
-# notebooks/01_document_intake.py needed no changes at all.
-#
-# extract_keystone removed 2026-08-30: investigation confirmed its 4
-# "ledger-specific" passthrough columns (balance_forward, period_activity,
-# credit_applied, payment_applied) are ordinary printed columns with real
-# headers ("Balance Forward", "Period Activity", "Credit Applied", "Payment
-# Applied") -- read directly via x-position bucketing in extract_keystone.py,
-# not computed/derived by that parser. There was no technical reason this
-# vendor needed to stay on the deterministic parser; ClaudeSonnetClient's
-# column-agnostic approach (extract each column verbatim from columns_found)
-# handles it the same way it already handles every other AI-routed vendor.
+# RESTORED (2026-08-31): all 10 original python-library modules are back on
+# their hardcoded pdfplumber parsers. 8 were restored first, after
+# investigation confirmed each already captured 100% of the real printed
+# columns on its sample statement -- extract_statement, extract_astech,
+# extract_empire, extract_nimey, extract_lia, extract_precision,
+# extract_adas, extract_keystone. extract_wilberts and extract_quirk were
+# deliberately held back at that point -- their only known gap was a
+# multi-bucket aging table each was missing entirely -- then restored here
+# once that gap was closed (see extract_wilberts.py's / extract_quirk.py's
+# own parse_aging_summary()), same 100%-real-columns bar as the other 8.
 _FIELD_MAP = {
+    "extract_statement": {
+        "invoice_number": ("invoice_number", "remit_invoice_no"),
+        "date_field": "date", "due_date_field": None,
+        "charge_field": "charges", "credit_field": "credits",
+        "amount_due_field": "amount_due", "transaction_code_field": "transaction_code",
+    },
+    "extract_astech": {
+        "invoice_number": ("invoice_no",),
+        "date_field": "invoice_date", "due_date_field": "due_date",
+        "charge_field": "outstanding_amount", "credit_field": None,
+    },
+    "extract_empire": {
+        "invoice_number": ("doc_no",),
+        "date_field": "transaction_date", "due_date_field": "due_date",
+        "charge_field": "amount", "credit_field": None,
+    },
+    "extract_wilberts": {
+        "invoice_number": ("invoice_number",),
+        "date_field": "date", "due_date_field": None,
+        # "balance", not "amount" -- extract_wilberts.py's own docstring:
+        # the printed total reconciles against sum(balance), not
+        # sum(amount). They're identical for ordinary rows, but the one
+        # lump-sum "Payment" row has a non-zero amount (the payment total)
+        # and a zero balance (already absorbed by the credit rows it paid
+        # down) -- summing amount there double-counts it.
+        "charge_field": "balance", "credit_field": None,
+    },
+    "extract_quirk": {
+        "invoice_number": ("invoice",),
+        "date_field": "date", "due_date_field": None,
+        "signed_field": "amount",
+    },
+    "extract_nimey": {
+        "invoice_number": ("invoice_no",),
+        "date_field": "invoice_date", "due_date_field": None,
+        "charge_field": "purchases", "credit_field": "payments",
+    },
+    "extract_lia": {
+        "invoice_number": ("document_transaction",),
+        "date_field": "date", "due_date_field": None,
+        "charge_field": "purchases", "credit_field": "payments_credits",
+    },
+    "extract_precision": {
+        "invoice_number": ("invoice_no",),
+        "date_field": "date", "due_date_field": None,
+        "charge_field": "charge", "credit_field": "payment",
+    },
+    "extract_adas": {
+        "invoice_number": ("invoice_no",),
+        "date_field": "date", "due_date_field": "due_date",
+        # "amount", not "open_amount" -- Charges must always be the
+        # ORIGINAL invoice amount (extract_adas.py's own docstring), never
+        # the remaining unpaid balance. Confirmed via manual comparison
+        # against the real PDF (2026-08-24): invoices #14564-14748, already
+        # paid off before the statement period, show open_amount=0.00 but
+        # a real original amount (e.g. $536.00) -- using open_amount here
+        # was silently showing $0.00 in Charges for every closed invoice.
+        # (This module's own extract()/reconciles check, which does sum
+        # open_amount against the printed TOTAL DUE, is separate from this
+        # per-row Bronze/matching field and is unaffected by this change.)
+        "charge_field": "amount", "credit_field": None,
+    },
+    "extract_keystone": {
+        # Ledger-style statement (see extract_keystone.py's own docstring
+        # and the Keystone investigation session): every row is EITHER a
+        # new-charge row (period_activity populated) OR a settlement row
+        # (balance_forward/credit_applied/payment_applied populated),
+        # never both. No single field maps cleanly to the shared
+        # charge_field/credit_field roles, so "ledger_charge_credit"
+        # dispatches to _keystone_charge_credit() instead (see its own
+        # docstring) -- Charges = period_activity on a new-charge row,
+        # or balance_forward (what was owed coming into this period) on
+        # a settlement row; Credits = credit_applied when genuinely
+        # non-zero. amount_due_field (balance_due) is untouched --
+        # already correct, confirmed 2026-08-24. Every real field still
+        # reaches Bronze in its own dedicated column: reference_date ->
+        # raw_invoice_date, reference_number -> raw_invoice_number
+        # (invoice_number below), purchase_order_number -> raw_po_number
+        # (po_number_field below), balance_due -> raw_amount_due
+        # (amount_due_field below), and the remaining four via
+        # passthrough_fields.
+        "invoice_number": ("reference_number",),
+        "date_field": "reference_date", "due_date_field": None,
+        "po_number_field": "purchase_order_number",
+        "amount_due_field": "balance_due",
+        "ledger_charge_credit": True,
+        "passthrough_fields": {
+            "balance_forward": "balance_forward",
+            "period_activity": "period_activity",
+            "credit_applied": "credit_applied",
+            "payment_applied": "payment_applied",
+        },
+    },
 }
 
 
@@ -347,6 +432,17 @@ class PythonLibraryExtractionEngine:
 
         statement_date = _normalize_date(summary.get(_STATEMENT_DATE_KEY.get(module.__name__, "statement_date")))
 
+        # Statement-level aging bucket totals (see extract_wilberts.py's /
+        # extract_quirk.py's own parse_aging_summary() docstrings) -- a
+        # generic "any summary key prefixed aging_" pass-through, not
+        # hardcoded per vendor, so this naturally extends to any future
+        # vendor module whose own summary dict carries aging_* fields too.
+        # Empty dict (never written to document_intake_log -- see
+        # write_intake_log()) for every vendor module that doesn't produce
+        # one. Never merged into invoices (INV-03: no summary/total row may
+        # ever be ingested as if it were a real invoice line).
+        aging_summary = {k: v for k, v in summary.items() if k.startswith("aging_")}
+
         return {
             "document_metadata": {
                 "document_type": "VENDOR_STATEMENT",
@@ -377,6 +473,7 @@ class PythonLibraryExtractionEngine:
                 "column_mapping_confidence": 1.0,
             },
             "warnings": [],
+            "aging_summary": aging_summary,
             "_provider_used": "python_library_pdfplumber",
             "_model_used": module.__name__,
         }

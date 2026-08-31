@@ -10,6 +10,7 @@ SQL abstraction). Routers stay thin; this module owns the SQL.
 import hashlib
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -1047,6 +1048,20 @@ def get_silver_row_count(statement_id: str) -> int:
     return rows[0]["c"] or 0 if rows else 0
 
 
+def _prettify_aging_label(key: str) -> str:
+    """"aging_over_30" -> "Over 30 Days", "aging_31_60" -> "31-60 Days",
+    "aging_pay_this_amount" -> "Pay This Amount" -- generic, not a lookup
+    table of specific field names, so a future vendor's own aging_* keys
+    get a reasonable label automatically instead of falling back to the
+    raw key. Never changes the underlying value, purely cosmetic."""
+    label = key[len("aging_"):] if key.startswith("aging_") else key
+    label = re.sub(r"(\d+)_(\d+)", r"\1-\2", label)  # "31_60" -> "31-60"
+    label = label.replace("_", " ").strip().title()
+    if re.fullmatch(r"(Over )?[\d\-]+", label):
+        label += " Days"
+    return label
+
+
 class _RowsWithColumns(list):
     """A plain list of row dicts, with the ordered union of every row's
     raw_columns keys attached as `.columns` -- lets extracted_data.html do
@@ -1054,11 +1069,23 @@ class _RowsWithColumns(list):
     also reading `rows.columns` for the flat full-data table's header row,
     without jobs.py needing to change how it builds extracted_data.html's
     context (it just does `"rows": queries.get_extracted_rows_for_job(...)`
-    today, unchanged)."""
+    today, unchanged).
 
-    def __init__(self, rows, columns):
+    `.aging_summary` is the same idea for document_intake_log's
+    raw_aging_summary (see get_extracted_rows_for_job()) -- a dict, empty
+    when this statement has none, so the template can do a plain
+    `{% if rows.aging_summary %}` with no separate context key needed.
+    `.aging_summary_display` is the same data as a (label, value) list,
+    in printed order, with keys run through _prettify_aging_label() for
+    the template to render directly without needing its own logic."""
+
+    def __init__(self, rows, columns, aging_summary=None):
         super().__init__(rows)
         self.columns = columns
+        self.aging_summary = aging_summary or {}
+        self.aging_summary_display = [
+            (_prettify_aging_label(k), v) for k, v in self.aging_summary.items()
+        ]
 
 
 def get_extracted_rows_for_job(job_id: str) -> list:
@@ -1081,6 +1108,14 @@ def get_extracted_rows_for_job(job_id: str) -> list:
     raw_columns here so extracted_data.html can render it without also
     needing to import json.
 
+    Also pulls document_intake_log.raw_aging_summary for the same
+    statement_id -- a statement-level (not per-invoice) JSON blob of
+    printed aging bucket totals, populated only for vendors whose
+    extractor found one (see extract_wilberts.py's / extract_quirk.py's
+    parse_aging_summary() and adapter.py's generic "aging_"-prefix
+    pass-through). NULL/absent for every other vendor -- never merged
+    into the per-invoice rows (INV-03).
+
     Returns a _RowsWithColumns: same list of row dicts as before, plus a
     `.columns` attribute -- the ordered union of every row's raw_columns
     keys (first-seen order), i.e. the real printed header names for this
@@ -1088,7 +1123,8 @@ def get_extracted_rows_for_job(job_id: str) -> list:
     raw_columns at all (every row went through a hardcoded pdfplumber
     parser, or predates this column being saved) -- extracted_data.html
     uses that to decide whether to render the full table or its
-    fixed-field-extraction fallback note."""
+    fixed-field-extraction fallback note. Also a `.aging_summary`
+    attribute -- a dict, empty when this statement has none."""
     job = get_job_by_id(job_id)
     if not job or not job.get("statement_id"):
         return _RowsWithColumns([], [])
@@ -1125,7 +1161,19 @@ def get_extracted_rows_for_job(job_id: str) -> list:
                     seen.add(key)
                     columns.append(key)
 
-    return _RowsWithColumns(rows, columns)
+    intake_log_rows = execute_query(
+        "SELECT raw_aging_summary FROM document_intake_log WHERE statement_id = ?",
+        [statement_id],
+    )
+    aging_summary = None
+    if intake_log_rows:
+        raw_aging = intake_log_rows[0].get("raw_aging_summary")
+        try:
+            aging_summary = json.loads(raw_aging) if raw_aging else None
+        except (TypeError, ValueError):
+            aging_summary = None
+
+    return _RowsWithColumns(rows, columns, aging_summary)
 
 
 # ---------------------------------------------------------------------------

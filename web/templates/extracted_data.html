@@ -13,6 +13,22 @@
 
 {% block content %}
 {% if rows %}
+{% if rows.aging_summary_display %}
+<div class="section-header">
+  <div class="section-title">Aging Summary</div>
+</div>
+<div class="detail-view-sub" style="padding-top:0">
+  Statement-level total printed on the vendor's statement — not an individual invoice row.
+</div>
+<div class="field-grid" style="margin-bottom:28px">
+  {% for label, value in rows.aging_summary_display %}
+  <div class="field-box">
+    <div class="fb-label">{{ label }}</div>
+    <div class="fb-value{% if value is none %} muted{% endif %}">{{ value if value is not none else "—" }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 <div class="section-header">
   <div class="section-title">Extracted Data ({{ rows | length }} rows)</div>
 </div>

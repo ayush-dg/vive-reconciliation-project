@@ -201,12 +201,122 @@ def parse_grand_total(last_page_words):
     return None
 
 
+# How far below a header row's own top a value can sit and still count as
+# "printed under that header" -- measured directly from this document (row
+# 1: header top=702.5/703.1, its furthest value -- PAY THIS AMOUNT, in the
+# remittance-stub column -- sits at top=720.5, diff=18.0; row 2: header
+# top=728.0, value top=737.5-738.9, diff up to 10.9). 20 covers both with
+# margin but stays well short of the next header row entirely (diff 25+),
+# so a header row's own digit tokens (e.g. the literal "120" in "OVER 120
+# DAYS") are never mistaken for a value.
+AGING_VALUE_TOP_WINDOW = 20
+
+
+def _bucket_by_x0(anchors_x0):
+    """Turns a dict of {field_name: header_x0} into column (lo, hi) ranges
+    using the midpoint between each header and its next-rightmost neighbor
+    -- the same column-boundary-bucketing technique classify_word() and
+    extract_wilberts.py's bucket_column() already use, chosen over a fixed
+    +/- tolerance around each header's own x0 because the bucket headers
+    here are uneven widths ("CURRENT" vs "PAY THIS AMOUNT") and a value's
+    left edge doesn't sit a fixed distance from its header's left edge."""
+    ordered = sorted(anchors_x0.items(), key=lambda kv: kv[1])
+    bounds = {}
+    for i, (name, x0) in enumerate(ordered):
+        lo = x0 - 40 if i == 0 else (ordered[i - 1][1] + x0) / 2
+        # Cap the rightmost column's own width instead of leaving it
+        # unbounded -- an unbounded last column can reach far enough right
+        # to swallow unrelated printed text well past this aging block
+        # (e.g. the account-number value echoed again just above the
+        # NEW BALANCE row on this document, at x0=346.6, would otherwise
+        # land inside an unbounded NEW BALANCE bucket starting at x0=177.75).
+        hi = (x0 + ordered[i + 1][1]) / 2 if i < len(ordered) - 1 else x0 + 100
+        bounds[name] = (lo, hi)
+    return bounds
+
+
+def parse_aging_summary(last_page_words):
+    """Statement-level aging bucket row (CURRENT / OVER 30/60/90/120 DAYS /
+    NEW BALANCE / ACCOUNT NUMBER / PAY THIS AMOUNT) -- finds the two header
+    rows, then reads the money/digit value printed under each one using
+    column-range bucketing (see _bucket_by_x0()). Per the investigation:
+    this header repeats as a footer template on every page, but only the
+    FINAL page has real values printed beneath it (pages 1-5 print the same
+    labels over blank cells) -- so this must be called with the last page's
+    words only, never scanned across every page. Returns a dict of flat
+    scalar fields; a bucket with nothing printed beneath it is None. Never
+    merged into line_items (INV-03: no summary/total row may ever be
+    ingested as if it were a real invoice line)."""
+    rows = group_rows(last_page_words)
+
+    row1 = row2 = None
+    for row in rows:
+        texts = [w["text"] for w in row]
+        if row1 is None and "CURRENT" in texts and "ACCOUNT" in texts and "NUMBER" in texts:
+            row1 = row
+        elif row2 is None and "NEW" in texts and "BALANCE" in texts and "STATEMENT" in texts:
+            row2 = row
+    if row1 is None or row2 is None:
+        return {}
+
+    anchors_x0 = {}
+    over1 = sorted((w for w in row1 if w["text"] == "OVER"), key=lambda w: w["x0"])
+    for w in row1:
+        if w["text"] == "CURRENT":
+            anchors_x0["aging_current"] = w["x0"]
+        elif w["text"] == "ACCOUNT":
+            anchors_x0["aging_account_number"] = w["x0"]
+        elif w["text"] == "PAY":
+            anchors_x0["aging_pay_this_amount"] = w["x0"]
+    if len(over1) >= 1:
+        anchors_x0["aging_over_30"] = over1[0]["x0"]
+    if len(over1) >= 2:
+        anchors_x0["aging_over_60"] = over1[1]["x0"]
+
+    over2 = sorted((w for w in row2 if w["text"] == "OVER"), key=lambda w: w["x0"])
+    for w in row2:
+        if w["text"] == "NEW":
+            anchors_x0["aging_new_balance"] = w["x0"]
+    if len(over2) >= 1:
+        anchors_x0["aging_over_90"] = over2[0]["x0"]
+    if len(over2) >= 2:
+        anchors_x0["aging_over_120"] = over2[1]["x0"]
+
+    row1_fields = {"aging_current", "aging_over_30", "aging_over_60",
+                   "aging_account_number", "aging_pay_this_amount"}
+    row1_bounds = _bucket_by_x0({k: v for k, v in anchors_x0.items() if k in row1_fields})
+    row2_bounds = _bucket_by_x0({k: v for k, v in anchors_x0.items() if k not in row1_fields})
+
+    result = {name: None for name in anchors_x0}
+
+    def fill_from(header_row, bounds):
+        header_top = header_row[0]["top"]
+        for row in rows:
+            row_top = row[0]["top"]
+            # Strictly after the header row itself (excludes the header's
+            # own text, e.g. the literal digits in "OVER 120 DAYS"), within
+            # AGING_VALUE_TOP_WINDOW points below it.
+            if not (header_top < row_top <= header_top + AGING_VALUE_TOP_WINDOW):
+                continue
+            for w in row:
+                if not (MONEY_RE.match(w["text"]) or w["text"].isdigit()):
+                    continue
+                for name, (lo, hi) in bounds.items():
+                    if result[name] is None and lo <= w["x0"] < hi:
+                        result[name] = w["text"]
+
+    fill_from(row1, row1_bounds)
+    fill_from(row2, row2_bounds)
+    return result
+
+
 def extract(pdf_path):
     """Returns {"line_items": [...], "fieldnames": [...], "summary": {...}, "full_text": None}."""
     line_items = []
     department_subtotals = {}
     header_info = {}
     printed_total = None
+    aging_summary = {}
 
     with pdfplumber.open(pdf_path) as pdf:
         page1_words = drop_watermark(pdf.pages[0].extract_words())
@@ -252,6 +362,7 @@ def extract(pdf_path):
 
             if page_num == len(pdf.pages):
                 printed_total = parse_grand_total(words)
+                aging_summary = parse_aging_summary(words)
 
     computed_total = round(sum(float(r["amount"].replace(",", "")) for r in line_items), 2)
     computed_from_departments = round(
@@ -265,6 +376,10 @@ def extract(pdf_path):
     summary["total_computed"] = f"{computed_total:,.2f}"
     summary["total_printed"] = printed_total
     summary["reconciles"] = computed_total == printed_total_val
+    # Statement-level aging bucket totals from the final page only (see
+    # parse_aging_summary()'s own docstring) -- never merged into
+    # line_items (INV-03).
+    summary.update(aging_summary)
 
     return {
         "line_items": line_items,
