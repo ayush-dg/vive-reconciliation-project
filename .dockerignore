@@ -29,3 +29,13 @@ docs/
 Dockerfile
 docker-compose.yml
 .dockerignore
+
+# Deployment staging artifacts — not needed inside the image
+deploy/
+deploy.zip
+
+# Ad-hoc local output/backups, not build inputs
+backup/
+*.xlsx
+JOBS_BACKUP_*.json
+lakehouse/*.db.pre-migration-*

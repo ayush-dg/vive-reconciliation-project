@@ -1389,11 +1389,17 @@ def _parse_review_row(row: dict) -> dict:
 
 def get_pending_review_count() -> int:
     # validation_document_review_queue is cut over to Fabric Warehouse —
-    # see get_fabric_connection() in src/lakehouse/connection.py.
-    rows = execute_query_fabric(
-        "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
-    )
-    return rows[0]["c"] or 0 if rows else 0
+    # see get_fabric_connection() in src/lakehouse/connection.py. Caught
+    # broadly here (not just at call sites) since every caller treats this
+    # as a minor sidebar/KPI number, not something worth a 500 over.
+    try:
+        rows = execute_query_fabric(
+            "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
+        )
+        return rows[0]["c"] or 0 if rows else 0
+    except Exception as e:
+        print(f"[queries] get_pending_review_count failed, defaulting to 0: {e}")
+        return 0
 
 
 def get_review_queue_vendors() -> list:

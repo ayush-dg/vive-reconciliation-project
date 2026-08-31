@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 import pyodbc
-from azure.identity import AzureCliCredential
+from azure.identity import ClientSecretCredential
 
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 
@@ -46,16 +46,19 @@ SQL_COPT_SS_ACCESS_TOKEN = 1256
 def get_fabric_sqldb_connection():
     """Temporary, migration-script-only connection to the new SQL database
     in Fabric item. Mirrors get_fabric_connection()'s auth mechanism exactly
-    (AzureCliCredential -> pyodbc access-token attribute) but targets
+    (ClientSecretCredential -> pyodbc access-token attribute) but targets
     FABRIC_SQLDB_ENDPOINT/FABRIC_SQLDB_NAME instead of
     FABRIC_SQL_ENDPOINT/FABRIC_WAREHOUSE_NAME. Not added to connection.py --
     that repoint happens in Stage 4, only after Stage 3's row counts are
     confirmed correct."""
     endpoint = os.getenv("FABRIC_SQLDB_ENDPOINT")
     database = os.getenv("FABRIC_SQLDB_NAME")
-    tenant_id = os.getenv("FABRIC_TENANT_ID")
 
-    credential = AzureCliCredential(tenant_id=tenant_id)
+    credential = ClientSecretCredential(
+        tenant_id=os.environ["FABRIC_TENANT_ID"],
+        client_id=os.environ["FABRIC_CLIENT_ID"],
+        client_secret=os.environ["FABRIC_CLIENT_SECRET"],
+    )
     token = credential.get_token("https://database.windows.net/.default")
     token_bytes = token.token.encode("utf-16-le")
     token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
