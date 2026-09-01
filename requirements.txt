@@ -1,4 +1,5 @@
 pdfplumber>=0.11.0
+python-dateutil>=2.9.0  # src/extraction/python_library/adapter.py's _normalize_date() catch-all for date formats not covered by its explicit format attempts -- was an undeclared transitive dependency; explicit now since production code imports it directly
 pymupdf>=1.24.0  # fitz -- used by src/extraction/python_library/extract_ksi.py's OCR vendor-detection path
 python-dotenv>=1.0.0
 anthropic==0.125.0
@@ -9,7 +10,7 @@ pytesseract==0.3.13
 pdf2image==1.17.0
 pypdf>=6.0.0
 azure-storage-blob>=12.19.0
-azure-identity>=1.19.0  # ClientSecretCredential/AzureCliCredential for Fabric auth (src/lakehouse/connection.py) -- was previously an undeclared transitive dep
+azure-identity>=1.19.0  # required by src/lakehouse/connection.py's get_fabric_connection() -- was an undeclared transitive dependency; explicit now since production's real config exercises this code path
 deltalake>=1.6.0  # Bronze writes to per-vendor Fabric Lakehouse Delta tables
 pyodbc>=5.0.0
 pytest==9.1.1

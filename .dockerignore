@@ -39,3 +39,16 @@ backup/
 *.xlsx
 JOBS_BACKUP_*.json
 lakehouse/*.db.pre-migration-*
+
+# Stray pre-migration SQLite backup files -- don't match the lakehouse/*.db-*
+# pattern above (named ...db.pre-migration-NNN-backup, not ...db-*).
+lakehouse/*.pre-migration-*-backup
+
+# Throwaway test artifacts from extraction-work's Foundry test scripts --
+# not needed at runtime, keeps the build context small.
+test_output/
+scripts/test_full_column_extraction.py
+scripts/test_foundry_full_extraction.py
+scripts/test_production_method_all_vendors.py
+scripts/test_extraction_consistency.py
+sample_data/Nucar Quonset 073026 2 (2) 3.pdf

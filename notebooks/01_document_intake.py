@@ -209,15 +209,15 @@ def check_cache(document_hash: str):
     See RULES.md RULE-02 — row_count > 0 is required; a failed run must
     never be treated as a valid cache hit.
 
-    extraction_cache has been cut over to Fabric Warehouse in production
-    (see get_fabric_connection() in src/lakehouse/connection.py) — every
-    other table here still reads/writes Azure SQL via execute_query()/
-    execute_sql(). execute_query_fabric() has no SQLite/T-SQL dialect
-    translation, and falls back to local SQLite in test/dev mode, so this
-    query has to be valid on both dialects as written — no trailing LIMIT
-    or TOP; the "most recent" row is picked in Python instead.
+    TEMPORARY (2026-08-29): extraction_cache is pointed back at Azure SQL
+    via execute_query() -- the Fabric SQL Database item this used to read
+    (get_fabric_connection() in src/lakehouse/connection.py) is unreachable
+    in production right now (the FABRIC_CLIENT_ID service principal lacks
+    Read permission on it). Revert to execute_query_fabric() once that
+    permission is granted. No dialect concern either way: this query has
+    no trailing LIMIT/TOP, valid unchanged on SQLite/Azure SQL/Fabric.
     """
-    rows = execute_query_fabric(
+    rows = execute_query(
         """
         SELECT * FROM extraction_cache
         WHERE document_hash = ? AND row_count > 0
@@ -238,8 +238,23 @@ def validate_invoice(invoice: dict, rules: dict):
     if invoice.get("outstanding_amount") is None and invoice.get("amount") is not None:
         invoice["outstanding_amount"] = invoice["amount"]
 
+    def has_value(field):
+        val = invoice.get(field)
+        return val is not None and str(val).strip() != ""
+
+    # A row missing invoice_number is still genuine (not garbage) if it has
+    # a real description and/or amount -- e.g. a "Last payment of 1234.56
+    # received" summary/payment line has no document number by nature.
+    # get_skip_reason() applies this same carve-out earlier in the pipeline
+    # for the "no identifier at all" case; this mirrors it here so a row
+    # that survives that check isn't then rejected on the same grounds by
+    # this required_fields check (confirmed missing from Bronze for BERLIN
+    # HEW 0726 2026-08-29 before this carve-out existed).
     required = rules.get("required_fields", ["invoice_number", "outstanding_amount"])
+    has_other_content = has_value("description") or has_value("amount") or has_value("outstanding_amount")
     for field in required:
+        if field == "invoice_number" and has_other_content:
+            continue
         val = invoice.get(field)
         if val is None or str(val).strip() == "":
             return False, f"MISSING_MANDATORY_FIELD: {field} is required"
@@ -366,12 +381,19 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
 def get_skip_reason(invoice: dict) -> str:
     """
     A row is genuinely unusable — not just low-confidence — when it has
-    no invoice identifier at all (neither invoice_number nor ro_number),
-    since there's then no way to even reference which invoice this row
-    is. Returns a skip reason string for such rows, or "" if the row
-    should proceed to normal validation (validate_invoice), which may
-    still route it to the review queue for other reasons (low
-    confidence, bad field type, etc).
+    no invoice identifier at all (neither invoice_number nor ro_number)
+    AND no other real content either (no description, no amount), since
+    there's then no way to even reference which invoice this row is, nor
+    anything else on the row worth keeping. Returns a skip reason string
+    for such rows, or "" if the row should proceed to normal validation
+    (validate_invoice), which may still route it to the review queue for
+    other reasons (low confidence, bad field type, etc).
+
+    A row lacking only an invoice/RO number is NOT skipped here if it has
+    a real description and/or amount — e.g. a "Last payment of 1234.56
+    received" summary/payment line has no document number by nature but
+    is a genuine transaction, not empty garbage (confirmed missing from
+    Bronze for BERLIN HEW 0726 2026-08-29 before this carve-out existed).
 
     A blank amount alone is deliberately NOT treated as unusable here —
     removed 2026-08-23 (INV-04 amendment, see docs/INVARIANTS.md). Every
@@ -383,7 +405,13 @@ def get_skip_reason(invoice: dict) -> str:
         val = invoice.get(field)
         return val is not None and str(val).strip() != ""
 
-    if not has_value("invoice_number") and not has_value("ro_number"):
+    has_identifier = has_value("invoice_number") or has_value("ro_number")
+    has_other_content = (
+        has_value("description")
+        or has_value("amount")
+        or has_value("outstanding_amount")
+    )
+    if not has_identifier and not has_other_content:
         return "no invoice identifier found"
 
     return ""
@@ -550,31 +578,29 @@ def write_to_review_queue(invalid_invoices: list, reasons: list,
                            statement_id: str, source_file: str, stage: str):
     """Write invalid records to the review queue.
 
-    validation_document_review_queue is cut over to Fabric Warehouse (see
-    get_fabric_connection() in src/lakehouse/connection.py). Its `id`
-    column has no IDENTITY there — same situation as extraction_cache,
-    see update_cache()'s docstring for why — so each row gets an explicit
-    id, computed once as MAX(id)+1 and incremented locally across this
-    call's own batch of inserts (so multiple invalid rows from the same
-    call never collide with each other). Not concurrency-safe across
-    separate calls landing at the same moment — same documented caveat
-    as extraction_cache's update_cache().
+    TEMPORARY (2026-08-29): validation_document_review_queue is pointed
+    back at Azure SQL via execute_sql() -- the Fabric SQL Database item
+    this used to write (get_fabric_connection() in
+    src/lakehouse/connection.py) is unreachable in production right now
+    (the FABRIC_CLIENT_ID service principal lacks Read permission on it).
+    Revert to execute_sql_fabric()/execute_query_fabric() once that
+    permission is granted. Azure SQL's real schema for this table has a
+    genuine IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
+    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
+    assignment this replaces. `id` is no longer in the INSERT at all; Azure
+    SQL assigns it.
     """
     now = datetime.now(timezone.utc).isoformat()
-    next_id = execute_query_fabric(
-        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM validation_document_review_queue"
-    )[0]["next_id"]
     for inv, reason in zip(invalid_invoices, reasons):
-        execute_sql_fabric(
+        execute_sql(
             """
             INSERT INTO validation_document_review_queue (
-                id, review_id, source_file, statement_id,
+                review_id, source_file, statement_id,
                 pipeline_stage, rejection_category, rejection_details,
                 raw_payload, review_status, flagged_timestamp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW', ?)
             """,
             [
-                next_id,
                 str(uuid.uuid4()),
                 source_file,
                 statement_id,
@@ -585,7 +611,6 @@ def write_to_review_queue(invalid_invoices: list, reasons: list,
                 now,
             ]
         )
-        next_id += 1
 
 
 def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vendor_id: str,
@@ -718,11 +743,17 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
                      invoice_count: int, routing_decision: str):
     """Write one row to document_intake_log.
 
-    document_intake_log is cut over to Fabric Warehouse (see
-    get_fabric_connection() in src/lakehouse/connection.py). Its `id`
-    column has no IDENTITY there either — same situation as
-    extraction_cache/validation_document_review_queue — so the new row
-    gets an explicit id via MAX(id)+1. Same not-concurrency-safe caveat.
+    TEMPORARY (2026-08-29): document_intake_log is pointed back at Azure
+    SQL via execute_sql() -- the Fabric SQL Database item this used to
+    write (get_fabric_connection() in src/lakehouse/connection.py) is
+    unreachable in production right now (the FABRIC_CLIENT_ID service
+    principal lacks Read permission on it). Revert to
+    execute_sql_fabric()/execute_query_fabric() once that permission is
+    granted. Azure SQL's real schema for this table has a genuine
+    IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
+    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
+    assignment this replaces. `id` is no longer in the INSERT at all;
+    Azure SQL assigns it.
     """
     now = datetime.now(timezone.utc).isoformat()
     meta = schema_result.get("document_metadata", {})
@@ -730,28 +761,33 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     stmt = schema_result.get("statement_metadata", {})
     conf = schema_result.get("extraction_confidence", {})
     warnings = schema_result.get("warnings", [])
+    # Statement-level aging bucket totals (see adapter.py's
+    # PythonLibraryExtractionEngine.understand() -- generic "aging_"-prefix
+    # pass-through, empty for every vendor that doesn't print one, and for
+    # every AI-routed vendor, which never sets this key at all). JSON only
+    # when non-empty so unrelated statements store a clean NULL, not a
+    # stray "{}" string.
+    aging_summary = schema_result.get("aging_summary") or {}
+    raw_aging_summary = json.dumps(aging_summary) if aging_summary else None
 
-    execute_sql_fabric(
+    execute_sql(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
         [statement_id]
     )
 
-    next_id = execute_query_fabric(
-        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM document_intake_log"
-    )[0]["next_id"]
-    execute_sql_fabric(
+    execute_sql(
         """
         INSERT INTO document_intake_log (
-            id, document_id, document_hash, source_file, ingestion_timestamp,
+            document_id, document_hash, source_file, ingestion_timestamp,
             document_type, document_type_confidence,
             vendor_name, shop_or_entity, statement_date, statement_period,
             currency, statement_total_as_printed,
             extraction_confidence_overall, extraction_model, extraction_method,
-            routing_decision, statement_id, invoice_count, warnings, schema_version
+            routing_decision, statement_id, invoice_count, warnings, schema_version,
+            raw_aging_summary
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            next_id,
             document_id,
             document_hash,
             os.path.basename(pdf_path),
@@ -772,6 +808,7 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             invoice_count,
             json.dumps(warnings),
             "1.0",
+            raw_aging_summary,
         ]
     )
 
@@ -779,9 +816,13 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
 def update_intake_log_blob_path(statement_id: str, blob_storage_path: str):
     """Back-fill blob_storage_path (+ uploaded_at) on the document_intake_log
     row already written for this statement_id — see write_intake_log(),
-    which runs first and doesn't yet know the blob location."""
+    which runs first and doesn't yet know the blob location.
+
+    TEMPORARY (2026-08-29): pointed back at Azure SQL via execute_sql() --
+    see write_intake_log()'s docstring for why. Revert to
+    execute_sql_fabric() once the Fabric permission issue is resolved."""
     now = datetime.now(timezone.utc).isoformat()
-    execute_sql_fabric(
+    execute_sql(
         "UPDATE document_intake_log SET blob_storage_path = ?, uploaded_at = ? WHERE statement_id = ?",
         [blob_storage_path, now, statement_id]
     )
@@ -871,36 +912,36 @@ def update_cache(document_hash: str, statement_id: str, source_file: str,
                  provider_used: str, row_count: int):
     """Insert or replace a cache entry.
 
-    extraction_cache lives on Fabric Warehouse now (see check_cache()).
-    execute_sql_fabric() has no SQLite-dialect translation, so the
-    INSERT OR REPLACE upsert that execute_sql() would normally rewrite
-    into a T-SQL MERGE (see _translate_for_azure()/AZURE_UPSERT_KEYS in
-    src/lakehouse/connection.py) is done explicitly here as a SELECT-
-    then-UPDATE-or-INSERT, keyed on (document_hash, statement_id) same
-    as that translation uses.
+    TEMPORARY (2026-08-29): extraction_cache is pointed back at Azure SQL
+    via execute_query()/execute_sql() -- the Fabric SQL Database item this
+    used to read/write (get_fabric_connection() in
+    src/lakehouse/connection.py) is unreachable in production right now
+    (the FABRIC_CLIENT_ID service principal lacks Read permission on it).
+    Revert to execute_query_fabric()/execute_sql_fabric() once that
+    permission is granted.
 
-    id assignment: the Fabric table's `id` column has no IDENTITY (the
-    9 migrated rows carry their original Azure SQL ids as plain
-    values — Fabric Warehouse's IDENTITY, confirmed separately, only
-    supports BIGINT with large non-sequential distributed values, and
-    can't be retrofitted onto an already-populated column without
-    recreating the table). New rows get `MAX(id) + 1` computed here.
-    This is NOT atomic/concurrency-safe — two workers updating the
-    cache for two different documents at the same moment could compute
-    the same next id. Low practical risk today (this function only
-    runs after a real extraction completes, so collisions require two
-    such completions landing in the same instant), but worth a
-    deliberate fix (e.g. a real sequence, or switching this column to
-    BIGINT IDENTITY on a freshly recreated table) before this table
-    sees heavier concurrent write volume.
+    Still done explicitly here as a SELECT-then-UPDATE-or-INSERT (keyed on
+    document_hash, statement_id) rather than switched to execute_sql()'s
+    own INSERT OR REPLACE -> MERGE translation (_translate_for_azure()/
+    AZURE_UPSERT_KEYS in src/lakehouse/connection.py already has an entry
+    for this table from before the Fabric cutover) -- that's a valid,
+    arguably cleaner alternative but out of scope for this temporary swap;
+    not changing it keeps this diff minimal and easy to revert later.
+
+    id assignment: Azure SQL's real schema for this table has a genuine
+    IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
+    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
+    assignment this replaces. `id` is no longer in the INSERT at all;
+    Azure SQL assigns it, and the old not-concurrency-safe caveat about
+    manually computed ids no longer applies.
     """
     now = datetime.now(timezone.utc).isoformat()
-    existing = execute_query_fabric(
+    existing = execute_query(
         "SELECT id FROM extraction_cache WHERE document_hash = ? AND statement_id = ?",
         [document_hash, statement_id]
     )
     if existing:
-        execute_sql_fabric(
+        execute_sql(
             """
             UPDATE extraction_cache
             SET source_file = ?, extraction_method = ?, row_count = ?, ingestion_timestamp = ?
@@ -910,19 +951,13 @@ def update_cache(document_hash: str, statement_id: str, source_file: str,
         )
         return
 
-    # COALESCE, not ISNULL — this must stay valid on both T-SQL (real
-    # Fabric) and SQLite (local/test fallback — see get_fabric_connection()
-    # in src/lakehouse/connection.py); ISNULL is T-SQL-only.
-    next_id = execute_query_fabric(
-        "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM extraction_cache"
-    )[0]["next_id"]
-    execute_sql_fabric(
+    execute_sql(
         """
         INSERT INTO extraction_cache
-            (id, document_hash, statement_id, source_file, extraction_method, row_count, ingestion_timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (document_hash, statement_id, source_file, extraction_method, row_count, ingestion_timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
-        [next_id, document_hash, statement_id, source_file, provider_used, row_count, now]
+        [document_hash, statement_id, source_file, provider_used, row_count, now]
     )
 
 

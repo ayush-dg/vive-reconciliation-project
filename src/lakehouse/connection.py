@@ -71,15 +71,22 @@ SQL_COPT_SS_ACCESS_TOKEN = 1256
 
 # Uses a service-principal token (ClientSecretCredential + SQL_COPT_SS_ACCESS_TOKEN,
 # same pattern as src/lakehouse/fabric_sql.py) instead of the ODBC driver's
-# Authentication=ActiveDirectoryInteractive keyword. Originally this used
-# AzureCliCredential (relying on a local `az login` session) — that worked
-# on a dev machine but fails in any container/deployment with no Azure CLI
-# on PATH ("CredentialUnavailableError: Azure CLI not found on path"),
-# which is what actually broke Fabric-cut-over reads/writes in production
-# (dashboard, exceptions, and job intake all going through
-# get_fabric_connection()). Switched 2026-08-27 to the same
+# Authentication=ActiveDirectoryInteractive keyword. Interactive auth
+# (Authentication=ActiveDirectoryInteractive) was tried first and fails with
+# FA004/0x534 — the Windows WAM broker can't complete the sign-in on this
+# machine — so do not switch back to it.
+#
+# Originally this used AzureCliCredential (relying on a local `az login`
+# session) — that worked on a dev machine but fails in any container/
+# deployment with no Azure CLI on PATH ("CredentialUnavailableError: Azure
+# CLI not found on path"), which is what actually broke Fabric-cut-over
+# reads/writes in production (dashboard, exceptions, and job intake all
+# going through get_fabric_connection(), every page touching
+# sidebar_context()/get_pending_review_count() crashing). Confirmed via live
+# container logs 2026-08-29. Switched 2026-08-27 to the same
 # FABRIC_TENANT_ID/FABRIC_CLIENT_ID/FABRIC_CLIENT_SECRET service principal
-# already used by fabric_sql.py, which works in any environment.
+# already used by fabric_sql.py — authenticates directly, no CLI binary, no
+# interactive session, works identically on a laptop or inside a container.
 #
 # Repointed 2026-08-06 from Fabric Warehouse to a real "SQL database in
 # Fabric" item (FABRIC_SQLDB_ENDPOINT/FABRIC_SQLDB_NAME) — same auth
@@ -109,8 +116,8 @@ def get_fabric_connection():
     test that already relies on it to get a clean local run (e.g.
     tests/test_level2_matching_integration.py) is unaffected, since a test
     environment with AZURE_SQL_SERVER unset also has FABRIC_SQLDB_ENDPOINT
-    unset. Real Fabric (service-principal token auth) is only used when Fabric
-    itself is genuinely configured."""
+    unset. Real Fabric (service-principal token auth) is only used when
+    Fabric itself is genuinely configured."""
     if not _using_fabric_sqldb():
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)

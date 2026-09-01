@@ -1,0 +1,29 @@
+-- 013_add_aging_summary_column.sql
+--
+-- Adds raw_aging_summary to document_intake_log -- a JSON blob of a
+-- statement's printed aging bucket totals (e.g. Current/31-60/61-90/
+-- 91-120/Over 120 for Wilbert's; Current/Over 30/60/90/120/New Balance/
+-- Account Number/Pay This Amount for Quirk -- see extract_wilberts.py's
+-- and extract_quirk.py's own parse_aging_summary()). document_intake_log
+-- is one row per statement_id already (see
+-- notebooks/01_document_intake.py's write_intake_log(), which DELETEs by
+-- statement_id before each INSERT), the natural existing home for this --
+-- these are statement-level totals, not per-invoice data, so they never
+-- belong in bronze_vendor_statement_raw or line_items (INV-03: no
+-- summary/total row may ever be ingested and validated as if it were a
+-- real invoice line).
+--
+-- A JSON blob, not fixed columns, because the field set genuinely differs
+-- per vendor (Wilbert's: 6 keys; Quirk: 8 different keys) -- same
+-- flexible-blob precedent already used for this table's own `warnings`
+-- column and for raw_ai_response on bronze_vendor_statement_raw.
+--
+-- adapter.py's PythonLibraryExtractionEngine.understand() populates this
+-- generically (any summary key prefixed "aging_", not hardcoded per
+-- vendor) -- see its own comment. NULL for every other python-library
+-- vendor and every AI-extraction row, which never produce an aging_*
+-- summary key at all.
+--
+-- Purely additive: no existing column dropped, renamed, or retyped.
+
+ALTER TABLE document_intake_log ADD COLUMN raw_aging_summary TEXT;

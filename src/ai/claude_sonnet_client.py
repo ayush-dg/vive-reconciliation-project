@@ -73,6 +73,20 @@ STEP 1: Look at the line-item table on this document. Identify EVERY column that
 STEP 2: Declare the exact list of columns you found, in left-to-right order, as "columns_found". Use each column's own printed header text verbatim (preserve exact wording/casing/punctuation). If a column has no printed header, name it "UNLABELED_TRANSACTION_CODE" (or "UNLABELED_TRANSACTION_CODE_2", "UNLABELED_TRANSACTION_CODE_3", ... if there is more than one such unlabeled column) — never invent any other name for an unlabeled column. Never declare the same column name twice — if this would only happen because you're looking at a second table, see the single-table rule in STEP 1 above instead of extracting from both.
 
 STEP 3: Extract every single data row exactly as printed. Every row object must use EXACTLY the same set of keys declared in "columns_found" — the same columns for every row in this document, even when a particular cell is blank (use null for a blank cell, never omit the key).
+- NEVER ASSUME. Every single value must be extracted exactly as printed,
+  in the exact column it is physically printed under on the page —
+  nothing else. Do not infer a value's column from what a similar-looking
+  row showed, from what the same invoice number showed elsewhere on the
+  statement, from a pattern you've noticed, or from a guess about what
+  "usually" happens. Look only at THIS row's actual printed position,
+  every single time, with no exceptions. If you are ever tempted to
+  place a value based on anything other than its own printed position on
+  the page, that is the exact mistake to avoid. This also applies to
+  invoice/document number naming conventions — a prefix like "CM" (often
+  meaning Credit Memo) does NOT tell you which column a value belongs in.
+  Some statements print CM-prefixed invoice numbers under Charges, not
+  Credits. The invoice number's name/prefix is never a signal for column
+  placement — only its actual printed position is.
 - invoice_number-like columns: use the CLEANEST invoice number column available — if there are multiple invoice-number-like columns, prefer the one WITHOUT account codes or route codes. NEVER fold an account/route code (like '60 35' or '99 57') into the invoice number itself — a code like that belongs in its own UNLABELED_TRANSACTION_CODE column instead (see STEP 2).
 - Do NOT skip any rows
 - Do NOT merge rows
@@ -80,6 +94,25 @@ STEP 3: Extract every single data row exactly as printed. Every row object must 
 - Do NOT include a grand total, subtotal, or balance-forward row as if it
   were an invoice line — report those separately in statement-level totals
   only, never inside rows.
+- SETTLEMENT/CLOSING ROW WARNING — READ THIS BEFORE MAPPING ANY CHARGES
+  VALUE: many statements print a settlement/closing row where an original
+  charge has already been fully offset by a credit — this row prints a
+  value under CREDITS and a matching NEGATIVE value under AMOUNT DUE,
+  with CHARGES left blank on that printed line. If you find yourself
+  about to put a value into CHARGES because you are unsure which column
+  it belongs to, STOP — first check whether CREDITS and a negative AMOUNT
+  DUE are present on that same row instead. That exact shape (CREDITS
+  populated + AMOUNT DUE negative + CHARGES blank) means the value
+  belongs in CREDITS, not CHARGES, every time, with no exceptions. Two
+  worked examples:
+    Example A — printed: CHARGES=(blank), CREDITS=268.12,
+    AMOUNT DUE=-75.00. Correct: {"CHARGES": null, "CREDITS": 268.12,
+    "AMOUNT DUE": -75.00}. WRONG: {"CHARGES": 268.12, "CREDITS": null,
+    "AMOUNT DUE": -75.00}.
+    Example B — printed: CHARGES=(blank), CREDITS=749.40,
+    AMOUNT DUE=-125.00. Correct: {"CHARGES": null, "CREDITS": 749.40,
+    "AMOUNT DUE": -125.00}. WRONG: {"CHARGES": 749.40, "CREDITS": null,
+    "AMOUNT DUE": -125.00}.
 - Some columns represent a genuinely different TYPE of value than others on
   the same row — e.g. the ORIGINAL charge/invoice amount for a line is a
   different column than a running BALANCE/AMOUNT DUE figure, which is
@@ -98,14 +131,78 @@ STEP 3: Extract every single data row exactly as printed. Every row object must 
   own Charges/Credits/Amount Due value. Re-read this row's own printed
   line specifically; never carry a value forward or backward from an
   adjacent row just because the two rows look similar.
+- INVOICE-NUMBER MEMORY WARNING (a stronger, specific case of the rule
+  above): an invoice number appearing multiple times on this statement is
+  NOT evidence of which column its NEXT occurrence belongs to. Real
+  vendor ledgers routinely show the SAME invoice number alternating
+  between Charges and Credits across different rows — an original
+  charge, then a credit memo reversing part of it, then a final
+  settlement. Seeing Credits for a given invoice number two or three
+  times in a row does NOT mean the next row printed for that same
+  invoice number is also Credits. Re-read EVERY row's own printed column
+  position from scratch, with zero weight given to what you extracted
+  for that same invoice number moments ago. This applies across page
+  breaks too — do not carry forward an invoice number's recent column
+  pattern from the bottom of one page to rows at the top of the next
+  page; re-derive column position fresh every time, on every page.
+  Worked example: invoice number "9173819X1" prints under CREDITS on
+  three consecutive rows (25.04, 25.04, 894.30), then appears again
+  later in the statement printed under CHARGES (25.04) — the correct
+  extraction for that fourth occurrence is {"CHARGES": 25.04, "CREDITS":
+  null, ...}, ignoring the preceding three rows' column entirely.
+- More generally, when a row has exactly ONE value present among several
+  charge-like/credit-like columns, place that value in the column it is
+  actually printed under — determined strictly by its horizontal position
+  under that column's header. NEVER default to "the first numeric column"
+  or "the Charges column" as a fallback when uncertain which column a lone
+  value belongs to; uncertainty about placement is not evidence that the
+  value belongs in Charges. Defaulting to Charges when unsure IS a form
+  of assuming — the exact thing the NEVER ASSUME principle above
+  forbids. Uncertainty is resolved by looking again at the row's actual
+  printed position, never by falling back to Charges.
 - Numbers must be plain numbers (no $ signs, no thousands commas); use
   negative numbers for amounts shown in parentheses or with a leading or
   trailing minus sign.
+- A row with no invoice/document number is not automatically excluded —
+  but it is not automatically included either. Apply this test: KEEP it
+  only if it represents its OWN distinct transaction with its OWN date
+  and its OWN amount (e.g. "Last payment of 1234.56 received" — a real
+  payment event that happened on a specific day; a missing invoice
+  number is never by itself a reason to skip a row like this). EXCLUDE
+  it if it instead looks like a subtotal/recap line for a group of rows
+  above it — specifically: no date (or a blank/repeated date), and its
+  amount is close to or equal to the sum of several rows immediately
+  above it that share the same reference/source code (e.g. a running
+  total for one vendor-source group, printed right after that group's
+  individual lines). This is the SAME exclusion as the earlier "do NOT
+  include a grand total, subtotal, or balance-forward row" rule — a
+  no-invoice-number row does NOT get a pass from that rule just because
+  it lacks an invoice number; use the KEEP test above, not the mere
+  absence of an invoice number, to decide. Worked example: a page has
+  several individual charge rows for source code "220", followed by a
+  row simply labeled "220" with no date and an amount matching their
+  sum — EXCLUDE that recap row entirely (do not add it to "rows"). A
+  separate, unrelated payment line elsewhere on the same statement that
+  has its own date (e.g. "Last payment of 1234.56 received" dated
+  7/31) IS included, per the KEEP test above. For any row you do keep
+  under this rule, use null for whichever fields are genuinely blank or
+  not applicable on that row.
 - Include a "confidence" field (0.0-1.0) for every row: 0.9+ only if every
   character is unambiguous; lower it for anything uncertain — unclear
   handwriting/scan quality, an invoice number you had to guess between two
   readings, a column you weren't fully sure how to map, etc. Be honest and
   granular — do not default to a single value for every row.
+
+SELF-CHECK BEFORE FINALIZING: Review every row where an invoice/document
+number repeats. For each one, confirm you read THAT row's own printed
+position independently — not copied from another occurrence of the same
+invoice number. If unsure, re-derive it now from the row's actual
+position before finalizing. This applies especially near page breaks.
+Then, for EVERY row in the document (not just repeated invoice numbers),
+ask yourself: does my placement match this row's actual visual position,
+or did I base it on the invoice number's naming pattern, prefix, or what
+seems "typical"? If based on anything other than visual position,
+correct it now.
 
 Also extract document-level metadata at the top of the JSON response:
 - vendor_name: the vendor/supplier company name as printed on the
@@ -147,6 +244,28 @@ INVOICE_NUMBER_KEYWORDS = (
     "document no", "sin",
 )
 REFERENCE_ONLY_KEYWORDS = ("reference",)
+
+# Qualifies a "reference"-containing header as an actual identifier column
+# (e.g. "Reference Number") rather than something else that merely happens
+# to contain the word "reference" (e.g. "Reference Date"). A header
+# containing "date" is NEVER treated as the invoice-number column, full
+# stop, regardless of any other keyword present -- confirmed via Keystone
+# (2026-08-30): a document with both "Reference Date" and "Reference
+# Number" columns was mapping invoice_number to the date column, since
+# "Reference Date" happened to be declared first in columns_found and
+# both headers matched the same bare "reference" keyword with no way to
+# tell them apart.
+REFERENCE_NUMBER_QUALIFIERS = ("number", "no", "#")
+
+# Bronze columns that exist specifically to carry a non-standard named
+# column through to its own dedicated slot when the fixed schema
+# (invoice_number, amount, credits, etc.) has no field for it -- see
+# migrations/012_add_keystone_ledger_columns.sql and write_to_bronze() in
+# notebooks/01_document_intake.py, which already reads inv.get() for each
+# of these names generically. Extend this tuple (and add a matching Bronze
+# column) for a future vendor with its own non-standard column instead of
+# writing vendor-specific mapping code.
+PASSTHROUGH_FIELD_NAMES = ("balance_forward", "period_activity", "credit_applied", "payment_applied")
 
 # Embedded invoice/credit number pattern -- some vendors (e.g. Momentum
 # Tire & Wheel Nutley) print no dedicated invoice-number column at all;
@@ -512,12 +631,25 @@ class ClaudeSonnetClient(AIClient):
         """
         field_map = {}
         invoice_candidates = []
-        reference_only_candidates = []
+        reference_number_candidates = []
+        reference_bare_candidates = []
 
         headers = columns_found or (list(rows[0].keys()) if rows and isinstance(rows[0], dict) else [])
 
         for header in headers:
             h = self._normalize_header(header)
+            normalized_exact = h.replace(" ", "_")
+            # Exact passthrough-name match checked FIRST, before any
+            # generic substring keyword below -- e.g. "Balance Forward"
+            # contains "balance" (would otherwise match OUTSTANDING_KEYWORDS)
+            # and "Credit Applied"/"Payment Applied" both contain "applied"
+            # (would otherwise match CREDIT_KEYWORDS). An exact passthrough
+            # name is unambiguous and always more specific than a substring
+            # keyword match, so it must win outright rather than only being
+            # considered for whatever's left over after the substring
+            # checks below have already claimed the header.
+            if normalized_exact in PASSTHROUGH_FIELD_NAMES:
+                field_map.setdefault(normalized_exact, header)
             # h == "invoice" (bare, exact) alongside the substring keywords
             # below -- a document with a plain "Invoice" header (no "#"/
             # "no"/"number" suffix, e.g. NYE Sprague's) matched no existing
@@ -526,10 +658,22 @@ class ClaudeSonnetClient(AIClient):
             # check) so this never collides with "Invoice Date"/"Invoice
             # Amount", which the DATE_KEYWORDS/CHARGE_KEYWORDS checks below
             # still need to catch.
-            if self._match_any(h, INVOICE_NUMBER_KEYWORDS) or h == "invoice":
+            elif self._match_any(h, INVOICE_NUMBER_KEYWORDS) or h == "invoice":
                 invoice_candidates.append(header)
-            elif self._match_any(h, REFERENCE_ONLY_KEYWORDS):
-                reference_only_candidates.append(header)
+            # "date" excludes a header from ever being a reference/invoice-
+            # number candidate, full stop -- falls through to the
+            # DATE_KEYWORDS elif below instead (e.g. "Reference Date").
+            # Among the remaining reference-ish headers, one that also
+            # looks like an identifier (contains "number"/"no"/"#", e.g.
+            # "Reference Number") is preferred over a bare "Reference"
+            # column; bare "Reference" is used only when no qualified
+            # reference-number column exists at all (see
+            # REFERENCE_NUMBER_QUALIFIERS' module-level comment).
+            elif "date" not in h and self._match_any(h, REFERENCE_ONLY_KEYWORDS):
+                if self._match_any(h, REFERENCE_NUMBER_QUALIFIERS):
+                    reference_number_candidates.append(header)
+                else:
+                    reference_bare_candidates.append(header)
             elif self._match_any(h, DUE_DATE_KEYWORDS):
                 field_map.setdefault("due_date", header)
             elif self._match_any(h, DATE_KEYWORDS):
@@ -560,11 +704,15 @@ class ClaudeSonnetClient(AIClient):
         # A real "Invoice"-labeled column always wins over a "Reference"
         # column, even when Reference is also present -- only fall back to
         # Reference when no genuine invoice-number column exists at all
-        # (see REFERENCE_ONLY_KEYWORDS' module-level comment).
+        # (see REFERENCE_ONLY_KEYWORDS' module-level comment). Among
+        # reference-ish columns, a qualified "reference number"-shaped one
+        # wins over a bare "Reference" column (see REFERENCE_NUMBER_QUALIFIERS).
         if invoice_candidates:
             field_map["invoice_number"] = self._pick_cleanest_column(invoice_candidates, rows)
-        elif reference_only_candidates:
-            field_map["invoice_number"] = self._pick_cleanest_column(reference_only_candidates, rows)
+        elif reference_number_candidates:
+            field_map["invoice_number"] = self._pick_cleanest_column(reference_number_candidates, rows)
+        elif reference_bare_candidates:
+            field_map["invoice_number"] = self._pick_cleanest_column(reference_bare_candidates, rows)
 
         # Unlabeled account/route-code columns declared per EXTRACTION_PROMPT
         # STEP 2 (e.g. Fred Beans' two-part "60 35" code) -- reconstructed
@@ -725,6 +873,12 @@ class ClaudeSonnetClient(AIClient):
             "credits": credits_value,
             "amount_due": amount_due,
             "transaction_code": transaction_code,
+            # Generic passthrough fields (see PASSTHROUGH_FIELD_NAMES/
+            # _map_columns()) -- null for every vendor whose document has
+            # no matching non-standard column at all; populated when
+            # field_map picked one up (e.g. Keystone's Balance Forward/
+            # Period Activity/Credit Applied/Payment Applied).
+            **{name: self._to_float(get(name)) for name in PASSTHROUGH_FIELD_NAMES},
             # Internal only -- the original dynamic-column row exactly as
             # the model returned it, before this mapping collapsed it to
             # the fixed schema above. Not part of the Universal Financial
