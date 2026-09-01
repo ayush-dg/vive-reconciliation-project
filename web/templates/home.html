@@ -154,7 +154,6 @@
     <thead>
       <tr>
         <th>Vendor</th>
-        <th>Period</th>
         <th>Invoices</th>
         <th>Matched</th>
         <th>Exceptions</th>
@@ -167,7 +166,6 @@
       {% for run in runs %}
       <tr>
         <td><div class="vendor-cell"><div class="vendor-chip">{{ run.vendor_display_name | initials }}</div><div class="vendor-name" title="{{ run.vendor_name }}">{{ run.vendor_display_name }}</div></div></td>
-        <td style="color:var(--text-muted)">{{ run.statement_period | period_label }}</td>
         <td class="mono">{{ run.total_invoice_count }}</td>
         <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
         <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'var(--warning)' }}">{{ run.exception_count }}</td>
@@ -198,7 +196,6 @@
     <thead>
       <tr>
         <th>Vendor</th>
-        <th>Period</th>
         <th>Invoices</th>
         <th>Matched</th>
         <th>Exceptions</th>
