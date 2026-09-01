@@ -3,14 +3,18 @@ subprocess. Additive to the existing pipeline, never required for it to
 complete -- see fabric_bronze.py's write_bronze_fabric() docstring for the
 same philosophy on the write side.
 
-dbt-core/dbt-fabric are deliberately NOT part of requirements.txt (see
-dbt/requirements-dbt.txt's own docstring: isolated dependency set, avoids
-click/protobuf/etc version collisions with the app). That means dbt is only
-guaranteed to exist in this repo's own venv/ -- NOT wherever the app itself
-actually runs (Dockerfile installs only requirements.txt, and .dockerignore
-excludes venv/ from the image entirely). DBT_EXECUTABLE_PATH lets a
-deployment point at wherever dbt actually lives; the default only works for
-local dev against this repo's venv/.
+dbt-core/dbt-fabric are pinned directly in requirements.txt (2026-09-01 --
+previously kept in a separate dbt/requirements-dbt.txt out of a
+theoretical version-collision concern that a clean-venv dependency check
+didn't confirm; that separation meant dbt was never actually installed in
+the app's own image, so this whole module silently no-op'd on every job
+until then). Installed this way, `dbt` lands on PATH wherever pip put it
+(e.g. /usr/local/bin/dbt in the container, not this repo's own venv/,
+which .dockerignore excludes from the image entirely) --
+_default_dbt_executable() resolves it via shutil.which() for exactly that
+reason, falling back to a venv/-relative guess only if PATH lookup finds
+nothing (e.g. a venv activated without also being the active Python's own
+install). DBT_EXECUTABLE_PATH still lets a deployment override both.
 
 known_vendor_ids -- the list statement.sql/statement_line.sql loop over to
 union each vendor's Bronze table into Silver -- used to be a hand-maintained
@@ -31,6 +35,7 @@ run just picks up whatever tables exist.
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 
@@ -42,6 +47,9 @@ DBT_PROFILES_DIR = os.path.join(PROJECT_ROOT, "dbt")
 
 
 def _default_dbt_executable() -> str:
+    on_path = shutil.which("dbt")
+    if on_path:
+        return on_path
     exe_name = "dbt.exe" if sys.platform == "win32" else "dbt"
     return os.path.join(PROJECT_ROOT, "venv", "Scripts" if sys.platform == "win32" else "bin", exe_name)
 

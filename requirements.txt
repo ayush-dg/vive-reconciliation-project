@@ -26,6 +26,20 @@ pyarrow>=14.0.0  # write_deltalake() converts the pandas DataFrame via pandas' A
                  # importable (see pandas.compat._optional's version floor) -- same
                  # undeclared-transitive-dependency gap as pandas above, same failure mode.
 pyodbc>=5.0.0
+dbt-core==1.12.3   # Bronze -> Silver normalization (dbt/) run by
+                   # src/lakehouse/fabric_dbt_runner.py's run_dbt_silver_build() -- was
+                   # kept in a separate dbt/requirements-dbt.txt out of a theoretical
+                   # concern about click/jinja2/requests/protobuf version collisions with
+                   # the main app. Verified 2026-09-01 via a clean-venv
+                   # `pip install --dry-run -r requirements.txt -r dbt/requirements-dbt.txt`:
+                   # no actual conflict -- dbt-core/dbt-fabric resolve cleanly alongside
+                   # every existing pin here. Never having been installed in the app's own
+                   # image meant run_dbt_silver_build() silently no-op'd on every single
+                   # job (dbt executable not found -> logged warning, swallowed by
+                   # web/worker.py's subprocess.run(capture_output=True), same invisible
+                   # failure pattern as the pandas/pyarrow gap above) -- Bronze never
+                   # reached Silver/matching in production until this was added.
+dbt-fabric==1.11.1  # dbt adapter for the Fabric Warehouse target (dbt/profiles.yml.example)
 pytest==9.1.1
 fastapi>=0.110.0
 uvicorn>=0.27.0
