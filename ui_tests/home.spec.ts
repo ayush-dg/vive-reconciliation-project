@@ -112,8 +112,8 @@ test.describe('Home screen', () => {
     await expect(exceptionsLink).toBeVisible();
 
     await exceptionsLink.click();
-    await expect(page).toHaveURL(/\/exceptions\?search=/);
-    await expect(page.getByTestId('exceptions-search-input')).toHaveValue(vendor.toLowerCase());
+    await expect(page).toHaveURL(new RegExp(`/exceptions/${vendor.toLowerCase()}`));
+    await expect(page.getByTestId('exceptions-vendor-count')).toHaveText('1 exceptions');
   });
 
   test('Reconcile button is not shown for a document that has not finished extraction yet', async ({ page, context }) => {

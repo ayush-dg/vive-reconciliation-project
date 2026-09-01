@@ -54,6 +54,10 @@ type NormalizedReferenceRow = {
   _run_id: string;
   _extracted_at: string;
   _source_system: string;
+  // Every column of the live NetSuite row, for the Exceptions screen's "NetSuite record"
+  // panel — null against the local SQLite fixture, which only carries 4 real columns
+  // (no such thing as "the full raw record" exists there to show).
+  rawFields: Record<string, unknown> | null;
 };
 
 type ReferenceCapture = { runId: string; extractedAt: string; sourceSystem: string };
@@ -81,7 +85,7 @@ async function findReferenceRowByDocNumber(
     const vendorNamePrefix = vendorNamePrefixFromSlug(vendorSlug);
     const row = await getReferenceRowByTranId(normalizedInvoiceRef, vendorNamePrefix, amount);
     if (row) {
-      return { candidateKey: row.tranid, refAmount: row.total, isCredit: false, _run_id: row._run_id, _extracted_at: row._extracted_at, _source_system: row._source_system };
+      return { candidateKey: row.tranid, refAmount: row.total, isCredit: false, _run_id: row._run_id, _extracted_at: row._extracted_at, _source_system: row._source_system, rawFields: row.rawFields };
     }
     // A miss against vendorbill may still be a genuine credit memo, recorded in NetSuite
     // under a separate table (see fabricLakehouse.ts's getCreditRowByTranId doc comment).
@@ -89,7 +93,7 @@ async function findReferenceRowByDocNumber(
     // that common case at one lookup, not two.
     const creditRow = await getCreditRowByTranId(normalizedInvoiceRef, vendorNamePrefix, amount);
     if (!creditRow) return null;
-    return { candidateKey: creditRow.tranid, refAmount: creditRow.total, isCredit: true, _run_id: creditRow._run_id, _extracted_at: creditRow._extracted_at, _source_system: creditRow._source_system };
+    return { candidateKey: creditRow.tranid, refAmount: creditRow.total, isCredit: true, _run_id: creditRow._run_id, _extracted_at: creditRow._extracted_at, _source_system: creditRow._source_system, rawFields: creditRow.rawFields };
   }
 
   const db = getSqliteDb();
@@ -109,10 +113,10 @@ async function findReferenceRowByDocNumber(
        WHERE UPPER(TRIM(bill_document_number)) = ?
        ORDER BY ABS(amount - ?) ASC, _extracted_at DESC LIMIT 1`
     )
-    .get(normalizedInvoiceRef, amount) as Omit<NormalizedReferenceRow, 'isCredit'> | undefined;
+    .get(normalizedInvoiceRef, amount) as Omit<NormalizedReferenceRow, 'isCredit' | 'rawFields'> | undefined;
   // No local fixture equivalent for vendorcredit — the live-only fallback above is what
   // Fabric-configured runs exercise; local/test runs never see a credit-memo match.
-  return row ? { ...row, isCredit: false } : null;
+  return row ? { ...row, isCredit: false, rawFields: null } : null;
 }
 
 /** The reference table's own most-recently-extracted row overall — captured for a
@@ -192,7 +196,7 @@ export async function matchStatementLine(line: {
       status: 'unmatched',
       candidateIds: [ref.candidateKey],
       reasonCodes: ['AMOUNT_MISMATCH'],
-      evidence: { statementAmount: line.amount, netsuiteAmount: ref.refAmount, diff },
+      evidence: { statementAmount: line.amount, netsuiteAmount: ref.refAmount, diff, netsuiteRecord: ref.rawFields },
       requiresReview: true,
       reference,
     };

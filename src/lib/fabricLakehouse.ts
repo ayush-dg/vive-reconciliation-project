@@ -109,6 +109,12 @@ export type NetsuiteVendorBillRow = {
   _run_id: string;
   _extracted_at: string;
   _source_system: string;
+  // Every column the live row actually carries, JSON-safe (Dates coerced to ISO strings) —
+  // captured so an exception's evidence can show the full NetSuite record (Exceptions
+  // screen redesign, 2026-09-01) without a live re-query at view time. Not attempted
+  // against bronze.netsuite_vendor (the JOIN'd table) — only the bill/credit row's own
+  // columns are captured, matching what a "NetSuite record" means to the reviewer.
+  rawFields: Record<string, unknown>;
 };
 
 /**
@@ -137,7 +143,7 @@ async function findBillOrCreditRow(
 
   if (vendorNamePrefix) {
     const scopedRows = await runQuery(
-      `SELECT TOP 1 b.tranid, b.total, b._run_id, b._extracted_at, b._source_system
+      `SELECT TOP 1 b.*
        FROM ${table} b
        JOIN bronze.netsuite_vendor v ON v.id = b.entity
        WHERE UPPER(LTRIM(RTRIM(b.tranid))) = @tranId
@@ -165,7 +171,7 @@ async function findBillOrCreditRow(
   // No vendor known at all (document's vendor was never resolved) — unscoped,
   // amount-closest is the best available signal.
   const rows = await runQuery(
-    `SELECT TOP 1 tranid, total, _run_id, _extracted_at, _source_system
+    `SELECT TOP 1 *
      FROM ${table}
      WHERE UPPER(LTRIM(RTRIM(tranid))) = @tranId
      ORDER BY ABS(total - @amount) ASC, _extracted_at DESC`,
@@ -211,12 +217,17 @@ export async function getCreditRowByTranId(
  * rather than depending on JS's silent string/number coercion or Date's default
  * (non-ISO) toString(). */
 function normalizeRow(row: Record<string, unknown>): NetsuiteVendorBillRow {
+  const rawFields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    rawFields[key] = value instanceof Date ? value.toISOString() : value;
+  }
   return {
     tranid: String(row.tranid),
     total: Number(row.total),
     _run_id: String(row._run_id),
     _extracted_at: row._extracted_at instanceof Date ? row._extracted_at.toISOString() : String(row._extracted_at),
     _source_system: String(row._source_system),
+    rawFields,
   };
 }
 

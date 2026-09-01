@@ -228,7 +228,7 @@ export default function HomeView({
                       </span>
                       {displayStatus.showExceptionsLink && doc.vendor_slug && (
                         <Link
-                          href={`/exceptions?search=${encodeURIComponent(doc.vendor_slug)}`}
+                          href={`/exceptions/${encodeURIComponent(doc.vendor_slug)}`}
                           className="show-exceptions-link"
                           data-testid={`home-show-exceptions-${doc.document_id}`}
                         >

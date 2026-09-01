@@ -1,8 +1,15 @@
 # EXECUTION_PLAN.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.6 (2026-08-28 — build-time correction, discovered mid-Session-4)
+**Version:** 1.7 (2026-08-28 — Session 7 deferred, engineer direction)
 **Traces to:** `docs/ARCHITECTURE.md` v1.5, `docs/INVARIANTS.md` v1.6, `docs/UI_SURFACE.md` v1.4
 **APPLICATION_SURFACE:** UI+API — Session 1 includes Playwright scaffolding per PBVI-011.
+
+## v1.7 Changelog (2026-08-28)
+
+**Session 7 removed** (Tasks 7.1/7.2, Gold-layer reporting integration) — engineer
+direction: not needed right now. Unlike Session 4, this is a scope deferral, not an
+externally-owned-infrastructure determination — D-D and S3 (Gold-only reporting, never
+`recon` directly) remain valid decisions, just with no implementing task at present.
 
 ## v1.6 Changelog (2026-08-28)
 
@@ -108,10 +115,11 @@ blocker — noted per-task where relevant.)
 | 4 | **REMOVED 2026-08-28** — NetSuite/CCC ingestion is externally owned, not this build's job | 0 | — |
 | 5 | Matching service (deterministic + AI-assisted residual, incl. reference-data capture moved from Session 4) | 4 | 3 days |
 | 6 | Home dashboard + Exceptions + Document Detail screens | 5 | 3 days |
-| 7 | Reporting (Gold integration) | 2 | 1 day |
+| 7 | **REMOVED 2026-08-28** — deferred, not needed right now (engineer direction) | 0 | — |
+| 8 | Extraction quality improvements ("Improve") — per-vendor deterministic parsing, live Claude default path + AI-failure fallback, real OCR, better column mapping/confidence, row-level dedup | 5 | — |
 
 *(Task counts and estimates updated 2026-08-26 to reflect new tasks: 2.4 Extract trigger,
-3.5 extraction-method summary, 6.5 Document Detail screen.)*
+3.5 extraction-method summary, 6.5 Document Detail screen. Session 8 added 2026-08-28.)*
 
 ---
 
@@ -1346,93 +1354,276 @@ Test file path: ui_tests/document-detail.spec.ts
 
 ---
 
-# Session 7 — Reporting (Gold Integration)
+# Session 7 — REMOVED 2026-08-28 (engineer: not needed right now)
 
-**Session goal:** Home's summary stats and any simple report view correctly read from the
-existing v3.3 Gold layer, never from `recon` directly.
+**This session is deferred, not built.** Unlike Session 4 (removed because the work
+genuinely isn't this project's job), Session 7 is removed at the engineer's explicit
+direction because Gold-layer reporting integration isn't needed right now — this is a
+scope deferral, not a "not our job" determination. The underlying decisions it depended on
+(D-D — reporting reads from Gold, not `recon` directly; S3 — the same isolation invariant)
+remain valid and un-walked-back; they simply have no task implementing them yet.
 
-**Integration check:**
-```bash
-./scripts/test_gold_reporting_integration.sh
-```
+- **Task 7.1 (Gold-layer query integration) — REMOVED.** Deferred.
+- **Task 7.2 (refresh cadence + `dim_shop` conformance) — REMOVED.** Deferred.
 
-## Task 7.1 — Gold-layer query integration
+No tasks remain in this session. Session numbering elsewhere in this document is
+unchanged. **Revisit condition:** if/when reporting is needed, S3 (Gold-only, never
+`recon` directly) still applies and should be re-embedded in whatever task is written to
+build it — it was never removed as an invariant, only its implementing task.
 
-**Description:** Wire Home's summary stats (Task 6.1) to read from the existing v3.3 Gold
-layer (materialized Fabric Warehouse tables) rather than any bounded-build-specific
-structure, per the resolved D-D.
-
-**CC prompt:**
-```
-Wire the Home screen's summary stats query to read from the existing v3.3 Gold layer
-(materialized Fabric Warehouse tables per D11), not from a custom structure and not from
-recon directly. Apply this TASK-SCOPED invariant inline:
-
-- S3 — Reporting reads from the designated Gold/reporting surface and does not query
-  recon directly. A report implementation joining or querying recon tables directly is a
-  violation, even though this build has no concurrent AP workload yet — the isolation
-  pattern must hold from the start so it isn't expensive to unwind later.
-```
-
-**Test cases:**
-- Happy path: Home's stats reflect real Gold-layer data correctly.
-- Failure case: static analysis / code review confirms no query in the reporting path
-  joins or selects directly from any `recon.*` table.
-
-**Verification command:**
-```bash
-./scripts/test_gold_reporting_integration.sh
-```
-
-**Invariant enforcement:** S3 (embedded above).
-
-**Regression classification:** HARNESS-CANDIDATE — directly tied to S3, and to v3.3's D11
-isolation rationale.
-
-**UI test spec:** N/A (data-layer task; UI already tested in Task 6.1).
 
 ---
 
-## Task 7.2 — Reporting refresh cadence + `dim_shop` conformance check
+# Session 8 — Extraction Quality Improvements ("Improve")
 
-**Description:** Confirm the Gold layer's existing refresh cadence is compatible with this
-build's manual-refresh-only UI pattern (Task 6.1), and verify `dim_shop` conformance with
-the dashboard workstream (per v3.3 D14) is not broken by this build's read path.
+**Session goal:** Close the gap between this build's placeholder extraction (synthetic
+mock, no OCR, no per-vendor parsing, single-shot Claude only) and what real-world vendor
+statements need, using patterns confirmed working in the reference implementation
+(`vive-reconciliation-project-threshold-0.8-and-dupe-disable`) — without carrying over
+that system's confidence-threshold gate, which conflicts with this build's own IC-2
+("confidence is diagnostic metadata only, never a pass/fail input" — never negotiable).
+That mechanism is deliberately excluded from every task below.
+
+Extraction/OCR logic stays on the Python side of the existing subprocess boundary
+(precedent: `pdfplumber` extraction since Session 3). Tasks 8.1 and 8.3 reuse the
+reference repo's actual Python files, adapted to this build's subprocess I/O contract —
+not reimplemented in TypeScript.
+
+**Integration check:**
+```bash
+npm run test:extraction-quality && npx playwright test ui_tests/extract-trigger.spec.ts ui_tests/document-detail.spec.ts
+```
+
+---
+
+## Task 8.1 — Known-vendor deterministic extraction (real Python, reused from the reference repo)
+
+**Description:** Build a real vendor-routing dispatcher (this build's `vendorIdentification.ts`
+currently only matches a synthetic "VENDOR: name" marker — no real per-vendor parsing
+exists). This stays entirely on the Python side of the subprocess boundary — reuse the
+reference implementation's actual `src/extraction/python_library/adapter.py`
+(`_FIELD_MAP` dispatch pattern) and `extract_lia.py` itself directly (a real Lia Auto Group
+statement is already available as a test case), adapted only to this build's subprocess
+input/output contract. This is a copy-and-adapt of working Python, not a TypeScript
+rewrite.
 
 **CC prompt:**
 ```
-Verify the existing Gold layer's refresh cadence (already defined in the full v3.3
-architecture) is compatible with this build simply querying it on manual refresh — no new
-refresh job should be built by this task. Confirm this build's read-only query against
-Gold does not introduce a second, divergent dim_shop consumer (per v3.3 D14 — dim_shop is
-shared with the dashboard workstream) — if dim_shop is referenced at all in the summary
-stats, it must use the existing conformed dimension, not a new copy.
+Add a Python-side vendor-routing dispatcher, reusing the reference implementation's
+adapter.py (_FIELD_MAP pattern) nearly as-is: a fixed mapping of vendor_slug -> per-vendor
+Python extractor function, checked before falling through to the Claude-primary path
+(which stays in TypeScript, unchanged). Copy extract_lia.py itself (word-position table
+reconstruction — group words by vertical position, classify columns by right-edge
+alignment for amounts, handle the vendor's trailing-minus negative-amount quirk) into
+this build's Python extraction script, adapted only to match pdfplumberExtractor.ts's
+existing subprocess I/O contract (stdin/argv in, JSON matching ExtractedStatement out) —
+not reimplemented in TypeScript. A vendor with no registered deterministic extractor must
+fall through to the Claude-primary path exactly as today — never treated as an error.
 ```
 
 **Test cases:**
-- Happy path: querying Gold's existing refresh timestamp confirms it's compatible with
-  manual on-demand reads (no staleness surprise for the user).
-- Failure case: no new `dim_shop`-like table is created by this build.
+- Happy path: a real Lia Auto Group statement PDF (fixture) extracts correctly via the
+  deterministic Python path, with no AI call made (structural check: no fetch/Anthropic
+  SDK call in the trace for this document).
+- Happy path: a vendor with no registered deterministic extractor still routes to
+  Claude-primary, unchanged from current behavior.
+- Failure case: a malformed/edge-case Lia statement (e.g. a row this parser's tolerance
+  doesn't cover) fails validation cleanly rather than silently producing wrong data.
 
 **Verification command:**
 ```bash
-./scripts/test_gold_refresh_and_dim_shop_conformance.sh
+npx tsx scripts/test_lia_deterministic_extraction.mjs
+```
+
+**Invariant enforcement:** None new task-scoped — consumes existing IC-1/IC-2 gates
+unchanged.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only; existing `document-detail.spec.ts` already
+asserts on `provider_used = python_library_pdfplumber`).
+
+---
+
+## Task 8.2 — Live Claude extraction as the default path, with a Python OCR/pdfplumber fallback tier
+
+**Description:** Replace the current "mock unless `EXTRACTION_LIVE_TESTS=1`" behavior with
+live Claude as the actual default for non-known-vendor documents (requires a real
+`ANTHROPIC_API_KEY` — real per-call spend, engineer approval required before this task is
+built). Claude is tried FIRST for any document without a registered deterministic
+extractor — including scanned/image-based PDFs, since a vision-capable model can often
+read those directly without OCR. Only if that Claude call fails does the pipeline fall
+through to Task 8.3's Python OCR/pdfplumber fallback tier, mirroring the reference
+implementation's `DocumentUnderstandingEngine` 2-tier design (AI primary -> Python
+fallback) — this is the opposite order from "OCR first," which the reference repo does
+not do.
+
+**CC prompt:**
+```
+Make extractViaClaude's live path (already implemented in aiProvider.ts) the actual
+default for non-known-vendor documents, gated only on ANTHROPIC_API_KEY being present —
+remove the additional EXTRACTION_LIVE_TESTS=1 test-only gate for production use (keep an
+explicit test-mode override so automated tests still default to the mock). Within
+extractionPipeline.ts's bounded-retry loop, make attempt 2 route to Task 8.3's Python
+fallback script when attempt 1 was a genuine Claude failure (not merely a validation
+failure on otherwise-successful extraction) — Claude is always tried first, never OCR.
+Preserve IC-3/G3's data-vs-instructions discipline unchanged — no prompt changes beyond
+what's needed for this routing.
+```
+
+**Test cases:**
+- Happy path: a real vendor statement with genuine text content extracts correctly via
+  live Claude on the first attempt (verify against the previously-diagnosed Lia Auto Group
+  real PDF, assuming it isn't already caught by Task 8.1's deterministic path).
+- Failure case: a Claude API error on attempt 1 routes attempt 2 to the Python
+  OCR/pdfplumber fallback tier, not an identical Claude retry.
+- Regression: existing mock-mode tests (no ANTHROPIC_API_KEY) continue to pass unchanged.
+
+**Verification command:**
+```bash
+ANTHROPIC_API_KEY=... npx tsx scripts/test_live_claude_extraction.mjs
+```
+
+**Invariant enforcement:** None new task-scoped — IC-3/G3 (prompt-injection defense)
+apply unchanged.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 8.3 — Python OCR/pdfplumber fallback tier for scanned/image-only PDFs
+
+**Description:** This build currently has no OCR at all — `pdfplumber` only reads text
+already embedded in a PDF, and 2 of 3 real-world test uploads so far were scanned/
+image-based statements that returned empty text on every attempt. This fallback only
+fires after a genuine Claude failure (Task 8.2) — never tried first. Reuse the reference
+implementation's actual `ocr_extractor.py` (Tesseract wrapper) and `pdfplumber_fallback.py`
+(real ruled-table extraction per page, OCR only for pages where native text is sparse)
+directly, adapted to this build's subprocess contract.
+
+**CC prompt:**
+```
+Add a new Python fallback script, reusing ocr_extractor.py and pdfplumber_fallback.py from
+the reference repo nearly as-is: real per-page pdfplumber table extraction first; only for
+a page whose native text is under ~500 characters, run Tesseract OCR on that page and
+reshape the result into a pseudo-table using the same header-detection/column-mapping
+logic pdfplumber_fallback.py already has. This script is invoked only when Task 8.2's
+Claude call has already failed — confirm Tesseract is installable in the actual deployment
+target (Azure App Service) before committing to this dependency; flag as a Scope Decision
+if it isn't, since that would block this task entirely.
+```
+
+**Test cases:**
+- Happy path: a genuinely scanned PDF (image-only, no text layer) now produces non-empty
+  extracted text via OCR, where it previously produced only whitespace — triggered via a
+  simulated Claude failure, not called directly.
+- Regression: a normal text-layer PDF's extraction is unaffected (this fallback never
+  triggers when Claude succeeds; OCR itself never triggers when a page's native text is
+  already sufficient).
+- Environment check: Tesseract binary is confirmed available in both local dev and the
+  actual deployment target before this task is marked complete.
+
+**Verification command:**
+```bash
+npx tsx scripts/test_ocr_fallback.mjs
 ```
 
 **Invariant enforcement:** None new task-scoped.
 
-**Regression classification:** NOT-REGRESSION-RELEVANT — depends on live Fabric
-capacity/refresh state, not portable to a bare checkout.
+**Regression classification:** HARNESS-CANDIDATE.
 
-**UI test spec:** N/A.
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 8.4 — Better column mapping + real per-row model-reported confidence
+
+**Description:** Improve the live Claude prompt (Task 8.2) to ask for a calibrated
+per-line confidence score and a tolerant column-mapping fallback (scan a row's raw cell
+values directly if standard header-based mapping misses a field), mirroring the reference
+implementation's `_row_to_invoice()`/`_parse_confidence()` pattern. This stays in
+TypeScript — it's about the Claude request/response shape, not PDF parsing. Confidence
+remains diagnostic-only per IC-2 — never gates pass/fail, only stored and surfaced for
+human review context.
+
+**CC prompt:**
+```
+Extend the record_extraction tool schema to include a per-line confidence field (0.0-1.0,
+with prompt guidance on calibration, e.g. "0.85+ only if every character is unambiguous").
+Add a tolerant fallback in the response-parsing code: if a line's amount/invoice-ref can't
+be mapped from the model's structured columns, scan the line's own raw text for a
+plausible candidate before leaving the field null. Store the reported confidence exactly
+as before (diagnostic metadata, never a gate) — no change to IC-2's enforcement.
+```
+
+**Test cases:**
+- Happy path: a line with an unusual layout still resolves its invoice number via the
+  fallback scan rather than coming back null.
+- Regression: confidence is still never used as a pass/fail signal anywhere in the
+  validation gate (structural check: grep for confidence usage in validationGate.ts).
+
+**Verification command:**
+```bash
+npx tsx scripts/test_column_mapping_fallback.mjs
+```
+
+**Invariant enforcement:** IC-2 (confidence remains diagnostic-only — reaffirmed, not
+weakened).
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 8.5 — Row-level duplicate detection (invoice number + amount)
+
+**Description:** A genuinely new capability, distinct from this build's existing G4
+(whole-document content-hash idempotency). Detect duplicate individual line items (same
+invoice number + amount) within or across a vendor's statements, flagging the second
+occurrence rather than silently ingesting it as a separate exception/match candidate. This
+stays in TypeScript (Silver normalization) — no PDF parsing involved.
+
+**CC prompt:**
+```
+Add a duplicate-line check during Silver normalization: before writing a
+silver.statement_line row, check whether a row with the same vendor_id + normalized
+invoice ref + amount already exists. If so, flag it (new reason code, e.g.
+DUPLICATE_LINE_ITEM) rather than silently writing a second identical row. Decide with the
+engineer whether a flagged duplicate still reaches Silver (visible, flagged) or is
+diverted before Silver entirely — this changes downstream matching/exception behavior and
+should be an explicit decision, not an assumption.
+```
+
+**Test cases:**
+- Happy path: two statement lines with identical vendor+invoice ref+amount are flagged as
+  a duplicate pair, not silently treated as two independent lines.
+- Regression: legitimately distinct lines (same invoice ref, different amount, e.g. a
+  partial payment) are never falsely flagged.
+
+**Verification command:**
+```bash
+npx tsx scripts/test_row_level_dedup.mjs
+```
+
+**Invariant enforcement:** TBD — engineer to decide whether this warrants a new
+task-scoped invariant (e.g. S12) or stays an unenforced implementation detail.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only) unless the engineer decides duplicates should
+surface distinctly in the Exceptions screen, in which case this task would also need a
+UI test spec entry.
 
 ---
 
 ## Engineer Sign-Off
 
 **Decision owner:** Vaishali
-**Date:** _______________________
-**Signature / confirmation:** [ ] I confirm this execution plan is complete, every task's
+**Date:** 2026-08-27
+**Signature / confirmation:** [x] I confirm this execution plan is complete, every task's
 invariant enforcement is correctly embedded, regression classifications are appropriate,
 and I authorize proceeding to Phase 4 (Design Gate).
 

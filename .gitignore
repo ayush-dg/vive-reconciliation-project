@@ -25,6 +25,7 @@ out/
 npm-debug.log*
 .env
 .env.local
+*.env
 *.tsbuildinfo
 
 # Local SQLite dev database

@@ -17,10 +17,14 @@ function assertSqliteMode() {
 
 export type CccEvidence = { roNumber: string; amount: number } | null;
 export type AmountMismatchEvidence = { statementAmount: number; netsuiteAmount: number } | null;
+export type ExceptionStatus = 'open' | 'resolved' | 'flagged' | 'skipped';
 
 export type ExceptionDetailData = {
   exceptionId: string;
   category: string;
+  status: ExceptionStatus;
+  note: string | null;
+  resolvedAt: string | null;
   createdAt: string;
   referenceExtractedAt: string | null;
   statementLine: {
@@ -33,6 +37,10 @@ export type ExceptionDetailData = {
   };
   cccCorroboration: CccEvidence;
   amountMismatch: AmountMismatchEvidence;
+  // Full raw NetSuite bill/credit row captured at match time (fabricLakehouse.ts,
+  // 2026-09-01) — null against the local SQLite fixture (no such data exists there) or
+  // for a not_posted exception (nothing was found to capture).
+  netsuiteRecord: Record<string, unknown> | null;
 };
 
 export function getExceptionDetail(exceptionId: string): ExceptionDetailData | null {
@@ -43,6 +51,9 @@ export function getExceptionDetail(exceptionId: string): ExceptionDetailData | n
       `SELECT
          e.exception_id AS exceptionId,
          e.category AS category,
+         e.status AS status,
+         e.note AS note,
+         e.resolved_at AS resolvedAt,
          e.created_at AS createdAt,
          e.evidence AS evidence,
          e.reference_extracted_at AS referenceExtractedAt,
@@ -62,6 +73,9 @@ export function getExceptionDetail(exceptionId: string): ExceptionDetailData | n
     | {
         exceptionId: string;
         category: string;
+        status: ExceptionStatus;
+        note: string | null;
+        resolvedAt: string | null;
         createdAt: string;
         evidence: string;
         referenceExtractedAt: string | null;
@@ -94,7 +108,9 @@ export function getExceptionDetail(exceptionId: string): ExceptionDetailData | n
     ? { roNumber: residual.cccCorroboration.roNumber, amount: residual.cccCorroboration.amount }
     : null;
 
-  const deterministic = evidence.deterministic as { statementAmount?: number; netsuiteAmount?: number } | undefined;
+  const deterministic = evidence.deterministic as
+    | { statementAmount?: number; netsuiteAmount?: number; netsuiteRecord?: Record<string, unknown> | null }
+    | undefined;
   const amountMismatch: AmountMismatchEvidence =
     row.category === 'amount_mismatch' && deterministic?.statementAmount !== undefined && deterministic?.netsuiteAmount !== undefined
       ? { statementAmount: deterministic.statementAmount, netsuiteAmount: deterministic.netsuiteAmount }
@@ -103,6 +119,9 @@ export function getExceptionDetail(exceptionId: string): ExceptionDetailData | n
   return {
     exceptionId: row.exceptionId,
     category: row.category,
+    status: row.status,
+    note: row.note,
+    resolvedAt: row.resolvedAt,
     createdAt: row.createdAt,
     referenceExtractedAt: row.referenceExtractedAt,
     statementLine: {
@@ -115,5 +134,31 @@ export function getExceptionDetail(exceptionId: string): ExceptionDetailData | n
     },
     cccCorroboration,
     amountMismatch,
+    netsuiteRecord: deterministic?.netsuiteRecord ?? null,
   };
+}
+
+const VALID_STATUSES: ExceptionStatus[] = ['open', 'resolved', 'flagged', 'skipped'];
+
+/** The single write path for recon.exception's resolution workflow — Mark
+ * resolved/Flag for vendor/Skip, plus the optional note. Engineer-directed deviation
+ * from ARCHITECTURE.md D-C (see this module's doc comment via exceptionsList.ts). */
+export function updateExceptionResolution(
+  exceptionId: string,
+  input: { status: ExceptionStatus; note?: string | null }
+): void {
+  assertSqliteMode();
+  if (!VALID_STATUSES.includes(input.status)) {
+    throw new Error(`updateExceptionResolution: unrecognized status "${input.status}".`);
+  }
+  const db = getSqliteDb();
+  const resolvedAt = input.status === 'open' ? null : new Date().toISOString();
+  const result = db
+    .prepare(
+      `UPDATE recon_exception SET status = ?, note = COALESCE(?, note), resolved_at = ? WHERE exception_id = ?`
+    )
+    .run(input.status, input.note ?? null, resolvedAt, exceptionId);
+  if (result.changes === 0) {
+    throw new Error(`updateExceptionResolution: no exception found with id "${exceptionId}".`);
+  }
 }

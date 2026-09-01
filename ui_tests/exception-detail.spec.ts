@@ -38,7 +38,7 @@ async function findExceptionIdForDocument(documentId: string): Promise<string> {
   return row.id;
 }
 
-test.describe('Exception Detail screen', () => {
+test.describe('Exception detail panel (two-pane vendor view)', () => {
   test('an exception with CCC evidence shows the Related panel populated', async ({ page, context }) => {
     await signInViaCookie(context);
     const db = getSqliteDb();
@@ -51,20 +51,17 @@ test.describe('Exception Detail screen', () => {
     const documentId = await uploadFixture(page, statementText(vendor, `INV-CCC-${crypto.randomUUID().slice(0, 8)}`, amount));
     await page.request.post(`/api/documents/${documentId}/extract`);
     await page.request.post(`/api/documents/${documentId}/match`);
-    const exceptionId = await findExceptionIdForDocument(documentId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
     await expect(page.getByTestId('ccc-evidence-content')).toContainText(roNumber);
     await expect(page.getByTestId('ccc-evidence-empty')).toHaveCount(0);
   });
 
-  // Challenge-review addition: recon.exception.evidence is a nullable column
-  // (migration 005). JSON.parse(null) doesn't throw (it string-coerces to "null" and
-  // returns JS null), so a NULL row previously bypassed exceptionDetail.ts's try/catch
-  // entirely and would have thrown uncaught on evidence.residual/evidence.deterministic
-  // access. No real code path writes a NULL evidence today (exceptionWriter.ts always
-  // JSON.stringifies it), so this state is seeded directly to confirm the page degrades
-  // gracefully rather than crashing, per exceptionDetail.ts's own stated guarantee.
+  // Challenge-review addition (carried over): recon.exception.evidence is a nullable
+  // column (migration 005). JSON.parse(null) doesn't throw (it string-coerces to "null"
+  // and returns JS null), so a NULL row previously bypassed exceptionDetail.ts's try/catch
+  // entirely. No real code path writes a NULL evidence today, so this state is seeded
+  // directly to confirm the panel degrades gracefully rather than crashing.
   test('an exception with a NULL evidence column degrades gracefully, not a crash', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `ExDetail_NullEvidence_Vendor_${crypto.randomUUID().slice(0, 8)}`;
@@ -76,7 +73,7 @@ test.describe('Exception Detail screen', () => {
     const db = getSqliteDb();
     db.prepare('UPDATE recon_exception SET evidence = NULL WHERE exception_id = ?').run(exceptionId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
     await expect(page.getByTestId('exception-detail-category')).toBeVisible();
     await expect(page.getByTestId('ccc-evidence-empty')).toContainText('No CCC confirmation available');
     await expect(page.getByTestId('error-boundary')).toHaveCount(0);
@@ -88,16 +85,12 @@ test.describe('Exception Detail screen', () => {
     const documentId = await uploadFixture(page, statementText(vendor, `INV-NOCCC-${crypto.randomUUID().slice(0, 8)}`, '77.00'));
     await page.request.post(`/api/documents/${documentId}/extract`);
     await page.request.post(`/api/documents/${documentId}/match`);
-    const exceptionId = await findExceptionIdForDocument(documentId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
     await expect(page.getByTestId('ccc-evidence-empty')).toContainText('No CCC confirmation available');
   });
 
-  test('an amount_mismatch exception shows the expandable section with both the statement and NetSuite values', async ({
-    page,
-    context,
-  }) => {
+  test('an amount_mismatch exception shows both the statement and NetSuite values', async ({ page, context }) => {
     await signInViaCookie(context);
     const db = getSqliteDb();
     ensureNetsuiteVendorBillFixtureTable();
@@ -114,54 +107,49 @@ test.describe('Exception Detail screen', () => {
       extractedAt: '2026-08-27T00:00:00Z',
     });
     await page.request.post(`/api/documents/${documentId}/match`);
-    const exceptionId = await findExceptionIdForDocument(documentId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
-    const drilldown = page.getByTestId('amount-mismatch-drilldown');
-    await expect(drilldown).toBeVisible();
-    // Collapsed by default (UI_SURFACE.md) — a native <details> element, so its content
-    // is genuinely hidden (not just off-screen) until expanded via its <summary>.
-    await drilldown.locator('summary').click();
-    await expect(page.getByTestId('amount-mismatch-statement-value')).toContainText('88.00');
-    await expect(page.getByTestId('amount-mismatch-netsuite-value')).toContainText('5.00');
-    await expect(page.getByTestId('amount-mismatch-as-of')).toBeVisible();
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
+    await expect(page.getByTestId('exception-detail-statement-amount')).toContainText('88.00');
+    await expect(page.getByTestId('exception-detail-erp-amount')).toContainText('5.00');
   });
 
-  test('a non-amount-mismatch exception does not show the amount-mismatch drill-down section', async ({ page, context }) => {
+  test('a non-amount-mismatch exception does not show the ERP amount / difference fields', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `ExDetail_NotPosted_Vendor_${crypto.randomUUID().slice(0, 8)}`;
     const documentId = await uploadFixture(page, statementText(vendor, `INV-NOTPOSTED-DETAIL-${crypto.randomUUID().slice(0, 8)}`, '9.00'));
     await page.request.post(`/api/documents/${documentId}/extract`);
     await page.request.post(`/api/documents/${documentId}/match`);
-    const exceptionId = await findExceptionIdForDocument(documentId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
-    await expect(page.getByTestId('exception-detail-category')).toHaveText('Not Posted');
-    await expect(page.getByTestId('amount-mismatch-drilldown')).toHaveCount(0);
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
+    await expect(page.getByTestId('exception-detail-category')).toHaveText('Missing in ERP');
+    await expect(page.getByTestId('exception-detail-erp-amount')).toHaveCount(0);
   });
 
-  test('no approve/dispute action buttons exist anywhere on this screen', async ({ page, context }) => {
+  // Engineer-directed (2026-09-01): Mark resolved / Flag for vendor / Skip are a
+  // deliberate deviation from ARCHITECTURE.md D-C's "flat, ownerless list" — see
+  // exceptionsList.ts's doc comment. Confirms the workflow actually updates state.
+  test('"Mark resolved" updates the exception\'s status and the resolve-progress count', async ({ page, context }) => {
     await signInViaCookie(context);
-    const vendor = `ExDetail_NoActions_Vendor_${crypto.randomUUID().slice(0, 8)}`;
-    const documentId = await uploadFixture(page, statementText(vendor, `INV-NOACTIONS-${crypto.randomUUID().slice(0, 8)}`, '3.00'));
+    const vendor = `ExDetail_Resolve_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, `INV-RESOLVE-${crypto.randomUUID().slice(0, 8)}`, '15.00'));
     await page.request.post(`/api/documents/${documentId}/extract`);
     await page.request.post(`/api/documents/${documentId}/match`);
-    const exceptionId = await findExceptionIdForDocument(documentId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
-    await expect(page.getByText('Approve', { exact: false })).toHaveCount(0);
-    await expect(page.getByText('Dispute', { exact: false })).toHaveCount(0);
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
+    await expect(page.getByTestId('exceptions-resolve-count')).toHaveText('0 / 1 resolved');
+
+    await page.getByTestId('exception-action-resolve').click();
+    await expect(page.getByTestId('exceptions-resolve-count')).toHaveText('1 / 1 resolved');
   });
 
-  test('"Back to list" navigates to /exceptions', async ({ page, context }) => {
+  test('"Exceptions" breadcrumb link navigates back to the vendor landing screen', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `ExDetail_BackLink_Vendor_${crypto.randomUUID().slice(0, 8)}`;
     const documentId = await uploadFixture(page, statementText(vendor, `INV-BACKLINK-${crypto.randomUUID().slice(0, 8)}`, '6.00'));
     await page.request.post(`/api/documents/${documentId}/extract`);
     await page.request.post(`/api/documents/${documentId}/match`);
-    const exceptionId = await findExceptionIdForDocument(documentId);
 
-    await page.goto(`/exceptions/${exceptionId}`);
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
     await page.getByTestId('back-to-exceptions').click();
     await expect(page).toHaveURL('/exceptions');
   });

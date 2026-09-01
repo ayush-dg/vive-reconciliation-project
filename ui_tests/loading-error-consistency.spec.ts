@@ -33,7 +33,7 @@ test.describe('Loading/Error consistency (Home, Exceptions, Exception Detail)', 
     const routeDirs = [
       'src/app/(app)/home',
       'src/app/(app)/exceptions',
-      'src/app/(app)/exceptions/[id]',
+      'src/app/(app)/exceptions/[vendorSlug]',
       'src/app/(app)/documents/[id]',
     ];
     for (const dir of routeDirs) {
@@ -117,14 +117,13 @@ test.describe('Loading/Error consistency (Home, Exceptions, Exception Detail)', 
     const homeErrorText = await page.getByTestId('error-boundary').textContent();
     await page.unroute('**/api/documents');
 
-    // Exceptions: a failed /api/exceptions refetch after a search submit.
+    // Exceptions: a failed /api/exceptions refetch after clicking Refresh.
     await page.goto('/exceptions');
-    await page.route('**/api/exceptions?*', (route) => route.fulfill({ status: 500, body: '{}' }));
-    await page.getByTestId('exceptions-search-input').fill('anything');
-    await page.getByTestId('exceptions-search-submit').click();
+    await page.route('**/api/exceptions', (route) => route.fulfill({ status: 500, body: '{}' }));
+    await page.getByTestId('exceptions-vendor-refresh').click();
     await expect(page.getByTestId('error-boundary')).toBeVisible();
     const exceptionsErrorText = await page.getByTestId('error-boundary').textContent();
-    await page.unroute('**/api/exceptions?*');
+    await page.unroute('**/api/exceptions');
 
     // Document Detail: a failed /api/documents/:id/detail refetch after a real Extract click.
     const docDetailId = await uploadFixture('%PDF-1.4 consistency-doc-detail');
