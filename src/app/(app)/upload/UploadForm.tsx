@@ -21,10 +21,16 @@ function formatUploadTimestamp(isoLike: string): string {
   });
 }
 
+// Legal Entity is no longer user-selected (engineer-directed simplification, 2026-08-30)
+// — no real legal-entity structure was ever specified (UI_SURFACE.md flagged this field's
+// provenance as an open architectural gap), so every upload is now assigned this single
+// fixed default. S4 (legal_entity_id must not be null) is still satisfied — more strongly
+// than before, in fact, since there is no longer a code path that can omit it.
+const DEFAULT_LEGAL_ENTITY_ID = LEGAL_ENTITIES[0].id;
+
 export default function UploadForm({ initialDocuments }: { initialDocuments: ApiDocument[] }) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [file, setFile] = useState<File | null>(null);
-  const [legalEntityId, setLegalEntityId] = useState('');
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -40,11 +46,18 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
     }
   }
 
-  // D-I: this is the only place extraction is triggered — never automatic on
-  // upload. G5: the endpoint itself does the atomic ownership acquisition;
-  // this handler just reflects the outcome (success -> refresh so the button
-  // disappears once status flips; 409 -> already in progress).
-  async function handleExtract(documentId: string) {
+  // G5: the endpoint itself does the atomic ownership acquisition; this
+  // handler just reflects the outcome (success -> refresh so the button
+  // disappears once status flips; 409 -> already in progress). Server-side,
+  // registration (documents.ts) and extraction (extraction.ts) remain two
+  // distinct calls with G5's lock still enforced between them — D-I's actual
+  // separation is unchanged. What changed (2026-08-31, engineer-directed):
+  // the CLIENT now chains them automatically right after a successful
+  // upload (see handleSubmit's autoTriggered call below) instead of waiting
+  // for a second, separate click — `silent` suppresses the "Extraction
+  // started" toast for that case, since "Statement uploaded" already covers
+  // it; a real failure still surfaces normally either way.
+  async function handleExtract(documentId: string, options?: { silent?: boolean }) {
     setExtractingIds((prev) => new Set(prev).add(documentId));
     try {
       const res = await fetch(`/api/documents/${documentId}/extract`, { method: 'POST' });
@@ -58,7 +71,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         showError(data.error ?? 'Failed to start extraction.');
         return;
       }
-      showSuccess('Extraction started.');
+      if (!options?.silent) showSuccess('Extraction started.');
       await refreshDocuments();
     } catch {
       showError('Failed to start extraction — check your connection and try again.');
@@ -83,16 +96,13 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       setFileError('Select a PDF statement.');
       return;
     }
-    if (!legalEntityId) {
-      setFileError('Select a legal entity.');
-      return;
-    }
 
     setSubmitting(true);
+    let newDocumentId: string | null = null;
     try {
       const body = new FormData();
       body.set('file', file);
-      body.set('legalEntityId', legalEntityId);
+      body.set('legalEntityId', DEFAULT_LEGAL_ENTITY_ID);
       const res = await fetch('/api/documents', { method: 'POST', body });
       const data = (await res.json()) as {
         document?: ApiDocument;
@@ -114,16 +124,37 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         showSuccess(
           data.duplicate
             ? 'This exact statement was already uploaded — no duplicate created.'
-            : 'Statement uploaded successfully.'
+            : 'Statement uploaded successfully — extraction starting…'
         );
       }
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // Refresh immediately so the new row appears right away — extraction
+      // (below) can take real, multi-second time with live Claude, and
+      // waiting for it before the first refresh made a fresh upload look
+      // like nothing had happened (engineer-directed fix, 2026-08-31).
       await refreshDocuments();
+
+      // A duplicate hit (existing document, possibly already extracted/extracting) is
+      // left alone — not re-triggered; the refresh above already covers it.
+      if (!data.duplicate && data.document) {
+        newDocumentId = data.document.document_id;
+      }
     } catch {
       showError('Upload failed — check your connection and try again.');
     } finally {
+      // Ends here, not after extraction — the Upload button (disabled={submitting})
+      // must not stay blocked for however long extraction takes, or a second PDF
+      // couldn't be uploaded until the first one finished extracting (real complaint,
+      // 2026-08-31 fix). Extraction still starts automatically, just as its own
+      // independent, non-blocking call below — extractingIds already tracks it
+      // per-document for that row's own "Extracting…" state.
       setSubmitting(false);
+    }
+
+    if (newDocumentId) {
+      void handleExtract(newDocumentId, { silent: true });
     }
   }
 
@@ -184,22 +215,6 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         </div>
 
         <form className="form-card" onSubmit={handleSubmit} data-testid="upload-form">
-          <div className="field">
-            <label htmlFor="legal-entity">Legal Entity</label>
-            <select
-              id="legal-entity"
-              value={legalEntityId}
-              onChange={(e) => setLegalEntityId(e.target.value)}
-              data-testid="legal-entity-select"
-            >
-              <option value="">Select legal entity…</option>
-              {LEGAL_ENTITIES.map((entity) => (
-                <option key={entity.id} value={entity.id}>
-                  {entity.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" style={{ width: 'auto', flex: 1 }} disabled={submitting} data-testid="upload-submit">
               {submitting ? 'Uploading…' : 'Upload statement'}
@@ -212,13 +227,13 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
         <div className="panel-head">
           <div>
             <h2>Uploaded statements</h2>
-            <div className="sub">Vendor is identified automatically during extraction</div>
+            <div className="sub">Showing the file you uploaded — vendor is identified automatically during extraction</div>
           </div>
         </div>
         <table data-testid="uploaded-documents-table">
           <thead>
             <tr>
-              <th>Vendor</th>
+              <th>File Name</th>
               <th>Legal Entity</th>
               <th>Uploaded</th>
               <th>Action</th>
@@ -234,15 +249,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
             )}
             {documents.map((doc) => (
               <tr key={doc.document_id} data-testid={`document-row-${doc.document_id}`}>
-                <td>
-                  {doc.vendor_id ? (
-                    <span className="doc-list-vendor">{doc.vendor_id}</span>
-                  ) : (
-                    <span className="doc-list-vendor identifying" data-testid="vendor-identifying">
-                      Identifying…
-                    </span>
-                  )}
-                </td>
+                <td data-testid={`document-filename-${doc.document_id}`}>{doc.original_filename ?? '—'}</td>
                 <td>{LEGAL_ENTITIES.find((e) => e.id === doc.legal_entity_id)?.name ?? doc.legal_entity_id}</td>
                 <td className="mono">{formatUploadTimestamp(doc.upload_timestamp)}</td>
                 <td>

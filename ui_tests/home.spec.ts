@@ -59,7 +59,7 @@ test.describe('Home screen', () => {
     expect(shown).toBeGreaterThanOrEqual(floor);
   });
 
-  test('clicking Reconcile on an extracted document triggers matching and the badge updates to Reconciled', async ({
+  test('clicking Reconcile on an extracted document triggers matching and the badge updates to Done', async ({
     page,
     context,
   }) => {
@@ -83,7 +83,37 @@ test.describe('Home screen', () => {
     await page.goto('/home');
     await page.getByTestId(`home-reconcile-button-${documentId}`).click();
     await expect(page.getByTestId('toast-success')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toHaveText('Reconciled');
+    // "Done", not "Reconciled" — Home's own softer display mapping (2026-08-31), same
+    // underlying computeDocumentStatus() badge ('Reconciled') Document Detail still shows
+    // verbatim.
+    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toHaveText('Done');
+  });
+
+  // Engineer-directed (2026-08-31): a document whose matching run produced an open
+  // exception should read as "Done" on Home too (reconciliation genuinely finished, just
+  // with something to review) — not the same alarming "Failed — see Exceptions" wording a
+  // real extraction failure gets, which was the previous, conflated behavior. A "Show
+  // exceptions" link appears alongside it, pre-filtering the Exceptions screen to this
+  // vendor via the existing ?search= support (exceptionsList.ts).
+  test('a document whose matching run produces an open exception shows "Done" with a "Show exceptions" link, not "Failed"', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_DoneWithException_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, `INV-DONE-EXC-${crypto.randomUUID().slice(0, 8)}`, '40.00'));
+    await page.request.post(`/api/documents/${documentId}/extract`);
+    // No bronze_netsuite_vendorbill row seeded — resolves to a NOT_POSTED exception.
+    await page.request.post(`/api/documents/${documentId}/match`);
+
+    await page.goto('/home');
+    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toHaveText('Done');
+    const exceptionsLink = page.getByTestId(`home-show-exceptions-${documentId}`);
+    await expect(exceptionsLink).toBeVisible();
+
+    await exceptionsLink.click();
+    await expect(page).toHaveURL(new RegExp(`/exceptions/${vendor.toLowerCase()}`));
+    await expect(page.getByTestId('exceptions-vendor-count')).toHaveText('1 exceptions');
   });
 
   test('Reconcile button is not shown for a document that has not finished extraction yet', async ({ page, context }) => {

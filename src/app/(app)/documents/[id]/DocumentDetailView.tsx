@@ -98,7 +98,9 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
   }
 
   const canExtract = detail.status === 'registered';
-  const canReconcile = detail.status === 'processing' && detail.statusBadge.badge === 'Processing';
+  // 'Extracted' (not 'Processing') — extraction must have actually succeeded
+  // before there's anything for Reconcile to match.
+  const canReconcile = detail.status === 'processing' && detail.statusBadge.badge === 'Extracted';
   const providerEntries = Object.entries(detail.extractionMethodSummary);
 
   return (
@@ -134,7 +136,7 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
                   onClick={handleExtract}
                   data-testid="document-detail-extract-button"
                 >
-                  {extracting ? 'Starting…' : 'Extract'}
+                  {extracting ? 'Extracting…' : 'Extract'}
                 </button>
               )}
               {canReconcile && (
@@ -145,7 +147,7 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
                   onClick={handleReconcile}
                   data-testid="document-detail-reconcile-button"
                 >
-                  {reconciling ? 'Starting…' : 'Reconcile'}
+                  {reconciling ? 'Reconciling…' : 'Reconcile'}
                 </button>
               )}
             </div>
@@ -170,7 +172,21 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
 
         <div className="panel">
           <div className="panel-head">
-            <h2>Extracted lines</h2>
+            <div>
+              <h2>Extracted lines ({detail.lines.length} total)</h2>
+              <div className="sub" data-testid="reconciliation-progress">
+                {(() => {
+                  const { totalLines, matchedLines, exceptionLines } = detail.reconciliation;
+                  const processed = matchedLines + exceptionLines;
+                  if (totalLines === 0) return 'No lines extracted yet.';
+                  if (processed === 0) return 'Reconciliation not started yet.';
+                  // matchingPipeline.ts commits a document's matching results atomically
+                  // (all lines at once) — processed is always either 0 or totalLines,
+                  // never a partial figure from a still-in-progress run.
+                  return `Reconciliation complete — ${matchedLines} matched, ${exceptionLines} exception${exceptionLines === 1 ? '' : 's'}.`;
+                })()}
+              </div>
+            </div>
           </div>
           <table data-testid="statement-lines-table">
             <thead>

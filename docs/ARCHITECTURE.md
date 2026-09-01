@@ -1,6 +1,14 @@
 # ARCHITECTURE.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.5 (2026-08-28 — build-time correction, discovered mid-Session-4)
+**Version:** 1.6 (2026-09-01 — Session 6→9 lightweight-patch doc-sync)
+
+## v1.6 Changelog (2026-09-01)
+
+D-I amended (auto-extract-on-upload, reversing the explicit "Alternatives rejected" call);
+D-A/Section 1 amended (lightweight exception resolution workflow added, short of the full
+deferred review/approval workspace); D-M extended (vendorcredit table, vendor-scoped
+matching, full raw-row capture); D-F noted as resolved by the Legal Entity picker's
+removal.
 
 ## v1.5 Changelog (2026-08-28)
 
@@ -75,8 +83,13 @@ VIVE's reference data, a flat exception list for anything that doesn't match, an
 per-statement/per-reconciliation-cycle reporting.
 
 **What this build explicitly does not solve:**
-- No human review/approval workspace (no approve/dispute actions, no reviewer/approver
-  separation, no dollar-threshold second approval)
+- No *formal* human review/approval workspace — **amended 2026-09-01:** a lightweight
+  exception-resolution workflow was added (Mark resolved / Flag for vendor / Skip, plus an
+  optional note; see D-A amendment below), engineer-directed. It has none of T2
+  (segregation of duties), T3 (dollar-threshold second approval), T4 (immutable audit
+  ledger), or T7 (reversible bulk actions) — those remain genuinely deferred to BCE,
+  unchanged. What's now in scope is narrower: single-role, single-step, no audit trail
+  beyond the row's own `status`/`note`/`resolved_at` columns.
 - No formal Reconciliation Run object (no frozen input scope, no run versioning)
 - No permanent audit ledger of human decisions (there are no human decisions to log yet —
   only system-generated matches and exceptions)
@@ -98,6 +111,14 @@ decision register; they are sequenced after this foundation, not designed away.
 ### D-A — Slice boundary: sign-in → upload → extract → match → flat exceptions → simple report
 **Decision:** Build only these six capabilities now. Defer review/approval workspace, formal
 runs, audit ledger, and management reporting to a BCE-driven enhancement phase.
+
+**Amended 2026-09-01:** a narrow exception-resolution workflow (Mark resolved / Flag for
+vendor / Skip + note; migration 008) was added by engineer direction after this build's
+initial sign-off — see Section 1's amended "does not solve" bullet for exactly what is and
+isn't in scope. The *formal* review/approval workspace (T2/T3/T4/T7) remains deferred to
+BCE unchanged; this is not that. D-E (single user role) is unaffected — no new role or
+permission distinction was introduced, only new actions available to the existing single
+role.
 **Rationale:** This build is delivered ahead of additional engineers joining the project.
 Structuring it as a clean, boundable foundation lets BCE onboard new engineers against a
 completed, working slice rather than a partially-built monolith with unfinished workflow
@@ -194,6 +215,13 @@ access-scoping question, and with only one user role (D-E), access scoping is a 
 decision, not an architectural one.
 **Alternatives rejected:** None — this is a placeholder, not a decision between alternatives.
 
+**Resolved by implementation, 2026-09-01:** the Upload screen's Legal Entity picker was
+removed (auto-assigned a single fixed default) — engineer-directed simplification, not a
+UI Discovery outcome. This answers the "all entities at once vs. selector" question this
+decision deferred, at least for the current single-default-entity state; genuine
+multi-entity access scoping (per-user, per-entity) remains unresolved and would need its
+own decision if/when a second entity is actually onboarded.
+
 ### D-H — Same vendor/period collision handling without a Run object [AMENDED 2026-08-26]
 **Decision:** Identical-file re-uploads are deduplicated by content hash — not re-extracted,
 not re-reconciled (unchanged). A *different* document (different hash) landing for the same
@@ -227,17 +255,25 @@ vendor/period/entity collision check this decision describes therefore cannot ru
 registration time (Task 2.2); it runs once extraction populates `vendor_id` (Task 3.1). At
 registration, only content-hash dedup (G4) applies. See D-L for the full sequencing.
 
-### D-I — Upload and extraction are separate explicit acts [NEW 2026-08-26]
-**Decision:** Uploading a document registers it only (content-hash check, `extracted.document`
-record created — see D-J). Extraction is a distinct, explicit user-triggered action on that
-document — it does not run automatically on upload.
-**Rationale:** Extends D17's existing separation (ingestion vs. reconciliation are separate
-acts) one step earlier — a user may want to upload several statements before committing
-extraction spend/time on any of them, and this gives an explicit checkpoint consistent with
-D17's same reasoning.
-**Alternatives rejected:** Auto-extract on upload — rejected as inconsistent with D17's
-already-established principle that landing a file in storage should not implicitly trigger
-downstream processing.
+### D-I — Upload and extraction are separate explicit acts [AMENDED 2026-09-01]
+**Original decision (2026-08-26, no longer current at the UX layer):** Uploading a
+document registers it only. Extraction is a distinct, explicit user-triggered action on
+that document — it does not run automatically on upload. **Alternatives rejected:**
+auto-extract on upload — rejected as inconsistent with D17's principle that landing a file
+in storage should not implicitly trigger downstream processing.
+
+**Amended 2026-09-01:** extraction is now triggered automatically, client-side,
+immediately after a successful upload — reversing the "alternatives rejected" call above.
+**What's unchanged:** the *server-side* separation this decision's rationale actually
+protects (D17's ingestion-vs-processing boundary) is intact — registration
+(`POST /api/documents`) and extraction (`POST /api/documents/:id/extract`) remain two
+distinct endpoint calls; G5's lock-acquisition guarantee is enforced identically either
+way. What changed is purely that the client now makes the second call automatically
+instead of waiting for an explicit second click. **Rationale for the reversal:** engineer
+feedback that a manual second click added friction with no corresponding benefit once
+extraction became fast/reliable enough to run unattended. **Not re-litigated:** whether
+this should apply to a future bulk-upload flow, or whether a user should be able to opt
+back into manual-extract — out of scope for this amendment.
 
 ### D-J — VIVE intake data lives in a new `extracted` schema; per-vendor raw tables [NEW 2026-08-27]
 **Decision:** `bronze`/`silver`/`gold` already host live NetSuite data on Fabric. Rather than
@@ -390,6 +426,22 @@ this build's proof of what was actually seen, independent of what the source tab
 like later. No new versioning infrastructure, formal `ReferenceSnapshot` entity, or
 Bronze→Silver batch job is built by this project — the mechanism is entirely: read three
 existing columns, write them alongside the decision they informed.
+
+**Extended 2026-09-01 (mechanics added during lightweight-patch work, not a new
+decision):** live matching against `bronze.netsuite_vendorbill` also reads
+**`bronze.netsuite_vendorcredit`** (same shape/columns, confirmed live) as a second-pass
+source when a bill-table lookup misses — a real statement line can be posted as a credit
+memo rather than a bill. NetSuite stores a credit's `total` as a positive magnitude while
+the statement shows the same amount negative; the sign is flipped before comparison.
+Separately, `tranid` is confirmed **not unique across vendors** — matching is scoped by
+joining `bronze.netsuite_vendor` and filtering to the statement's own vendor family
+(first name-token prefix match) before falling back to amount-closest as a tie-break;
+once a vendor is known, a scoped miss is never retried unscoped (an unscoped fallback was
+found, live, to reintroduce cross-vendor false matches). Finally, the full raw row (not
+just `total`) is now captured into the exception's `evidence` blob for
+`amount_mismatch` cases, feeding the Exceptions screen's NetSuite-record display — no new
+snapshot mechanism, same "read at match time, write it down" approach D-M already
+established.
 
 **This replaces original Task 4.3's premise** (that this build's own ingestion job would
 stamp a `snapshot_version`) and **removes Tasks 4.1/4.2 entirely** (the pulls are not this
@@ -618,3 +670,19 @@ accepted decisions:
 
 **Signature / confirmation:** [x] I confirm this architecture, including all amendments
 through v1.3, is accurate to my decisions and I authorize proceeding to Phase 6.
+
+---
+
+## Sign-Off Currency Update (2026-09-01)
+
+**Decision owner:** Vaishali
+**Date:** 2026-09-01
+**Status:** RATIFIED — the Final Sign-Off above (2026-08-27, through v1.3) is extended to
+cover every amendment since, through the current v1.6 (see the changelog at the top of
+this document for the full list: v1.4 known-vendor fast path, v1.5 externally-owned
+NetSuite/CCC ingestion + D-M reproducibility, v1.6 Session 6→9 lightweight-patch
+amendments). Each amendment was already attributed to engineer direction at the time it
+was made; this entry closes the gap between that attribution and a renewed formal sign-off.
+
+**Signature / confirmation:** [x] I confirm this architecture, including all amendments
+through v1.6, remains accurate to my decisions and authorized for the current build.

@@ -1,8 +1,25 @@
 # EXECUTION_PLAN.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.6 (2026-08-28 — build-time correction, discovered mid-Session-4)
-**Traces to:** `docs/ARCHITECTURE.md` v1.5, `docs/INVARIANTS.md` v1.6, `docs/UI_SURFACE.md` v1.4
+**Version:** 1.8 (2026-09-01 — Session 6→9 lightweight-patch doc-sync)
+**Traces to:** `docs/ARCHITECTURE.md` v1.6, `docs/INVARIANTS.md` v1.7, `docs/UI_SURFACE.md` v1.5
 **APPLICATION_SURFACE:** UI+API — Session 1 includes Playwright scaffolding per PBVI-011.
+
+## v1.8 Changelog (2026-09-01)
+
+Documents the lightweight-patch work done between Session 6's completion and Session 8's
+start (no task numbers of its own at the time — see the "LIGHTWEIGHT_PATCHES_LOG.md —
+Session 6 → Session 8 Gap" section embedded later in this document for the full
+retrospective; corrected 2026-09-01 — this previously cited a `sessions/` file that was
+never created standalone). Amends Tasks
+2.1, 2.3, 2.4, 5.2, 6.1, 6.5 below; Tasks 6.2/6.3 rewritten wholesale, not amended, to
+match the actual shipped Exceptions architecture.
+
+## v1.7 Changelog (2026-08-28)
+
+**Session 7 removed** (Tasks 7.1/7.2, Gold-layer reporting integration) — engineer
+direction: not needed right now. Unlike Session 4, this is a scope deferral, not an
+externally-owned-infrastructure determination — D-D and S3 (Gold-only reporting, never
+`recon` directly) remain valid decisions, just with no implementing task at present.
 
 ## v1.6 Changelog (2026-08-28)
 
@@ -108,10 +125,12 @@ blocker — noted per-task where relevant.)
 | 4 | **REMOVED 2026-08-28** — NetSuite/CCC ingestion is externally owned, not this build's job | 0 | — |
 | 5 | Matching service (deterministic + AI-assisted residual, incl. reference-data capture moved from Session 4) | 4 | 3 days |
 | 6 | Home dashboard + Exceptions + Document Detail screens | 5 | 3 days |
-| 7 | Reporting (Gold integration) | 2 | 1 day |
+| 7 | **REMOVED 2026-08-28** — deferred, not needed right now (engineer direction) | 0 | — |
+| 8 | Extraction quality improvements ("Improve") — per-vendor deterministic parsing, live Claude default path + AI-failure fallback, real OCR, better column mapping/confidence, row-level dedup | 5 | — |
+| 9 | Extraction accuracy: per-vendor deterministic parsers + real OCR — credit-sign/running-balance prompt rules, 8 more vendor parsers, live-Claude-vs-OCR test, committed verification script (9.1–9.6 **Completed**; former 9.7 "OCR-derived parsers" **REMOVED 2026-09-01**, premise didn't hold; 9.8 renumbered to 9.7, **Completed**) | 7 | — |
 
 *(Task counts and estimates updated 2026-08-26 to reflect new tasks: 2.4 Extract trigger,
-3.5 extraction-method summary, 6.5 Document Detail screen.)*
+3.5 extraction-method summary, 6.5 Document Detail screen. Session 8 added 2026-08-28.)*
 
 ---
 
@@ -276,6 +295,10 @@ company SSO" button remains a TBD placeholder per UI_SURFACE.md's unresolved gap
 not implement SSO logic, render the button disabled with a "Coming soon" tooltip.
 ```
 
+**Amended 2026-09-01:** the Sign In screen was redesigned to a single, centered card
+layout, matching an updated Figma mockup — visual only, no change to the
+username/password mechanism or session-expiry behavior described above.
+
 **Test cases:**
 - Happy path: valid credentials redirect to `/home`.
 - Failure case: invalid credentials show inline error, no redirect.
@@ -368,6 +391,10 @@ marked TBD in UI_SURFACE.md — implement as a user-selected dropdown as the saf
 since its provenance wasn't resolved before Phase 3; flag this explicitly rather than guess
 silently. **Vendor is not a form field** (resolved 2026-08-27, ARCHITECTURE.md D-L
 amendment) — the app identifies it during extraction, not the user at upload.
+
+**Amended 2026-09-01:** the Legal Entity dropdown described above was removed entirely —
+engineer-directed simplification, auto-assigns a single fixed default
+(`DEFAULT_LEGAL_ENTITY_ID`). See ARCHITECTURE.md D-F's 2026-09-01 resolution note.
 
 **CC prompt:**
 ```
@@ -476,6 +503,15 @@ itself is built in Session 6 — expose this as a queryable field/view for that 
 to consume.
 ```
 
+**Amended 2026-09-01:** the shipped badge set is `Processing | Extracted | Reconciling |
+Retrying | Failed | Reconciled` — two values beyond the original four.
+`'Extracted'` distinguishes a document whose extraction genuinely succeeded from one still
+`'Processing'` (a real bug in the original NULL-pass-field handling was found and fixed
+here too — see the lightweight-patches log §6). `'Reconciling'` is read directly from a
+live (non-stale) `recon_document_lock` row, not derived from attempt history, so it
+persists correctly across the real async matching gap instead of only showing an
+immediate-click loading state.
+
 **Test cases:**
 - Happy path: a document with zero attempts shows "Processing".
 - Happy path: a document with one failed attempt shows "Retrying (1/2)".
@@ -499,6 +535,12 @@ to consume.
 **Description:** A registered-but-unextracted document shows an explicit "Extract" action
 (button, per-row on Home/Upload) that triggers Session 3's extraction service. Extraction
 does not run automatically on upload (D-I).
+
+**Amended 2026-09-01:** extraction now also triggers automatically, client-side,
+immediately after a successful upload — the manual per-row "Extract" button described
+above still exists and still works (e.g. for a document that failed auto-extraction), but
+is no longer the only path. See ARCHITECTURE.md D-I's 2026-09-01 amendment for the
+server-side separation this doesn't change.
 
 **CC prompt:**
 ```
@@ -942,6 +984,21 @@ Silver copy this build produces — no such Silver transform exists or is built 
 (ARCHITECTURE.md D9 amended). This task now also owns the S8 reference-data capture that
 was Task 4.3's job before Session 4 was removed.
 
+**Amended 2026-09-01:** matching now runs against **live** Fabric Lakehouse connectivity
+(`src/lib/fabricLakehouse.ts`, `tedious` + AAD service-principal auth), not only the local
+SQLite fixture described above. Real mechanics added, none of which are in the original
+task text: (1) `bronze.netsuite_vendorcredit` is read as a second-pass source when the
+bill table misses, with the credit's sign flipped before comparison; (2) matching is
+vendor-scoped — `tranid` is confirmed not unique across vendors, so the lookup joins
+`bronze.netsuite_vendor` and filters to the statement's own vendor-name-prefix family
+before amount-closest tie-breaking, and never falls back unscoped once a vendor is known
+(a real cross-vendor false-match bug, found and fixed live against a Bald Hill Dodge
+statement); (3) all per-line match/exception writes for one document are now buffered and
+committed in a single atomic transaction, not written individually mid-loop, so a
+concurrent reader never sees a partially-reconciled document; (4) the full raw NetSuite
+row (not just the matched total) is captured into the exception's evidence for
+`amount_mismatch` cases. See ARCHITECTURE.md D-M's 2026-09-01 extension.
+
 **CC prompt:**
 ```
 Implement deterministic SQL-based matching: recon key is vendor invoice number matched
@@ -1119,6 +1176,14 @@ default). "View statement" action now navigates to the new Document Detail scree
 6.5), resolving the prior unresolved gap.
 ```
 
+**Amended 2026-09-01:** "Uploaded Statements panel" is now titled "Most recent uploads."
+A Home-screen-only display mapping (`homeDisplayStatus()`) softens the raw status badge:
+"Success" once extraction is done, "Done" once reconciliation has run at all — including
+when it left open exceptions, with a "Show exceptions →" link, rather than reusing the
+same "Failed — see Exceptions" wording a genuine extraction failure gets. This required a
+new `open_exception_count` field on the document API shape to tell the two cases apart —
+both previously collapsed into the same `'Failed'` badge value.
+
 **Test cases:**
 - Happy path: uploading a statement (via Task 2.1) and returning to Home shows it with the
   correct status badge.
@@ -1153,28 +1218,39 @@ Test file path: ui_tests/home.spec.ts
 
 ---
 
-## Task 6.2 — Exceptions list screen
+## Task 6.2 — Exceptions vendor-grouped list screen [REWRITTEN 2026-09-01 — replaces flat-list architecture]
 
-**Description:** Build the Exceptions list per UI_SURFACE.md, with the resolved defaults
-(pagination 50, search on vendor/invoice ref, manual refresh).
+**Description:** The shipped Exceptions landing screen is vendor-grouped, not the flat,
+paginated, all-vendor list originally planned. Build `/exceptions` as a table of vendors
+that have at least one exception — not individual exception rows. Each vendor row links to
+Task 6.3's per-vendor detail view.
 
 **CC prompt:**
 ```
-Build the Exceptions screen (route /exceptions, List type) per UI_SURFACE.md. Columns:
-vendor, statement, invoice ref, amount, exception type, date. Pagination: 50 rows per
-page (resolved default). Search: vendor and invoice ref fields (resolved default). No
-bulk selection (confirmed — no approval workspace exists). The
-possible_duplicate_correction category no longer exists (removed 2026-08-26 — see D-H
-amended; re-uploads are version-chained before ever reaching Exceptions, so do not build
-this category into the enum).
+Build the Exceptions landing screen (route /exceptions). One row per vendor with >=1
+exception (server-rendered, e.g. via a listVendorsWithExceptions() query; client-
+refreshable via GET /api/exceptions). Columns: Vendor (linked to /exceptions/[vendorSlug],
+humanized from the slug), Missing in ERP count, Amount mismatch count, Resolved (progress
+bar + "resolvedCount/total" label). Search box filters the vendor rows client-side by
+vendor slug. No pagination (vendor count, not exception count, drives this screen's size)
+and no bulk selection (confirmed — no approval workspace exists per D-C; see ARCHITECTURE.md
+D-A's 2026-09-01 amendment for the narrower resolution workflow that does exist, built at
+the per-exception level in Task 6.3, not here). Empty states: "No exceptions — all
+statements reconciled cleanly" when no vendor has any exception; "No matching vendors"
+when a search filters out every row. The possible_duplicate_correction category still does
+not exist (removed 2026-08-26 — see D-H amended; re-uploads are version-chained before
+ever reaching Exceptions).
 ```
 
 **Test cases:**
-- Happy path: exceptions list populates with real data from Session 5's matching output.
-- Happy path: search by vendor name filters correctly.
-- Happy path: pagination shows 50 rows per page when more than 50 exist.
-- Failure case: no `possible_duplicate_correction` category ever appears in the list
-  (confirms Task 5.4's enum no longer includes it).
+- Happy path: the vendor list populates with real data from Session 5's matching output,
+  one row per vendor with at least one exception.
+- Happy path: search by vendor slug filters the vendor rows correctly.
+- Happy path: each vendor's Resolved progress bar reflects its real resolvedCount/total.
+- Happy path: a vendor with zero exceptions never appears in this list.
+- Happy path: the empty-list and no-search-matches states each render their own message.
+- Failure case: no `possible_duplicate_correction` category ever appears anywhere (confirms
+  Task 5.4's enum still doesn't include it).
 
 **Verification command:**
 ```bash
@@ -1187,12 +1263,13 @@ npx playwright test ui_tests/exceptions.spec.ts
 
 **UI test spec:**
 ```
-Screen: Exceptions
+Screen: Exceptions (vendor list)
 Test strategy: Seeded
 Assertions to implement:
-- List populates with seeded exception data
-- Search by vendor filters results
-- Pagination shows correct row count per page
+- Vendor list populates with seeded exception data, one row per vendor
+- Search by vendor slug filters results
+- Resolved progress bar shows correct resolvedCount/total per vendor
+- Empty states (no exceptions at all / no search matches) each render correctly
 - No bulk-selection UI is present
 - No possible_duplicate_correction category ever appears
 Test file path: ui_tests/exceptions.spec.ts
@@ -1200,57 +1277,96 @@ Test file path: ui_tests/exceptions.spec.ts
 
 ---
 
-## Task 6.3 — Exception Detail screen (amount-mismatch drill-down added 2026-08-26)
+## Task 6.3 — Exception vendor detail screen: two-pane view + resolution workflow [REWRITTEN 2026-09-01 — replaces single-exception detail-page architecture]
 
-**Description:** Build the Exception Detail screen per UI_SURFACE.md, including CCC
-corroborating-evidence panel where present, no approve/dispute actions, and a new
-expandable section for amount-mismatch exceptions showing the source NetSuite/Fabric
-value alongside the statement value.
+**Description:** The shipped detail screen is a per-vendor two-pane master-detail view at
+`/exceptions/[vendorSlug]` (not a single-exception `/exceptions/:id` page as originally
+planned) — a filterable list of that vendor's exceptions on the left, full detail of the
+selected one on the right, including the amount-mismatch drill-down and a resolution-action
+workflow this task's original text never anticipated. The resolution workflow is an
+engineer-directed deviation from D-A/D-C's "no review/approval workspace" framing — see
+ARCHITECTURE.md D-A's 2026-09-01 amendment for the exact boundary (single-role, single-step,
+none of T2/T3/T4/T7's guarantees) and INVARIANTS.md OD6 for the still-open question of
+whether it warrants its own named invariant.
 
 **CC prompt:**
 ```
-Build the Exception Detail screen (route /exceptions/:id, Detail type) per UI_SURFACE.md.
-Show the full exception record, plus a Related panel for CCC corroborating evidence when
-present (per Task 5.3's residual-matching output), and the source statement line/
-extraction record. No approve/dispute actions — confirmed absent per D-C. Only action is
-"Back to list". NEW: for exceptions with category = amount_mismatch (or equivalent enum
-value from Task 5.4), add an expandable/dropdown section showing the corresponding
-NetSuite record's value (from the `evidence` field of Task 5.2's D-K structured result,
-already captured at match time) side-by-side with the extracted statement value, plus a
-small "as of" caption sourced from the exception's reference_extracted_at column (amended
-2026-08-28, per ARCHITECTURE.md D-M) — never a live re-query, since the Lakehouse table
-may have since been upserted to a different value. Collapsed by default; not shown for
-non-amount-mismatch exception types.
+Build the per-vendor Exception detail screen (route /exceptions/[vendorSlug]). If the slug
+has zero exceptions, throw (caught by the global error boundary, per Task 6.4's pattern).
+Support an optional ?exception=<id> query param that preselects a row (used by Home's
+"Show exceptions ->" link, Task 6.1).
+
+Left pane: header showing "{total} exceptions", All/Missing/Mismatch filter tabs, a
+resolve-progress bar (percent + "{resolvedCount}/{total} resolved"). Each row: invoice
+number, created date, category badge (danger styling for not_posted, warning for
+amount_mismatch), amount.
+
+Right pane (selected exception's detail): title ("Invoice #... — Vendor"), category badge,
+a field grid (Invoice number, Vendor, Statement period, Statement amount — plus ERP amount
+and Difference, shown only for amount_mismatch), a "Why this is an exception" explanatory
+box, a CCC corroborating-evidence panel (RO number + amount from evidence.residual
+.cccCorroboration, or "No CCC confirmation available" when absent), a collapsible
+"NetSuite record" panel (a highlighted field subset by default, "show all N fields" reveals
+the rest) sourced from evidence.deterministic.netsuiteRecord — the full raw NetSuite row
+captured at match time (Task 5.2's D-M capture), never a live re-query, since the Lakehouse
+row may have since changed; null under local SQLite or for not_posted exceptions. A note
+textarea, and three resolution buttons: "Mark resolved", "Flag for vendor", "Skip" — each
+calls PATCH /api/exceptions/[id] with {status, note}. This is per-row, not bulk — no
+checkbox/multi-select UI. On success, refresh the row list so the progress bar and filter-
+tab counts stay in sync.
+
+API-side (PATCH /api/exceptions/[id]): validate status against the fixed four-value enum
+('open'/'resolved'/'flagged'/'skipped'); 400 on anything else. Set resolved_at to now for
+any non-'open' status, NULL when reopened to 'open'. note is always written (COALESCE
+against the existing value) — an empty note draft does overwrite a prior note, it is not
+treated as null. 404 if the exception id doesn't exist. No restriction on which status can
+transition to which (including re-opening a resolved/flagged/skipped row) — this is
+intentionally permissive, not a state machine.
 ```
 
 **Test cases:**
-- Happy path: an exception with CCC evidence shows the Related panel populated.
-- Happy path: an exception without CCC evidence shows "No CCC confirmation available".
-- Happy path: an amount_mismatch exception shows the expandable section with both the
-  statement value and the NetSuite/Fabric source value.
-- Happy path: a non-amount-mismatch exception does not show this section at all.
-- Failure case: no approve/dispute button renders anywhere on this screen.
+- Happy path: selecting a vendor from Task 6.2 opens this two-pane view scoped to only
+  that vendor's exceptions.
+- Happy path: the All/Missing/Mismatch filter tabs correctly scope the left-pane list.
+- Happy path: clicking Mark resolved / Flag for vendor / Skip updates that row's status;
+  the progress bar and filter-tab counts refresh afterward.
+- Happy path: an amount_mismatch exception's right pane shows Statement amount, ERP
+  amount, and Difference; a not_posted exception shows neither ERP amount nor Difference.
+- Happy path: the NetSuite record panel is collapsed by default, shows the highlighted
+  field subset, and "show all N fields" reveals the full captured row.
+- Happy path: the CCC panel shows RO number + amount when present, "No CCC confirmation
+  available" when absent.
+- Happy path: `?exception=<id>` in the URL preselects that row on load.
+- Failure case: `PATCH /api/exceptions/[id]` with a status outside the four-value enum is
+  rejected (400).
+- Failure case: no `possible_duplicate_correction` category ever appears.
+- Failure case: no bulk-select/checkbox UI exists anywhere on this screen.
 
 **Verification command:**
 ```bash
 npx playwright test ui_tests/exception-detail.spec.ts
 ```
 
-**Invariant enforcement:** None new task-scoped.
+**Invariant enforcement:** None new task-scoped (see INVARIANTS.md OD6 — the resolution
+workflow itself is deliberately not yet promoted to a named invariant).
 
 **Regression classification:** REGRESSION-RELEVANT.
 
 **UI test spec:**
 ```
-Screen: Exception Detail
+Screen: Exception Detail (per-vendor, two-pane)
 Test strategy: Seeded
 Assertions to implement:
-- CCC evidence panel populates when present
-- "No CCC confirmation available" shows when absent
-- Amount-mismatch exceptions show source-value drill-down (statement vs. Fabric/NetSuite)
-- Non-amount-mismatch exceptions do not show the drill-down section
-- No approve/dispute action buttons exist anywhere on this screen
-- "Back to list" navigates to /exceptions
+- Left-pane list scopes correctly to the selected vendor only
+- Filter tabs (All/Missing/Mismatch) scope the left-pane list correctly
+- Mark resolved/Flag for vendor/Skip each update status and refresh counts
+- amount_mismatch detail shows Statement/ERP amount + Difference; not_posted does not
+- NetSuite record panel: collapsed by default, "show all N fields" reveals full row
+- CCC panel shows evidence when present, fallback message when absent
+- ?exception=<id> query param preselects that row
+- PATCH with an invalid status value is rejected (400)
+- No possible_duplicate_correction category ever appears
+- No bulk-select/checkbox UI exists on this screen
 Test file path: ui_tests/exception-detail.spec.ts
 ```
 
@@ -1313,6 +1429,11 @@ rows (invoice ref, amount, confidence, provider) for this document. Add this rou
 Screen Inventory and wire Home's "View statement" (Task 6.1) to it.
 ```
 
+**Amended 2026-09-01:** the extracted-rows table gained a reconciliation-progress line
+above it ("Reconciliation not started yet." / "Reconciliation complete — X matched, Y
+exceptions.") — new `getReconciliationCounts()` in `documentDetail.ts`. Not in the
+original task text.
+
 **Test cases:**
 - Happy path: navigating from Home's "View statement" opens this screen with the correct
   document's rows.
@@ -1346,93 +1467,797 @@ Test file path: ui_tests/document-detail.spec.ts
 
 ---
 
-# Session 7 — Reporting (Gold Integration)
+# Session 7 — REMOVED 2026-08-28 (engineer: not needed right now)
 
-**Session goal:** Home's summary stats and any simple report view correctly read from the
-existing v3.3 Gold layer, never from `recon` directly.
+**This session is deferred, not built.** Unlike Session 4 (removed because the work
+genuinely isn't this project's job), Session 7 is removed at the engineer's explicit
+direction because Gold-layer reporting integration isn't needed right now — this is a
+scope deferral, not a "not our job" determination. The underlying decisions it depended on
+(D-D — reporting reads from Gold, not `recon` directly; S3 — the same isolation invariant)
+remain valid and un-walked-back; they simply have no task implementing them yet.
 
-**Integration check:**
-```bash
-./scripts/test_gold_reporting_integration.sh
-```
+- **Task 7.1 (Gold-layer query integration) — REMOVED.** Deferred.
+- **Task 7.2 (refresh cadence + `dim_shop` conformance) — REMOVED.** Deferred.
 
-## Task 7.1 — Gold-layer query integration
+No tasks remain in this session. Session numbering elsewhere in this document is
+unchanged. **Revisit condition:** if/when reporting is needed, S3 (Gold-only, never
+`recon` directly) still applies and should be re-embedded in whatever task is written to
+build it — it was never removed as an invariant, only its implementing task.
 
-**Description:** Wire Home's summary stats (Task 6.1) to read from the existing v3.3 Gold
-layer (materialized Fabric Warehouse tables) rather than any bounded-build-specific
-structure, per the resolved D-D.
-
-**CC prompt:**
-```
-Wire the Home screen's summary stats query to read from the existing v3.3 Gold layer
-(materialized Fabric Warehouse tables per D11), not from a custom structure and not from
-recon directly. Apply this TASK-SCOPED invariant inline:
-
-- S3 — Reporting reads from the designated Gold/reporting surface and does not query
-  recon directly. A report implementation joining or querying recon tables directly is a
-  violation, even though this build has no concurrent AP workload yet — the isolation
-  pattern must hold from the start so it isn't expensive to unwind later.
-```
-
-**Test cases:**
-- Happy path: Home's stats reflect real Gold-layer data correctly.
-- Failure case: static analysis / code review confirms no query in the reporting path
-  joins or selects directly from any `recon.*` table.
-
-**Verification command:**
-```bash
-./scripts/test_gold_reporting_integration.sh
-```
-
-**Invariant enforcement:** S3 (embedded above).
-
-**Regression classification:** HARNESS-CANDIDATE — directly tied to S3, and to v3.3's D11
-isolation rationale.
-
-**UI test spec:** N/A (data-layer task; UI already tested in Task 6.1).
 
 ---
 
-## Task 7.2 — Reporting refresh cadence + `dim_shop` conformance check
+# LIGHTWEIGHT_PATCHES_LOG.md — Session 6 → Session 8 Gap
 
-**Description:** Confirm the Gold layer's existing refresh cadence is compatible with this
-build's manual-refresh-only UI pattern (Task 6.1), and verify `dim_shop` conformance with
-the dashboard workstream (per v3.3 D14) is not broken by this build's read path.
+**Period:** 2026-08-29 through 2026-09-01 (between Session 6's formal completion and
+Session 8's start)
+**Engineer:** Vaishali
+**Branch:** session/s06_home-exceptions-screens (continued)
+**Mode:** Lightweight scoped patches — engineer-directed, **not** full PBVI ceremony.
+Confirmed explicitly by the engineer early in this period ("Lightweight scoped patch
+(Recommended)" — implement + test + brief self-review + commit, no scaffold, no
+challenge-agent review, no per-change session log).
+
+**Note on this document:** unlike S01–S06's `SESSION_LOG.md` files, this is a retrospective
+compilation written after the fact, not a real-time log kept during the work. It exists
+because a substantial amount of real, commit-worthy work happened in this gap with no
+session-log record at all — the engineer asked for one covering it before Session 8's own
+log begins. Organized thematically, not by numbered task, since none of this carried
+EXECUTION_PLAN.md task numbers.
+
+---
+
+## 1. Live Fabric Lakehouse Connectivity (deterministic matching)
+
+Built real, read-only connectivity from `deterministicMatching.ts` to the live Fabric
+Lakehouse (`bronze.netsuite_vendorbill`, `bronze.netsuite_vendorcredit`,
+`bronze.netsuite_vendor`) — previously matching only ever ran against a local SQLite
+fixture.
+
+- **Module:** `src/lib/fabricLakehouse.ts` — uses `tedious` directly (not `mssql`'s
+  `ConnectionPool`, which fails with "socket hang up" on Fabric's mid-handshake reroute to
+  a `*.pbidedicated.windows.net` backend host). Azure AD service-principal auth
+  (`ClientSecretCredential`), token cached with a 60s safety margin. A new short-lived
+  connection is opened per call, not pooled.
+- **Env vars:** `FABRIC_LAKEHOUSE_SQL_ENDPOINT`/`FABRIC_LAKEHOUSE_NAME`, deliberately
+  separate from `db.ts`'s own `FABRIC_SQL_ENDPOINT` (the app's own, still-unimplemented,
+  all-or-nothing Fabric app-state switch) so enabling live reference lookups doesn't also
+  flip the whole app into a mode nothing in `src/lib` implements.
+- **Bugs fixed during build:** `total` returned as a string and `_extracted_at` as a JS
+  `Date` from the live table (not documented type guarantees) — normalized at the source
+  (`normalizeRow()`) so every caller gets a real number/ISO string.
+
+## 2. Cross-Vendor `tranid` Collision Bug (real production bug, found via live data)
+
+Diagnosed against a real Bald Hill Dodge Chrysler Jeep Kia statement: 6 of 11 lines
+silently matched the *wrong* vendor's NetSuite bill (Taylor's, Faulkner Subaru, etc.).
+
+- **Root cause:** NetSuite's `tranid` (bill number) is not unique across vendors — the
+  same bill number can and does repeat between unrelated companies. A single AP vendor
+  "brand" (e.g. Fred Beans, Nucar) can itself span multiple distinct NetSuite entities
+  (different shop/franchise locations), but `tranid`s don't collide *within* one vendor's
+  own family of entities.
+- **Fix:** vendor-scoped lookup first — join `bronze.netsuite_vendor`, filter on
+  `LOWER(v.entityid) LIKE '<first-name-token>%'`, amount-closest as the tie-break within
+  that scope.
+- **Second-layer bug found during the same fix:** once a vendor is known, falling back to
+  an *unscoped* search on a scoped miss reintroduced the exact same collision bug for a
+  genuinely-not-posted bill (confirmed live: Bald Hill's own bill #178375 doesn't exist in
+  NetSuite; an unscoped fallback matched an unrelated Toyota/Volvo dealer's own #178375
+  instead). Fixed by removing that fallback entirely once a vendor is known — a false
+  NOT_POSTED (human reviews it) is the safe failure direction; a false cross-vendor match
+  is not.
+
+## 3. Credit-Memo Sign Handling
+
+NetSuite stores `bronze.netsuite_vendorcredit.total` as a positive magnitude; the vendor
+statement shows the same amount as negative (confirmed against 4 real KSI Trading Corp
+credit-memo lines). Fixed via an `isCredit` flag on the matched reference row, sign-flipped
+before the arithmetic comparison — otherwise a genuine credit-memo match reported as a
+~2x `AMOUNT_MISMATCH`.
+
+## 4. Reconciliation Atomicity Fix
+
+`runMatchingForDocument()` used to write each line's match/exception result individually,
+mid-loop — a concurrent reader (Exceptions screen in another tab, Home's stats) could
+observe a genuinely in-progress document's *partial* results. Fixed by buffering every
+match/exception write in memory across the (necessarily async, per-line Fabric-call) loop,
+then committing all of them together in one synchronous `db.transaction()` at the end. A
+concurrent reader now sees either none of a document's results or all of them, never a
+partial slice.
+
+## 5. Live Claude Extraction via Azure AI Foundry
+
+Wired the real live extraction path (`AZURE_CLAUDE_*` env vars, `@anthropic-ai/foundry-sdk`
+client) as this project's actual configured credential, checked before the direct
+Anthropic API path.
+
+- **Bugs fixed during build:** the `resource` param passed to the Foundry client must be
+  just the resource-name prefix — passing the full `AZURE_CLAUDE_ENDPOINT` hostname doubled
+  the `.services.ai.azure.com` suffix and broke DNS resolution. `AZURE_CLAUDE_DEPLOYMENT`
+  ("claude-haiku-4-5") doesn't exist in this Azure resource — confirmed via a live 404;
+  only `AZURE_CLAUDE_SONNET_DEPLOYMENT` ("claude-sonnet-4-6") is real.
+- Automated tests never take this live path by default — gated behind
+  `EXTRACTION_LIVE_TESTS=1`, deliberately blanked in `playwright.config.ts`'s
+  `webServer.env` so the Playwright-launched dev server always uses the mock, independent
+  of what's in `.env.local` for manual/live use.
+
+## 6. Status Badge System Expansion
+
+`DocumentStatusBadge` expanded from UI_SURFACE.md's original four-value set
+(`Processing | Retrying | Failed | Reconciled`) to
+`Processing | Extracted | Reconciling | Retrying | Failed | Reconciled` —
+**engineer-directed deviation from the signed-off UI_SURFACE.md spec**, flagged explicitly
+in code comments each time it's touched, not a silent expansion.
+
+- `'Reconciling'` is read directly from a fresh (non-stale — same
+  `LOCK_STALE_AFTER_MINUTES = 10` window as `matchingInvocation.ts`) row in
+  `recon_document_lock`, checked before any attempt-history-derived state — this made the
+  "Reconciling…" state persist correctly across the async matching gap for the first time
+  (it previously only ever showed the immediate post-click loading state, not the real
+  server-side in-progress state).
+- `'Extracted'` split out from a real, pre-existing latent bug in `computeDocumentStatus`
+  found during this period: NULL pass-fields were incorrectly falling into "Extracted"
+  rather than being distinguished from a genuine successful extraction.
+
+## 7. Upload Screen Changes
+
+- **Legal Entity picker removed** — auto-assigned a single fixed default
+  (`DEFAULT_LEGAL_ENTITY_ID`). No real legal-entity structure was ever specified
+  (UI_SURFACE.md itself flagged this field's provenance as an open architectural gap);
+  engineer-directed simplification.
+- **Auto-extract on upload** — extraction now starts automatically right after a
+  successful upload, non-blocking (fire-and-forget from the client), instead of requiring
+  a second, separate "Extract" click.
+- **Real bug fixed:** the Upload button previously stayed disabled for the *entire*
+  upload+auto-extraction chain (a real complaint once extraction takes genuine
+  multi-second time against live Claude) — `submitting` now flips back to `false`
+  immediately after the upload+refresh completes, not after extraction finishes too, so a
+  second PDF can be uploaded while the first is still extracting.
+- Uploaded-document list now shows the file's own original filename (new
+  `original_filename` column, migration 007) instead of the not-yet-resolved vendor.
+- **Real bug fixed:** same-second upload timestamps sorted ambiguously — `listDocuments()`
+  gained `rowid DESC` as an ordering tiebreaker.
+
+## 8. Home Screen Redesign
+
+- "Uploaded statements" → "Most recent uploads."
+- New `homeDisplayStatus()` mapping layer, Home-screen-only: "Success" once extraction is
+  done (softer than the raw "Extracted" badge), "Done" once reconciliation has run at all
+  — whether or not it left open exceptions (previously a reconciled-with-exceptions
+  document showed the same alarming "Failed — see Exceptions" wording as a genuine
+  extraction failure, even though the process itself completed correctly). A "Show
+  exceptions →" link appears alongside a Done-with-exceptions row.
+- Colored left-border accent on the summary stat cards (navy/success/warning/danger).
+- New `ApiDocument.open_exception_count` field to distinguish "genuine extraction failure"
+  from "reconciled with exceptions" — both previously collapsed into the single `'Failed'`
+  badge value with no way to tell them apart.
+
+## 9. Document Detail Screen Improvements
+
+- "Extracted lines" panel now shows the total line count plus a reconciliation-progress
+  line ("Reconciliation not started yet." / "Reconciliation complete — X matched, Y
+  exceptions.") — new `getReconciliationCounts()` in `documentDetail.ts`.
+- Extract/Reconcile button loading text clarified to "Extracting…"/"Reconciling…"
+  (previously generic/ambiguous wording).
+
+## 10. Login Screen Redesign
+
+Redesigned to a single, centered card layout, matching an updated Figma mockup supplied
+by the engineer.
+
+## 11. Exceptions / Exception Detail — Full Architectural Redesign
+
+The largest single piece of work in this gap. Replaced the original flat, paginated,
+search-filterable all-vendor list (Task 6.2) plus its separate per-exception detail page
+(Task 6.3, route `/exceptions/:id`) with a vendor-grouped, two-pane master-detail
+architecture, matching Figma mockups the engineer supplied
+(`05-vive-reconciliation-detail-fredbeans-*.html`).
+
+- **`/exceptions`** — now a vendor-grouped landing: one row per vendor with an open
+  exception, its own resolve-progress bar, client-side vendor-name search.
+- **`/exceptions/[vendorSlug]`** (new) — the two-pane view: left panel is that vendor's
+  own exception list (All/Missing/Mismatch filter tabs, resolve-progress bar, scrollable
+  rows); right panel is the selected exception's inline detail (field-grid facts, a
+  "why this is an exception" box, a collapsible NetSuite-record panel with a "show all N
+  fields" raw dump, a note field, and prev/next paging) — no more navigating to a separate
+  page per exception.
+- **New resolution workflow** — Mark resolved / Flag for vendor / Skip, each with an
+  optional note. Backed by migration 008 (`recon_exception` gains `status`, `note`,
+  `resolved_at`).
+- **Explicitly flagged engineer-directed deviation from ARCHITECTURE.md D-C** ("this
+  build's exceptions are a flat, ownerless list by design... no review/approval
+  workspace") — recorded in code comments (`exceptionsList.ts`), not silently walked back,
+  since D-C is a real, signed-off architecture decision this directly contradicts. Not
+  edited in `ARCHITECTURE.md` itself (out of this build's edit scope per Claude.md Section
+  3) — the engineer still needs to formally amend that document if this is meant to stick.
+- **New data capture:** the NetSuite-record panel needed the *full* raw NetSuite bill/
+  credit row, which the existing `evidence` blob never stored (only
+  `statementAmount`/`netsuiteAmount`/`diff`) — `fabricLakehouse.ts`'s row fetch extended to
+  capture and store the complete raw row (`evidence.deterministic.netsuiteRecord`) for
+  `amount_mismatch` exceptions where a candidate row was actually found.
+- Old `/exceptions/[id]` route and its flat-list component removed outright, not left
+  dead alongside the new screens.
+
+## 12. Real-World Diagnostic Investigations (no code change — confirmed correct behavior)
+
+Several exception results were investigated directly against live Fabric data and
+confirmed as *correct*, not bugs, during real-vendor-PDF testing this period:
+
+- KSI Trading Corp: a reported-missing invoice (`I41260714271`) genuinely doesn't exist in
+  NetSuite — correct `NOT_POSTED`, not an extraction or matching defect.
+- Nucar / DCD Automotive Holdings: similarly confirmed as genuinely-not-posted lines, not
+  a bug.
+
+## Established Conventions / Hard Rules (carried forward into Session 8+)
+
+- **Never `rm -f` or otherwise delete the local SQLite database file
+  (`.data/recon.local.db*`) directly** — it is a real, shared file holding both test data
+  and the engineer's actual login credentials/uploads. Any "clear test data" request is
+  handled via row-level `DELETE FROM ...` (transaction-wrapped, always preserving
+  `recon_app_user`) in a throwaway scratch script, never a file-level operation. This rule
+  was violated twice early in this gap, corrected each time, and has held since.
+- Engineer's login: `vive` / `vive123` (seeded via `scripts/seed_users.mjs`).
+- "Lightweight scoped patch" (implement + test + brief self-review + commit, no full
+  scaffold/challenge-review/session-log ceremony) is the engineer's confirmed preference
+  for this phase of work — this document is the exception, written retrospectively on
+  request, not a change to that working mode going forward.
+
+---
+
+# Session 8 — Extraction Quality Improvements ("Improve")
+
+**Session goal:** Close the gap between this build's placeholder extraction (synthetic
+mock, no OCR, no per-vendor parsing, single-shot Claude only) and what real-world vendor
+statements need, using patterns confirmed working in the reference implementation
+(`vive-reconciliation-project-threshold-0.8-and-dupe-disable`) — without carrying over
+that system's confidence-threshold gate, which conflicts with this build's own IC-2
+("confidence is diagnostic metadata only, never a pass/fail input" — never negotiable).
+That mechanism is deliberately excluded from every task below.
+
+Extraction/OCR logic stays on the Python side of the existing subprocess boundary
+(precedent: `pdfplumber` extraction since Session 3). Tasks 8.1 and 8.3 reuse the
+reference repo's actual Python files, adapted to this build's subprocess I/O contract —
+not reimplemented in TypeScript.
+
+**Integration check:**
+```bash
+npm run test:extraction-quality && npx playwright test ui_tests/extract-trigger.spec.ts ui_tests/document-detail.spec.ts
+```
+
+---
+
+## Task 8.1 — Known-vendor deterministic extraction (real Python, reused from the reference repo)
+
+**Description:** Build a real vendor-routing dispatcher (this build's `vendorIdentification.ts`
+currently only matches a synthetic "VENDOR: name" marker — no real per-vendor parsing
+exists). This stays entirely on the Python side of the subprocess boundary — reuse the
+reference implementation's actual `src/extraction/python_library/adapter.py`
+(`_FIELD_MAP` dispatch pattern) and `extract_lia.py` itself directly (a real Lia Auto Group
+statement is already available as a test case), adapted only to this build's subprocess
+input/output contract. This is a copy-and-adapt of working Python, not a TypeScript
+rewrite.
 
 **CC prompt:**
 ```
-Verify the existing Gold layer's refresh cadence (already defined in the full v3.3
-architecture) is compatible with this build simply querying it on manual refresh — no new
-refresh job should be built by this task. Confirm this build's read-only query against
-Gold does not introduce a second, divergent dim_shop consumer (per v3.3 D14 — dim_shop is
-shared with the dashboard workstream) — if dim_shop is referenced at all in the summary
-stats, it must use the existing conformed dimension, not a new copy.
+Add a Python-side vendor-routing dispatcher, reusing the reference implementation's
+adapter.py (_FIELD_MAP pattern) nearly as-is: a fixed mapping of vendor_slug -> per-vendor
+Python extractor function, checked before falling through to the Claude-primary path
+(which stays in TypeScript, unchanged). Copy extract_lia.py itself (word-position table
+reconstruction — group words by vertical position, classify columns by right-edge
+alignment for amounts, handle the vendor's trailing-minus negative-amount quirk) into
+this build's Python extraction script, adapted only to match pdfplumberExtractor.ts's
+existing subprocess I/O contract (stdin/argv in, JSON matching ExtractedStatement out) —
+not reimplemented in TypeScript. A vendor with no registered deterministic extractor must
+fall through to the Claude-primary path exactly as today — never treated as an error.
 ```
 
 **Test cases:**
-- Happy path: querying Gold's existing refresh timestamp confirms it's compatible with
-  manual on-demand reads (no staleness surprise for the user).
-- Failure case: no new `dim_shop`-like table is created by this build.
+- Happy path: a real Lia Auto Group statement PDF (fixture) extracts correctly via the
+  deterministic Python path, with no AI call made (structural check: no fetch/Anthropic
+  SDK call in the trace for this document).
+- Happy path: a vendor with no registered deterministic extractor still routes to
+  Claude-primary, unchanged from current behavior.
+- Failure case: a malformed/edge-case Lia statement (e.g. a row this parser's tolerance
+  doesn't cover) fails validation cleanly rather than silently producing wrong data.
 
 **Verification command:**
 ```bash
-./scripts/test_gold_refresh_and_dim_shop_conformance.sh
+npx tsx scripts/test_lia_deterministic_extraction.mjs
+```
+
+**Invariant enforcement:** None new task-scoped — consumes existing IC-1/IC-2 gates
+unchanged.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only; existing `document-detail.spec.ts` already
+asserts on `provider_used = python_library_pdfplumber`).
+
+---
+
+## Task 8.2 — Live Claude extraction as the default path, with a Python OCR/pdfplumber fallback tier
+
+**Description:** Replace the current "mock unless `EXTRACTION_LIVE_TESTS=1`" behavior with
+live Claude as the actual default for non-known-vendor documents (requires a real
+`ANTHROPIC_API_KEY` — real per-call spend, engineer approval required before this task is
+built). Claude is tried FIRST for any document without a registered deterministic
+extractor — including scanned/image-based PDFs, since a vision-capable model can often
+read those directly without OCR. Only if that Claude call fails does the pipeline fall
+through to Task 8.3's Python OCR/pdfplumber fallback tier, mirroring the reference
+implementation's `DocumentUnderstandingEngine` 2-tier design (AI primary -> Python
+fallback) — this is the opposite order from "OCR first," which the reference repo does
+not do.
+
+**CC prompt:**
+```
+Make extractViaClaude's live path (already implemented in aiProvider.ts) the actual
+default for non-known-vendor documents, gated only on ANTHROPIC_API_KEY being present —
+remove the additional EXTRACTION_LIVE_TESTS=1 test-only gate for production use (keep an
+explicit test-mode override so automated tests still default to the mock). Within
+extractionPipeline.ts's bounded-retry loop, make attempt 2 route to Task 8.3's Python
+fallback script when attempt 1 was a genuine Claude failure (not merely a validation
+failure on otherwise-successful extraction) — Claude is always tried first, never OCR.
+Preserve IC-3/G3's data-vs-instructions discipline unchanged — no prompt changes beyond
+what's needed for this routing.
+```
+
+**Test cases:**
+- Happy path: a real vendor statement with genuine text content extracts correctly via
+  live Claude on the first attempt (verify against the previously-diagnosed Lia Auto Group
+  real PDF, assuming it isn't already caught by Task 8.1's deterministic path).
+- Failure case: a Claude API error on attempt 1 routes attempt 2 to the Python
+  OCR/pdfplumber fallback tier, not an identical Claude retry.
+- Regression: existing mock-mode tests (no ANTHROPIC_API_KEY) continue to pass unchanged.
+
+**Verification command:**
+```bash
+ANTHROPIC_API_KEY=... npx tsx scripts/test_live_claude_extraction.mjs
+```
+
+**Invariant enforcement:** None new task-scoped — IC-3/G3 (prompt-injection defense)
+apply unchanged.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 8.3 — Python OCR/pdfplumber fallback tier for scanned/image-only PDFs
+
+**Description:** This build currently has no OCR at all — `pdfplumber` only reads text
+already embedded in a PDF, and 2 of 3 real-world test uploads so far were scanned/
+image-based statements that returned empty text on every attempt. This fallback only
+fires after a genuine Claude failure (Task 8.2) — never tried first. Reuse the reference
+implementation's actual `ocr_extractor.py` (Tesseract wrapper) and `pdfplumber_fallback.py`
+(real ruled-table extraction per page, OCR only for pages where native text is sparse)
+directly, adapted to this build's subprocess contract.
+
+**CC prompt:**
+```
+Add a new Python fallback script, reusing ocr_extractor.py and pdfplumber_fallback.py from
+the reference repo nearly as-is: real per-page pdfplumber table extraction first; only for
+a page whose native text is under ~500 characters, run Tesseract OCR on that page and
+reshape the result into a pseudo-table using the same header-detection/column-mapping
+logic pdfplumber_fallback.py already has. This script is invoked only when Task 8.2's
+Claude call has already failed — confirm Tesseract is installable in the actual deployment
+target (Azure App Service) before committing to this dependency; flag as a Scope Decision
+if it isn't, since that would block this task entirely.
+```
+
+**Test cases:**
+- Happy path: a genuinely scanned PDF (image-only, no text layer) now produces non-empty
+  extracted text via OCR, where it previously produced only whitespace — triggered via a
+  simulated Claude failure, not called directly.
+- Regression: a normal text-layer PDF's extraction is unaffected (this fallback never
+  triggers when Claude succeeds; OCR itself never triggers when a page's native text is
+  already sufficient).
+- Environment check: Tesseract binary is confirmed available in both local dev and the
+  actual deployment target before this task is marked complete.
+
+**Verification command:**
+```bash
+npx tsx scripts/test_ocr_fallback.mjs
 ```
 
 **Invariant enforcement:** None new task-scoped.
 
-**Regression classification:** NOT-REGRESSION-RELEVANT — depends on live Fabric
-capacity/refresh state, not portable to a bare checkout.
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 8.4 — Better column mapping + real per-row model-reported confidence
+
+**Description:** Improve the live Claude prompt (Task 8.2) to ask for a calibrated
+per-line confidence score and a tolerant column-mapping fallback (scan a row's raw cell
+values directly if standard header-based mapping misses a field), mirroring the reference
+implementation's `_row_to_invoice()`/`_parse_confidence()` pattern. This stays in
+TypeScript — it's about the Claude request/response shape, not PDF parsing. Confidence
+remains diagnostic-only per IC-2 — never gates pass/fail, only stored and surfaced for
+human review context.
+
+**CC prompt:**
+```
+Extend the record_extraction tool schema to include a per-line confidence field (0.0-1.0,
+with prompt guidance on calibration, e.g. "0.85+ only if every character is unambiguous").
+Add a tolerant fallback in the response-parsing code: if a line's amount/invoice-ref can't
+be mapped from the model's structured columns, scan the line's own raw text for a
+plausible candidate before leaving the field null. Store the reported confidence exactly
+as before (diagnostic metadata, never a gate) — no change to IC-2's enforcement.
+```
+
+**Test cases:**
+- Happy path: a line with an unusual layout still resolves its invoice number via the
+  fallback scan rather than coming back null.
+- Regression: confidence is still never used as a pass/fail signal anywhere in the
+  validation gate (structural check: grep for confidence usage in validationGate.ts).
+
+**Verification command:**
+```bash
+npx tsx scripts/test_column_mapping_fallback.mjs
+```
+
+**Invariant enforcement:** IC-2 (confidence remains diagnostic-only — reaffirmed, not
+weakened).
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 8.5 — Row-level duplicate detection (invoice number + amount)
+
+**Description:** A genuinely new capability, distinct from this build's existing G4
+(whole-document content-hash idempotency). Detect duplicate individual line items (same
+invoice number + amount) within or across a vendor's statements, flagging the second
+occurrence rather than silently ingesting it as a separate exception/match candidate. This
+stays in TypeScript (Silver normalization) — no PDF parsing involved.
+
+**CC prompt:**
+```
+Add a duplicate-line check during Silver normalization: before writing a
+silver.statement_line row, check whether a row with the same vendor_id + normalized
+invoice ref + amount already exists. If so, flag it (new reason code, e.g.
+DUPLICATE_LINE_ITEM) rather than silently writing a second identical row. Decide with the
+engineer whether a flagged duplicate still reaches Silver (visible, flagged) or is
+diverted before Silver entirely — this changes downstream matching/exception behavior and
+should be an explicit decision, not an assumption.
+```
+
+**Test cases:**
+- Happy path: two statement lines with identical vendor+invoice ref+amount are flagged as
+  a duplicate pair, not silently treated as two independent lines.
+- Regression: legitimately distinct lines (same invoice ref, different amount, e.g. a
+  partial payment) are never falsely flagged.
+
+**Verification command:**
+```bash
+npx tsx scripts/test_row_level_dedup.mjs
+```
+
+**Invariant enforcement:** TBD — engineer to decide whether this warrants a new
+task-scoped invariant (e.g. S12) or stays an unenforced implementation detail.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only) unless the engineer decides duplicates should
+surface distinctly in the Exceptions screen, in which case this task would also need a
+UI test spec entry.
+
+---
+# Session 9 — Extraction Accuracy: Per-Vendor Deterministic Parsers + Real OCR
+
+**Session goal:** Close the gap between Session 8's placeholder/generic extraction and
+real-world vendor statement accuracy, by porting the reference implementation's
+already-solved per-vendor parsers (`vive-reconciliation-project-threshold-0.8-and-dupe-disable`)
+for vendors where Claude's generic vision path demonstrably gets the arithmetic wrong —
+confirmed against real statement PDFs, not synthetic fixtures. Extraction logic stays on
+the Python side of the subprocess boundary, same precedent as Session 8's Task 8.1/8.3.
+
+**Integration check:**
+```bash
+npx tsx scripts/verify_known_vendor_extractors.mjs && npx playwright test ui_tests/extract-trigger.spec.ts ui_tests/document-detail.spec.ts
+```
+*(At the time this task ran, `scripts/verify_known_vendor_extractors.mjs` did not yet exist
+— verification was done via ad hoc scratch scripts, each confirming the extracted line sum
+reconciles to the PDF's own printed total within $0.01, then deleted. That script was since
+built as Task 9.7 (renumbered from 9.8) — not yet committed to git as of this revision.)*
+
+---
+
+## Task 9.1 — Extraction prompt: explicit credit-sign and running-balance rules
+
+**Description:** Claude's generic extraction prompt was silently getting two structural
+patterns wrong across multiple real vendors: (1) credit/return/payment lines extracted as
+positive when they reduce the balance (confirmed independently on both Fred Beans and Matt
+Nimey Sprague's real statements), and (2) on layouts with multiple money columns per row
+(a charge/credit column plus one or more running-balance/remittance-stub columns), reading
+the running total as if it were the row's own transaction amount (confirmed on Fred Beans —
+extracted lines summed to $113,672.48 against a printed total of $23,986.36, roughly 4.7x
+inflated). Both are now explicit, named rules in `EXTRACTION_SYSTEM_PROMPT`
+(`src/lib/aiProvider.ts`).
+
+**CC prompt:**
+```
+Add two explicit rules to the extraction system prompt: (1) a credit memo, return, credit,
+or payment line is always a NEGATIVE amount regardless of how it's printed (plain positive,
+parenthesized, or trailing-minus), (2) when a statement prints multiple money columns per
+row, only the row's own charge or credit value is the line amount — never a running-balance
+or remittance-stub column that restates an accumulated total. Confidence/gating behavior
+(G2/IC-2) is unaffected — this is prompt content only.
+```
+
+**Test cases:**
+- Regression: existing mock-mode tests (no live extraction) continue to pass unchanged —
+  this is a live-path prompt change only.
+- Happy path (live, manual verification): Matt Nimey Sprague's real statement's credit
+  lines now extract as negative.
+
+**Verification command:** none per-task; covered by the umbrella script built in Task 9.7 (`scripts/verify_known_vendor_extractors.mjs`, renumbered from 9.8 — not yet committed to git as of this revision).
+
+**Invariant enforcement:** None new — G2/IC-2 (confidence remains diagnostic-only)
+unaffected.
+
+**Regression classification:** REGRESSION-RELEVANT (prompt content, not code).
+
+**UI test spec:** N/A (data-layer only).
+
+---
+
+## Task 9.2 — Keystone Automotive Industries deterministic parser
+
+**Description:** Claude's generic path scored 0% correct on this vendor (confirmed live)
+— every transaction row's net amount already reflects Balance Forward + Period Activity −
+Credit Applied − Payment Applied, a per-row netting no generic prompt can be expected to
+reverse-engineer from a page scan. Ports `extract_keystone.py`'s column-bucketing logic
+from the reference implementation (`src/extraction/python_library/extract_keystone.py`)
+into `scripts/extract_keystone.py`, wired via `src/lib/extractKeystone.ts`.
+
+**CC prompt:**
+```
+Port the reference implementation's extract_keystone.py column-bucketing logic (x0-based
+column boundaries measured from the real document) into this project's subprocess
+contract — argv PDF path in, one ExtractedStatement-shaped JSON object out. The Balance
+Due column is the correct per-row amount to sum; Balance Forward/Period Activity/Credit
+Applied/Payment Applied are not read into the line amount individually. Add
+keystone_automotive_industries to the known-vendor extractor registry
+(src/lib/knownVendorExtractors.ts), keyed on the real printed signature "Keystone
+Automotive Industries".
+```
+
+**Test cases:**
+- Happy path: a real Keystone statement PDF extracts via the deterministic path (zero AI
+  calls), and the extracted lines' sum reconciles to the statement's printed AMOUNT DUE
+  within $0.01. Verified live: 160 lines, $10,428.76, exact match.
+- Failure case: a Keystone-signature document with no registry row yet auto-provisions one
+  with `extraction_route = 'deterministic'` on first sight (no seed-data violation).
+
+**Verification command:** none per-task; covered by the umbrella script built in Task 9.7 (`scripts/verify_known_vendor_extractors.mjs`, renumbered from 9.8 — not yet committed to git as of this revision).
+
+**Invariant enforcement:** G2 (arithmetic validation now passes on real data instead of
+failing 0%); no new invariant.
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only; existing `document-detail.spec.ts` already asserts
+on `provider_used = python_library_pdfplumber`).
+
+---
+
+## Task 9.3 — Fred Beans Parts deterministic parser
+
+**Description:** Claude's generic path extracted structurally valid lines (invoice
+numbers, dates all correct) but conflated this vendor's four money columns per row
+(charges / credits / amount_due / remit_amount_due) into a single "amount," inflating the
+sum ~4.7x (confirmed live, Session 8). Ports `extract_statement.py` from the reference
+implementation into `scripts/extract_fred_beans.py`, wired via `src/lib/extractFredBeans.ts`.
+
+**CC prompt:**
+```
+Port the reference implementation's extract_statement.py word-position row reconstruction
+and right-edge (x1) money-column classifier into this project's subprocess contract. This
+project's single `amount` field is charges (positive) when populated, else -credits
+(negative) when populated — never amount_due/remit_amount_due. Add fred_beans_parts to the
+known-vendor extractor registry, keyed on the real printed signature "Fred Beans Parts".
+```
+
+**Test cases:**
+- Happy path: a real Fred Beans statement extracts via the deterministic path, sum
+  reconciles to the printed Balance Due within $0.01. Verified live: 273 lines, $23,986.36,
+  exact match, credit-memo lines correctly negative.
+
+**Verification command:** none per-task; covered by the umbrella script built in Task 9.7 (`scripts/verify_known_vendor_extractors.mjs`, renumbered from 9.8 — not yet committed to git as of this revision).
+
+**Invariant enforcement:** G2 (arithmetic now passes instead of failing by ~$89,686).
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+**⚠️ Known open bug (found 2026-09-01, not yet fixed):** the deterministic-path raw-row
+write in `extractionPipeline.ts` (`INSERT INTO ${vendor.tableName} ...`, pre-existing code
+from Task 3.1) assumes `extracted_stmt_<vendor_slug>` already exists. `ensureKnownVendor()`
+(this session, `vendorIdentification.ts`) creates the registry row pointing at that table
+name but never calls the existing `ensureVendorStmtTable()` (`src/lib/vendorSchema.ts`) to
+actually create it — so the insert throws, uncaught, *after* the attempt row is committed
+(correctly, per S10) but *before* Silver normalization runs. Net effect: the document shows
+badge "Extracted" (attempt row honestly shows `arithmetic_pass=1`) but zero
+`silver_statement_line` rows. Confirmed live against a real Fred Beans upload; confirmed
+every Claude-routed document in the same database is unaffected (only the
+`python_library_pdfplumber` provider path hits this). Affects all 9 vendors from this
+session equally, not just Fred Beans — Fred Beans is just the one a real upload happened
+to exercise first. **Fix:** `ensureKnownVendor()` must call `ensureVendorStmtTable(vendorSlug)`
+before/alongside the registry insert. **Data repair note:** any document already stuck in
+this state has an attempt row that looks successful, so `hasAlreadySucceeded()` will skip
+re-running extraction even after the fix — existing stuck documents need either a fresh
+re-upload or a one-off repair, not just a retry.
+
+---
+
+## Task 9.4 — Wilbert's, Quirk, Adas, Empire deterministic parsers
+
+**Description:** Ports four more reference-implementation parsers for vendors where
+Claude's generic path was partially wrong (56–87% correct against the reference project's
+own eval of the generic fallback): Wilbert's Inc. (sum the Balance column, not Amount — one
+lump-sum Payment row double-counts otherwise), Quirk Auto Group (single signed amount
+column, plus a reversed-watermark text artifact to filter), Adas Calibration Experts (sum
+OPEN AMOUNT, not AMOUNT — an already-paid invoice shows a real nonzero AMOUNT but correct
+$0.00 OPEN AMOUNT), Empire Auto Parts (word-position column bucketing with a doc-number/
+description merge fixup).
+
+**CC prompt:**
+```
+Port extract_wilberts.py, extract_quirk.py, extract_adas.py, and extract_empire.py from
+the reference implementation into scripts/extract_<vendor>.py, each wired via its own
+src/lib/extract<Vendor>.ts and registered in knownVendorExtractors.ts with its real printed
+signature. Preserve each module's own documented reconciliation rule (which column is the
+correct line amount) exactly — do not generalize them into one shared parser.
+```
+
+**Test cases:**
+- Happy path (all four, verified live against real statement PDFs): sum of extracted
+  lines reconciles to each PDF's own printed total within $0.01 — Wilbert's 28 lines/
+  $2,302.25, Quirk 174 lines/$45,983.25, Adas 48 lines/$10,685.75, Empire 91 lines/$8,568.00.
+
+**Verification command:** none per-task; covered by the umbrella script built in Task 9.7 (`scripts/verify_known_vendor_extractors.mjs`, renumbered from 9.8 — not yet committed to git as of this revision).
+
+**Invariant enforcement:** G2 (arithmetic now passes instead of partial failures).
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+**⚠️ Subject to the same open bug as Task 9.3** (missing `ensureVendorStmtTable` call).
+
+---
+
+## Task 9.5 — Astech, Precision deterministic parsers (reliability, not correctness)
+
+**Description:** Ports two more reference parsers for vendors Claude's generic path
+already extracts correctly (asTech: 106/106 matched live; Precision Diagnostics: 27/27
+matched in the reference project's own eval) — done for cost (zero AI calls) and
+determinism, not because Claude was wrong.
+
+**CC prompt:**
+```
+Port extract_astech.py and extract_precision.py from the reference implementation, same
+pattern as Task 9.4. Precision's multi-line transaction reconstruction (wrapped vehicle
+description/VIN/RO fragments across several physical lines) must be preserved unchanged.
+```
+
+**Test cases:**
+- Happy path (both, verified live): Astech 106 lines/$8,339.11 exact match; Precision 27
+  lines/$17,952.92 exact match.
+
+**Verification command:** none per-task; covered by the umbrella script built in Task 9.7 (`scripts/verify_known_vendor_extractors.mjs`, renumbered from 9.8 — not yet committed to git as of this revision).
+
+**Invariant enforcement:** None new (Claude path was already passing G2 for these two).
+
+**Regression classification:** HARNESS-CANDIDATE.
+
+**UI test spec:** N/A (data-layer only).
+
+**⚠️ Subject to the same open bug as Task 9.3.**
+
+---
+
+## Task 9.6 — Live-Claude-vs-OCR test for scanned vendors — Completed
+
+**Description:** 6 vendors in the same real-statement sample (802 Subaru, Bowser Klapec,
+Key Rotunda's, Momentum Tire & Wheel, NYE Sprague's, KSI Noakers) are scanned/image-only
+PDFs — confirmed via pdfplumber (zero embedded text, zero words). Task 8.3's OCR/pdfplumber
+fallback tier is already built but inert: `pytesseract`/`pdf2image` Python packages are
+present locally, but the Tesseract and Poppler system binaries are not installed. Rather
+than installing anything up front, this task tested live Claude directly against all 6
+scanned PDFs first — this app already sends every PDF to Claude as a base64 `document`
+content block (`aiProvider.ts`), which reads a scan via vision natively, no OCR required.
+
+**Result:** 5 of 6 reconciled exactly via Claude vision alone, no OCR involved — KSI
+Noakers, 802 Subaru Rotunda's, Bowser Klapec, Momentum Tire & Wheel, and NYE Sprague's all
+passed both structural and arithmetic validation on the first live attempt. Only Key
+Rotunda's failed arithmetic reconciliation ($9,023.17 statement total vs. a computed sum of
+–$2,320.49). Investigating that one failure found it is **not an OCR/scan-quality
+problem** — Claude read every individual line correctly (0.92–0.95 confidence throughout)
+— it included two rows, `WTCC070826` (–$3,753.11) and `WTCC072026` (–$7,590.55), that are
+payment/remittance-total rows, not real transaction lines. Excluding just those two rows
+reconciles to the statement's own total exactly, to the cent — the same structural class
+of trap as Fred Beans' running-balance columns or Wilbert's lump-sum Payment row, just a
+new shape of it, and unrelated to scan quality.
+
+**Scope Decision:** since none of the 6 scanned vendors actually need OCR to be read
+correctly, Task 9.6 Step 2 (installing Tesseract/Poppler) and the former Task 9.7
+(OCR-derived parsers for scanned AR1C-family vendors) are both dropped — the premise they
+were built on (that some of these scans would fail Claude's vision path the way Fred
+Beans/Keystone failed text extraction) didn't hold for 5 of 6 vendors, and the one that did
+fail needs a different kind of fix (see Out of Scope Observation below), not OCR.
+
+**Test cases:**
+| Case | Scenario | Expected | Result |
+|------|----------|----------|--------|
+| TC-1 | KSI Noakers, 802 Subaru, Bowser Klapec, Momentum, NYE Sprague's — live Claude, no OCR | Each reconciles to its own statement total within $0.01 | PASS — all 5 |
+| TC-2 | Key Rotunda's — live Claude, no OCR | Reconciles to its own statement total within $0.01 | FAIL — off by $11,343.66 (root cause identified, see Description) |
+
+**Invariant enforcement:** None new — G2 (arithmetic gate) applied unchanged; Key
+Rotunda's correctly failed the existing gate rather than silently passing.
+
+**Regression classification:** N/A (a live investigation, not a code change to an existing
+path — Claude's extraction prompt/logic is untouched by this task).
+
+**Out of Scope Observation:** Key Rotunda's own fix (a prompt rule to recognize and exclude
+payment/remittance-total rows, or a small dedicated deterministic parser, matching the
+precedent Fred Beans/Keystone already set) is not built by this task — engineer-directed
+scope stop, not an oversight. One vendor's known, narrow, root-caused gap, not a class of
+vendors needing OCR infrastructure.
+
+*(An earlier draft of this section carried the former Task 9.7's original OCR-derived-parser
+description here, un-headed, left over from the 2026-09-01 renumbering. Removed — its
+content duplicated the Scope Decision above, and its premise no longer holds.)*
+
+---
+
+## Task 9.7 — Commit a real verification script — Completed
+**Description:** Every reconciliation check in this session (9.1–9.5) was done via
+throwaway scratch scripts, run once and deleted — never committed, so this session's
+"reconciles exactly" claims aren't independently re-runnable or protected against
+regression the way Sessions 1–8's `scripts/test_*.sh`/`.mjs` verification commands are.
+
+**CC prompt:**
+```
+Add scripts/verify_known_vendor_extractors.mjs: for each vendor in
+knownVendorExtractors.ts, run its extractor against a checked-in or documented-path real
+sample PDF and assert the extracted lines' sum reconciles to the statement's own
+statementTotal within $0.01. Exit non-zero on any mismatch.
+```
+
+**Test cases:**
+- Failure case: any vendor's extractor drifting out of reconciliation (e.g. from a future
+  edit) fails this script, not just a human noticing during manual testing.
+
+**Verification command:**
+```bash
+npx tsx scripts/verify_known_vendor_extractors.mjs
+```
+
+**Invariant enforcement:** None new — closes a real verification gap this session left
+open.
+
+**Regression classification:** HARNESS-CANDIDATE.
 
 **UI test spec:** N/A.
+
+
 
 ---
 
 ## Engineer Sign-Off
 
 **Decision owner:** Vaishali
-**Date:** _______________________
-**Signature / confirmation:** [ ] I confirm this execution plan is complete, every task's
+**Date:** 2026-08-27
+**Signature / confirmation:** [x] I confirm this execution plan is complete, every task's
 invariant enforcement is correctly embedded, regression classifications are appropriate,
 and I authorize proceeding to Phase 4 (Design Gate).
 
@@ -1458,3 +2283,21 @@ Also confirmed, lower risk throughout: new Tasks 2.4, 3.5, 6.1 (amended), 6.3 (a
 **Signature / confirmation:** [x] I confirm this execution plan, including all amendments
 through v1.3, is complete and accurate to my decisions, and I authorize proceeding to
 Phase 6.
+
+---
+
+## Sign-Off Currency Update (2026-09-01)
+
+**Decision owner:** Vaishali
+**Date:** 2026-09-01
+**Status:** RATIFIED — the Final Sign-Off above (2026-08-27, through v1.3) is extended to
+cover every amendment since, through the current v1.8 (see the changelog at the top of
+this document for the full list: v1.4–v1.6 Session 4 and Session 7 removed, v1.7 Session 7
+removal formalized as a scope deferral, v1.8 Session 6→8 lightweight-patch work documented
+plus Session 8/9 tasks added). Each amendment was already attributed to engineer direction
+at the time it was made; this entry closes the gap between that attribution and a renewed
+formal sign-off.
+
+**Signature / confirmation:** [x] I confirm this execution plan, including all amendments
+through v1.8, remains complete and accurate to my decisions and authorized for the current
+build.

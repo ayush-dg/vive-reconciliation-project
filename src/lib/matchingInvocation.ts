@@ -34,7 +34,9 @@ const matchDocument = runMatchingForDocument;
 // ForDocument/runScheduledMatchingBatch's own try/finally) would otherwise be permanent:
 // nothing ever read acquired_at, so the document could never be matched again without
 // manual DB intervention. A lock older than this is treated as abandoned and reclaimable.
-const LOCK_STALE_AFTER_MINUTES = 10;
+// Exported so documentStatus.ts can check for a live lock using the exact same
+// staleness window, rather than duplicating this number.
+export const LOCK_STALE_AFTER_MINUTES = 10;
 
 /** Exported for Task 5.1's own dedicated G5 test. The single atomic UPSERT is the entire
  * enforcement mechanism — no interleaving window exists within one Node process for a

@@ -1,5 +1,5 @@
 ---
-version: v1.1
+version: v1.3
 METHODOLOGY_VERSION: PBVI v4.9 (PBVI-011 — UI as a First-Class Citizen)
 source: PBVI Phase 5 greenfield
 frozen: true
@@ -13,6 +13,7 @@ frozen: true
 | v1.0 | 2026-08-26 | Vaishali | Greenfield — Initial, derived from ARCHITECTURE.md v1.1, INVARIANTS.md v1.3, EXECUTION_PLAN.md v1.1, UI_SURFACE.md v1.1 |
 | v1.1 | 2026-08-27 | Vaishali | Section 3/4 updated for ARCHITECTURE.md D-J — VIVE intake data relocated to new `extracted` schema (`bronze`/`gold` unaffected, already host live NetSuite data) |
 | v1.2 | 2026-08-27 | Vaishali | Section 4 Auth corrected per PHASE4_GATE_RECORD.md Finding 5 — username/password is the actual v1 build target (matches UI_SURFACE.md/Task 1.3); Entra ID recorded as the stated end-goal, not this build's mechanism |
+| v1.3 | 2026-09-01 | Vaishali | Section 1 amended to match ARCHITECTURE.md D-A (lightweight exception-resolution workflow added, short of the full deferred review/approval workspace); Section 4 corrected — the live extraction model actually wired is Claude Sonnet 5, not 4.6 (documented Scope Decision, same substitution logic as the Next.js version bump). |
 
 ---
 
@@ -21,10 +22,14 @@ frozen: true
 This system reconciles VIVE's vendor AP statement PDFs against NetSuite (AP bills) and
 CCC ONE (repair-order data) on Fabric — sign-in, upload, AI-assisted extraction,
 deterministic-first matching with a narrowly-scoped AI-assisted residual pass, a flat
-exception list, and simple per-statement reporting. It does not do human review/approval
-workflows, formal Reconciliation Runs, a permanent audit ledger, NetSuite write-back, or
-management reporting — those are BCE-scope. Success is a working extraction-to-exception
-slice an AP user can operate end-to-end, that BCE can extend without a rebuild.
+exception list, and simple per-statement reporting. It does not do a *formal* human
+review/approval workflow (no segregation of duties, no dollar-threshold second approval,
+no immutable audit ledger, no reversible bulk actions — all still BCE-scope), formal
+Reconciliation Runs, NetSuite write-back, or management reporting. A narrow, single-role
+exception-resolution action (mark resolved / flag for vendor / skip, with an optional
+note) was added 2026-09-01 by engineer direction — see ARCHITECTURE.md D-A's amendment for
+the exact boundary. Success is a working extraction-to-exception slice an AP user can
+operate end-to-end, that BCE can extend without a rebuild.
 
 ---
 
@@ -104,9 +109,13 @@ only.)*
   per-vendor raw statement tables) lives in a new `extracted` schema, kept separate from
   `bronze` to avoid namespace collision with existing NetSuite tables there
 - **Transformation:** dbt, `dbt-fabric` adapter, writing directly to Fabric Warehouse
-- **AI extraction:** Claude Sonnet 4.6 via Azure AI Foundry (primary, for non-known-vendor
-  documents); deterministic `pdfplumber`-based extractors (known-vendor bypass — no LLM
-  call); `pdfplumber`-based OCR fallback (AI-failure path only)
+- **AI extraction:** Claude Sonnet 5 via Azure AI Foundry (primary, for non-known-vendor
+  documents — corrected 2026-09-01; originally named 4.6, `claude-sonnet-5` is what's
+  actually configured, a documented Scope Decision, same substitution logic as the
+  Next.js version bump in Task 1.1); deterministic `pdfplumber`-based per-vendor extractors
+  (known-vendor bypass — no LLM call; 9 real vendors wired as of Session 9, up from the
+  originally-envisioned single generic bypass); `pdfplumber`-based OCR fallback
+  (AI-failure path only, built but inert pending Tesseract/Poppler availability)
 - **Auth:** Username/password (v1 build target — this is what Task 1.3 and
   `UI_SURFACE.md`'s Sign In spec actually build). **Entra ID is the stated end-goal**, not
   implemented in this bounded build; the Sign In screen's "Sign in with company SSO" button
@@ -149,3 +158,20 @@ confirmed as part of this sign-off.
 **Signature / confirmation:** [x] I confirm the five sections above are complete and
 accurate, the five-invariant hard cap is respected, CQ-001 is present, and I authorize
 this Claude.md for Phase 6 build sessions.
+
+---
+
+## Sign-Off Currency Update (2026-09-01)
+
+**Decision owner:** Vaishali
+**Date:** 2026-09-01
+**Status:** RATIFIED — the Engineer Sign-Off above (2026-08-27) named ARCHITECTURE.md
+"through v1.3", INVARIANTS.md "through v1.4", EXECUTION_PLAN.md "through v1.3", and
+UI_SURFACE.md "through v1.2" as the signed-off versions it relied on. Each of those four
+documents has since been amended (now at v1.6/v1.7/v1.8/v1.5 respectively) and each has its
+own Sign-Off Currency Update (2026-09-01) ratifying those amendments. This entry extends
+this Claude.md's own sign-off to rely on those current versions instead of the originals.
+
+**Signature / confirmation:** [x] I confirm this Claude.md, at its current v1.3, remains
+authorized for Phase 6 build sessions, now relying on ARCHITECTURE.md v1.6, INVARIANTS.md
+v1.7, EXECUTION_PLAN.md v1.8, and UI_SURFACE.md v1.5.

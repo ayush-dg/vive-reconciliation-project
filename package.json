@@ -14,9 +14,11 @@
     "seed:users": "tsx scripts/seed_users.mjs",
     "test:toast": "tsx scripts/test_toast_store.mjs",
     "test:document-registration": "tsx scripts/test_document_registration.mjs",
-    "test:document-status": "tsx scripts/test_document_status.mjs"
+    "test:document-status": "tsx scripts/test_document_status.mjs",
+    "test:known-vendor-extractors": "tsx scripts/verify_known_vendor_extractors.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/foundry-sdk": "^0.4.4",
     "@anthropic-ai/sdk": "^0.122.0",
     "better-sqlite3": "^11.3.0",
     "mssql": "^11.0.1",

@@ -57,12 +57,13 @@ insertAttempt(docTwoFail, 2, { arithmeticPass: 1, structuralPass: 0 });
 const statusTwoFail = computeDocumentStatus(docTwoFail);
 check('TC-3: two failed attempts -> Failed — see Exceptions', statusTwoFail.label === 'Failed — see Exceptions');
 
-// --- Bonus: a successful attempt (both pass) with no match yet -> "Processing" ---
-// (matching hasn't run — a passed validation gate alone isn't "Reconciled")
+// --- Bonus: a successful attempt (both pass) with no match yet -> "Extracted" ---
+// (matching hasn't run — a passed validation gate alone isn't "Reconciled"; distinct
+// from "Processing" as of 2026-08-31 — see documentStatus.ts's top comment)
 const docPassedNoMatch = newDoc();
 insertAttempt(docPassedNoMatch, 1, { arithmeticPass: 1, structuralPass: 1 });
 const statusPassedNoMatch = computeDocumentStatus(docPassedNoMatch);
-check('Bonus: validation passed but no match yet -> Processing (not Reconciled)', statusPassedNoMatch.label === 'Processing');
+check('Bonus: validation passed but no match yet -> Extracted (not Processing, not Reconciled)', statusPassedNoMatch.label === 'Extracted');
 
 function makeVendor() {
   const vendorId = crypto.randomUUID();
@@ -95,15 +96,16 @@ reconcile(docReconciled);
 const statusReconciled = computeDocumentStatus(docReconciled);
 check('Bonus: a recon.match exists -> Reconciled', statusReconciled.label === 'Reconciled');
 
-// --- Challenge Agent Finding 1: fail then succeed -> Processing (matching-eligible),
-// NOT stuck on "Retrying" forever. This is Task 3.3's own stated happy path.
+// --- Challenge Agent Finding 1: fail then succeed -> Extracted (matching-eligible),
+// NOT stuck on "Retrying" forever. This is Task 3.3's own stated happy path. ("Extracted",
+// not "Processing", as of 2026-08-31's badge split — same matching-eligible meaning.)
 const docFailThenSucceed = newDoc();
 insertAttempt(docFailThenSucceed, 1, { arithmeticPass: 0, structuralPass: 1 });
 insertAttempt(docFailThenSucceed, 2, { arithmeticPass: 1, structuralPass: 1 });
 const statusFailThenSucceed = computeDocumentStatus(docFailThenSucceed);
 check(
-  'Finding 1 fix: attempt 1 fails, attempt 2 succeeds -> Processing (not stuck on Retrying)',
-  statusFailThenSucceed.label === 'Processing'
+  'Finding 1 fix: attempt 1 fails, attempt 2 succeeds -> Extracted (not stuck on Retrying)',
+  statusFailThenSucceed.label === 'Extracted'
 );
 
 // --- Challenge Agent Finding 2: Reconciled branch reports the real attempt count ---

@@ -37,101 +37,39 @@ async function makeRealNotPostedException(page: import('@playwright/test').Page,
   await page.request.post(`/api/documents/${documentId}/match`);
 }
 
-/** Directly seeds N synthetic exception rows (vendor + document + silver line + exception
- * each) — used only for the pagination-volume test, where driving 51 documents through the
- * real extraction/matching pipeline would be slow and pagination display logic doesn't
- * depend on how a row was produced (matching logic itself is Session 5's own test scope). */
-function seedSyntheticExceptions(count: number, vendorSlugPrefix: string) {
-  const db = getSqliteDb();
-  for (let i = 0; i < count; i++) {
-    const vendorId = crypto.randomUUID();
-    const documentId = crypto.randomUUID();
-    const lineId = crypto.randomUUID();
-    const exceptionId = crypto.randomUUID();
-    db.prepare(
-      `INSERT INTO extracted_vendor_registry (vendor_id, vendor_slug, table_name, extraction_route) VALUES (?, ?, ?, NULL)`
-    ).run(vendorId, `${vendorSlugPrefix}_${i}`, `extracted_stmt_${vendorSlugPrefix}_${i}`);
-    db.prepare(`INSERT INTO extracted_document (document_id, content_sha256, legal_entity_id) VALUES (?, ?, 'vive-holdings')`).run(
-      documentId,
-      crypto.randomUUID()
-    );
-    db.prepare(
-      `INSERT INTO silver_statement_line (line_id, document_id, vendor_id, amount, invoice_ref, normalized_invoice_ref, normalization_version)
-       VALUES (?, ?, ?, ?, ?, ?, 'v1')`
-    ).run(lineId, documentId, vendorId, 1, `INV-PAGE-${i}`, `INV-PAGE-${i}`);
-    db.prepare(
-      `INSERT INTO recon_exception (exception_id, statement_line_id, category, reason_codes, evidence) VALUES (?, ?, 'not_posted', '[]', '{}')`
-    ).run(exceptionId, lineId);
-  }
-}
-
-test.describe('Exceptions list screen', () => {
-  test('exceptions list populates with real data from Session 5\'s matching output', async ({ page, context }) => {
+test.describe('Exceptions landing screen', () => {
+  test('vendor list populates with real data from the matching pipeline', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `Exceptions_Populate_Vendor_${crypto.randomUUID().slice(0, 8)}`;
-    const invoiceRef = `INV-EXC-${crypto.randomUUID().slice(0, 8)}`;
-    await makeRealNotPostedException(page, vendor, invoiceRef);
+    await makeRealNotPostedException(page, vendor, `INV-EXC-${crypto.randomUUID().slice(0, 8)}`);
 
     await page.goto('/exceptions');
-    await expect(page.getByText(vendor.toLowerCase(), { exact: false })).toBeVisible();
+    await expect(page.getByTestId(`exceptions-vendor-link-${vendor.toLowerCase()}`)).toBeVisible();
   });
 
-  test('search by vendor name filters correctly', async ({ page, context }) => {
+  test('the vendor search box filters the list client-side', async ({ page, context }) => {
     await signInViaCookie(context);
     const uniqueVendor = `SearchFilterVendor${crypto.randomUUID().slice(0, 8)}`;
+    const otherVendor = `OtherVendor${crypto.randomUUID().slice(0, 8)}`;
     await makeRealNotPostedException(page, uniqueVendor, `INV-SEARCH-${crypto.randomUUID().slice(0, 8)}`);
+    await makeRealNotPostedException(page, otherVendor, `INV-SEARCH-OTHER-${crypto.randomUUID().slice(0, 8)}`);
 
     await page.goto('/exceptions');
-    await page.getByTestId('exceptions-search-input').fill(uniqueVendor.toLowerCase());
-    await page.getByTestId('exceptions-search-submit').click();
+    await page.getByTestId('exceptions-vendor-search-input').fill(uniqueVendor.toLowerCase());
 
-    await expect(page.getByTestId('exceptions-table')).toContainText(uniqueVendor.toLowerCase());
-    // A retrying expect(), not a one-shot .textContent() read — the search click fires an
-    // async fetch (ExceptionsView.tsx's handleSearchSubmit doesn't await load()), so a
-    // static read racing that fetch can observe the pre-search summary text.
-    await expect(page.getByTestId('exceptions-pagination-summary')).toContainText('1 total');
+    await expect(page.getByTestId(`exceptions-vendor-link-${uniqueVendor.toLowerCase()}`)).toBeVisible();
+    await expect(page.getByTestId(`exceptions-vendor-link-${otherVendor.toLowerCase()}`)).toHaveCount(0);
   });
 
-  // Challenge-review addition: vendor_slug values are underscore-delimited by
-  // construction (vendorIdentification.ts's slugify()) — an unescaped SQL LIKE would let
-  // "_" match any single character, so searching for one vendor's exact slug could also
-  // match an unrelated vendor differing only at that position. Confirms the escaped
-  // search matches ONLY the exact vendor, not both.
-  test('a search term containing an underscore does not broaden the match via SQL LIKE wildcarding', async ({
-    page,
-    context,
-  }) => {
+  test('clicking a vendor navigates to that vendor\'s two-pane exception view', async ({ page, context }) => {
     await signInViaCookie(context);
-    const suffix = crypto.randomUUID().slice(0, 8);
-    const exactVendor = `wildcard_test_${suffix}`; // the literal search term
-    const decoyVendor = `wildcardXtest_${suffix}`; // differs only where "_" sits — matches if "_" is treated as a wildcard
-    await makeRealNotPostedException(page, exactVendor, `INV-WC-EXACT-${suffix}`);
-    await makeRealNotPostedException(page, decoyVendor, `INV-WC-DECOY-${suffix}`);
+    const vendor = `Exceptions_Navigate_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    await makeRealNotPostedException(page, vendor, `INV-NAV-${crypto.randomUUID().slice(0, 8)}`);
 
     await page.goto('/exceptions');
-    await page.getByTestId('exceptions-search-input').fill(exactVendor);
-    await page.getByTestId('exceptions-search-submit').click();
-
-    await expect(page.getByTestId('exceptions-table')).toContainText(exactVendor);
-    await expect(page.getByTestId('exceptions-pagination-summary')).toContainText('1 total');
-    await expect(page.getByTestId('exceptions-table')).not.toContainText(decoyVendor);
-  });
-
-  test('pagination shows 50 rows per page when more than 50 exist', async ({ page, context }) => {
-    await signInViaCookie(context);
-    const prefix = `pg_vendor_${crypto.randomUUID().slice(0, 6)}`;
-    seedSyntheticExceptions(51, prefix);
-
-    await page.goto('/exceptions');
-    await page.getByTestId('exceptions-search-input').fill(prefix);
-    await page.getByTestId('exceptions-search-submit').click();
-
-    await expect(page.getByTestId('exceptions-pagination-summary')).toContainText('51 total');
-    const rows = page.locator('[data-testid^="exception-row-"]');
-    await expect(rows).toHaveCount(50);
-
-    await page.getByTestId('exceptions-next-page').click();
-    await expect(page.locator('[data-testid^="exception-row-"]')).toHaveCount(1);
+    await page.getByTestId(`exceptions-vendor-link-${vendor.toLowerCase()}`).click();
+    await expect(page).toHaveURL(`/exceptions/${vendor.toLowerCase()}`);
+    await expect(page.getByTestId('exceptions-vendor-count')).toHaveText('1 exceptions');
   });
 
   test('no bulk-selection UI is present', async ({ page, context }) => {
@@ -143,37 +81,34 @@ test.describe('Exceptions list screen', () => {
     await expect(page.locator('input[type="checkbox"]')).toHaveCount(0);
   });
 
-  // Challenge-review addition: the client refetch (ExceptionsView.tsx's load()) previously
-  // swallowed a failed API response with no error/retry UI at all — the table would just
-  // keep showing stale data. Confirms the same global inline-error + Retry pattern now
-  // surfaces, and that Retry recovers once the API is healthy again.
-  test('a failed search/pagination refetch shows an inline error with Retry, which recovers', async ({ page, context }) => {
+  // Challenge-review addition (carried over from the flat-list screen): a failed refetch
+  // must not leave the table silently showing stale/wrong data with no signal. The vendor
+  // list is server-rendered on load, so the only client fetch is the explicit Refresh
+  // button — exercised here instead of a search-triggered one.
+  test('a failed refresh shows an inline error with Retry, which recovers', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `Exceptions_LoadError_Vendor_${crypto.randomUUID().slice(0, 8)}`;
     await makeRealNotPostedException(page, vendor, `INV-LOADERR-${crypto.randomUUID().slice(0, 8)}`);
 
     await page.goto('/exceptions');
     let shouldFail = true;
-    await page.route('**/api/exceptions?*', (route) => {
-      if (shouldFail) {
-        shouldFail = false; // fail once, then let Retry succeed
+    await page.route('**/api/exceptions', (route) => {
+      if (route.request().method() === 'GET' && shouldFail) {
+        shouldFail = false;
         return route.fulfill({ status: 500, body: JSON.stringify({ error: 'simulated failure' }) });
       }
       return route.continue();
     });
 
-    await page.getByTestId('exceptions-search-input').fill(vendor.toLowerCase());
-    await page.getByTestId('exceptions-search-submit').click();
-    // Shared InlineLoadError component (Task 6.4) — same testids as the global SSR error
-    // boundary (error.tsx), not a screen-specific duplicate.
+    await page.getByTestId('exceptions-vendor-refresh').click();
     await expect(page.getByTestId('error-boundary')).toBeVisible();
 
     await page.getByTestId('error-retry').click();
     await expect(page.getByTestId('error-boundary')).toHaveCount(0);
-    await expect(page.getByTestId('exceptions-table')).toContainText(vendor.toLowerCase());
+    await expect(page.getByTestId(`exceptions-vendor-link-${vendor.toLowerCase()}`)).toBeVisible();
   });
 
-  test('no possible_duplicate_correction category ever appears in the list', async ({ page, context }) => {
+  test('no possible_duplicate_correction category ever appears', async ({ page, context }) => {
     await signInViaCookie(context);
     await page.goto('/exceptions');
     await expect(page.getByText('possible_duplicate_correction', { exact: false })).toHaveCount(0);
@@ -198,9 +133,9 @@ test.describe('Exceptions list screen', () => {
     });
     await page.request.post(`/api/documents/${documentId}/match`);
 
-    await page.goto('/exceptions');
-    await page.getByTestId('exceptions-search-input').fill(vendor.toLowerCase());
-    await page.getByTestId('exceptions-search-submit').click();
-    await expect(page.getByTestId('exceptions-table')).toContainText('Amount Mismatch');
+    await page.goto(`/exceptions/${vendor.toLowerCase()}`);
+    await expect(page.getByTestId('exception-detail-category')).toHaveText('Amount mismatch');
+    await expect(page.getByTestId('exception-detail-statement-amount')).toContainText('99.00');
+    await expect(page.getByTestId('exception-detail-erp-amount')).toContainText('1.00');
   });
 });

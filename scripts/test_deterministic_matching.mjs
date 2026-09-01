@@ -122,7 +122,7 @@ function insertSilverLine(documentId, invoiceRef, amount) {
     runId: 'run-002',
     extractedAt: '2026-08-27T00:00:00Z',
   });
-  const outcome = matchStatementLine(line);
+  const outcome = await matchStatementLine(line);
   check('TC-5: amount mismatch is unmatched, not silently accepted', outcome.status === 'unmatched');
   check('TC-5: reason code is AMOUNT_MISMATCH', outcome.reasonCodes.includes('AMOUNT_MISMATCH'));
   check('TC-5: reference is still captured for an amount-mismatch outcome', !!outcome.reference);
@@ -172,7 +172,7 @@ function insertSilverLine(documentId, invoiceRef, amount) {
   seedNetsuiteVendorBillRow(db, older);
   seedNetsuiteVendorBillRow(db, newer);
 
-  const outcome = matchStatementLine({ normalizedInvoiceRef: 'INV-DUP', amount: 30 });
+  const outcome = await matchStatementLine({ normalizedInvoiceRef: 'INV-DUP', amount: 30 });
   check('TC-8: duplicate doc numbers resolve deterministically to the most-recently-extracted row', outcome.reference?.runId === 'run-new');
 }
 
@@ -210,7 +210,7 @@ function insertSilverLine(documentId, invoiceRef, amount) {
   db.exec('CREATE TEMPORARY TABLE bronze_netsuite_vendorbill_backup AS SELECT * FROM bronze_netsuite_vendorbill');
   db.exec('DELETE FROM bronze_netsuite_vendorbill');
   try {
-    const outcome = matchStatementLine({ normalizedInvoiceRef: 'INV-EMPTY-TABLE', amount: 5 });
+    const outcome = await matchStatementLine({ normalizedInvoiceRef: 'INV-EMPTY-TABLE', amount: 5 });
     check('TC-10: NOT_POSTED against a genuinely empty reference table', outcome.status === 'unmatched' && outcome.reasonCodes.includes('NOT_POSTED'));
     check('TC-10: reference is null (nothing at all to capture), not a fabricated watermark', outcome.reference === null);
   } finally {
