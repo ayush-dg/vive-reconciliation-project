@@ -3,6 +3,8 @@ import { getSqliteDb, getDbMode } from './db';
 import { assertValidVendorSlug } from './schema';
 import { extractViaClaude } from './aiProvider';
 import { extractViaPdfplumber } from './pdfplumberExtractor';
+import { extractViaPdfplumberOcrFallback } from './pdfplumberOcrFallback';
+import { extractViaLiaAutoGroup, LIA_AUTO_GROUP_SIGNATURES, LIA_AUTO_GROUP_VENDOR_SLUG } from './extractLiaAutoGroup';
 import type { ExtractionOutcome } from './aiProvider';
 
 /**
@@ -89,6 +91,27 @@ function createProvisionalVendor(vendorSlug: string): VendorRegistryRow {
   return { vendorId, vendorSlug, tableName, extractionRoute: null };
 }
 
+/** Task 8.1 (2026-09-01) — Lia Auto Group is the one vendor this build ships
+ * a real per-vendor deterministic Python extractor for (see
+ * extractLiaAutoGroup.ts's doc comment). Unlike createProvisionalVendor
+ * (an unknown vendor Claude just identified, extraction_route left NULL
+ * pending manual onboarding), this vendor is known in advance — the registry
+ * row is created with extraction_route='deterministic' on first sight, no
+ * "Migrated only, no seed data" violation since nothing is seeded ahead of
+ * an actual document needing it. */
+function ensureLiaAutoGroupVendor(): VendorRegistryRow {
+  const existing = findVendorBySlug(LIA_AUTO_GROUP_VENDOR_SLUG);
+  if (existing) return existing;
+  const db = getSqliteDb();
+  const vendorId = crypto.randomUUID();
+  const tableName = `extracted_stmt_${LIA_AUTO_GROUP_VENDOR_SLUG}`;
+  db.prepare(
+    `INSERT INTO extracted_vendor_registry (vendor_id, vendor_slug, table_name, extraction_route)
+     VALUES (?, ?, ?, 'deterministic')`
+  ).run(vendorId, LIA_AUTO_GROUP_VENDOR_SLUG, tableName);
+  return { vendorId, vendorSlug: LIA_AUTO_GROUP_VENDOR_SLUG, tableName, extractionRoute: 'deterministic' };
+}
+
 /** S2 — a non-identical document for an already-processed vendor/period/
  * entity combination is version-chained to the prior document, not left
  * disconnected. No human-reviewed flag (D-H amended). Moved here from Task
@@ -123,7 +146,7 @@ export type IdentifyAndExtractResult = {
   // outcome; the pipeline orchestrator writes the attempt with vendor_id
   // left NULL, and Task 3.2's validation gate fails it on structural grounds.
   vendor: VendorRegistryRow | null;
-  provider: 'python_library_pdfplumber' | 'claude_sonnet';
+  provider: 'python_library_pdfplumber' | 'claude_sonnet' | 'pdfplumber_fallback';
   outcome: ExtractionOutcome;
 };
 
@@ -142,7 +165,19 @@ function resolveProvisionalVendor(outcome: ExtractionOutcome, guessedSlug: strin
   return findVendorBySlug(resolvedSlug) ?? createProvisionalVendor(resolvedSlug);
 }
 
-export async function identifyAndExtract(documentId: string, legalEntityId: string, pdfBytes: Buffer): Promise<IdentifyAndExtractResult> {
+/** forceFallback (Task 8.2/8.3, 2026-09-01): set by extractionPipeline.ts's
+ * retry loop when attempt 1 was a genuine Claude failure (extracted === null
+ * for a document that would otherwise have routed to Claude) — routes
+ * straight to the OCR/pdfplumber fallback tier instead of an identical
+ * Claude retry. Never set for a document with a known deterministic
+ * vendor — that path doesn't call Claude in the first place, so this
+ * routing question never arises for it. */
+export async function identifyAndExtract(
+  documentId: string,
+  legalEntityId: string,
+  pdfBytes: Buffer,
+  forceFallback = false
+): Promise<IdentifyAndExtractResult> {
   assertSqliteMode();
   const db = getSqliteDb();
 
@@ -150,12 +185,29 @@ export async function identifyAndExtract(documentId: string, legalEntityId: stri
   const matched = guessedSlug ? findVendorBySlug(guessedSlug) : null;
 
   let vendor = matched;
-  let provider: 'python_library_pdfplumber' | 'claude_sonnet';
+  let provider: 'python_library_pdfplumber' | 'claude_sonnet' | 'pdfplumber_fallback';
   let outcome: ExtractionOutcome;
 
-  if (matched && matched.extractionRoute === 'deterministic') {
+  // Task 8.1 — checked BEFORE the generic guessedSlug/matched path: a real
+  // Lia Auto Group statement has no synthetic "VENDOR: <name>" marker for
+  // peekVendorSlug's regex to find (that marker only exists in this
+  // project's own test fixtures), so it would otherwise never match a
+  // registry row no matter how the registry itself is configured. This
+  // checks the document's real, raw text for Lia's own printed signature
+  // instead — the one genuine "signature/layout match" this build performs.
+  const isLiaAutoGroup = LIA_AUTO_GROUP_SIGNATURES.some((sig) => pdfText.includes(sig));
+
+  if (isLiaAutoGroup) {
+    provider = 'python_library_pdfplumber';
+    vendor = ensureLiaAutoGroupVendor();
+    outcome = await extractViaLiaAutoGroup(pdfBytes);
+  } else if (matched && matched.extractionRoute === 'deterministic') {
     provider = 'python_library_pdfplumber';
     outcome = await extractViaPdfplumber(pdfBytes);
+  } else if (forceFallback) {
+    provider = 'pdfplumber_fallback';
+    outcome = await extractViaPdfplumberOcrFallback(pdfBytes);
+    vendor = matched ?? resolveProvisionalVendor(outcome, guessedSlug);
   } else {
     provider = 'claude_sonnet';
     outcome = await extractViaClaude(pdfBytes, pdfText);

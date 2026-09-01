@@ -34,6 +34,7 @@ function parseMarkerLines(text: string): ExtractedLine[] {
       roNumber: roNumber === '-' ? null : roNumber,
       amount: amountStr === '-' ? null : Number(amountStr),
       date: date === '-' ? null : date,
+      lineConfidence: null, // this stand-in marker parser never claims a real per-line signal
     });
   }
   return lines;

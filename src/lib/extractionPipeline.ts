@@ -69,6 +69,15 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
   }
 
   let attemptNo = getExistingAttemptCount(documentId);
+  // Task 8.2 (2026-09-01) — set once attempt N's provider was 'claude_sonnet'
+  // and it produced no usable extraction at all (a genuine Claude failure,
+  // e.g. the truncated-output case aiProvider.ts now guards against) —
+  // attempt N+1 then routes to Task 8.3's OCR/pdfplumber fallback tier
+  // instead of an identical Claude retry. Left false for a validation-only
+  // failure (extracted !== null but arithmetic/structural failed), which
+  // still retries the same path as before this task — unchanged behavior
+  // for the common case.
+  let routeNextAttemptToFallback = false;
   while (attemptNo < MAX_ATTEMPTS) {
     attemptNo += 1;
 
@@ -76,7 +85,7 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
     // missing document file) must still leave an attempt row; these tables
     // must never silently omit a failed attempt. Caught here, not left to
     // propagate past the write below.
-    let provider: 'python_library_pdfplumber' | 'claude_sonnet' | null = null;
+    let provider: 'python_library_pdfplumber' | 'claude_sonnet' | 'pdfplumber_fallback' | null = null;
     let rawOutput = '';
     let confidence: number | null = null;
     let arithmeticPass = false;
@@ -86,12 +95,13 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
 
     try {
       const pdfBytes = readDocumentFile(document.content_sha256);
-      const result = await identifyAndExtract(documentId, document.legal_entity_id, pdfBytes);
+      const result = await identifyAndExtract(documentId, document.legal_entity_id, pdfBytes, routeNextAttemptToFallback);
       vendor = result.vendor;
       provider = result.provider;
       rawOutput = result.outcome.rawOutput;
       confidence = result.outcome.confidence;
       extracted = result.outcome.extracted;
+      routeNextAttemptToFallback = provider === 'claude_sonnet' && extracted === null;
 
       const validation = validateExtraction(extracted);
       // Both flags require extracted !== null — otherwise a total extraction
