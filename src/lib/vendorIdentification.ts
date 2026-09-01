@@ -5,6 +5,7 @@ import { extractViaClaude } from './aiProvider';
 import { extractViaPdfplumber } from './pdfplumberExtractor';
 import { extractViaPdfplumberOcrFallback } from './pdfplumberOcrFallback';
 import { findKnownVendorExtractor } from './knownVendorExtractors';
+import { ensureVendorStmtTable } from './vendorSchema';
 import type { ExtractionOutcome } from './aiProvider';
 
 /**
@@ -99,12 +100,27 @@ function createProvisionalVendor(vendorSlug: string): VendorRegistryRow {
  * created with extraction_route='deterministic' on first sight, no
  * "Migrated only, no seed data" violation since nothing is seeded ahead of
  * an actual document needing it. */
-function ensureKnownVendor(vendorSlug: string): VendorRegistryRow {
+async function ensureKnownVendor(vendorSlug: string): Promise<VendorRegistryRow> {
+  // Bug fixed 2026-09-01: this function used to insert the registry row
+  // naming a table_name it never actually created. extractionPipeline.ts's
+  // pre-existing raw-row write (`INSERT INTO ${vendor.tableName} ...`, only
+  // reachable for provider === 'python_library_pdfplumber') then threw on a
+  // real Fred Beans upload — an unguarded exception that fired AFTER the
+  // attempt row was already committed (S10) but BEFORE Silver normalization
+  // ran, leaving the document showing badge "Extracted" with zero
+  // silver_statement_line rows. ensureVendorStmtTable() already existed for
+  // exactly this (vendorSchema.ts, Task 1.2) — just never called here.
+  // Called unconditionally (CREATE TABLE IF NOT EXISTS, so idempotent and
+  // cheap), not only on the "insert a new registry row" branch below — a
+  // registry row already created by the pre-fix code path is exactly the
+  // broken state that needs repairing, not skipping, on next sight.
+  const tableName = await ensureVendorStmtTable(vendorSlug);
+
   const existing = findVendorBySlug(vendorSlug);
   if (existing) return existing;
+
   const db = getSqliteDb();
   const vendorId = crypto.randomUUID();
-  const tableName = `extracted_stmt_${vendorSlug}`;
   db.prepare(
     `INSERT INTO extracted_vendor_registry (vendor_id, vendor_slug, table_name, extraction_route)
      VALUES (?, ?, ?, 'deterministic')`
@@ -200,7 +216,7 @@ export async function identifyAndExtract(
 
   if (knownVendor) {
     provider = 'python_library_pdfplumber';
-    vendor = ensureKnownVendor(knownVendor.vendorSlug);
+    vendor = await ensureKnownVendor(knownVendor.vendorSlug);
     outcome = await knownVendor.extract(pdfBytes);
   } else if (matched && matched.extractionRoute === 'deterministic') {
     provider = 'python_library_pdfplumber';
