@@ -159,12 +159,6 @@ export default function HomeView({
             </div>
             <div className="stat-label">Open exceptions</div>
           </div>
-          <div className="stat-card stat-card--danger">
-            <div className="stat-value" data-testid="stat-extraction-failures">
-              {stats.extractionFailures}
-            </div>
-            <div className="stat-label">Extraction failures</div>
-          </div>
           <div className="stat-card stat-card--success">
             <div className="stat-value" data-testid="stat-reconciled">
               {stats.reconciledCount}

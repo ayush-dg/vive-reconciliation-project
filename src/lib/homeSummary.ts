@@ -17,7 +17,6 @@ function assertSqliteMode() {
 export type HomeSummaryStats = {
   documentsProcessed: number;
   openExceptions: number;
-  extractionFailures: number;
   reconciledCount: number;
   notReconciledCount: number;
 };
@@ -27,13 +26,21 @@ export function getHomeSummaryStats(): HomeSummaryStats {
   const db = getSqliteDb();
   const documents = listDocumentsWithStatusBadge();
   const openExceptions = (db.prepare('SELECT COUNT(*) AS n FROM recon_exception').get() as { n: number }).n;
-  const reconciledCount = documents.filter((d) => d.status_badge.badge === 'Reconciled').length;
+  // Reconciled is a line-level count (parallel to openExceptions above), not a
+  // document-level one: every statement line that went through matching lands in
+  // exactly one of recon_match (reconciled) or recon_exception (open exception) — never
+  // both — so this is simply "lines that did not become an exception."
+  const reconciledCount = (db.prepare('SELECT COUNT(*) AS n FROM recon_match').get() as { n: number }).n;
+  // Not-reconciled stays document-level: documents with at least one line still short of
+  // a full match (i.e. not every line reconciled) — "documents that need review," not a
+  // count derived from the old overloaded 'Failed' badge (which conflated a genuine
+  // extraction failure with a document that extracted fine but has open exceptions).
+  const fullyReconciledDocs = documents.filter((d) => d.status_badge.badge === 'Reconciled').length;
 
   return {
     documentsProcessed: documents.length,
     openExceptions,
-    extractionFailures: documents.filter((d) => d.status_badge.badge === 'Failed').length,
     reconciledCount,
-    notReconciledCount: documents.length - reconciledCount,
+    notReconciledCount: documents.length - fullyReconciledDocs,
   };
 }

@@ -1,7 +1,14 @@
 # INVARIANTS.md — VIVE Statement Reconciliation (Bounded First Build)
 
-**Version:** 1.6
+**Version:** 1.7
 **Status:** COMPLETE
+
+## v1.7 Changelog (2026-09-01)
+
+New OD6 — whether the exception-resolution workflow (status/note/resolved_at) warrants a
+named invariant, or stays an unenforced implementation detail (mirrors OD4's own
+re-examination pattern). G1–G5/S1–S11/T1–T7 all reviewed against Session 6→9 work and
+confirmed still accurate as written — no changes.
 
 ## v1.6 Changelog (2026-08-28, build-time correction discovered mid-Session-4)
 
@@ -504,6 +511,30 @@ which was pushed to UI Discovery and remains unresolved there.
 
 ---
 
+## OD6 — Does the exception-resolution workflow need its own invariant? [NEW 2026-09-01]
+
+**Context:** a lightweight resolution workflow (Mark resolved / Flag for vendor / Skip +
+optional note; `recon.exception.status`/`note`/`resolved_at`, migration 008) was added by
+engineer direction, in tension with D-A/D-C's original "no review/approval workspace"
+framing (see ARCHITECTURE.md's 2026-09-01 amendments). It has none of T2/T3/T4/T7's
+guarantees (segregation of duties, dollar-threshold approval, audit ledger, reversibility)
+— those remain correctly un-built.
+
+**Open question:** should something like "a resolved/flagged/skipped exception is never
+silently reset back to open by an automated process" become a real, named invariant
+(enforced in code, checked by a harness test) — or does it stay an implementation detail,
+same tier as any other UI state, not worth invariant status?
+
+**Constraint to weigh:** the Global section is a hard-capped five (G1–G5). A genuinely new
+*global* invariant would require retiring or merging an existing one, not just appending a
+sixth — this is very likely session-scoped (`S`-prefixed) territory instead, if it's
+adopted at all, the same tier as S1/S2/S5.
+
+**Not resolved here** — flagged for Vaishali to decide, same as OD4 was reopened rather
+than silently assumed.
+
+---
+
 # 4. Deferred Target-State Invariants (BCE-scope)
 
 These belong to the full target architecture and are deliberately not required as global
@@ -557,10 +588,11 @@ and CCC reference data ingested via an internally-owned daily batch job... match
 calls either API live") as-is for this bounded build. Removing this as a Global invariant
 means the bounded build, as currently specified, no longer has an explicit invariant
 preventing live matching calls — even though the live-pull feature itself is confirmed
-out of scope for this build. ARCHITECTURE.md should be amended with a corresponding note
-(recommended: add a Deferred/parking-lot entry mirroring the "T8" suggestion made during
-this discussion) so the two documents don't silently diverge. This has not yet been done
-to ARCHITECTURE.md as of this INVARIANTS.md revision — flagging as an open follow-up.
+out of scope for this build. **Resolved (corrected 2026-09-01):** ARCHITECTURE.md §7
+(Future Enhancements / Parking Lot) now carries the corresponding entry — "Live
+NetSuite/CCC pull as an alternative matching mode" — so the two documents no longer
+silently diverge. This was done in an earlier ARCHITECTURE.md revision than this note
+previously acknowledged; no further follow-up needed.
 
 **Replacement:** S9 (extraction attempt FK/append-only) was promoted to fill the vacated
 Global slot, at engineer's selection among offered candidates (S7, S8, S9, or other).
@@ -635,3 +667,20 @@ five-invariant hard cap, and I stand behind this set.
 **Signature / confirmation:** [x] I confirm every invariant above, including all
 amendments through v1.4, is accurate to my decisions and I authorize proceeding to
 Phase 6.
+
+---
+
+## Sign-Off Currency Update (2026-09-01)
+
+**Decision owner:** Vaishali
+**Date:** 2026-09-01
+**Status:** RATIFIED — the Final Sign-Off above (2026-08-27, through v1.4) is extended to
+cover every amendment since, through the current v1.7 (see the changelog at the top of
+this document for the full list: v1.5 G5 failure-mode sharpened, v1.6 S8 reworded for
+externally-owned NetSuite/CCC ingestion, v1.7 new OD6 + Session 6→9 review with no
+changes). Each amendment was already attributed to engineer direction at the time it was
+made; this entry closes the gap between that attribution and a renewed formal sign-off.
+
+**Signature / confirmation:** [x] I confirm every invariant above, including all
+amendments through v1.7, remains accurate to my decisions and authorized for the current
+build.
