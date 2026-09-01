@@ -4,7 +4,7 @@ import { assertValidVendorSlug } from './schema';
 import { extractViaClaude } from './aiProvider';
 import { extractViaPdfplumber } from './pdfplumberExtractor';
 import { extractViaPdfplumberOcrFallback } from './pdfplumberOcrFallback';
-import { extractViaLiaAutoGroup, LIA_AUTO_GROUP_SIGNATURES, LIA_AUTO_GROUP_VENDOR_SLUG } from './extractLiaAutoGroup';
+import { findKnownVendorExtractor } from './knownVendorExtractors';
 import type { ExtractionOutcome } from './aiProvider';
 
 /**
@@ -91,25 +91,25 @@ function createProvisionalVendor(vendorSlug: string): VendorRegistryRow {
   return { vendorId, vendorSlug, tableName, extractionRoute: null };
 }
 
-/** Task 8.1 (2026-09-01) — Lia Auto Group is the one vendor this build ships
- * a real per-vendor deterministic Python extractor for (see
- * extractLiaAutoGroup.ts's doc comment). Unlike createProvisionalVendor
- * (an unknown vendor Claude just identified, extraction_route left NULL
- * pending manual onboarding), this vendor is known in advance — the registry
- * row is created with extraction_route='deterministic' on first sight, no
+/** Task 8.1, generalized in Session 9 (2026-09-01) — each vendor in
+ * knownVendorExtractors.ts's table ships a real per-vendor deterministic
+ * Python extractor. Unlike createProvisionalVendor (an unknown vendor
+ * Claude just identified, extraction_route left NULL pending manual
+ * onboarding), these vendors are known in advance — the registry row is
+ * created with extraction_route='deterministic' on first sight, no
  * "Migrated only, no seed data" violation since nothing is seeded ahead of
  * an actual document needing it. */
-function ensureLiaAutoGroupVendor(): VendorRegistryRow {
-  const existing = findVendorBySlug(LIA_AUTO_GROUP_VENDOR_SLUG);
+function ensureKnownVendor(vendorSlug: string): VendorRegistryRow {
+  const existing = findVendorBySlug(vendorSlug);
   if (existing) return existing;
   const db = getSqliteDb();
   const vendorId = crypto.randomUUID();
-  const tableName = `extracted_stmt_${LIA_AUTO_GROUP_VENDOR_SLUG}`;
+  const tableName = `extracted_stmt_${vendorSlug}`;
   db.prepare(
     `INSERT INTO extracted_vendor_registry (vendor_id, vendor_slug, table_name, extraction_route)
      VALUES (?, ?, ?, 'deterministic')`
-  ).run(vendorId, LIA_AUTO_GROUP_VENDOR_SLUG, tableName);
-  return { vendorId, vendorSlug: LIA_AUTO_GROUP_VENDOR_SLUG, tableName, extractionRoute: 'deterministic' };
+  ).run(vendorId, vendorSlug, tableName);
+  return { vendorId, vendorSlug, tableName, extractionRoute: 'deterministic' };
 }
 
 /** S2 — a non-identical document for an already-processed vendor/period/
@@ -188,19 +188,20 @@ export async function identifyAndExtract(
   let provider: 'python_library_pdfplumber' | 'claude_sonnet' | 'pdfplumber_fallback';
   let outcome: ExtractionOutcome;
 
-  // Task 8.1 — checked BEFORE the generic guessedSlug/matched path: a real
-  // Lia Auto Group statement has no synthetic "VENDOR: <name>" marker for
-  // peekVendorSlug's regex to find (that marker only exists in this
-  // project's own test fixtures), so it would otherwise never match a
-  // registry row no matter how the registry itself is configured. This
-  // checks the document's real, raw text for Lia's own printed signature
-  // instead — the one genuine "signature/layout match" this build performs.
-  const isLiaAutoGroup = LIA_AUTO_GROUP_SIGNATURES.some((sig) => pdfText.includes(sig));
+  // Task 8.1, generalized in Session 9 — checked BEFORE the generic
+  // guessedSlug/matched path: a real known-vendor statement has no
+  // synthetic "VENDOR: <name>" marker for peekVendorSlug's regex to find
+  // (that marker only exists in this project's own test fixtures), so it
+  // would otherwise never match a registry row no matter how the registry
+  // itself is configured. This checks the document's real, raw text
+  // against each known vendor's own printed signature instead — the one
+  // genuine "signature/layout match" this build performs.
+  const knownVendor = findKnownVendorExtractor(pdfText);
 
-  if (isLiaAutoGroup) {
+  if (knownVendor) {
     provider = 'python_library_pdfplumber';
-    vendor = ensureLiaAutoGroupVendor();
-    outcome = await extractViaLiaAutoGroup(pdfBytes);
+    vendor = ensureKnownVendor(knownVendor.vendorSlug);
+    outcome = await knownVendor.extract(pdfBytes);
   } else if (matched && matched.extractionRoute === 'deterministic') {
     provider = 'python_library_pdfplumber';
     outcome = await extractViaPdfplumber(pdfBytes);
