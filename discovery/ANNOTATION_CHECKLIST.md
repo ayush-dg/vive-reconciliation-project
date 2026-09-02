@@ -470,5 +470,5 @@ evaluation of M-018's write path.
 Blocked on Session F completing (CON-S3-001) and the remaining open P1 items.
 
 **Human gate required before Stage 3 closes.**
-**Engineer sign-off:** _____________
-**Date:** _____________
+**Engineer sign-off:** Vaishali
+**Date:** 02-09-2026
