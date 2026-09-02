@@ -10,7 +10,10 @@ STAGE-3-STATUS: CHECK 0 (schema compliance) found and fixed two P1 SCHEMA_VIOLAT
 backfilled. R-001 cited "N2" in its threatened-invariant framing as if it were a resolvable
 `INVARIANT_CATALOGUE.md` ID; it isn't (confirmed — no such ID exists there) — reworded to
 state plainly that N2 is a `PHASE4_GATE_RECORD.md` label deliberately never promoted to a
-catalogue entry, not an orphaned reference.
+catalogue entry, not an orphaned reference. Cross-artifact review (P1-S3-003, P2-S3-006)
+also found R-002/R-003 didn't cross-reference `docs/INVARIANTS.md`'s OD4/OD5, despite
+covering the same underlying gaps — both now cross-referenced. See
+`discovery/ANNOTATION_CHECKLIST.md` for the full Stage 3 backlog.
 
 # RISK_REGISTER.md — VIVE Statement Reconciliation
 
@@ -66,12 +69,17 @@ history). Only genuinely still-open risk is catalogued here.
   code; this risk describes a design gap in that function's behavior (no checkpoint), not
   a defect Stage 2 otherwise flagged independently.
 - **Source artifact:** `docs/ARCHITECTURE.md` §4 Key Risks, item 1 (not covered by any
-  `PHASE4_GATE_RECORD.md` Section D finding — no matching entry found there)
+  `PHASE4_GATE_RECORD.md` Section D finding — no matching entry found there).
+  **[Stage 3 cross-reference, 2026-09-02]:** this is the same gap `docs/INVARIANTS.md`
+  OD4 already names directly — OD4's own text: "Not silently accepted — raised for
+  Vaishali/Vartan to confirm this trade is intentional before build." R-002's resolution
+  is contingent on that same conversation, not a separate open item to track twice.
 - **Mitigation:** none stated — this risk is recorded as currently unmitigated, not
   accepted-with-rationale like R-001.
-- **Recommended action:** NOT DETERMINABLE FROM SOURCE (requires operational assessment;
-  `ARCHITECTURE.md` frames this as BCE-scope to close, not a decision this bounded build
-  has made).
+- **Recommended action:** Confirm with Vartan (per OD4) whether version-chaining with no
+  human checkpoint is an intentional, accepted trade. `ARCHITECTURE.md` frames this as
+  BCE-scope to close, but OD4 makes clear it's also pending an explicit sign-off before
+  build, not solely a future-BCE concern.
 
 - **Risk ID:** R-003
 - **Description:** Access-scoping deferral (D-F) could surface a real architectural need
@@ -90,7 +98,11 @@ history). Only genuinely still-open risk is catalogued here.
   concern this risk describes.
 - **Source artifact:** `docs/ARCHITECTURE.md` §4 Key Risks, item 4 (not covered by any
   `PHASE4_GATE_RECORD.md` Section D finding — no matching entry found there); related to
-  the still-open OD5/D-F item in `ARCHITECTURE.md` §6 Open Questions
+  the still-open OD5/D-F item in `ARCHITECTURE.md` §6 Open Questions. **[Stage 3
+  cross-reference, 2026-09-02]:** directly ties to `docs/INVARIANTS.md` OD5, which states
+  the entity-scoped access model "remains genuinely open" — no separate named approval
+  pending the way R-002/OD4 has, so no action needed here until a future UI Discovery
+  pass surfaces a real need, per OD5's own text.
 - **Mitigation:** none stated.
 - **Recommended action:** NOT DETERMINABLE FROM SOURCE (requires operational assessment).
 
