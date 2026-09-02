@@ -13,7 +13,12 @@ is the one shared, vendor-agnostic boundary where VIVE and NetSuite data coexist
 (`ARCHITECTURE.md` D-J, §8).
 **Session F disposition:** FULL EXTRACTION expected at Stage 2 — this is a real, running
 application with committed source (`src/`, `scripts/`, `migrations/`), not a docs-only or
-stub system.
+stub system. **CONFIRMED — completed 2026-09-02** (pre-condition assessment: no metadata
+catalog exists, real migration DDL exists → FULL EXTRACTION confirmed). Ran out of order,
+after Sessions A/B/C/G/U/D/E rather than before B/C/G/U as the methodology prefers — a
+genuine Stage 2 process gap caught at Stage 3 (`ANNOTATION_CHECKLIST.md` CON-S3-001) and
+caught up on rather than redone. See `discovery/F01_structural_inventory.md`,
+`discovery/F02_vocabulary_extraction.md`, `discovery/DOMAIN_MODEL.json`.
 
 **Stage 1 Human Gate:** Reviewed and confirmed — Engineer: Vaishali, Date: 2026-09-01.
 "Proceed everything looks good." Stage 2 (source-code extraction) authorized to begin.

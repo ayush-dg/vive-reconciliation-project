@@ -8,6 +8,10 @@ attribution). PART 2: 3 new implicit invariant candidates (IC-CANDIDATE-01..03) 
 below, including a lock-recovery invariant distinct from G5 itself; the exception-write
 idempotency question was explicitly considered and NOT elevated (see rationale in the new
 section).
+STAGE-3-STATUS: IC-CANDIDATE-04 added — 2026-09-02. Resolves `ANNOTATION_CHECKLIST.md`
+P1-S3-004 (`docs/INVARIANTS.md` OD6 had no catalogue counterpart) — confirmed directly
+against `matchingPipeline.ts`'s eligibility query that a resolved/flagged/skipped exception
+is never automatically reset, closing OD6 as an affirmatively enforced guarantee.
 
 # INVARIANT_CATALOGUE.md — VIVE Statement Reconciliation
 
@@ -577,3 +581,40 @@ auth matcher the way M-051 is"); `U11_matching_run_batch_route.md`'s `[NOTABLE]`
 the same point at greater length; confirmed directly against `src/proxy.ts:34-47`'s matcher
 regex, which lists only `login|api/health|_next/static|_next/image|...(static extensions)`
 as exclusions — `matching/run-batch` matches none of them.
+
+---
+
+**IC-CANDIDATE-04 — A resolved, flagged, or skipped exception is never silently reset back
+to `open` by an automated process [resolves docs/INVARIANTS.md OD6 — see
+ANNOTATION_CHECKLIST.md P1-S3-004]**
+Category: Data Correctness
+Scope: TASK-SCOPED (exception resolution workflow / matching eligibility)
+Currently enforced: YES — [STAGE-3-CONFIRMED — 2026-09-02] confirmed directly against
+source, not inferred.
+Enforcement point: `src/lib/matchingPipeline.ts:39-56`
+(`getEligibleLinesForDocument`) — the eligibility query's `AND NOT EXISTS (SELECT 1 FROM
+recon_exception e WHERE e.statement_line_id = sl.line_id)` clause (line 52) excludes ANY
+line with an existing exception row, regardless of that exception's `status` value, from
+ever being selected for (re-)matching.
+Owning module: M-025 (matchingPipeline.ts — the module that structurally prevents
+reprocessing)
+Enforcing modules: M-025 (eligibility exclusion), M-018 (exceptionDetail.ts — confirmed the
+*only* write path that ever touches `recon.exception.status`; no other module in the
+78-module roster writes to this column, per `MODULE_CONTRACTS.md`'s consolidated Calls
+data)
+Rationale: this is what OD6 was actually asking — "docs/INVARIANTS.md OD6: whether 'a
+resolved/flagged/skipped exception is never silently reset back to open by an automated
+process' warrants a named invariant." The answer, confirmed by source rather than assumed:
+once `recon.exception` has ANY row for a statement line, that line is permanently excluded
+from `getEligibleLinesForDocument` — there is no code path by which a re-run of matching
+(manual Reconcile, or the scheduled n8n batch, M-053/IP-005) could ever re-touch, re-create,
+or reset that exception's status. The `status` column changes only through the single
+human-initiated `updateExceptionResolution()` call (M-018). This closes OD6 as an
+affirmatively enforced guarantee, not an unenforced implementation detail — the concern
+`INVARIANTS.md` raised does not currently occur, by construction.
+Evidence: `src/lib/matchingPipeline.ts:39-56` (direct read, this session);
+`discovery/F02_vocabulary_extraction.md`'s Cardinality Samples row ("silver.statement_line
+-> recon.match OR recon.exception: Exactly 0 or 1 of either, mutually exclusive, never
+both... Structurally enforced by the eligibility query itself, not just observed"); cross-
+checked against `MODULE_CONTRACTS.md`'s full module list for any other writer of
+`recon.exception.status` — none found beyond M-018.

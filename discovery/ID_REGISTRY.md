@@ -25,6 +25,29 @@ against their target directories).
 
 Full field detail for each lives in `discovery/TOPOLOGY.md`'s A03 section.
 
+## Domain Model IDs (E-NNN / A-NNN / SV-NNN / SVV-NNN / REL-NNN)
+
+Assigned during BCE Stage 2 Session F03 (2026-09-02, domain model synthesis). Separate
+namespace from M-NNN/IP-NNN — no prefix overlaps. Full detail lives in
+`discovery/DOMAIN_MODEL.json`.
+
+| Prefix | Range | Count | Meaning |
+|---|---|---|---|
+| E-NNN | E-001–E-006 | 6 | Entities: Document, Vendor, StatementLine, Match, Exception, AppUser |
+| A-NNN | A-001–A-038 | 38 | Attributes (columns of the 6 promoted entities) |
+| SV-NNN | SV-001–SV-006 | 6 | Status vocabularies (enum/status field groupings) |
+| SVV-NNN | SVV-001–SVV-019 | 19 | Individual status values across those 6 vocabularies |
+| REL-NNN | REL-001–REL-006 | 6 | Relationships between entities |
+
+**No MT-NNN (Metric) IDs** — `metricsLayer: false` in `DOMAIN_MODEL.json`; no metrics
+layer exists in this build (Session 7/Gold reporting was removed, per prior planning).
+
+**Entities NOT promoted** (recorded in `DOMAIN_MODEL.json`'s `entity_promotion_notes`,
+not given E-NNN IDs): `extracted.extraction_attempt` (pipeline audit log, not a business
+noun), the dynamic `extracted.stmt_<vendor_slug>` raw tables (pre-normalization staging),
+`recon.document_lock` (concurrency infra), and all `bronze.*` external tables (not owned
+by this build).
+
 ## Not yet assigned
 
 Entra ID/company SSO — no IP-NNN assigned; confirmed not integrated (disabled placeholder

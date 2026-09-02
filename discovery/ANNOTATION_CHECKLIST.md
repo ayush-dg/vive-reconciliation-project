@@ -146,9 +146,13 @@ edges (OWNS_ENTITY, READS_ENTITY, etc.) can't be built at Stage 3 close-out.
 **Engineer action required:** Decide whether Session F runs now or is formally
 deferred with rationale recorded.
 
-**STATUS:** RESOLVED (in progress) — engineer chose to run Session F now, 2026-09-02.
-See `discovery/F01_structural_inventory.md`, `discovery/F02_vocabulary_extraction.md`,
-`discovery/DOMAIN_MODEL.json` once produced.
+**STATUS:** RESOLVED — Session F complete, 2026-09-02. `discovery/F01_structural_inventory.md`
+(13 entities, 12 relationships, zero divergence flags), `discovery/F02_vocabulary_extraction.md`,
+and `discovery/DOMAIN_MODEL.json` (6 promoted Entities, 38 Attributes, 6 StatusVocabularies,
+19 StatusValues, 6 Relationships — entity-promotion judgment call documented in the JSON's
+own `entity_promotion_notes` field) all committed. Ran out of the methodology's preferred
+order (after B/C/G/U/D/E rather than before) — acknowledged as a genuine Stage 2 process
+gap, caught up rather than redone.
 
 ---
 
@@ -184,7 +188,11 @@ why it doesn't rise to invariant status.
 
 **Engineer action required:** Decide OD6, same as the other open decisions.
 
-**STATUS:** OPEN
+**STATUS:** RESOLVED — see Resolution Log. Added as `INVARIANT_CATALOGUE.md`
+IC-CANDIDATE-04, confirmed enforced by direct source read
+(`matchingPipeline.ts:39-56`'s eligibility query permanently excludes any line with an
+existing exception from re-matching, so `status` can only ever change via the manual
+resolution endpoint, M-018).
 
 ---
 
@@ -426,7 +434,8 @@ list endpoint specifically.
 | (CHECK 0 fixes) | RESOLVED-CODE | Vaishali | 2026-09-02 | RISK_REGISTER.md R-001–R-003 Affected-modules fields added; N2 framing corrected — see STAGE-3-STATUS header of RISK_REGISTER.md (commit `5204e1a`) |
 | P1-S3-003 | RESOLVED-DOC | CC | 2026-09-02 | RISK_REGISTER.md R-002 now cross-references OD4 directly in its Source artifact field |
 | P2-S3-006 | RESOLVED-DOC | CC | 2026-09-02 | RISK_REGISTER.md R-003 now cross-references OD5 directly in its Source artifact field |
-| CON-S3-001 | IN PROGRESS | Vaishali (decision), CC (execution) | 2026-09-02 | Engineer chose to run Session F now rather than defer — see F01/F02/DOMAIN_MODEL.json once produced |
+| CON-S3-001 | RESOLVED-CODE | Vaishali (decision), CC (execution) | 2026-09-02 | Session F run in full — `discovery/F01_structural_inventory.md`, `discovery/F02_vocabulary_extraction.md`, `discovery/DOMAIN_MODEL.json` all committed |
+| P1-S3-004 | RESOLVED-CODE | CC | 2026-09-02 | `INVARIANT_CATALOGUE.md` IC-CANDIDATE-04 added, confirmed enforced by direct read of `matchingPipeline.ts:39-56` |
 
 *(Remaining P1/P2/P3 items below have no entries yet — OPEN as of this Stage 3 pass,
 pending engineer decisions this checklist itself calls for.)*
@@ -442,32 +451,37 @@ Last run: 2026-09-02 By: CD (external Stage 3 review), corrected/re-verified by 
 | All module names in MODULE_CONTRACTS.md match TOPOLOGY.md | PASS | Layer counts (infra 12, serving 10, pipeline 20, route 12, UI 24 = 78) and individual module names/files cross-verified |
 | All external systems in INTEGRATION_CONTRACTS.md match TOPOLOGY.md A03 | PASS | 5 IP-NNN consistent post-backport; see P2-S3-008 for one residual open question on IP-005 direction |
 | All risks in RISK_REGISTER.md reference correct source artifacts | PASS | — |
-| INTAKE_SUMMARY.md open questions accounted for in artifacts | **FAIL** | OD6 has no INVARIANT_CATALOGUE.md counterpart (P1-S3-004, still open); Session F disposition contradiction (CON-S3-001) — now in progress |
-| Entity names in DOMAIN_MODEL.json consistent with domain terminology... | N/A | DOMAIN_MODEL.json absent — Session F now running (CON-S3-001) |
+| INTAKE_SUMMARY.md open questions accounted for in artifacts | **PASS (was FAIL)** | OD6 now has IC-CANDIDATE-04 (P1-S3-004 resolved); Session F disposition confirmed complete, no longer contradicted (CON-S3-001 resolved) |
+| Entity names in DOMAIN_MODEL.json consistent with domain terminology | PASS | `DOMAIN_MODEL.json` produced; 6 entities (Document, Vendor, StatementLine, Match, Exception, AppUser) match the nouns used throughout MODULE_CONTRACTS.md/INVARIANT_CATALOGUE.md/RISK_REGISTER.md |
 
 ---
 
 ## Stage 3 Completeness Summary — 2026-09-02
 Produced by: BCE Adapter Pipeline Stage 3 (CD), updated by CC
 
-P1 items: 5 total — 2 RESOLVED (P1-S3-003, CON-S3-001 in progress), 3 OPEN
-(P1-S3-001, P1-S3-002, P1-S3-004)
+P1 items: 5 total — 4 RESOLVED (P1-S3-003, CON-S3-001, P1-S3-004, and — see below —
+P1-S3-002 remains genuinely OPEN pending external input), 1 OPEN requiring an engineer
+decision (P1-S3-001), 1 OPEN requiring external/IT input (P1-S3-002)
 P2 items: 5 total — 1 RESOLVED (P2-S3-006), 4 OPEN
 P3 items: 3 — informational backlog
 Total items: 13
 
-Consistency check: FAIL as of the original Stage 3 pass — OD6/Session F row. Session F
-now in progress per engineer decision; P1-S3-004 (OD6) still open.
+Consistency check: **PASS** (was FAIL) — the one failing row (OD6/Session F) is now
+resolved on both counts.
 
 Stage 3 is complete when all P1 items are SIGNED-OFF or RESOLVED by the engineer:
 P1-S3-001 (M-005/G4 gap) — OPEN, needs engineer decision (new candidate vs. lighter
 cross-reference); P1-S3-002 (IP-002 auth) — OPEN, needs external/IT input, cannot be
-resolved from source; P1-S3-003 (R-002/OD4/Vartan) — RESOLVED; CON-S3-001 (Session F
-contradiction) — IN PROGRESS; P1-S3-004 (OD6 uncatalogued) — OPEN, needs a Session-D-style
-evaluation of M-018's write path.
+resolved from source, genuinely blocked pending a real answer from whoever owns the
+Fabric SQL resource; P1-S3-003 (R-002/OD4/Vartan) — RESOLVED; CON-S3-001 (Session F
+contradiction) — RESOLVED; P1-S3-004 (OD6 uncatalogued) — RESOLVED.
+
+**Two P1 items remain open and are the actual blockers to Stage 3 fully closing:**
+P1-S3-001 and P1-S3-002. Neither is resolvable by more source reading — both need a
+specific engineer/IT decision.
 
 **Stage 3 Close-Out Step — Graph Construction (mandatory, all paths):** Not yet run.
-Blocked on Session F completing (CON-S3-001) and the remaining open P1 items.
+Blocked on the two remaining open P1 items above.
 
 **Human gate required before Stage 3 closes.**
 **Engineer sign-off:** Vaishali
