@@ -294,4 +294,5 @@ a real defect. Corrected in that file 2026-09-02, cross-verified directly agains
 before the correction was made (not just relayed from an agent).
 
 **Human gate required before Stage 3 begins.**
-**Engineer sign-off:** _______________________________ **Date:** ___________
+**Engineer sign-off:** Vaishali 
+**Date:** 02-09-2026
