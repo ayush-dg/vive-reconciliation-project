@@ -136,8 +136,14 @@ an uncertain single target among 9 possibilities at static-analysis time.
 - Purpose: primary extraction path for non-known-vendor documents; narrow AI-assisted
   residual matching pass (never auto-approves, G3-gated — vendor/document content treated
   strictly as input data, never concatenated into model instructions)
-- Called by: M-028 (aiProvider.ts, the sole direct caller) — reached transitively from
-  M-021 (vendorIdentification.ts) and M-027 (aiResidualMatching.ts)
+- Called by: [STAGE-2-DIVERGENCE — 2026-09-02, backported from Session E, now resolved]:
+  this previously read "M-028, the sole direct caller — reached transitively from... M-027."
+  That was wrong. **M-027 (aiResidualMatching.ts) calls Claude directly**, with its own
+  independent `RESIDUAL_SYSTEM_PROMPT`/credential surface — not through M-028 at all. Correct
+  statement: M-028 (aiProvider.ts) and M-027 (aiResidualMatching.ts) are two independent
+  direct callers of IP-001, each maintaining its own G3 enforcement site (confirmed in
+  `INVARIANT_CATALOGUE.md`'s G3 entry and `MODULE_CONTRACTS.md`'s M-027 row). M-021
+  (vendorIdentification.ts) reaches IP-001 transitively, through M-028, as originally stated.
 - Auth: NOT DETERMINABLE FROM SOURCE
 - Error handling: [STAGE-2-UPDATE — 2026-09-02]: M-028 falls back through three tiers —
   Azure AI Foundry, then direct Anthropic API, then a deterministic marker-text mock —
@@ -245,3 +251,47 @@ an uncertain single target among 9 possibilities at static-analysis time.
 
 **IP-NNN IDs above are permanent for the life of this project**, assigned sequentially
 IP-001–IP-005 at Stage 2 Session A, per BCE convention.
+
+---
+
+## Stage 2 Completeness Summary
+
+**All Sessions A0–E complete and committed** (2026-09-02, branch
+`session/s10_phase8_signoff`): A0 (codebase map, 131+ files), A (78-module roster, full
+call graph, A01/A03 reconciliation), B/C/G/U (all 78 modules given complete 9-field
+contracts), D (all 16 invariants given enforcement points + 3 new candidates), E
+(`INTEGRATION_CONTRACTS.md` produced, `RISK_REGISTER.md` expanded, A03 staleness
+backported).
+
+**Five BCE artifacts, all committed:** `INTAKE_SUMMARY.md` (Stage 1), `TOPOLOGY.md`
+(this file), `MODULE_CONTRACTS.md`, `INVARIANT_CATALOGUE.md`, `RISK_REGISTER.md`, plus
+`INTEGRATION_CONTRACTS.md` (Stage 2 only — not produced until source exists to synthesize
+from).
+
+**STAGE-2-DIVERGENCE tags — all resolved, none left open:**
+1. `INVARIANT_CATALOGUE.md` (S7) — prior Enforcement point misattributed to
+   `documentStatus.ts`; corrected in place to `extractionPipeline.ts`'s `MAX_ATTEMPTS`
+   guard.
+2–7. `INTEGRATION_CONTRACTS.md` (6 tags, one root cause) — A03's Auth/Error-handling
+   fields for IP-001 through IP-005 were left at Stage 1's blanket "NOT DETERMINABLE"
+   even after Sessions C/D/G separately determined most of them, and IP-001's topology
+   was stated backwards (M-027 does not route through M-028). All backported into
+   `TOPOLOGY.md`'s A03 section directly above, tagged `[STAGE-2-UPDATE]`, in this same
+   session.
+
+**The most important finding of this Stage 2 pass, restated plainly:** the
+`/api/matching/run-batch` endpoint (M-053) — this build's only automated matching
+trigger, meant for n8n — is not excluded from the session-cookie auth middleware the way
+`/api/health` is. An external machine caller cannot authenticate to it as coded. Verified
+directly against `src/proxy.ts`'s matcher regex, not taken on trust from any single
+agent pass. Recorded as `RISK_REGISTER.md` R-006 (P1) and `INVARIANT_CATALOGUE.md`
+IC-CANDIDATE-03. **Not fixed as part of BCE discovery** — Stage 2 is read-only by design;
+this is a build-phase decision for the engineer.
+
+**Second most important finding:** Phase 8 Part 1's `VERIFICATION_CHECKLIST.md` recorded
+an S7 invariant FAIL that turned out to be a false positive — a stale test assertion, not
+a real defect. Corrected in that file 2026-09-02, cross-verified directly against source
+before the correction was made (not just relayed from an agent).
+
+**Human gate required before Stage 3 begins.**
+**Engineer sign-off:** _______________________________ **Date:** ___________
