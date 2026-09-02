@@ -121,7 +121,7 @@ svg { display: block; }
   position: sticky; top: 0; height: 100vh;
 }
 .sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 22px; }
-.sidebar-brand-icon { width: 50px; height: 50px; border-radius: 8px; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+.sidebar-brand-icon { width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
 .sidebar-brand-text { font-family: var(--font-display); font-weight: 700; font-size: 19px; color: #fff; line-height: 1.15; }
 .sidebar-brand-text span { display: block; font-family: var(--font-body); font-weight: 500; font-size: 10.5px; color: #8FA3B8; letter-spacing: .06em; text-transform: uppercase; }
 
