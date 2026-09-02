@@ -166,12 +166,21 @@ cited per entry below as a cross-reference, not substituted for the Stage 1 rule
   a document repeatedly submitted beyond that bound is a violation.
 - **Category:** Operational
 - **Scope:** TASK-SCOPED
-- **Currently enforced:** NOT DETERMINABLE FROM SOURCE
+- **Currently enforced:** YES — [STAGE-2-UPDATE — 2026-09-02] confirmed directly against
+  source (overrides the blanket Stage 1 "NOT DETERMINABLE" rule for this one entry, since
+  Stage 2 reading has now actually settled it; see Source below for what happened).
+- **Enforcement point:** `src/lib/documentStatus.ts:139-165` (`computeDocumentStatus`,
+  M-012 per `discovery/components/A02_module_call_map.md`)
 - **Source:** `INVARIANTS.md` Scope = extraction service task. Cross-reference:
-  `VERIFICATION_CHECKLIST.md` records this as a **real, confirmed FAIL** — 13 of 14
-  sub-checks in `test_bounded_retry.sh` passed; the one failure is a display-layer bug
-  (status badge doesn't read "Processing" after a successful 2nd-attempt recovery), not a
-  data-integrity violation — the underlying attempt-bounding behavior itself passed.
+  `VERIFICATION_CHECKLIST.md` originally recorded a FAIL here (13/14 sub-checks passed;
+  one display-layer assertion failed). **[STAGE-2-UPDATE — 2026-09-02]:** confirmed via
+  direct source reading (`src/lib/documentStatus.ts:155-158`, cross-checked by two
+  independent module-contract sessions, B and C) that this was a **false positive** — the
+  code correctly returns a distinct `'Extracted'` badge for this exact case (added
+  2026-08-31 by engineer direction specifically to disambiguate it from `'Processing'`);
+  the test at `scripts/test_bounded_retry.mjs:58` asserts the pre-2026-08-31 expectation
+  and was never updated. `VERIFICATION_CHECKLIST.md` has been corrected accordingly. The
+  stale test assertion itself remains unfixed.
 
 - **ID:** S8
 - **Statement:** Every Match and Exception that depends on reference data must carry the

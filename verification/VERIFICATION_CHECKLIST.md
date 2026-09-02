@@ -51,7 +51,7 @@ rather than rounded up to a clean PASS.
 | S4 — `legal_entity_id` requirement | Automated | [x] PASS |
 | S5 — Exception category is a closed enum | Automated | [x] PASS |
 | S6 — Normalization version traceability | Automated | [x] PASS |
-| S7 — Extraction attempts are bounded (max 2) | Automated | [ ] **FAIL** |
+| S7 — Extraction attempts are bounded (max 2) | Automated | [x] PASS (corrected 2026-09-02 — see Manual check details; original FAIL was a stale test, not a real defect) |
 | S8 — Reference data is version-bound (amended) | Automated | [x] PASS |
 | S10 — `extracted` schema write precedes validation | Automated | [x] PASS |
 | S11 — Statement-line amounts immutable after extraction | Manual | [ ] NOT INDEPENDENTLY VERIFIED |
@@ -67,16 +67,30 @@ only its implementing task" (`EXECUTION_PLAN.md` line 1481) — there is current
 reporting surface in the running system for this check to exercise. Re-verify when Session
 7 is eventually built.
 
-**S7 — FAIL, real finding.** `./scripts/test_bounded_retry.sh`, run cleanly once (before any
-re-run pollution — see Non-Portable/Non-Idempotent note below): 13 of 14 sub-checks passed.
-The one failure: **"TC-1: document proceeds to matching-eligible (Processing badge, not
-Failed/Retrying)"** — after a bounded-retry sequence's 2nd attempt succeeds (and a
-`silver.statement_line` row is correctly produced, per the very next passing check), the
-document's displayed status badge does not correctly read "Processing" / matching-eligible.
-This is a real UI/status-computation gap, not a data-integrity gap — the underlying
-extraction data is correct; only the derived badge is wrong. Recommend a follow-up task
-against `homeSummary.ts`/`Task 2.3`'s status-computation logic before relying on this badge
-in production use.
+**S7 — originally recorded as FAIL; CORRECTED 2026-09-02 to PASS — false positive, not a
+real defect.** `./scripts/test_bounded_retry.sh`, run cleanly once (before any re-run
+pollution — see Non-Portable/Non-Idempotent note below): 13 of 14 sub-checks passed. The
+one failure was **"TC-1: document proceeds to matching-eligible (Processing badge, not
+Failed/Retrying)"**.
+
+**Correction (2026-09-02, discovered during BCE Stage 2 Sessions B and C — direct source
+verification, not just an agent claim):** `src/lib/documentStatus.ts:155-158` has an
+explicit, distinct `'Extracted'` badge — added 2026-08-31 by engineer direction,
+specifically to disambiguate "extraction succeeded, awaiting Reconcile" from `'Processing'`
+(the code comment literally says "distinct from 'Processing'"). The real application
+behavior for this exact case is correctly `badge: 'Extracted'`. The test assertion at
+`scripts/test_bounded_retry.mjs:58` still checks `status.badge === 'Processing'` — a
+pre-2026-08-31 expectation that was never updated when the badge scheme grew a 6th value.
+**There is no status-computation defect.** The underlying S7 invariant (bounded retry) was
+never actually violated — this was a stale test assertion producing a false FAIL, caught a
+day later by two independent Stage 2 module-contract passes (Sessions B and C) and
+confirmed directly against source by CC before amending this record. The original
+Engineer Sign-Off below is not invalidated by this — it was signed with this item listed as
+a known open issue; it is now resolved as never having been a real issue. The stale test
+itself (`scripts/test_bounded_retry.mjs:58`) has **not** been fixed as part of this
+correction — that's a one-line code change outside BCE Stage 2's read-only discovery scope,
+flagged for the engineer to action separately (it will keep producing this same false FAIL
+on every future harness run until fixed).
 
 **S11 — not independently verified.** No dedicated automated check for post-extraction
 immutability of `silver.statement_line` amounts was found or run in this pass (distinct
@@ -180,7 +194,11 @@ results, not the polluted re-run.
 system meets the four operational tests of the responsibility model.*
 
 **Open items carried into this sign-off decision, not hidden:**
-1. S7 — real FAIL (status-badge display bug after successful bounded retry).
+1. ~~S7 — real FAIL (status-badge display bug after successful bounded retry).~~
+   **RESOLVED 2026-09-02 — was a false positive (stale test assertion), not a real defect.
+   See the corrected S7 entry above.** The stale test itself
+   (`scripts/test_bounded_retry.mjs:58`) remains unfixed — a one-line follow-up for the
+   engineer, outside this correction's scope.
 2. S11 — not independently verified (architecturally sound, untested).
 3. S3 — N/A, no reporting surface exists yet (Session 7 deferred).
 4. Architecture Alignment's "no undocumented components" checklist item — not
