@@ -1084,12 +1084,37 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             os.path.basename(pdf_path), statement_period
         )
         print(f"  Copied {incomplete_count} EXTRACTION_INCOMPLETE exception(s) forward from the cached run.")
+
+        # Additive Fabric Lakehouse copy (2026-09-03 fix) -- without this, a
+        # cache-hit re-upload's statement_id never gets Fabric Bronze rows
+        # at all (write_bronze_fabric() is only called on the fresh-
+        # extraction path below), so the unconditional dbt Silver build /
+        # NetSuite matching scripts/run_full_pipeline.py runs right after
+        # this returns silently find nothing for it -- the statement never
+        # appears in silver.recon_summary/recon_exceptions, with no error
+        # surfaced anywhere. Uses cache_vendor_id (the cached run's REAL
+        # vendor_id), not the filename-derived vendor_id local var, so this
+        # targets the correct bronze.bronze_<vendor_id>_raw table -- same
+        # reasoning as normalize_to_silver()'s vendor_id use above already
+        # doesn't apply here (it intentionally still uses the outer
+        # vendor_id/statement_period for the NEW statement's own local
+        # Silver identity), but the Fabric copy is reading an existing
+        # vendor-specific table by name, so it must match the table the
+        # cached rows actually live in. Silent no-op on any failure or if
+        # Fabric isn't configured -- same contract as write_bronze_fabric().
+        from src.lakehouse.fabric_bronze import copy_bronze_fabric_for_cache_hit
+        fabric_bronze_count = copy_bronze_fabric_for_cache_hit(
+            cached_statement_id, statement_id, cache_vendor_id, version_info
+        )
+        print(f"  Fabric Bronze: {fabric_bronze_count} rows copied for {statement_id}.")
+
         return {
             "statement_id": statement_id,
             "cache_hit": True,
             "bronze_count": bronze_count,
             "silver_count": silver_count,
             "extraction_incomplete_count": incomplete_count,
+            "fabric_bronze_count": fabric_bronze_count,
         }
 
     print(f"  Cache MISS — proceeding with extraction.")
