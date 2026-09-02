@@ -1,4 +1,11 @@
 STAGE-1-DRAFT: DOCS-DERIVED — 2026-09-01 — Produced by BCE Adapter Pipeline Stage 1
+STAGE-2-STATUS: R-004 through R-007 added — 2026-09-02, BCE Adapter Pipeline Stage 2 Session
+E (Integration Contracts + Risk Register). R-001–R-003 (seeded from docs at Stage 1, before
+Sessions A–D existed) are unchanged below. New entries are code-confirmed findings surfaced
+by Sessions A–D's source reading, evaluated here for whether they rise to risk-register level
+(operational/business risk) versus remaining a module-contract-level fragility note. One
+candidate from this session's evaluation list (the Fabric DDL missing `IF NOT EXISTS`) was
+considered and NOT added — see the note after R-007.
 
 # RISK_REGISTER.md — VIVE Statement Reconciliation
 
@@ -60,6 +67,118 @@ history). Only genuinely still-open risk is catalogued here.
   the still-open OD5/D-F item in `ARCHITECTURE.md` §6 Open Questions
 - **Mitigation:** none stated.
 - **Recommended action:** NOT DETERMINABLE FROM SOURCE (requires operational assessment).
+
+- **Risk ID:** R-004
+- **Description:** A failed Microsoft Fabric SQL connection attempt permanently caches the
+  *rejected* promise in `db.ts`'s (M-003) module-level `fabricPoolPromise` singleton. Every
+  subsequent `getFabricPool()` call for the life of the process returns that same rejection —
+  there is no automatic retry, and no operator-facing signal distinguishing "Fabric was never
+  configured" (deliberate SQLite fallback) from "Fabric was configured and the connect
+  failed" (silent permanent breakage). Only an explicit `closeDb()` call resets it. This
+  single connection pool serves both IP-002 (`recon`) and IP-004 (`silver` writes), so one
+  transient connectivity blip at process startup can break both simultaneously.
+- **Severity:** P2 — no data corruption, but a self-inflicted, non-self-healing outage of the
+  primary transactional store with no automated recovery path.
+- **Source artifact:** `discovery/components/G03_db.md` (M-003's own `[NOTABLE]` Known
+  Fragility); `discovery/INTEGRATION_CONTRACTS.md` IP-002/IP-004 (Error handling assumptions,
+  Known divergences).
+- **Mitigation:** none — newly surfaced. `closeDb()` exists as a manual reset mechanism but
+  requires an operator to already know the pool is poisoned and take deliberate action; there
+  is no automatic detection or retry.
+- **Recommended action:** either retry the connect with backoff instead of caching a
+  rejection, or at minimum log/alert distinctly when `fabricPoolPromise` is in a rejected
+  state so an operator knows to call `closeDb()`. Affected modules: M-003 (all 20 of its
+  callers transitively). No cataloged invariant is directly threatened (this is availability,
+  not correctness), but it undermines IP-002 and IP-004 identically since both share the one
+  pool.
+
+- **Risk ID:** R-005
+- **Description:** The two G5 "no concurrent double-processing" lock implementations recover
+  from an unhandled failure asymmetrically. Matching's lock (M-017,
+  `acquireMatchingLock`/`LOCK_STALE_AFTER_MINUTES`) self-releases and is TTL-reclaimable.
+  Extraction's lock (M-015/M-046, the `extracted_document.status='processing'` flip) has no
+  equivalent — a mid-extraction crash (subprocess failure, unexpected DB error) leaves the
+  document permanently stuck in `'processing'`, with `triggerExtraction`'s own guard (`WHERE
+  status != 'processing'`) then rejecting every future Extract attempt indefinitely. Only
+  direct DB intervention recovers it. Now formally identified as IC-CANDIDATE-01 in
+  `INVARIANT_CATALOGUE.md`.
+- **Severity:** P2 — blocks the end user from ever re-attempting extraction on an affected
+  document with no self-service recovery, though it does not corrupt data (G1/S10's
+  append-only guarantees hold regardless).
+- **Source artifact:** `discovery/INVARIANT_CATALOGUE.md` IC-CANDIDATE-01; M-015's and
+  M-046's own Known Fragility fields in `MODULE_CONTRACTS.md`; `MODULE_CONTRACTS.md`'s
+  Cross-cutting findings note on the two G5 implementations' inconsistent recovery semantics.
+- **Mitigation:** none — newly surfaced as a risk-register entry (the underlying fragility
+  was already documented independently at the module-contract level in M-015/M-046, but not
+  previously evaluated as an operational risk in its own right).
+- **Recommended action:** give the extraction lock the same self-releasing/TTL-reclaimable
+  design as the matching lock (`src/lib/extraction.ts`, contrast against
+  `matchingInvocation.ts:39,48-58`), or at minimum add an admin-facing "unstick" action.
+  Affected modules: M-015, M-046 (no recovery); M-017, M-047 (has recovery, for contrast).
+  Threatened invariant: IC-CANDIDATE-01 (G5 itself is not violated — its narrower "no two
+  concurrent owners" guarantee still holds on both sides).
+
+- **Risk ID:** R-006
+- **Description:** `/api/matching/run-batch` (M-053), documented as the receiving endpoint
+  for n8n's external scheduled trigger (IP-005), is not excluded from `proxy.ts`'s (M-043)
+  session-auth matcher the way `/api/health` (M-051) explicitly is. Every request to it —
+  including n8n's — must carry a valid browser session cookie or gets redirected to `/login`
+  before the handler runs. n8n, as a machine-to-machine external scheduler with no browser,
+  has no documented way to obtain or present that cookie, and no compensating machine-auth
+  mechanism (API key, shared secret, service token) exists anywhere in source for this route.
+  As coded, this build's only non-manual matching trigger path appears unreachable by its own
+  documented caller. Now formally identified as IC-CANDIDATE-03 in `INVARIANT_CATALOGUE.md`.
+- **Severity:** P1 — if accurate, the scheduled/batch matching integration this build was
+  built to support cannot function without an out-of-band workaround invisible to source
+  (and even a hand-provisioned cookie would need refreshing well inside M-043's 30-minute
+  idle timeout for any real monthly-cadence job — see `INTEGRATION_CONTRACTS.md` IP-005
+  Gaps).
+- **Source artifact:** `discovery/INVARIANT_CATALOGUE.md` IC-CANDIDATE-03;
+  `discovery/components/U11_matching_run_batch_route.md`'s own `[NOTABLE]` tag;
+  `discovery/INTEGRATION_CONTRACTS.md` IP-005 (Auth mechanism, Known divergences).
+- **Mitigation:** none — newly surfaced.
+- **Recommended action:** exclude `/api/matching/run-batch` from M-043's auth matcher (the
+  pattern M-051/`/api/health` already establishes) and add a compensating machine-auth
+  mechanism before this integration is relied on operationally. Affected modules: M-053,
+  M-043. Threatened invariant: IC-CANDIDATE-03.
+
+- **Risk ID:** R-007
+- **Description:** `UploadForm.tsx`'s (M-070) `DEFAULT_LEGAL_ENTITY_ID = LEGAL_ENTITIES[0].id`
+  is now the *only* legal entity every uploaded document is attributed to — legal entity is
+  no longer user-selectable at all (an engineer-directed simplification, 2026-08-30). No
+  `isDefault`/priority marker exists on the static `LEGAL_ENTITIES` array
+  (`legalEntities.ts`, M-042); the default is derived purely from array position. Reordering
+  that array — a plausible, easy-to-make change (e.g. adding a new entity alphabetically
+  ahead of the current one) — would silently reassign every subsequent upload's legal entity
+  with no test, type, or runtime guard to catch it. Now formally identified (together with an
+  unrelated vendor-extractor-routing instance of the same pattern) as IC-CANDIDATE-02 in
+  `INVARIANT_CATALOGUE.md`.
+- **Severity:** P2 — silent business-data misattribution risk (legal entity feeds
+  reconciliation/reporting), made worse specifically because the field is no longer
+  user-visible or user-correctable at upload time the way it would be if still selectable.
+- **Source artifact:** `discovery/INVARIANT_CATALOGUE.md` IC-CANDIDATE-02 (legal-entity half);
+  `MODULE_CONTRACTS.md`'s M-042 and M-070 rows.
+- **Mitigation:** none — newly surfaced. S4 (a document is never registered without *a*
+  `legal_entity_id`) is satisfied regardless — it guards presence, not correctness of value —
+  so it does not mitigate this risk.
+- **Recommended action:** replace the positional default with an explicit `isDefault` marker
+  on the `LEGAL_ENTITIES` record (or reintroduce an explicit selector before a second legal
+  entity is ever added to the array). Affected modules: M-042, M-070, M-044 (also imports
+  `LEGAL_ENTITIES`). Threatened invariant: IC-CANDIDATE-02.
+
+**Considered and not elevated: Fabric DDL missing `IF NOT EXISTS` (M-041/`vendorSchema.ts`).**
+`vendorSchema.ts`'s Fabric-dialect DDL for per-vendor raw tables has no `IF NOT EXISTS` guard
+(unlike its SQLite counterpart), contradicting its own "idempotent" doc comment — calling it
+twice for the same vendor in Fabric mode would throw. This is real, but per the module's own
+contract it is currently unreachable: no code path in this build exercises Fabric app-state
+for vendor-table creation today (Fabric mode, where configured, is used for `recon`/`silver`
+via M-003 and `bronze` reads via M-008, but nothing currently drives M-041's Fabric branch).
+Unlike R-004/R-005/R-006/R-007 above — each of which is exercised by real, currently-live
+usage (a configured Fabric pool, any extraction crash, the actual n8n integration, every real
+upload) — this one has zero current trigger path. Keeping it as a documented fragility in
+M-041's own module contract rather than promoting it here; it should be revisited and added
+if/when any future work wires up Fabric app-state for vendor-table creation, at which point
+it would become live risk rather than latent code-quality debt.
 
 ---
 

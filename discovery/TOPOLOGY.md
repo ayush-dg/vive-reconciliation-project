@@ -153,8 +153,16 @@ an uncertain single target among 9 possibilities at static-analysis time.
 - Purpose: primary transactional store for this build's own data (matches, exceptions)
 - Called by: M-003 (db.ts, the sole direct caller — every other module reaches this
   through M-003, confirmed by Session A's call table)
-- Auth: NOT DETERMINABLE FROM SOURCE
-- Error handling: NOT DETERMINABLE FROM SOURCE
+- Auth: NOT DETERMINABLE FROM SOURCE — genuinely undetermined, not merely stale (no
+  component file found a credential mechanism beyond the bare `FABRIC_SQL_ENDPOINT`
+  connection string)
+- Error handling: [STAGE-2-UPDATE — 2026-09-02, backported from Session E]: `getFabricPool()`
+  throws explicitly if `FABRIC_SQL_ENDPOINT` is unset (no silent fallback at this layer).
+  **Known bug (see `discovery/RISK_REGISTER.md` R-004):** a failed `.connect()` permanently
+  caches the *rejected* promise in `db.ts`'s module-level singleton — every subsequent
+  caller gets the same rejection with no automatic retry until `closeDb()` is explicitly
+  invoked. Shares its one connection pool with IP-004's `silver` write path — a failure in
+  one is simultaneously a failure in the other, despite being catalogued as separate IPs.
 
 - **IP-003** — System: Microsoft Fabric — Lakehouse (`bronze`)
 - Direction: inbound (read-only from this build's perspective)
@@ -165,8 +173,15 @@ an uncertain single target among 9 possibilities at static-analysis time.
   separate Fabric pipeline (confirmed 2026-08-28, not built by this project)
 - Called by: M-008 (fabricLakehouse.ts, the sole direct caller) — reached from M-026
   (deterministicMatching.ts)
-- Auth: NOT DETERMINABLE FROM SOURCE
-- Error handling: NOT DETERMINABLE FROM SOURCE
+- Auth: [STAGE-2-UPDATE — 2026-09-02, backported from Session E]: AAD `ClientSecretCredential`
+  (OAuth client-credentials flow) via `FABRIC_CLIENT_ID`/`FABRIC_CLIENT_SECRET`/
+  `FABRIC_TENANT_ID`, token cached in-process and refreshed ~60s before expiry.
+- Error handling: [STAGE-2-UPDATE — 2026-09-02]: nothing in M-008 catches anything — token
+  acquisition, connection errors, and query-callback errors all propagate uncaught to the
+  sole caller, M-026. This has a real downstream consequence: a Lakehouse outage cascades
+  through M-026's transaction into M-017's batch loop (no per-document error isolation),
+  so one bronze-read failure can abort an entire scheduled matching batch — not just the
+  document being checked when it happened.
 
 - **IP-004** — System: Microsoft Fabric — Warehouse (`silver`, `gold`)
 - Direction: outbound (write to `silver.statement_line`), inbound (read from `gold` for
@@ -181,8 +196,17 @@ an uncertain single target among 9 possibilities at static-analysis time.
   itself runs.
 - Purpose: shared normalization layer (`silver`) and existing reused Gold reporting layer
 - Called by: M-003 (for the `silver` write path); N/A for `gold` (unimplemented, see A01)
-- Auth: NOT DETERMINABLE FROM SOURCE
-- Error handling: NOT DETERMINABLE FROM SOURCE
+- Auth: [STAGE-2-UPDATE — 2026-09-02]: not a genuinely separate fact from IP-002's — the
+  `silver` write path shares M-003's exact same connection pool as `recon`, not an
+  independent auth surface. Cataloguing IP-002/IP-004 as five-total "separate" integration
+  points obscures that a connect failure breaks both simultaneously (see IP-002's Error
+  handling / R-004).
+- Error handling: [STAGE-2-UPDATE — 2026-09-02]: same connection-pool permanent-cache bug
+  as IP-002 (R-004), since it's the same pool. Separately: `vendorSchema.ts` (M-041)'s
+  Fabric DDL for per-vendor raw tables has no `IF NOT EXISTS` guard (unlike its SQLite
+  counterpart), contradicting its own "idempotent" doc comment — currently unreachable
+  (no code path exercises Fabric app-state for vendor-table creation in this build), so
+  not promoted to the risk register, but sits latent under this integration point.
 
 - **IP-005** — System: n8n
 - Direction: inbound (triggers this build) / outbound (notifications)
@@ -193,8 +217,21 @@ an uncertain single target among 9 possibilities at static-analysis time.
   M-053 (`api/matching/run-batch/route.ts`), confirmed as the sole handler of this
   direction. Confirmed via Session A: no internal producer/consumer async boundary exists
   on this app's side — M-053 awaits M-017 synchronously within the same request.
-- Auth: NOT DETERMINABLE FROM SOURCE
-- Error handling: NOT DETERMINABLE FROM SOURCE
+- Auth: [STAGE-2-UPDATE — 2026-09-02, backported from Session D/E — **the most consequential
+  finding in this entire Stage 2 pass**]: `/api/matching/run-batch` is **not** excluded from
+  `proxy.ts` (M-043)'s session-cookie auth matcher the way `/api/health` (M-051) explicitly
+  is (confirmed directly against the matcher regex, not just inferred). Every request to
+  M-053 — including n8n's — must carry a valid browser session cookie or gets redirected to
+  `/login` before the route handler ever runs. n8n, as an external machine-to-machine
+  scheduler with no browser, has no documented way to obtain or present that cookie, and no
+  compensating machine-auth mechanism (API key, shared secret) exists anywhere in source.
+  **As coded, this build's only non-manual matching trigger path is unreachable by its own
+  documented caller.** See `RISK_REGISTER.md` R-006 (P1) and `INVARIANT_CATALOGUE.md`
+  IC-CANDIDATE-03.
+- Error handling: [STAGE-2-UPDATE — 2026-09-02]: M-053 promises `{processed, skipped}` on
+  success, but a genuine per-document exception (not just a held lock) inside M-017's loop
+  is uncaught — it propagates to an unhandled 500 with zero partial-result reporting, and
+  none of that batch's already-completed work is communicated back to n8n.
 
 - System: Entra ID / company SSO — **no IP-NNN assigned (not integrated, per Stage 1)**
 - Direction: N/A — not integrated
