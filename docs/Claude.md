@@ -1,5 +1,5 @@
 ---
-version: v1.3
+version: v1.4
 METHODOLOGY_VERSION: PBVI v4.9 (PBVI-011 — UI as a First-Class Citizen)
 source: PBVI Phase 5 greenfield
 frozen: true
@@ -14,6 +14,7 @@ frozen: true
 | v1.1 | 2026-08-27 | Vaishali | Section 3/4 updated for ARCHITECTURE.md D-J — VIVE intake data relocated to new `extracted` schema (`bronze`/`gold` unaffected, already host live NetSuite data) |
 | v1.2 | 2026-08-27 | Vaishali | Section 4 Auth corrected per PHASE4_GATE_RECORD.md Finding 5 — username/password is the actual v1 build target (matches UI_SURFACE.md/Task 1.3); Entra ID recorded as the stated end-goal, not this build's mechanism |
 | v1.3 | 2026-09-01 | Vaishali | Section 1 amended to match ARCHITECTURE.md D-A (lightweight exception-resolution workflow added, short of the full deferred review/approval workspace); Section 4 corrected — the live extraction model actually wired is Claude Sonnet 5, not 4.6 (documented Scope Decision, same substitution logic as the Next.js version bump). |
+| v1.4 | 2026-09-02 | Vaishali | Section 3 corrected — Phase 8 (System Sign-Off + BCE Path C) is now complete: `discovery/` is populated (all seven BCE artifacts plus `DOMAIN_MODEL.json`/`SYSTEM_GRAPH.json`, M-NNN module IDs now exist for all 78 modules), `EXECUTION_PLAN.md` is frozen per its own Phase 8 banner, and `enhancements/**`/`sessions/**` are active, registered directories, not "not yet applicable." The stale "pre-Phase 8 — no SYSTEM_GRAPH.json yet" framing is removed. |
 
 ---
 
@@ -73,7 +74,11 @@ only.)*
 
 ## Section 3 — Scope Boundary
 
-*(Greenfield, pre-Phase 8 — no SYSTEM_GRAPH.json yet. File paths, not M-NNN references.)*
+*(Updated 2026-09-02 — Phase 8 complete: `discovery/SYSTEM_GRAPH.json` now exists, with
+permanent M-NNN IDs assigned to all 78 modules in `discovery/components/A02_module_call_map.md`'s
+Module Roster. The scope list below still uses file paths, not M-NNN references — this
+document's own scope-boundary convention was never migrated to ID-based references, and
+doing so is a separate decision from simply correcting this stale note.)*
 
 **In scope — CC may create/modify:**
 - `/playwright.config.ts`
@@ -93,7 +98,14 @@ only.)*
   `/docs/UI_SURFACE.md` — signed-off planning artifacts; CC reads, never edits
 - `/docs/Claude.md` (this file) — frozen; changes only via engineer-directed amendment
   (new version, new changelog row), never in-session
-- `/discovery/**`, `/enhancements/**`, `/sessions/**` — not yet applicable pre-Phase 8
+- `/discovery/**` — **updated 2026-09-02:** no longer "not yet applicable" — populated at
+  Phase 8 (all seven BCE artifacts, `DOMAIN_MODEL.json`, `SYSTEM_GRAPH.json`); still
+  out of scope for CC to edit in-session, same as the trunk docs above, now for the
+  opposite reason (it's a completed deliverable, not a pending one)
+- `/enhancements/**` — active as of Phase 8 completion; per the `EXECUTION_PLAN.md`
+  freeze banner, all future task-level work happens here (`ENH-NNN_EXECUTION_PLAN.md`),
+  not by editing the frozen `EXECUTION_PLAN.md` above
+- `/sessions/**` — populated throughout the build (S01–S09); not "not yet applicable"
 - Anything not listed above and not registered in PROJECT_MANIFEST.md — per Rule 3, CC
   flags unregistered files and reports to the engineer before proceeding; never treats
   them as authoritative input
