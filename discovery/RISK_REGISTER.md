@@ -1,11 +1,16 @@
 STAGE-1-DRAFT: DOCS-DERIVED — 2026-09-01 — Produced by BCE Adapter Pipeline Stage 1
 STAGE-2-STATUS: R-004 through R-007 added — 2026-09-02, BCE Adapter Pipeline Stage 2 Session
-E (Integration Contracts + Risk Register). R-001–R-003 (seeded from docs at Stage 1, before
-Sessions A–D existed) are unchanged below. New entries are code-confirmed findings surfaced
+E (Integration Contracts + Risk Register). New entries are code-confirmed findings surfaced
 by Sessions A–D's source reading, evaluated here for whether they rise to risk-register level
 (operational/business risk) versus remaining a module-contract-level fragility note. One
 candidate from this session's evaluation list (the Fabric DDL missing `IF NOT EXISTS`) was
 considered and NOT added — see the note after R-007.
+STAGE-3-STATUS: CHECK 0 (schema compliance) found and fixed two P1 SCHEMA_VIOLATIONs —
+2026-09-02. R-001–R-003 were missing `Affected modules:` fields (present on R-004–R-007);
+backfilled. R-001 cited "N2" in its threatened-invariant framing as if it were a resolvable
+`INVARIANT_CATALOGUE.md` ID; it isn't (confirmed — no such ID exists there) — reworded to
+state plainly that N2 is a `PHASE4_GATE_RECORD.md` label deliberately never promoted to a
+catalogue entry, not an orphaned reference.
 
 # RISK_REGISTER.md — VIVE Statement Reconciliation
 
@@ -22,21 +27,31 @@ history). Only genuinely still-open risk is catalogued here.
 ---
 
 - **Risk ID:** R-001
-- **Description:** Non-negotiable N2 ("never call NetSuite/CCC live from matching") has no
-  enforcing invariant — the original GLOBAL invariant enforcing this was removed 2026-08-17.
-  `EXECUTION_PLAN.md` Task 5.2 itself states this is "no longer an enforced invariant, only
-  a design convention." A brief non-negotiable currently has no hard enforcement behind it.
+- **Description:** `docs/PHASE4_GATE_RECORD.md`'s brief non-negotiable **N2** ("never call
+  NetSuite/CCC live from matching") has no enforcing invariant — the original GLOBAL
+  invariant enforcing this was removed 2026-08-17. `EXECUTION_PLAN.md` Task 5.2 itself
+  states this is "no longer an enforced invariant, only a design convention." A brief
+  non-negotiable currently has no hard enforcement behind it. **N2 is a
+  `PHASE4_GATE_RECORD.md` label, not an ID in `INVARIANT_CATALOGUE.md`'s own G/S/T/
+  IC-CANDIDATE namespace** — deliberately never promoted there, per the Mitigation below;
+  this is stated explicitly to avoid it reading as an orphaned/unresolved cross-reference
+  (Stage 3 CHECK 0 finding P1-S3-002).
 - **Severity:** P2 (source: HIGH, `PHASE4_GATE_RECORD.md` Section D Finding #7)
+- **Affected modules:** M-026 (`deterministicMatching.ts`) — the module that would need a
+  live-call guard if a future task ever added a live NetSuite/CCC pull matching mode; no
+  current module violates N2 (no live-API code path exists in this build at all), so this
+  names where the guard would go, not a module currently breaking the rule.
 - **Source artifact:** `docs/PHASE4_GATE_RECORD.md` Section D, Finding #7
 - **Mitigation:** Engineer accepted rationale (verbatim intent): "still true but not needed
   to be defined." N2 remains true by construction — Task 5.2's matching only ever queries
   `silver.statement_line`/Silver reference data; no live-API code path exists anywhere in
   the current plan to guard against. Accepted as a documented convention, not re-promoted
-  to an enforced/tested invariant.
+  to an enforced/tested invariant — this is a deliberate decision, not a gap to close.
 - **Recommended action:** NOT DETERMINABLE FROM SOURCE (requires operational assessment).
   Docs do state a revisit trigger: re-evaluate if a future task ever introduces the "live
   NetSuite/CCC pull as an alternative matching mode" item already tracked in
-  `ARCHITECTURE.md` §7's Parking Lot.
+  `ARCHITECTURE.md` §7's Parking Lot — at that point, add a real catalogue entry and point
+  its enforcement point at M-026.
 
 - **Risk ID:** R-002
 - **Description:** Version-chaining (D-H, amended 2026-08-26) has no human checkpoint at
@@ -45,6 +60,11 @@ history). Only genuinely still-open risk is catalogued here.
   describes this as "a real gap for BCE to close, and a sharper one than before the
   2026-08-26 amendment — worth explicit sign-off rather than treating as equivalent risk."
 - **Severity:** NOT DETERMINABLE FROM SOURCE
+- **Affected modules:** M-021 (`vendorIdentification.ts`) — `runVersionChaining`
+  (confirmed at `src/lib/vendorIdentification.ts:137`, per
+  `discovery/components/A02_module_call_map.md`'s call table) is the actual implementing
+  code; this risk describes a design gap in that function's behavior (no checkpoint), not
+  a defect Stage 2 otherwise flagged independently.
 - **Source artifact:** `docs/ARCHITECTURE.md` §4 Key Risks, item 1 (not covered by any
   `PHASE4_GATE_RECORD.md` Section D finding — no matching entry found there)
 - **Mitigation:** none stated — this risk is recorded as currently unmitigated, not
@@ -62,6 +82,12 @@ history). Only genuinely still-open risk is catalogued here.
   underlying open question about whether real multi-entity access scoping is eventually
   needed.
 - **Severity:** NOT DETERMINABLE FROM SOURCE
+- **Affected modules:** none currently — this is honestly a missing-feature gap, not a
+  defect in an existing module: no module implements entity-scoped *access control*
+  anywhere in this codebase. The nearest related modules are M-042 (`legalEntities.ts`)
+  and M-070 (`UploadForm.tsx`), which handle legal-entity *assignment* at upload time (now
+  a fixed positional default per R-007) — assignment, not access scoping, and not the same
+  concern this risk describes.
 - **Source artifact:** `docs/ARCHITECTURE.md` §4 Key Risks, item 4 (not covered by any
   `PHASE4_GATE_RECORD.md` Section D finding — no matching entry found there); related to
   the still-open OD5/D-F item in `ARCHITECTURE.md` §6 Open Questions
