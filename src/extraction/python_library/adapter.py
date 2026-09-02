@@ -75,6 +75,9 @@ _VENDOR_DISPLAY_NAMES = {
     "extract_precision": "Precision Diagnostics",
     "extract_adas": "Adas Calibration Experts",
     "extract_keystone": "Keystone Automotive Industries",
+    "extract_abc": "ABC Parts International, Inc.",
+    "extract_fenix": "Fenix NE",
+    "extract_rivian": "Rivian, LLC",
 }
 
 # Which summary key holds the statement's own printed grand total, per
@@ -93,6 +96,9 @@ _PRINTED_TOTAL_KEY = {
     "extract_precision": "total_printed",
     "extract_adas": "total_printed",
     "extract_keystone": "total_printed",
+    "extract_abc": "amount_due_printed",
+    "extract_fenix": "total_due_printed",
+    "extract_rivian": "total_printed",
 }
 
 # Which summary key holds the statement date, per module -- these
@@ -111,6 +117,9 @@ _STATEMENT_DATE_KEY = {
     "extract_precision": "statement_date",
     "extract_adas": "statement_date",
     "extract_keystone": "statement_date",
+    "extract_abc": "statement_date",
+    "extract_fenix": "period_end",
+    "extract_rivian": "statement_date_iso",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -225,6 +234,55 @@ _FIELD_MAP = {
             "credit_applied": "credit_applied",
             "payment_applied": "payment_applied",
         },
+    },
+    "extract_abc": {
+        "invoice_number": ("invoice_number",),
+        "date_field": "date", "due_date_field": None,
+        "po_number_field": "po_number",
+        # so_number (the "Sales Order #C.../T" reference, see
+        # extract_abc.py's own docstring) has no dedicated universal-schema
+        # role of its own -- routed through work_order_number, the closest
+        # existing generic reference-number slot, so it reaches Bronze's
+        # already-existing raw_work_order_number column (and from there
+        # Silver + the "Work Order Number" extracted-data UI column) rather
+        # than being silently dropped (2026-09-02 fix, added alongside the
+        # generic work_order_number_field handling in understand() below).
+        "work_order_number_field": "so_number",
+        # "original_amount", not "remaining_balance" -- Charges must be the
+        # invoice's own original amount, same rule as extract_adas.py
+        # (see its own _FIELD_MAP entry above): a Credit Memo row's
+        # original_amount is its face value, and its actual credit shows
+        # up separately in the credit_field below.
+        "charge_field": "original_amount", "credit_field": "credit",
+    },
+    "extract_fenix": {
+        "invoice_number": ("reference_number",),
+        "date_field": "date", "due_date_field": None,
+        "po_number_field": "po_chk_number",
+        # "charged", not "due" -- same rule as extract_adas.py / extract_abc.py
+        # above: Charges must be the invoice's own ORIGINAL amount, never a
+        # remaining-open-balance figure. extract_fenix.py's own docstring:
+        # "due" is this invoice's current remaining-open amount (can be less
+        # than charged if already offset by a floating credit) - "charged" is
+        # always the original, unaffected by that offsetting.
+        # "paid", not "unalloc" -- "paid" is where this vendor's ledger
+        # posts a Credit row's own credit amount (and a Payment row's own
+        # payment amount); "unalloc" is a running unallocated-payment-pool
+        # figure, not a per-row credit value (usually 0.00 for Credit rows).
+        "charge_field": "charged", "credit_field": "paid",
+    },
+    "extract_rivian": {
+        "invoice_number": ("invoice_number",),
+        "date_field": "doc_date", "due_date_field": "due_date",
+        "po_number_field": "order_number",
+        # No separate credit column on this statement -- the one credit/
+        # adjustment row (08/19/2026 on the sample document) has its
+        # negative amount in the same "invoice_amount" field as every
+        # other row (see extract_rivian.py's own clean_money() docstring
+        # for the trailing-minus-notation -> leading-minus conversion), so
+        # a single charge_field naturally carries it through as a negative
+        # charge rather than needing a signed_field split.
+        "charge_field": "invoice_amount", "credit_field": None,
     },
 }
 
@@ -411,6 +469,7 @@ class PythonLibraryExtractionEngine:
             due_date_field = field_map.get("due_date_field")
             transaction_code_field = field_map.get("transaction_code_field")
             po_number_field = field_map.get("po_number_field")
+            work_order_number_field = field_map.get("work_order_number_field")
 
             invoice = {
                 "invoice_number": invoice_number,
@@ -420,7 +479,7 @@ class PythonLibraryExtractionEngine:
                 "outstanding_amount": outstanding,
                 "ro_number": None,
                 "po_number": item.get(po_number_field) if po_number_field else None,
-                "work_order_number": None,
+                "work_order_number": item.get(work_order_number_field) if work_order_number_field else None,
                 "description": None,
                 "credit": credits,
                 "shop": None,

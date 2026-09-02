@@ -44,6 +44,9 @@ import extract_lia         # Lia Auto Group
 import extract_keystone    # Keystone Automotive Industries
 import extract_precision   # Precision Diagnostics
 import extract_adas        # Adas Calibration Experts
+import extract_abc         # ABC Parts International, Inc.
+import extract_fenix       # Fenix NE
+import extract_rivian      # Rivian, LLC
 
 EXTRACTORS = [
     extract_statement,
@@ -57,6 +60,9 @@ EXTRACTORS = [
     extract_keystone,
     extract_precision,
     extract_adas,
+    extract_abc,
+    extract_fenix,
+    extract_rivian,
 ]
 
 
