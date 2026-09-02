@@ -55,7 +55,10 @@ on for identity/dedup decisions").
 lighter G4 cross-reference update, and whether it's realistic for a caller to ever pass
 a wrong hash given the current call sites.
 
-**STATUS:** OPEN
+**STATUS:** RESOLVED — engineer chose the lighter cross-reference option, 2026-09-02.
+`INVARIANT_CATALOGUE.md` G4's Enforcing modules field now names M-005 explicitly as an
+unverified precondition (`[STAGE-3-UPDATE]` tag), not promoted to a separate
+IC-CANDIDATE.
 
 ---
 
@@ -436,9 +439,11 @@ list endpoint specifically.
 | P2-S3-006 | RESOLVED-DOC | CC | 2026-09-02 | RISK_REGISTER.md R-003 now cross-references OD5 directly in its Source artifact field |
 | CON-S3-001 | RESOLVED-CODE | Vaishali (decision), CC (execution) | 2026-09-02 | Session F run in full — `discovery/F01_structural_inventory.md`, `discovery/F02_vocabulary_extraction.md`, `discovery/DOMAIN_MODEL.json` all committed |
 | P1-S3-004 | RESOLVED-CODE | CC | 2026-09-02 | `INVARIANT_CATALOGUE.md` IC-CANDIDATE-04 added, confirmed enforced by direct read of `matchingPipeline.ts:39-56` |
+| P1-S3-001 | RESOLVED-DOC | Vaishali (decision), CC (execution) | 2026-09-02 | `INVARIANT_CATALOGUE.md` G4's Enforcing modules field now names M-005 as an unverified precondition (lighter cross-reference chosen over a new IC-CANDIDATE) |
 
-*(Remaining P1/P2/P3 items below have no entries yet — OPEN as of this Stage 3 pass,
-pending engineer decisions this checklist itself calls for.)*
+*(Remaining P2/P3 items below have no entries yet — OPEN as of this Stage 3 pass. All
+5 P1 items are now RESOLVED — only P1-S3-002 required external input this pass couldn't
+supply on its own; it's tracked OPEN below pending that answer.)*
 
 ---
 
@@ -459,9 +464,8 @@ Last run: 2026-09-02 By: CD (external Stage 3 review), corrected/re-verified by 
 ## Stage 3 Completeness Summary — 2026-09-02
 Produced by: BCE Adapter Pipeline Stage 3 (CD), updated by CC
 
-P1 items: 5 total — 4 RESOLVED (P1-S3-003, CON-S3-001, P1-S3-004, and — see below —
-P1-S3-002 remains genuinely OPEN pending external input), 1 OPEN requiring an engineer
-decision (P1-S3-001), 1 OPEN requiring external/IT input (P1-S3-002)
+P1 items: 5 total — 4 RESOLVED (P1-S3-001, P1-S3-003, P1-S3-004, CON-S3-001), 1 OPEN
+requiring external/IT input (P1-S3-002)
 P2 items: 5 total — 1 RESOLVED (P2-S3-006), 4 OPEN
 P3 items: 3 — informational backlog
 Total items: 13
@@ -470,18 +474,22 @@ Consistency check: **PASS** (was FAIL) — the one failing row (OD6/Session F) i
 resolved on both counts.
 
 Stage 3 is complete when all P1 items are SIGNED-OFF or RESOLVED by the engineer:
-P1-S3-001 (M-005/G4 gap) — OPEN, needs engineer decision (new candidate vs. lighter
-cross-reference); P1-S3-002 (IP-002 auth) — OPEN, needs external/IT input, cannot be
-resolved from source, genuinely blocked pending a real answer from whoever owns the
-Fabric SQL resource; P1-S3-003 (R-002/OD4/Vartan) — RESOLVED; CON-S3-001 (Session F
-contradiction) — RESOLVED; P1-S3-004 (OD6 uncatalogued) — RESOLVED.
+P1-S3-001 (M-005/G4 gap) — RESOLVED; P1-S3-002 (IP-002 auth) — OPEN, needs external/IT
+input, cannot be resolved from source, genuinely blocked pending a real answer from
+whoever owns the Fabric SQL resource; P1-S3-003 (R-002/OD4/Vartan) — RESOLVED;
+CON-S3-001 (Session F contradiction) — RESOLVED; P1-S3-004 (OD6 uncatalogued) —
+RESOLVED.
 
-**Two P1 items remain open and are the actual blockers to Stage 3 fully closing:**
-P1-S3-001 and P1-S3-002. Neither is resolvable by more source reading — both need a
-specific engineer/IT decision.
+**One P1 item remains open and is the sole blocker to Stage 3 fully closing:**
+P1-S3-002. Not resolvable by more source reading or engineer judgment alone — needs a
+real answer from whoever owns/administers the Fabric SQL Database resource about what
+auth `FABRIC_SQL_ENDPOINT` actually requires.
 
 **Stage 3 Close-Out Step — Graph Construction (mandatory, all paths):** Not yet run.
-Blocked on the two remaining open P1 items above.
+Blocked on P1-S3-002 above. Once resolved, `SYSTEM_GRAPH.json` can be assembled from
+`TOPOLOGY.md`'s A02 (M-NNN), `DOMAIN_MODEL.json`'s cross_graph_edges (already present:
+OWNS_ENTITY/READS_ENTITY edges linking M-NNN to E-NNN), and `INTEGRATION_CONTRACTS.md`'s
+IP-NNN entries.
 
 **Human gate required before Stage 3 closes.**
 **Engineer sign-off:** Vaishali

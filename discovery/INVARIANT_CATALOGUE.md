@@ -142,7 +142,13 @@ cited per entry below as a cross-reference, not substituted for the Stage 1 rule
 - **Owning module:** M-011
 - **Enforcing modules:** M-011 (app-layer pre-check + race backstop); the DB-level UNIQUE
   constraint itself (`migrations/001_foundation_schema.sql`) is the ultimate guarantee but
-  is schema DDL, not a module
+  is schema DDL, not a module. **[STAGE-3-UPDATE — 2026-09-02]:** M-005 (`storage.ts`) also
+  belongs here as an **unverified precondition** — it never validates that a document's
+  `contentSha256` actually matches its stored `bytes` before M-011 relies on that hash for
+  uniqueness. G4's guarantee holds correctly for whatever hash value it's given; it does not
+  itself protect against a caller ever computing/passing a mismatched hash in the first
+  place. See `ANNOTATION_CHECKLIST.md` P1-S3-001 (resolved as a cross-reference, not a
+  separate invariant — engineer decision 2026-09-02).
 - **Source:** `INVARIANTS.md` states Detection point = unique constraint on
   `content_sha256` at write time. Cross-reference: `VERIFICATION_CHECKLIST.md` records
   Automated/PASS via Task 2.2's `test_document_registration.sh` and `upload.spec.ts`'s
