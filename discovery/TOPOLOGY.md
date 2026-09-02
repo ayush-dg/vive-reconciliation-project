@@ -159,9 +159,22 @@ an uncertain single target among 9 possibilities at static-analysis time.
 - Purpose: primary transactional store for this build's own data (matches, exceptions)
 - Called by: M-003 (db.ts, the sole direct caller — every other module reaches this
   through M-003, confirmed by Session A's call table)
-- Auth: NOT DETERMINABLE FROM SOURCE — genuinely undetermined, not merely stale (no
-  component file found a credential mechanism beyond the bare `FABRIC_SQL_ENDPOINT`
-  connection string)
+- Auth: [STAGE-3-UPDATE — 2026-09-02, resolves ANNOTATION_CHECKLIST.md P1-S3-002 — engineer-
+  confirmed, verified by CC against the actual parser]: **not merely undetermined — the
+  value present in this environment's `.env` is confirmed malformed.** `db.ts:56` passes
+  `FABRIC_SQL_ENDPOINT` straight into `new sql.ConnectionPool(endpoint)` as a plain string,
+  which `mssql` (v11) parses via `@tediousjs/connection-string`'s `parseSqlConnectionString()`
+  — it expects an ADO-style `Key=Value;Key2=Value2` string. The actual value is a **bare
+  hostname** (`<workspace>.datawarehouse.fabric.microsoft.com`) with no `Server=`/
+  `Authentication=`/`User Id=` pairs at all. Verified directly: `parseSqlConnectionString('a
+  bare hostname string')` returns `{}` — no error thrown, no server, no auth, nothing. So
+  `getFabricPool()` builds a pool config with **no server address configured**, before auth
+  even enters the picture. Since `getDbMode()` treats any non-empty `FABRIC_SQL_ENDPOINT` as
+  `'fabric'` mode regardless of its content, simply having this var set (even malformed)
+  routes the app away from the SQLite fallback into a path guaranteed to fail at `.connect()`
+  time. Promoted to `RISK_REGISTER.md` R-008 (see below) — this is the actual, confirmed root
+  cause of why Fabric access has never worked in any session to date, not merely an
+  unanswered auth question.
 - Error handling: [STAGE-2-UPDATE — 2026-09-02, backported from Session E]: `getFabricPool()`
   throws explicitly if `FABRIC_SQL_ENDPOINT` is unset (no silent fallback at this layer).
   **Known bug (see `discovery/RISK_REGISTER.md` R-004):** a failed `.connect()` permanently
@@ -169,6 +182,9 @@ an uncertain single target among 9 possibilities at static-analysis time.
   caller gets the same rejection with no automatic retry until `closeDb()` is explicitly
   invoked. Shares its one connection pool with IP-004's `silver` write path — a failure in
   one is simultaneously a failure in the other, despite being catalogued as separate IPs.
+  **Compounds directly with the Auth finding above**: a malformed connection string means
+  every `.connect()` attempt fails immediately, so R-004's pool-poisoning bug triggers on
+  literally the first request, permanently, for the life of the process.
 
 - **IP-003** — System: Microsoft Fabric — Lakehouse (`bronze`)
 - Direction: inbound (read-only from this build's perspective)

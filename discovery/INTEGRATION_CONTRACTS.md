@@ -98,10 +98,18 @@ assumes a failed connect is retryable simply by trying again later — see Gaps,
 assumption is false as currently implemented.
 
 Auth mechanism:
-NOT DETERMINABLE FROM SOURCE — consistent with A03. Unlike IP-003 (which has a fully
-documented AAD client-credentials flow one layer down in `G08_fabricLakehouse.md`), no
-component file read this session adds any further detail for IP-002's own auth beyond "an
-endpoint string." This one is genuinely undetermined, not merely stale.
+[STAGE-3-UPDATE — 2026-09-02, resolves ANNOTATION_CHECKLIST.md P1-S3-002]: **confirmed, not
+undetermined.** The engineer checked this environment's `.env`: `FABRIC_SQL_ENDPOINT` holds a
+bare hostname (`<workspace>.datawarehouse.fabric.microsoft.com`), not an ADO-style
+`Key=Value;...` connection string. `db.ts:56` passes it straight into
+`new sql.ConnectionPool(endpoint)`, which parses string input via
+`@tediousjs/connection-string`'s `parseSqlConnectionString()`. Verified directly by CC:
+that parser returns `{}` for a bare hostname — no error, no server, no auth block. So this
+integration point currently has **no functioning connection configuration at all**, let
+alone a determinable auth mechanism — the question "what auth does it use" doesn't yet
+apply, because the string doesn't parse into anything usable in the first place. Contrast
+with IP-003, which has a fully documented, functioning AAD client-credentials flow.
+Promoted to `RISK_REGISTER.md` R-008.
 
 Error handling assumptions:
 [STAGE-2-DIVERGENCE - 2026-09-02] A03 states "NOT DETERMINABLE FROM SOURCE." Session G's own
@@ -124,6 +132,10 @@ Known divergences:
 Gaps:
 - The connection-pool permanent-cache bug is a genuine operational risk, not yet in
   `RISK_REGISTER.md` before this session — added as **R-004**.
+- [Added 2026-09-02] The malformed-connection-string finding above (confirmed root cause
+  of Fabric never having worked in any session to date) is added as **R-008**, cross-
+  referenced with R-004 — a malformed string means every `.connect()` fails immediately,
+  so R-004's pool-poisoning triggers on literally the first request.
 - No visible distinction in `db.ts` between "Fabric mode was never configured" (silent
   SQLite fallback, by design) and "Fabric mode was configured but the connect failed"
   (permanent cache poisoning) from the caller's point of view — both eventually surface as

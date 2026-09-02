@@ -92,7 +92,15 @@ credentials, managed identity, or something else — before any live-Fabric work
 
 **Engineer action required:** Resolve before live Fabric access is next needed.
 
-**STATUS:** OPEN
+**STATUS:** RESOLVED — 2026-09-02. Engineer checked `.env` directly: `FABRIC_SQL_ENDPOINT`
+is a bare hostname, not an ADO-style connection string `db.ts`'s `mssql.ConnectionPool`
+requires. CC verified this directly against the real parser
+(`@tediousjs/connection-string`'s `parseSqlConnectionString()` returns `{}` for a bare
+hostname — no server, no auth, nothing). This is now a confirmed root-cause finding, not
+an open auth question — see `RISK_REGISTER.md` R-008, `TOPOLOGY.md`/
+`INTEGRATION_CONTRACTS.md` IP-002. The *fix* (reformat the connection string once a real
+auth scheme — SQL auth vs. Managed Identity vs. AAD service principal — is chosen) remains
+a follow-up task, not blocked on further discovery.
 
 ---
 
@@ -440,10 +448,10 @@ list endpoint specifically.
 | CON-S3-001 | RESOLVED-CODE | Vaishali (decision), CC (execution) | 2026-09-02 | Session F run in full — `discovery/F01_structural_inventory.md`, `discovery/F02_vocabulary_extraction.md`, `discovery/DOMAIN_MODEL.json` all committed |
 | P1-S3-004 | RESOLVED-CODE | CC | 2026-09-02 | `INVARIANT_CATALOGUE.md` IC-CANDIDATE-04 added, confirmed enforced by direct read of `matchingPipeline.ts:39-56` |
 | P1-S3-001 | RESOLVED-DOC | Vaishali (decision), CC (execution) | 2026-09-02 | `INVARIANT_CATALOGUE.md` G4's Enforcing modules field now names M-005 as an unverified precondition (lighter cross-reference chosen over a new IC-CANDIDATE) |
+| P1-S3-002 | RESOLVED-CODE | Vaishali (found it in `.env`), CC (verified against real parser) | 2026-09-02 | `RISK_REGISTER.md` R-008 added — `FABRIC_SQL_ENDPOINT` is a bare hostname, not a valid connection string; confirmed root cause of Fabric never connecting, not merely an open auth question |
 
-*(Remaining P2/P3 items below have no entries yet — OPEN as of this Stage 3 pass. All
-5 P1 items are now RESOLVED — only P1-S3-002 required external input this pass couldn't
-supply on its own; it's tracked OPEN below pending that answer.)*
+*(All 5 P1 items are now RESOLVED. Remaining P2/P3 items below have no entries yet — OPEN
+as of this Stage 3 pass, lower urgency, not blocking Stage 3 close-out.)*
 
 ---
 
@@ -464,32 +472,28 @@ Last run: 2026-09-02 By: CD (external Stage 3 review), corrected/re-verified by 
 ## Stage 3 Completeness Summary — 2026-09-02
 Produced by: BCE Adapter Pipeline Stage 3 (CD), updated by CC
 
-P1 items: 5 total — 4 RESOLVED (P1-S3-001, P1-S3-003, P1-S3-004, CON-S3-001), 1 OPEN
-requiring external/IT input (P1-S3-002)
-P2 items: 5 total — 1 RESOLVED (P2-S3-006), 4 OPEN
+P1 items: 5 total — **all 5 RESOLVED** (P1-S3-001, P1-S3-002, P1-S3-003, P1-S3-004,
+CON-S3-001)
+P2 items: 5 total — 1 RESOLVED (P2-S3-006), 4 OPEN (lower urgency, non-blocking)
 P3 items: 3 — informational backlog
 Total items: 13
 
 Consistency check: **PASS** (was FAIL) — the one failing row (OD6/Session F) is now
 resolved on both counts.
 
-Stage 3 is complete when all P1 items are SIGNED-OFF or RESOLVED by the engineer:
-P1-S3-001 (M-005/G4 gap) — RESOLVED; P1-S3-002 (IP-002 auth) — OPEN, needs external/IT
-input, cannot be resolved from source, genuinely blocked pending a real answer from
-whoever owns the Fabric SQL resource; P1-S3-003 (R-002/OD4/Vartan) — RESOLVED;
-CON-S3-001 (Session F contradiction) — RESOLVED; P1-S3-004 (OD6 uncatalogued) —
-RESOLVED.
+Stage 3 is complete when all P1 items are SIGNED-OFF or RESOLVED by the engineer — **all
+5 now are:** P1-S3-001 (M-005/G4 gap) — RESOLVED; P1-S3-002 (IP-002 auth) — RESOLVED
+(engineer found the actual malformed value in `.env` directly; the *fix* to that value is
+a separate follow-up task, not a discovery gap); P1-S3-003 (R-002/OD4/Vartan) — RESOLVED;
+CON-S3-001 (Session F contradiction) — RESOLVED; P1-S3-004 (OD6 uncatalogued) — RESOLVED.
 
-**One P1 item remains open and is the sole blocker to Stage 3 fully closing:**
-P1-S3-002. Not resolvable by more source reading or engineer judgment alone — needs a
-real answer from whoever owns/administers the Fabric SQL Database resource about what
-auth `FABRIC_SQL_ENDPOINT` actually requires.
+**No P1 items remain open. Stage 3's own completion condition is met.**
 
-**Stage 3 Close-Out Step — Graph Construction (mandatory, all paths):** Not yet run.
-Blocked on P1-S3-002 above. Once resolved, `SYSTEM_GRAPH.json` can be assembled from
-`TOPOLOGY.md`'s A02 (M-NNN), `DOMAIN_MODEL.json`'s cross_graph_edges (already present:
-OWNS_ENTITY/READS_ENTITY edges linking M-NNN to E-NNN), and `INTEGRATION_CONTRACTS.md`'s
-IP-NNN entries.
+**Stage 3 Close-Out Step — Graph Construction (mandatory, all paths):** Ready to run.
+`SYSTEM_GRAPH.json` can be assembled from `TOPOLOGY.md`'s A02 (M-NNN),
+`DOMAIN_MODEL.json`'s cross_graph_edges (already present: OWNS_ENTITY/READS_ENTITY edges
+linking M-NNN to E-NNN), and `INTEGRATION_CONTRACTS.md`'s IP-NNN entries. Not yet
+produced as of this revision — next step.
 
 **Human gate required before Stage 3 closes.**
 **Engineer sign-off:** Vaishali

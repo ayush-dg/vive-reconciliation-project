@@ -12,7 +12,11 @@ backfilled. R-001 cited "N2" in its threatened-invariant framing as if it were a
 state plainly that N2 is a `PHASE4_GATE_RECORD.md` label deliberately never promoted to a
 catalogue entry, not an orphaned reference. Cross-artifact review (P1-S3-003, P2-S3-006)
 also found R-002/R-003 didn't cross-reference `docs/INVARIANTS.md`'s OD4/OD5, despite
-covering the same underlying gaps — both now cross-referenced. See
+covering the same underlying gaps — both now cross-referenced. R-008 added 2026-09-02,
+resolving P1-S3-002: the engineer checked `.env` directly and found `FABRIC_SQL_ENDPOINT`
+is a bare hostname, not a valid connection string — confirmed by CC against the real
+parser, this is the actual root cause of Fabric never having worked, not merely an
+unanswered auth question. See
 `discovery/ANNOTATION_CHECKLIST.md` for the full Stage 3 backlog.
 
 # RISK_REGISTER.md — VIVE Statement Reconciliation
@@ -203,6 +207,45 @@ history). Only genuinely still-open risk is catalogued here.
   on the `LEGAL_ENTITIES` record (or reintroduce an explicit selector before a second legal
   entity is ever added to the array). Affected modules: M-042, M-070, M-044 (also imports
   `LEGAL_ENTITIES`). Threatened invariant: IC-CANDIDATE-02.
+
+- **Risk ID:** R-008
+- **Description:** `FABRIC_SQL_ENDPOINT` (this build's IP-002, `recon` database connection)
+  is confirmed malformed in this environment's `.env` — a bare hostname
+  (`<workspace>.datawarehouse.fabric.microsoft.com`), not the ADO-style
+  `Key=Value;Key2=Value2` connection string `db.ts:56`'s
+  `new sql.ConnectionPool(endpoint)` requires. Verified directly: `mssql`'s underlying
+  parser (`@tediousjs/connection-string`'s `parseSqlConnectionString()`) returns `{}` for
+  a bare hostname — no error, no server, no auth block, nothing. `getDbMode()` treats any
+  non-empty `FABRIC_SQL_ENDPOINT` as `'fabric'` mode regardless of content, so having this
+  var set at all (even malformed) routes the app away from the working SQLite fallback
+  into a path guaranteed to fail. This is the actual, confirmed root cause of why Fabric
+  access has never worked in any session to date — not merely an unanswered auth
+  question (which is what this was originally recorded as, `ANNOTATION_CHECKLIST.md`
+  P1-S3-002).
+- **Severity:** P1 — this build's own primary transactional store (`recon`) cannot
+  currently connect to live Fabric at all, under any circumstances, until this value is
+  corrected. Directly compounds R-004: a malformed string means `.connect()` fails on
+  literally the first request, immediately triggering R-004's permanent pool-poisoning
+  bug.
+- **Affected modules:** M-003 (`db.ts`, the connection owner) and, transitively, every one
+  of its 20+ callers across the serving/pipeline/route layers.
+- **Source artifact:** Engineer-confirmed directly against `.env`, 2026-09-02; parser
+  behavior verified directly by CC against the real `@tediousjs/connection-string`
+  package in this repo's `node_modules`. See `TOPOLOGY.md` IP-002 and
+  `INTEGRATION_CONTRACTS.md` IP-002 for the full technical trace.
+- **Mitigation:** none — newly discovered. The local SQLite fallback means this has never
+  caused a visible failure in any session, since `FABRIC_SQL_ENDPOINT` has presumably
+  never been set during actual local dev/test runs in this sandbox (only present in this
+  `.env` file, not necessarily exported to the process during `npm run dev`/tests —
+  `playwright.config.ts` additionally force-blanks it for the Playwright-launched server
+  specifically, so UI test runs are unaffected regardless).
+- **Recommended action:** Reformat `FABRIC_SQL_ENDPOINT` as a proper ADO connection
+  string once the correct auth scheme is decided (SQL auth, Azure AD Managed Identity, or
+  an explicit AAD service-principal flow matching IP-003's `FABRIC_CLIENT_ID`/
+  `FABRIC_CLIENT_SECRET`/`FABRIC_TENANT_ID` pattern) — e.g.
+  `Server=<hostname>;Database=recon;Authentication=Active Directory Default;` for Managed
+  Identity, or an explicit `User Id=`/`Password=` pair for SQL auth. This is now a
+  concrete, scoped fix, not an open research question.
 
 **Considered and not elevated: Fabric DDL missing `IF NOT EXISTS` (M-041/`vendorSchema.ts`).**
 `vendorSchema.ts`'s Fabric-dialect DDL for per-vendor raw tables has no `IF NOT EXISTS` guard
