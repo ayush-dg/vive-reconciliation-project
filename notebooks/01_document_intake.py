@@ -1054,6 +1054,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # Step 1: Cache check
     print(f"\n[Step 1] Checking extraction cache...")
     document_hash = compute_file_hash(pdf_path)
+    print(f"  Document Hash: {document_hash}")
     cached = check_cache(document_hash)
     if cached:
         cached_statement_id = cached["statement_id"]

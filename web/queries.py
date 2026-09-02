@@ -1073,10 +1073,15 @@ def claim_next_pending_job():
 
 def update_job_status(job_id: str, status: str, started_at: str = None,
                        completed_at: str = None, statement_id: str = None,
-                       vendor_name: str = None, error_message: str = None) -> None:
+                       vendor_name: str = None, error_message: str = None,
+                       document_hash: str = None) -> None:
     """Builds the SET clause from whichever fields are relevant to this
     transition — PENDING->PROCESSING only sets started_at; COMPLETED/FAILED
-    also set completed_at plus their own outcome fields."""
+    also set completed_at plus their own outcome fields.
+
+    document_hash (2026-09-03) lets _resolve_bronze_statement_id() find a
+    cache-hit job's real Bronze statement_id without re-reading the
+    original PDF from local disk -- see that function's docstring."""
     sets = ["status = ?"]
     params = [status]
     if started_at is not None:
@@ -1094,6 +1099,9 @@ def update_job_status(job_id: str, status: str, started_at: str = None,
     if error_message is not None:
         sets.append("error_message = ?")
         params.append(error_message)
+    if document_hash is not None:
+        sets.append("document_hash = ?")
+        params.append(document_hash)
     params.append(job_id)
     execute_sql(f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ?", params)
 
@@ -1133,15 +1141,21 @@ def _resolve_bronze_statement_id(job: dict) -> str:
     legitimately have zero Bronze rows even though the file was
     successfully processed.
 
-    Resolves this the same way run_intake() itself would on a fresh
-    upload of this file: re-hash job["pdf_path"] (uploads are saved
-    permanently to SAMPLE_DATA_DIR and never cleaned up -- see
-    web/routers/upload.py -- so the file reliably still exists) and look
-    up extraction_cache for the most recent successful (row_count > 0)
+    Resolution order: (1) job["document_hash"] -- stored on the jobs row
+    at completion time since 2026-09-03 (see update_job_status()), the
+    same hash run_intake() computes unconditionally before its cache
+    check, so this needs no disk access at all; (2) for jobs that predate
+    that column, fall back to re-hashing job["pdf_path"] the same way
+    run_intake() itself would on a fresh upload -- but uploads are NOT
+    guaranteed to still be on local disk (WEBSITES_ENABLE_APP_SERVICE_STORAGE
+    is false in production, so local disk is wiped on every container
+    restart), so this fallback is best-effort only, kept for any future
+    edge case rather than relied on. Either way, once a hash is found,
+    look up extraction_cache for the most recent successful (row_count > 0)
     entry for that hash, mirroring notebooks/01_document_intake.py's
     check_cache() query exactly. Falls back to job["statement_id"]
-    unchanged if the file is missing or no cache entry is found -- a
-    safe degradation (an empty/short result) rather than an error."""
+    unchanged if no hash or no cache entry can be found -- a safe
+    degradation (an empty/short result) rather than an error."""
     statement_id = job["statement_id"]
 
     direct_count = execute_query(
@@ -1151,15 +1165,17 @@ def _resolve_bronze_statement_id(job: dict) -> str:
     if direct_count and direct_count[0]["c"] > 0:
         return statement_id
 
-    pdf_path = job.get("pdf_path")
-    if not pdf_path or not os.path.exists(pdf_path):
-        return statement_id
+    document_hash = job.get("document_hash")
 
-    try:
-        with open(pdf_path, "rb") as f:
-            document_hash = hashlib.sha256(f.read()).hexdigest()
-    except OSError:
-        return statement_id
+    if not document_hash:
+        pdf_path = job.get("pdf_path")
+        if not pdf_path or not os.path.exists(pdf_path):
+            return statement_id
+        try:
+            with open(pdf_path, "rb") as f:
+                document_hash = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            return statement_id
 
     # TEMPORARY (2026-08-29): extraction_cache pointed back at Azure SQL --
     # see get_vendor_name_for_statement()'s comment above for why. Revert

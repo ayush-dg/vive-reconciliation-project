@@ -47,6 +47,7 @@ SAMPLE_DATA_DIR = os.path.join(PROJECT_ROOT, "sample_data")
 POLL_INTERVAL_SECONDS = 30
 DEFAULT_WORKER_POOL_SIZE = 3
 STATEMENT_ID_RE = re.compile(r"Statement ID:\s*(\S+)")
+DOCUMENT_HASH_RE = re.compile(r"Document Hash:\s*(\S+)")
 
 # Exact substring from src/matching/engine.py's run_matching() guard --
 # identifies "extraction succeeded, matching had no real ERP data to
@@ -94,6 +95,8 @@ def _run_job(job: dict) -> None:
         )
         output = (result.stdout or "") + "\n" + (result.stderr or "")
         match = STATEMENT_ID_RE.search(output)
+        hash_match = DOCUMENT_HASH_RE.search(output)
+        document_hash = hash_match.group(1) if hash_match else None
         completed_at = datetime.now(timezone.utc).isoformat()
 
         if result.returncode != 0 or not match:
@@ -117,6 +120,7 @@ def _run_job(job: dict) -> None:
                         completed_at=completed_at,
                         statement_id=statement_id,
                         vendor_name=vendor_name,
+                        document_hash=document_hash,
                         error_message=(
                             f"Extraction successful ({silver_count} rows) -- no ERP reference data "
                             f"loaded for this vendor yet, matching skipped. See scripts/load_voucher_data.py."
@@ -166,6 +170,7 @@ def _run_job(job: dict) -> None:
             completed_at=completed_at,
             statement_id=statement_id,
             vendor_name=vendor_name,
+            document_hash=document_hash,
         )
     except Exception as e:
         print(f"[worker] Job {job_id} FAILED with worker error: {e}")
