@@ -489,11 +489,19 @@ CON-S3-001 (Session F contradiction) — RESOLVED; P1-S3-004 (OD6 uncatalogued) 
 
 **No P1 items remain open. Stage 3's own completion condition is met.**
 
-**Stage 3 Close-Out Step — Graph Construction (mandatory, all paths):** Ready to run.
-`SYSTEM_GRAPH.json` can be assembled from `TOPOLOGY.md`'s A02 (M-NNN),
-`DOMAIN_MODEL.json`'s cross_graph_edges (already present: OWNS_ENTITY/READS_ENTITY edges
-linking M-NNN to E-NNN), and `INTEGRATION_CONTRACTS.md`'s IP-NNN entries. Not yet
-produced as of this revision — next step.
+**Stage 3 Close-Out Step — Graph Construction (mandatory, all paths):** **COMPLETE —
+2026-09-02.** `discovery/SYSTEM_GRAPH.json` committed. 111 nodes (78 Module, 5
+IntegrationPoint, 20 Invariant, 8 RiskItem); 190 edges (95 CALLS, 19 OWNS, 32 ENFORCES, 5
+CALLS_INTEGRATION, 13 AFFECTS, 3 THREATENS, 6 OWNS_ENTITY, 5 READS_ENTITY, 6
+ENFORCES_ENTITY_INVARIANT, 6 ENFORCES_ATTRIBUTE_INVARIANT). Validated: zero dangling
+references (every edge's `from`/`to` resolves to a real node, checked against both this
+file and `DOMAIN_MODEL.json`). CAN_VIOLATE (IntegrationPoint→Invariant) edges deliberately
+omitted — no explicit, evidenced link between a specific IP-NNN gap and a specific named
+invariant was found in any committed artifact; fabricating one would violate this
+project's own established discipline.
+
+**Per BCE §12: "Stage 3 is not complete until SYSTEM_GRAPH.json is committed to
+discovery/." — Stage 3 is now complete.**
 
 **Human gate required before Stage 3 closes.**
 **Engineer sign-off:** Vaishali
