@@ -17,6 +17,7 @@ same way the detail page (get_open_exceptions/get_exception_counts) does.
 """
 
 import os
+import re
 import sqlite3
 import sys
 import unittest
@@ -85,6 +86,115 @@ def _insert_open_exception(execute_sql, *, statement_id, exception_reason, excep
     )
 
 
+# ---------------------------------------------------------------------------
+# Fake Fabric Warehouse backend (silver.recon_summary / silver.recon_exceptions)
+# -- get_vendor_summaries(), get_exception_aging_summary(), get_open_exceptions(),
+# and escalate_exception() all read/write this backend via recon_query/
+# recon_sql (web/queries.py's import of src.lakehouse.fabric_sql's
+# execute_warehouse_query/execute_warehouse_sql), NOT execute_sql/
+# execute_query -- see queries.py's module docstring comment on recon_query.
+# Mirrors _wire_fake_backend()/_make_db() above but against an ATTACHed
+# in-memory "silver" schema, so the real "silver.recon_summary"-qualified SQL
+# text queries.py sends runs unmodified against SQLite -- no separate SQL
+# dialect to maintain here. Column list matches
+# scripts/create_fabric_recon_schema.py exactly (with SQLite-generic types;
+# SQLite is dynamically typed and ignores DECIMAL/DATETIME2 precision).
+# ---------------------------------------------------------------------------
+
+def _make_fabric_db():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("ATTACH DATABASE ':memory:' AS silver")
+    conn.execute(
+        """
+        CREATE TABLE silver.recon_summary (
+            summary_id TEXT, vendor_id TEXT, vendor_name TEXT, shop TEXT,
+            statement_period TEXT, statement_id TEXT, statement_total REAL,
+            erp_total REAL, difference REAL, total_invoice_count INTEGER,
+            matched_count INTEGER, exception_count INTEGER, match_percentage REAL,
+            overall_status TEXT, reconciliation_timestamp TEXT, version_number INTEGER,
+            previous_statement_id TEXT, is_latest_version INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE silver.recon_exceptions (
+            exception_id TEXT, vendor_id TEXT, shop TEXT, invoice_number TEXT,
+            ro_number TEXT, statement_amount REAL, erp_amount REAL, match_status TEXT,
+            exception_reason TEXT, exception_status TEXT, statement_id TEXT,
+            date_raised TEXT, date_resolved TEXT, statement_period TEXT,
+            ai_explanation TEXT, ai_suggested_resolution TEXT, ai_confidence_score REAL,
+            ai_provider TEXT, match_confidence REAL, shop_owner TEXT,
+            escalation_status TEXT, escalated_at TEXT, escalated_by TEXT, source_file TEXT
+        )
+        """
+    )
+    return conn
+
+
+_SELECT_TOP_RE = re.compile(r"^\s*SELECT\s+TOP\s+(\d+)\s+(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _wire_fake_fabric_backend(conn):
+    """Returns (recon_query, recon_sql) bound to `conn` -- same shapes as
+    _wire_fake_backend() above, for mock.patch("web.queries.recon_query", ...)/
+    mock.patch("web.queries.recon_sql", ...). Translates T-SQL "SELECT TOP N"
+    (real Fabric/T-SQL syntax queries.py sends unmodified to recon_query --
+    unlike execute_query()'s local/Azure-SQL path, recon_query has no dialect
+    translator) into SQLite's "... LIMIT N", since queries.py's SQL text is
+    written for real Fabric, not SQLite -- see get_vendor_latest_statement()."""
+    def recon_query(sql, params=None):
+        top_match = _SELECT_TOP_RE.match(sql)
+        if top_match:
+            n, rest = top_match.groups()
+            sql = f"SELECT {rest}\nLIMIT {n}"
+        cur = conn.execute(sql, params or [])
+        return [dict(row) for row in cur.fetchall()]
+
+    def recon_sql(sql, params=None):
+        cur = conn.execute(sql, params or [])
+        conn.commit()
+        return cur
+
+    return recon_query, recon_sql
+
+
+def _insert_recon_summary(recon_sql, *, statement_id, vendor_name, exception_count,
+                           overall_status, reconciliation_timestamp, is_latest_version=1,
+                           total_invoice_count=10, matched_count=10):
+    recon_sql(
+        """
+        INSERT INTO silver.recon_summary (
+            summary_id, vendor_id, vendor_name, statement_period, statement_id,
+            statement_total, erp_total, difference, total_invoice_count,
+            matched_count, exception_count, match_percentage, overall_status,
+            reconciliation_timestamp, is_latest_version
+        ) VALUES (?, ?, ?, '2026-05', ?, 1000.0, 1000.0, 0.0, ?, ?, ?, 100.0, ?, ?, ?)
+        """,
+        [f"SUM-{statement_id}", vendor_name.upper(), vendor_name, statement_id,
+         total_invoice_count, matched_count, exception_count, overall_status,
+         reconciliation_timestamp, is_latest_version],
+    )
+
+
+def _insert_recon_exception(recon_sql, *, statement_id, exception_reason, exception_id,
+                             status="OPEN", invoice_number="INV-1",
+                             date_raised="2026-05-01T00:00:00+00:00",
+                             match_confidence=None, source_file=None):
+    recon_sql(
+        """
+        INSERT INTO silver.recon_exceptions (
+            exception_id, vendor_id, invoice_number, statement_amount, erp_amount,
+            match_status, exception_reason, exception_status, statement_id, date_raised,
+            match_confidence, source_file
+        ) VALUES (?, 'VENDOR_X', ?, NULL, NULL, 'EXCEPTION', ?, ?, ?, ?, ?, ?)
+        """,
+        [exception_id, invoice_number, exception_reason, status, statement_id, date_raised,
+         match_confidence, source_file],
+    )
+
+
 class TestVendorSummaryReflectsLiveExtractionIncompleteCount(unittest.TestCase):
     """The exact reported bug: matching found 0 real exceptions (summary
     says RECONCILED), but intake later raised 2 open EXTRACTION_INCOMPLETE
@@ -101,6 +211,20 @@ class TestVendorSummaryReflectsLiveExtractionIncompleteCount(unittest.TestCase):
         self.addCleanup(patcher2.stop)
         self.addCleanup(self.conn.close)
 
+        # get_recent_runs()/get_all_runs() still read gold_* (execute_query,
+        # above); get_vendor_summaries() reads silver.recon_* (recon_query,
+        # below) -- both wired here since this class's tests exercise all
+        # three functions against the same fixture data.
+        self.fabric_conn = _make_fabric_db()
+        recon_query, recon_sql = _wire_fake_fabric_backend(self.fabric_conn)
+        patcher3 = mock.patch("web.queries.recon_query", recon_query)
+        patcher4 = mock.patch("web.queries.recon_sql", recon_sql)
+        patcher3.start()
+        patcher4.start()
+        self.addCleanup(patcher3.stop)
+        self.addCleanup(patcher4.stop)
+        self.addCleanup(self.fabric_conn.close)
+
         _insert_summary(
             execute_sql, statement_id="STMT-1", vendor_name="Acme Parts",
             exception_count=0, overall_status="RECONCILED",
@@ -110,6 +234,16 @@ class TestVendorSummaryReflectsLiveExtractionIncompleteCount(unittest.TestCase):
                                 exception_reason="EXTRACTION_INCOMPLETE", exception_id="EXC-1")
         _insert_open_exception(execute_sql, statement_id="STMT-1",
                                 exception_reason="EXTRACTION_INCOMPLETE", exception_id="EXC-2")
+
+        _insert_recon_summary(
+            recon_sql, statement_id="STMT-1", vendor_name="Acme Parts",
+            exception_count=0, overall_status="RECONCILED",
+            reconciliation_timestamp="2026-05-01T00:00:00+00:00",
+        )
+        _insert_recon_exception(recon_sql, statement_id="STMT-1",
+                                 exception_reason="EXTRACTION_INCOMPLETE", exception_id="EXC-1")
+        _insert_recon_exception(recon_sql, statement_id="STMT-1",
+                                 exception_reason="EXTRACTION_INCOMPLETE", exception_id="EXC-2")
 
     def test_get_vendor_summaries_shows_live_count_not_stale_zero(self):
         vendors = queries.get_vendor_summaries()
@@ -147,8 +281,23 @@ class TestVendorSummaryStillReconciledWhenTrulyClean(unittest.TestCase):
         self.addCleanup(patcher2.stop)
         self.addCleanup(self.conn.close)
 
+        self.fabric_conn = _make_fabric_db()
+        recon_query, recon_sql = _wire_fake_fabric_backend(self.fabric_conn)
+        patcher3 = mock.patch("web.queries.recon_query", recon_query)
+        patcher4 = mock.patch("web.queries.recon_sql", recon_sql)
+        patcher3.start()
+        patcher4.start()
+        self.addCleanup(patcher3.stop)
+        self.addCleanup(patcher4.stop)
+        self.addCleanup(self.fabric_conn.close)
+
         _insert_summary(
             execute_sql, statement_id="STMT-2", vendor_name="Clean Vendor",
+            exception_count=0, overall_status="RECONCILED",
+            reconciliation_timestamp="2026-05-01T00:00:00+00:00",
+        )
+        _insert_recon_summary(
+            recon_sql, statement_id="STMT-2", vendor_name="Clean Vendor",
             exception_count=0, overall_status="RECONCILED",
             reconciliation_timestamp="2026-05-01T00:00:00+00:00",
         )
@@ -179,6 +328,16 @@ class TestVendorSummaryExcludesResolvedExceptions(unittest.TestCase):
         self.addCleanup(patcher2.stop)
         self.addCleanup(self.conn.close)
 
+        self.fabric_conn = _make_fabric_db()
+        recon_query, recon_sql = _wire_fake_fabric_backend(self.fabric_conn)
+        patcher3 = mock.patch("web.queries.recon_query", recon_query)
+        patcher4 = mock.patch("web.queries.recon_sql", recon_sql)
+        patcher3.start()
+        patcher4.start()
+        self.addCleanup(patcher3.stop)
+        self.addCleanup(patcher4.stop)
+        self.addCleanup(self.fabric_conn.close)
+
         _insert_summary(
             execute_sql, statement_id="STMT-3", vendor_name="Partly Resolved",
             exception_count=2, overall_status="MINOR_EXCEPTIONS",
@@ -196,9 +355,98 @@ class TestVendorSummaryExcludesResolvedExceptions(unittest.TestCase):
             """
         )
 
+        _insert_recon_summary(
+            recon_sql, statement_id="STMT-3", vendor_name="Partly Resolved",
+            exception_count=2, overall_status="MINOR_EXCEPTIONS",
+            reconciliation_timestamp="2026-05-01T00:00:00+00:00",
+        )
+        _insert_recon_exception(recon_sql, statement_id="STMT-3",
+                                 exception_reason="Invoice Missing", exception_id="EXC-3")
+        _insert_recon_exception(recon_sql, statement_id="STMT-3", exception_id="EXC-4",
+                                 exception_reason="Invoice Missing", status="RESOLVED",
+                                 invoice_number="INV-1")
+
     def test_resolved_row_not_counted(self):
         vendors = queries.get_vendor_summaries()
         self.assertEqual(vendors[0]["exception_count"], 1)
+
+
+class TestVendorSummariesBatchedQueriesEdgeCases(unittest.TestCase):
+    """get_vendor_summaries()'s reason_breakdown/aging batching (2026-09-02
+    N+1 fix -- see queries.py's _attach_aging_summaries()) replaced one
+    recon_query() call per vendor with a single IN (...)-based query. Covers
+    the two cases that pattern can get wrong: zero vendors (an empty IN ()
+    is invalid SQL on both SQLite and T-SQL -- must short-circuit before
+    building the query at all) and a page mixing summary-backed vendors
+    (real statement_id, from silver.recon_summary) with exceptions-only
+    vendors (no statement_id, keyed by source_file instead -- see
+    _get_exceptions_only_vendors()), which the aging batch must route to
+    two different queries without either one starving the other."""
+
+    def setUp(self):
+        self.conn = _make_db()
+        execute_sql, execute_query = _wire_fake_backend(self.conn)
+        patcher1 = mock.patch("web.queries.execute_sql", execute_sql)
+        patcher2 = mock.patch("web.queries.execute_query", execute_query)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
+        self.addCleanup(self.conn.close)
+
+        self.fabric_conn = _make_fabric_db()
+        self.recon_query, self.recon_sql = _wire_fake_fabric_backend(self.fabric_conn)
+        patcher3 = mock.patch("web.queries.recon_query", self.recon_query)
+        patcher4 = mock.patch("web.queries.recon_sql", self.recon_sql)
+        patcher3.start()
+        patcher4.start()
+        self.addCleanup(patcher3.stop)
+        self.addCleanup(patcher4.stop)
+        self.addCleanup(self.fabric_conn.close)
+
+    def test_zero_vendors_does_not_crash(self):
+        """No silver.recon_summary rows and no orphan silver.recon_exceptions
+        rows at all -- both the reason_breakdown and aging batch queries
+        must be skipped entirely rather than emitting "IN ()"."""
+        vendors = queries.get_vendor_summaries()
+
+        self.assertEqual(vendors, [])
+
+    def test_mixed_summary_backed_and_exceptions_only_vendors_both_get_aging(self):
+        _insert_recon_summary(
+            self.recon_sql, statement_id="STMT-MIX-1", vendor_name="Summary Backed Vendor",
+            exception_count=0, overall_status="RECONCILED",
+            reconciliation_timestamp="2026-05-01T00:00:00+00:00",
+        )
+        _insert_recon_exception(
+            self.recon_sql, statement_id="STMT-MIX-1", exception_id="EXC-MIX-1",
+            exception_reason="Invoice Missing",
+            date_raised=(datetime.now(timezone.utc) - timedelta(days=5)).isoformat(),
+        )
+
+        # An orphan exception raised against a statement_id with no
+        # silver.recon_summary row at all -- the exact shape
+        # _get_exceptions_only_vendors() looks for, grouped by source_file
+        # since gold/recon_exceptions has no vendor_name column.
+        _insert_recon_exception(
+            self.recon_sql, statement_id="STMT-ORPHAN-1", exception_id="EXC-MIX-2",
+            exception_reason="Invoice Missing", source_file="orphan_vendor_statement.pdf",
+            date_raised=(datetime.now(timezone.utc) - timedelta(days=20)).isoformat(),
+        )
+
+        vendors = queries.get_vendor_summaries()
+
+        self.assertEqual(len(vendors), 2)
+        by_name = {v["vendor_name"]: v for v in vendors}
+
+        summary_backed = by_name["Summary Backed Vendor"]
+        self.assertEqual(summary_backed["aging"]["days_open"], 5)
+        self.assertEqual(summary_backed["reason_breakdown"], {"missing": 1})
+
+        exceptions_only = by_name["Orphan Vendor Statement"]
+        self.assertTrue(exceptions_only.get("exceptions_only"))
+        self.assertEqual(exceptions_only["aging"]["days_open"], 20)
+        self.assertEqual(exceptions_only["reason_breakdown"], {"missing": 1})
 
 
 class TestOpenExceptionsCountScopedToLatestRunPerVendor(unittest.TestCase):
@@ -874,24 +1122,34 @@ class TestExceptionRoutingAndAging(unittest.TestCase):
     note."""
 
     def setUp(self):
-        self.conn = _make_jobs_db()
-        self.execute_sql, self.execute_query = _wire_fake_backend(self.conn)
-        patcher1 = mock.patch("web.queries.execute_sql", self.execute_sql)
-        patcher2 = mock.patch("web.queries.execute_query", self.execute_query)
+        # get_open_exceptions()/escalate_exception()/get_exception_aging_summary()
+        # (and get_vendor_latest_statement(), which the aging tests exercise
+        # indirectly) are all recon_query/recon_sql (silver.recon_*) now --
+        # see queries.py's module docstring on recon_query. Only the Fabric
+        # fake backend is needed here, no jobs-table/execute_sql involvement.
+        self.fabric_conn = _make_fabric_db()
+        self.recon_query, self.recon_sql = _wire_fake_fabric_backend(self.fabric_conn)
+        patcher1 = mock.patch("web.queries.recon_query", self.recon_query)
+        patcher2 = mock.patch("web.queries.recon_sql", self.recon_sql)
         patcher1.start()
         patcher2.start()
         self.addCleanup(patcher1.stop)
         self.addCleanup(patcher2.stop)
-        self.addCleanup(self.conn.close)
+        self.addCleanup(self.fabric_conn.close)
 
-        _insert_gold_summary(self.execute_sql, statement_id="STMT-AGE", total_invoice_count=2)
+        _insert_recon_summary(
+            self.recon_sql, statement_id="STMT-AGE", vendor_name="Vendor One",
+            exception_count=0, overall_status="RECONCILED",
+            reconciliation_timestamp="2026-07-24T00:00:00+00:00",
+        )
 
     def _raised_days_ago(self, days):
         return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     def test_get_open_exceptions_attaches_days_open(self):
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1",
-                                date_raised=self._raised_days_ago(10))
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                 exception_reason="Invoice Missing",
+                                 date_raised=self._raised_days_ago(10))
 
         rows = queries.get_open_exceptions("STMT-AGE")
 
@@ -899,29 +1157,32 @@ class TestExceptionRoutingAndAging(unittest.TestCase):
         self.assertIsNone(rows[0]["days_since_escalated"])
 
     def test_escalate_exception_sets_status_and_metadata(self):
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1")
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                 exception_reason="Invoice Missing")
 
         queries.escalate_exception("EXC-1", escalated_by="reviewer@vive.com")
 
-        row = self.execute_query("SELECT * FROM gold_exceptions WHERE exception_id = 'EXC-1'")[0]
+        row = self.recon_query("SELECT * FROM silver.recon_exceptions WHERE exception_id = 'EXC-1'")[0]
         self.assertEqual(row["escalation_status"], "ESCALATED")
         self.assertEqual(row["escalated_by"], "reviewer@vive.com")
         self.assertIsNotNone(row["escalated_at"])
 
     def test_escalate_exception_does_not_resolve_it(self):
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1")
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                 exception_reason="Invoice Missing")
 
         queries.escalate_exception("EXC-1", escalated_by="reviewer@vive.com")
 
-        row = self.execute_query(
-            "SELECT exception_status FROM gold_exceptions WHERE exception_id = 'EXC-1'"
+        row = self.recon_query(
+            "SELECT exception_status FROM silver.recon_exceptions WHERE exception_id = 'EXC-1'"
         )[0]
         self.assertEqual(row["exception_status"], "OPEN")
 
     def test_get_open_exceptions_reports_days_since_escalated_once_escalated(self):
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1")
-        self.execute_sql(
-            "UPDATE gold_exceptions SET escalation_status = 'ESCALATED', escalated_at = ? "
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                 exception_reason="Invoice Missing")
+        self.recon_sql(
+            "UPDATE silver.recon_exceptions SET escalation_status = 'ESCALATED', escalated_at = ? "
             "WHERE exception_id = 'EXC-1'",
             [self._raised_days_ago(3)],
         )
@@ -931,20 +1192,25 @@ class TestExceptionRoutingAndAging(unittest.TestCase):
         self.assertEqual(rows[0]["days_since_escalated"], 3)
 
     def test_aging_summary_returns_oldest_open_exception_age(self):
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1",
-                                invoice_number="INV-1", date_raised=self._raised_days_ago(3))
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-2",
-                                invoice_number="INV-2", date_raised=self._raised_days_ago(15))
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                 exception_reason="Invoice Missing",
+                                 invoice_number="INV-1", date_raised=self._raised_days_ago(3))
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-2",
+                                 exception_reason="Invoice Missing",
+                                 invoice_number="INV-2", date_raised=self._raised_days_ago(15))
 
         summary = queries.get_exception_aging_summary("Vendor One")
 
         self.assertEqual(summary["days_open"], 15)
 
     def test_aging_summary_ignores_resolved_exceptions(self):
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-1",
-                                invoice_number="INV-1", date_raised=self._raised_days_ago(30), status="RESOLVED")
-        _insert_gold_exception(self.execute_sql, statement_id="STMT-AGE", exception_id="EXC-2",
-                                invoice_number="INV-2", date_raised=self._raised_days_ago(3))
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-1",
+                                 exception_reason="Invoice Missing",
+                                 invoice_number="INV-1", date_raised=self._raised_days_ago(30),
+                                 status="RESOLVED")
+        _insert_recon_exception(self.recon_sql, statement_id="STMT-AGE", exception_id="EXC-2",
+                                 exception_reason="Invoice Missing",
+                                 invoice_number="INV-2", date_raised=self._raised_days_ago(3))
 
         summary = queries.get_exception_aging_summary("Vendor One")
 

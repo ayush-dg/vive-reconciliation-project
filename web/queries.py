@@ -360,30 +360,103 @@ def get_vendor_summaries() -> list:
         latest_by_vendor[row["vendor_name"]] = row  # later (ASC) rows win
     vendors = list(latest_by_vendor.values())
 
-    for vendor in vendors:
+    # Batched (was one recon_query() call per vendor) -- each recon_query()
+    # call is a fresh Fabric round-trip (~4-8s measured, dominated by AAD
+    # auth before fabric_sql.py's credential caching fix), so N per-vendor
+    # calls here directly multiplied the exceptions page's load time by N.
+    # See 2026-09-02 investigation: 4 vendors, ~55s total. Empty-`vendors`
+    # guard below avoids emitting "IN ()", invalid SQL on both SQLite and
+    # T-SQL.
+    if vendors:
+        statement_ids = [v["statement_id"] for v in vendors]
+        placeholders = ", ".join("?" for _ in statement_ids)
         reason_rows = recon_query(
-            """
-            SELECT exception_reason, COUNT(*) AS c
+            f"""
+            SELECT statement_id, exception_reason, COUNT(*) AS c
             FROM silver.recon_exceptions
-            WHERE statement_id = ? AND exception_status = 'OPEN'
-            GROUP BY exception_reason
+            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+            GROUP BY statement_id, exception_reason
             """,
-            [vendor["statement_id"]],
+            statement_ids,
         )
-        vendor["reason_breakdown"] = {
-            REASON_LABELS.get(r["exception_reason"], r["exception_reason"]): r["c"]
-            for r in reason_rows
-        }
-        # Live count (sum of the OPEN breakdown just fetched above) —
-        # replaces the stale exception_count from gold_reconciliation_summary,
-        # which matching writes once from Silver-classified exceptions only
-        # and never updates again. See _live_open_exception_count().
-        vendor["exception_count"] = sum(r["c"] for r in reason_rows)
+        reasons_by_statement = {}
+        for r in reason_rows:
+            reasons_by_statement.setdefault(r["statement_id"], []).append(r)
+
+        for vendor in vendors:
+            rows_for_vendor = reasons_by_statement.get(vendor["statement_id"], [])
+            vendor["reason_breakdown"] = {
+                REASON_LABELS.get(r["exception_reason"], r["exception_reason"]): r["c"]
+                for r in rows_for_vendor
+            }
+            # Live count (sum of the OPEN breakdown just fetched above) —
+            # replaces the stale exception_count from gold_reconciliation_summary,
+            # which matching writes once from Silver-classified exceptions only
+            # and never updates again. See _live_open_exception_count().
+            vendor["exception_count"] = sum(r["c"] for r in rows_for_vendor)
 
     vendors.extend(_get_exceptions_only_vendors())
+    _attach_aging_summaries(vendors)
     for vendor in vendors:
         vendor["vendor_display_name"] = vendor_display_name(vendor["vendor_name"])
     return sorted(vendors, key=lambda v: v["vendor_name"] or "")
+
+
+def _attach_aging_summaries(vendors: list) -> None:
+    """Batched equivalent of calling get_exception_aging_summary(vendor_name)
+    once per vendor (mutates each vendor dict in place, adding "aging") --
+    same 2026-09-02 N+1 fix as the reason_breakdown batching above. Splits
+    vendors into the two kinds get_exception_aging_summary() itself
+    branches on: summary-backed (real statement_id) vs. exceptions-only
+    (no statement_id, keyed by source_file -- see
+    _get_exceptions_only_vendors()). Both batches are single set-based
+    queries regardless of vendor count. get_exception_aging_summary()
+    itself is left unchanged (and still used directly elsewhere/by tests)
+    -- this is purely an alternate, batched path for the vendor-list page."""
+    for vendor in vendors:
+        vendor["aging"] = None
+
+    with_statement = [v for v in vendors if v.get("statement_id")]
+    if with_statement:
+        statement_ids = [v["statement_id"] for v in with_statement]
+        placeholders = ", ".join("?" for _ in statement_ids)
+        aging_rows = recon_query(
+            f"""
+            SELECT statement_id, MIN(date_raised) AS oldest_date_raised
+            FROM silver.recon_exceptions
+            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+            GROUP BY statement_id
+            """,
+            statement_ids,
+        )
+        oldest_by_statement = {r["statement_id"]: r["oldest_date_raised"] for r in aging_rows}
+        for vendor in with_statement:
+            oldest = oldest_by_statement.get(vendor["statement_id"])
+            if oldest:
+                vendor["aging"] = {"oldest_date_raised": oldest, "days_open": _days_since(oldest)}
+
+    exceptions_only = [v for v in vendors if not v.get("statement_id") and v.get("source_file")]
+    if exceptions_only:
+        source_files = [v["source_file"] for v in exceptions_only]
+        placeholders = ", ".join("?" for _ in source_files)
+        aging_rows = recon_query(
+            f"""
+            SELECT ge.source_file, MIN(ge.date_raised) AS oldest_date_raised
+            FROM silver.recon_exceptions ge
+            WHERE ge.source_file IN ({placeholders}) AND ge.exception_status = 'OPEN'
+              AND NOT EXISTS (
+                  SELECT 1 FROM silver.recon_summary s
+                  WHERE s.statement_id = ge.statement_id
+              )
+            GROUP BY ge.source_file
+            """,
+            source_files,
+        )
+        oldest_by_source_file = {r["source_file"]: r["oldest_date_raised"] for r in aging_rows}
+        for vendor in exceptions_only:
+            oldest = oldest_by_source_file.get(vendor["source_file"])
+            if oldest:
+                vendor["aging"] = {"oldest_date_raised": oldest, "days_open": _days_since(oldest)}
 
 
 def _get_exceptions_only_vendors() -> list:
@@ -423,6 +496,7 @@ def _get_exceptions_only_vendors() -> list:
     for source_file, reason_counts in by_source_file.items():
         vendors.append({
             "statement_id": None,
+            "source_file": source_file,
             "vendor_name": _vendor_name_from_source_file(source_file),
             "statement_period": None,
             "total_invoice_count": 0,

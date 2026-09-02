@@ -10,15 +10,35 @@ import struct
 
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 
+# Cached at module level so repeated calls reuse the same ClientSecretCredential
+# instance instead of discarding it (and the AAD token it internally caches)
+# after every single query. azure-identity's credential classes already cache
+# and silently refresh their token on expiry (Fabric/AAD tokens are typically
+# valid ~60-90 min) -- recreating the credential object per call was throwing
+# that cache away every time, forcing a fresh AAD auth round-trip (~4-8s,
+# measured) on every recon_query()/recon_sql() call. Confirmed as the
+# dominant cost behind the /exceptions page's ~55s load with only 4 vendors
+# (2026-09-02 investigation) -- not caching the pyodbc connection itself here,
+# since get_lakehouse_connection()/get_warehouse_connection() are also called
+# directly (not just via execute_warehouse_query/execute_warehouse_sql) by
+# netsuite_vendor_resolver.py, fabric_matching.py, and fabric_dbt_runner.py,
+# which hold and close their own connection -- sharing one pyodbc connection
+# across those callers would risk both thread-safety and one caller's
+# close() breaking another's in-flight query.
+_credential = None
+
 
 def _get_credential():
-    from azure.identity import ClientSecretCredential
+    global _credential
+    if _credential is None:
+        from azure.identity import ClientSecretCredential
 
-    return ClientSecretCredential(
-        tenant_id=os.environ["FABRIC_TENANT_ID"],
-        client_id=os.environ["FABRIC_CLIENT_ID"],
-        client_secret=os.environ["FABRIC_CLIENT_SECRET"],
-    )
+        _credential = ClientSecretCredential(
+            tenant_id=os.environ["FABRIC_TENANT_ID"],
+            client_id=os.environ["FABRIC_CLIENT_ID"],
+            client_secret=os.environ["FABRIC_CLIENT_SECRET"],
+        )
+    return _credential
 
 
 def _connect(database: str):
