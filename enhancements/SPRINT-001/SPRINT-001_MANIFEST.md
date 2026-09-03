@@ -53,7 +53,13 @@ Each watchpoint is a mandatory Phase 1 confirmation task — not optional monito
 
 | ID | Enhancement | Surface | What Phase 1 Must Confirm | Assigned To |
 |---|---|---|---|---|
-| WP-001 | ENH-001 | ToastProvider (`MODULE_CONTRACTS.md` → M-083) — graph-derived via M-070→M-083 edge, not in the brief's own touch point table | ToastProvider has no cap on simultaneous toasts. Confirm intended behavior for an N-file batch upload — one toast per file, one consolidated summary toast, or accept unbounded stacking at expected batch sizes — before building the batch upload path. Brief already records this as OPEN, not silently defaulted. | Vaishali |
+| ~~WP-001~~ | ENH-001 | ToastProvider (`MODULE_CONTRACTS.md` → M-083) | **RESOLVED 2026-09-03** — no longer open. See below. | Vaishali |
+
+**WP-001 resolution (2026-09-03, post-commit — recorded here for traceability, manifest
+collision findings unaffected):** Running success-only counter toast ("N/10 uploaded"),
+reusing existing `dismiss()`/`add()` primitives in `toastStore.ts` — no change to `M-083`
+itself. Failures shown per-row via existing per-file progress state, not folded into the
+counter. Full decision recorded in `ENH-001_BRIEF.md` Known Constraints.
 
 **Findings surfaced and resolved before this manifest, no longer open watchpoints:**
 - M-042/R-007 (positional `LEGAL_ENTITIES[0]` default) — resolved in brief update

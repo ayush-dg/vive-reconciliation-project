@@ -45,7 +45,9 @@ Not applicable — INDEPENDENT classification.
 
 | ID | Surface | What You Must Confirm in Phase 1 | Escalate If |
 |---|---|---|---|
-| WP-001 | ToastProvider (`MODULE_CONTRACTS.md` → M-083) | ToastProvider has no cap on simultaneous toasts. Decide and confirm the intended batch-upload toast behavior (per-file vs. consolidated vs. accepted unbounded stacking) before building the batch upload path. | You discover the ToastProvider contract has changed since this manifest, or that the decision has downstream effects on another module not currently listed in your touch points — stop, escalate to Sprint Lead (yourself, in Sprint Lead capacity) before continuing Phase 1 planning on this thread. |
+| ~~WP-001~~ | ToastProvider (`MODULE_CONTRACTS.md` → M-083) | **RESOLVED 2026-09-03** — running success-only counter toast ("N/10 uploaded"), reusing existing `toastStore.ts` primitives, no `M-083` change. Full decision in `ENH-001_BRIEF.md` Known Constraints. | N/A — resolved |
+
+No open watchpoints remain for this enhancement.
 
 ---
 
