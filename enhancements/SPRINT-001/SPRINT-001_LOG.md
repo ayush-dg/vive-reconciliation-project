@@ -9,7 +9,7 @@
 
 | ENH ID | Title | Classification | Depends On | Engineer |
 |---|---|---|---|---|
-| ENH-001 | UI clarity fixes (Home/Upload/Document Detail) + multiple PDF upload | [pending manifest analysis] | — | Vaishali |
+| ENH-001 | UI clarity fixes (Home/Upload/Document Detail) + multiple PDF upload | INDEPENDENT | — | Vaishali |
 
 ---
 
@@ -44,13 +44,13 @@
 
 ## Pre-Sprint Record
 
-**Sprint Manifest committed:** [ ] Yes — Date: —
+**Sprint Manifest committed:** [x] Yes — Date: 2026-09-03
 **PROJECT_MANIFEST.md updated:** [x] Yes — 2026-09-03
-**ENH-NNN_SPRINT_CONSTRAINTS.md distributed:** [ ] Yes
+**ENH-NNN_SPRINT_CONSTRAINTS.md distributed:** [x] Yes
 
 | ENH ID | SPRINT_CONSTRAINTS.md distributed | Engineer confirmed receipt |
 |---|---|---|
-| ENH-001 | [ ] Yes | [ ] Yes |
+| ENH-001 | [x] Yes | [x] Yes — single-engineer sprint, Vaishali is both Sprint Lead and building engineer |
 
 **Process note (recorded 2026-09-03):** ENH-001_BRIEF.md was authored directly in
 `enhancements/` rather than first entering `enhancements/backlog/ENH-001-slug/` per the
@@ -65,7 +65,7 @@ first enhancement and the backlog step was skipped rather than deliberately waiv
 
 ### Sync Point 1 — Foundation Claude.md Committed
 
-[None — ENH-001 classification pending manifest analysis. No Foundation track declared yet.]
+[None — ENH-001 classified INDEPENDENT at manifest commit (2026-09-03). No Foundation track exists this sprint.]
 
 ---
 
