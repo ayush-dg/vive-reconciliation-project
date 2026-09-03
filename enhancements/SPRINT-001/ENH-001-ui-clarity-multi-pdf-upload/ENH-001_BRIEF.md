@@ -4,7 +4,7 @@
 **Title:** UI clarity fixes (Home/Upload/Document Detail) + multiple PDF upload
 **Author:** Vaishali
 **Date:** 2026-09-02
-**Status:** [x] Draft | [ ] AI Review Complete | [ ] Signed Off
+**Status:** [] Draft | [x] AI Review Complete | [x] Signed Off
 
 ---
 
@@ -49,7 +49,7 @@ changes, so this remains Tier 1 as originally hoped.
 | Constraint | Type | Notes |
 |---|---|---|
 | Must not change G4 (content-hash dedup) or G5 (processing-ownership lock) semantics | MANDATORY | Verified compatible with multi-PDF as currently designed — `registerDocument()`'s existing race-tolerant catch block and `extraction.ts`'s per-`document_id` lock already handle concurrent registration/extraction correctly with no code change (verified directly against source, 2026-09-02: `documents.ts:90-126`, `extraction.ts:36-38`). This constraint exists to keep it that way, not because a change is anticipated. |
-| Must not require a database schema change | MANDATORY | Keeps this Tier 1 (Type A). If any item below is found to need a schema change once in Phase 1, that item should be split into its own Type B enhancement rather than pulling this one up a tier. |
+| Must not require a database schema change | MANDATORY | Reviewed at the brief review gate (2026-09-03) as a possible Category 3 implicit-assumption flag — confirmed genuinely MANDATORY, not relabeled. This is a scope-routing rule, not a claim that no schema change is technically possible: it says what happens if Phase 1 finds one is needed — that item splits into its own Type B enhancement — rather than leaving room for this enhancement itself to absorb a schema change and quietly inherit Tier 3. Kept MANDATORY (not OPTIONAL) precisely because it isn't meant to be re-evaluated away in Phase 1; Phase 1's role here is to detect the trigger condition, not renegotiate the rule. |
 | IC-CANDIDATE-01 (extraction lock has no crash-recovery path) — batch upload multiplies exposure | OPTIONAL | Pre-existing fragility, not introduced by this enhancement, but N simultaneous extraction calls instead of one manual click raises the odds that at least one throws and permanently strands its document. Open decision, not yet made: fix the crash-recovery gap as part of this enhancement's scope, or ship accepting the multiplied exposure. Revisit in Phase 1 — do not default silently to either choice. |
 | Root cause of the failed/exceptions badge issue (item 3) not yet confirmed against source | OPTIONAL | Symptom described by the engineer; `documentStatus.ts`'s actual badge logic (the same module the earlier S7 false-positive lived in) needs to be read before this is a real acceptance criterion, not assumed from the visible symptom. |
 | Upload-time display fixed to IST (not user/locale-configurable) | OPTIONAL | Reasonable v1 scope for a single-region deployment; noted so it's a conscious choice, revisitable later, not an oversight. |
