@@ -47,8 +47,8 @@
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
 | 1.1     | Status label renames | Completed | 66a4743 |
-| 1.2     | Document Detail: combined summary + drop two columns | Completed | (pending) |
-| 1.3     | Click-through from Upload to a document's extracted lines | | |
+| 1.2     | Document Detail: combined summary + drop two columns | Completed | 33a466d |
+| 1.3     | Click-through from Upload to a document's extracted lines | Completed | (pending) |
 | 1.4     | Upload time display in IST | | |
 
 ---
@@ -78,6 +78,7 @@ Session was not resumed as of this entry.
 | 1.1 | A stale `node` dev server (PID 10984, started 10:53:17 same day) was squatting on port 3000, reused by Playwright's `reuseExistingServer` option and returning HTML error pages instead of JSON from API routes, failing all 8 tests in `home.spec.ts` with an unrelated symptom (`SyntaxError: Unexpected token '<'`). | Stopped the stale process; re-ran the same command against a freshly-started dev server. All 8 tests passed. Environmental, not a code defect — not a loop condition. |
 | 1.1 | Task 1.1 was built and committed directly on `sprint/SPRINT-001-initiation` — the session prompt file (`S1_execution_prompt.md`, which did not yet exist on disk when Task 1.1 began) specifies branch `session/s1_ui_clarity_fixes` and a LAUNCH ERROR check that this branch exists before any task work. Session prompt files for both S1/S2 appeared mid-Task-1.1, produced elsewhere. | Created `session/s1_ui_clarity_fixes` at the current commit (which already includes Task 1.1) immediately after discovering the prompt file — no work lost, no rebuild needed. All subsequent tasks (1.2 onward) proceed on this branch. Also corrected a stale `v1.3` Claude.md version reference in both S1 and S2 execution prompts (actual current version is v1.4) and renamed `S1_execution_prompt (1).md` to `S1_execution_prompt.md`. |
 | 1.2 | One test (`Extract/Reconcile actions appear only when applicable...`, pre-existing, unrelated to this task's diff) failed once under `--reporter=list`'s default 4-worker parallel run, then passed both in isolation and in a full re-run. | Confirmed non-reproducing (parallel-worker resource contention, not a code regression) before proceeding. Not a loop condition. |
+| 1.3 | Pre-existing, unrelated test (`a second PDF can be uploaded while the first one is still extracting`) now fails deterministically (reproduces in isolation, not a flake). Root-caused: `GET /api/documents` now takes ~2.2s (direct `curl` timing) because the local test SQLite DB has accumulated 101 documents from this session's cumulative test runs, and `listDocumentsWithStatusBadge()` has a documented, pre-existing N+1 query (`MODULE_CONTRACTS.md` M-011). That GET is part of `handleSubmit`'s own await chain before the submit button re-enables, exceeding the test's fixed 2000ms assertion budget. | Not fixed — logged as an Out of Scope Observation (see below) rather than loosening the test's timeout (would mask a real, if pre-existing, perf signal) or touching `documents.ts`/M-011 (outside Task 1.3's declared touch points). Confirmed via direct endpoint timing that this is unrelated to this task's diff (zero code overlap with `handleSubmit`/`refreshDocuments`). Two of my own three new tests already passed without issue; the third (originally racing a real timing window) was rewritten to synthesize the 'processing' state directly via DB update — same technique `document-detail.spec.ts` already uses — avoiding the race entirely. |
 
 ---
 
@@ -85,8 +86,9 @@ Session was not resumed as of this entry.
 
 | Task | Observation | Nature | Recommended action |
 |------|-------------|--------|--------------------|
+| 1.3 | `listDocumentsWithStatusBadge()`'s documented N+1 query (`MODULE_CONTRACTS.md` M-011) has degraded to ~2.2s at 101 accumulated local-DB documents, enough to break a pre-existing UI test's fixed 2000ms timeout assertion (`ui_tests/upload.spec.ts:63`, "a second PDF can be uploaded while the first one is still extracting"). Purely a test-environment/accumulated-fixture-data issue today, but the underlying N+1 pattern will degrade further as real usage grows. | FRAGILITY | BACKLOG — batch `computeDocumentStatus()` calls in `listDocumentsWithStatusBadge()` instead of calling it per-document; separately, `PROJECT_MANIFEST.md` already flags that fixture scripts aren't safe to re-run against a used local DB, so a safe test-DB reset procedure is also worth its own backlog item |
 
-None noticed during Task 1.1.
+None otherwise noticed during Task 1.1.
 
 ---
 

@@ -1,6 +1,9 @@
+import crypto from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { TEST_USERNAME, TEST_SESSION_SECRET } from './global-setup';
 import { SESSION_COOKIE_NAME, signSessionToken } from '../src/lib/session';
+import { getSqliteDb } from '../src/lib/db';
+import { makeTestPdf } from '../scripts/testPdfFixture.mjs';
 
 async function signInViaCookie(context: import('@playwright/test').BrowserContext) {
   process.env.SESSION_SECRET = TEST_SESSION_SECRET;
@@ -16,6 +19,21 @@ function samplePdf(label: string) {
     mimeType: 'application/pdf',
     buffer: Buffer.from(`%PDF-1.4 test fixture — ${label} — ${Math.random()}`),
   };
+}
+
+// A real, extractable statement (same pattern as home.spec.ts/document-detail.spec.ts) —
+// samplePdf()'s fake buffers above never reach a real 'Extracted' badge, needed for
+// ENH-001 Task 1.3's click-through tests.
+function statementText(vendor: string, invoiceRef: string, amount: string) {
+  return `VENDOR: ${vendor}\nPERIOD: 2026-08\nTOTAL: ${amount}\nINVOICE: ${invoiceRef} | RO: - | AMOUNT: ${amount} | DATE: 2026-08-01`;
+}
+
+// Deliberately mismatched TOTAL vs. line AMOUNT — deterministic arithmetic-validation
+// failure on every attempt (same technique scripts/test_bounded_retry.mjs uses), so a
+// single upload reaches the genuine 'Failed' badge (exhausted S7's 2-attempt bound, no
+// extracted lines produced) without needing a multi-step retry setup.
+function guaranteedFailureStatementText(vendor: string, invoiceRef: string) {
+  return `VENDOR: ${vendor}\nPERIOD: 2026-08\nTOTAL: 999.00\nINVOICE: ${invoiceRef} | RO: - | AMOUNT: 10.00 | DATE: 2026-08-01`;
 }
 
 test.describe('Upload', () => {
@@ -185,5 +203,120 @@ test.describe('Upload', () => {
     // (most-recent-first) table — same landmark the old "Identifying…" placeholder used.
     const firstFilenameCell = page.locator('[data-testid^="document-filename-"]').first();
     await expect(firstFilenameCell).toHaveText(/keystone.*\.pdf/);
+  });
+
+  // ENH-001 Task 1.3: click-through from Upload to a document's extracted lines.
+  test('a click-through link to extracted lines appears once extraction completes', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Upload_ClickThrough_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const invoiceRef = `INV-CT-${crypto.randomUUID().slice(0, 8)}`;
+    const res = await page.request.post('/api/documents', {
+      multipart: {
+        file: { name: `${vendor}.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(vendor, invoiceRef, '40.00')) },
+        legalEntityId: 'vive-holdings',
+      },
+    });
+    const documentId = (await res.json()).document.document_id as string;
+    await page.request.post(`/api/documents/${documentId}/extract`);
+
+    await page.goto('/upload');
+    const link = page.getByTestId(`view-extracted-lines-${documentId}`);
+    await expect(link).toBeVisible();
+    await link.click();
+    await expect(page).toHaveURL(`/documents/${documentId}`);
+    await expect(page.getByTestId('document-detail-vendor')).toBeVisible();
+  });
+
+  test('no click-through is shown while extraction is still in progress', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Upload_StillProcessing_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const res = await page.request.post('/api/documents', {
+      multipart: {
+        file: { name: `${vendor}.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(vendor, 'INV-CT-PROC', '20.00')) },
+        legalEntityId: 'vive-holdings',
+      },
+    });
+    const documentId = (await res.json()).document.document_id as string;
+
+    // Synthesize the "extraction genuinely in progress" state directly — same technique
+    // document-detail.spec.ts uses for the pdfplumber_fallback case — rather than racing
+    // a real timing window against this app's synchronous extraction pipeline. This is
+    // exactly the G5 lock-acquisition transition (extraction.ts's own
+    // `UPDATE extracted_document SET status = 'processing' WHERE status != 'processing'`),
+    // with zero extraction_attempt rows yet — computeDocumentStatus's documented
+    // zero-attempts branch classifies this as the 'Processing' badge.
+    const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET status = 'processing' WHERE document_id = ?`).run(documentId);
+
+    await page.goto('/upload');
+    const row = page.getByTestId(`document-row-${documentId}`);
+    await expect(row.getByTestId(`status-badge-${documentId}`)).toHaveText('Processing');
+    await expect(row.getByTestId(`view-extracted-lines-${documentId}`)).toHaveCount(0);
+  });
+
+  test('no click-through is shown when extraction genuinely fails (no lines to view)', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Upload_ExtractFail_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const res = await page.request.post('/api/documents', {
+      multipart: {
+        file: {
+          name: `${vendor}.pdf`,
+          mimeType: 'application/pdf',
+          buffer: makeTestPdf(guaranteedFailureStatementText(vendor, 'INV-CT-FAIL')),
+        },
+        legalEntityId: 'vive-holdings',
+      },
+    });
+    const documentId = (await res.json()).document.document_id as string;
+    await page.request.post(`/api/documents/${documentId}/extract`);
+
+    // Challenge agent Finding 1 (unverified assumption #1): assert open_exception_count
+    // is actually 0 here, not just the badge label text — this is what distinguishes a
+    // genuine extraction failure from a reconciliation exception (same badge/label for
+    // both), and is the field the click-through condition itself branches on.
+    const listRes = await page.request.get('/api/documents');
+    const doc = (await listRes.json()).documents.find((d: { document_id: string }) => d.document_id === documentId);
+    expect(doc.open_exception_count).toBe(0);
+
+    await page.goto('/upload');
+    const row = page.getByTestId(`document-row-${documentId}`);
+    await expect(row.getByTestId(`status-badge-${documentId}`)).toHaveText('Failed — see Exceptions');
+    await expect(row.getByTestId(`view-extracted-lines-${documentId}`)).toHaveCount(0);
+  });
+
+  // ENH-001 Task 1.3, challenge agent Finding 1: the Failed + open_exception_count > 0
+  // branch (extraction succeeded, matching found a discrepancy, lines DO exist) was added
+  // beyond the CC prompt's literal scope but had no test proving the link actually shows
+  // in that case — all shipped tests only proved the open_exception_count === 0 (hide) side.
+  test('click-through IS shown for a reconciliation exception — extraction succeeded, lines exist, badge reads Failed', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendor = `Upload_ReconException_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const invoiceRef = `INV-CT-RECEXC-${crypto.randomUUID().slice(0, 8)}`;
+    const res = await page.request.post('/api/documents', {
+      multipart: {
+        file: { name: `${vendor}.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(vendor, invoiceRef, '30.00')) },
+        legalEntityId: 'vive-holdings',
+      },
+    });
+    const documentId = (await res.json()).document.document_id as string;
+    await page.request.post(`/api/documents/${documentId}/extract`);
+    // No bronze_netsuite_vendorbill row seeded — resolves to a NOT_POSTED exception, not
+    // a genuine extraction failure. Extraction succeeded; lines genuinely exist.
+    await page.request.post(`/api/documents/${documentId}/match`);
+
+    const listRes = await page.request.get('/api/documents');
+    const doc = (await listRes.json()).documents.find((d: { document_id: string }) => d.document_id === documentId);
+    expect(doc.open_exception_count).toBeGreaterThan(0);
+
+    await page.goto('/upload');
+    const row = page.getByTestId(`document-row-${documentId}`);
+    await expect(row.getByTestId(`status-badge-${documentId}`)).toHaveText('Failed — see Exceptions');
+    const link = row.getByTestId(`view-extracted-lines-${documentId}`);
+    await expect(link).toBeVisible();
+    await link.click();
+    await expect(page).toHaveURL(`/documents/${documentId}`);
   });
 });

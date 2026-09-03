@@ -195,3 +195,104 @@ logic change in `DocumentDetailView.tsx`).
 **Files touched:** `src/app/(app)/documents/[id]/DocumentDetailView.tsx`,
 `ui_tests/document-detail.spec.ts` — both within declared blast radius.
 **Scope confirmed:** YES.
+
+---
+
+## Task 1.3 — Click-through from Upload to a document's extracted lines
+
+### Design Note
+The CC prompt's framing ("once extraction completes") maps to 3 of the app's 6
+`status_badge.badge` values that are only reachable after a successful extraction:
+`'Extracted'`, `'Reconciling'`, `'Reconciled'`. The 4th relevant value, `'Failed'`, is
+ambiguous by itself — `documents.ts`'s own `ApiDocument` doc comment confirms it covers
+both a genuine extraction failure (no lines exist) and a reconciliation exception
+(extraction succeeded, lines exist, matching found a discrepancy). Used the same
+`open_exception_count` field Home's own display mapping already uses to disambiguate:
+click-through shows for `'Failed'` only when `open_exception_count > 0`.
+
+### Test Cases Applied
+Source: ENH-001_EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | Single-file upload, extraction completes (`'Extracted'`) | Click-through link appears, navigates to Document Detail | WRITTEN — 4 assertions (new test) | PASS |
+| TC-2 | Extraction still in progress (`'Processing'`, synthesized via direct DB state — see Deviations) | No click-through shown | WRITTEN — 2 assertions (new test) | PASS |
+| TC-3 | Extraction genuinely fails, exhausted retries (`'Failed'`, `open_exception_count === 0`) | No click-through shown | WRITTEN — 3 assertions (new test, strengthened post-challenge to assert `open_exception_count` directly) | PASS |
+| TC-4 (added, beyond literal CC prompt scope) | Reconciliation exception (`'Failed'`, `open_exception_count > 0`) | Click-through DOES show — lines genuinely exist | WRITTEN — 5 assertions (new test, added post-challenge — Finding 1) | PASS |
+
+### Prediction Statement
+N/A — Autonomous mode.
+
+### Challenge Agent Output
+Same mechanism note as Tasks 1.1/1.2 (fresh context-free subagent).
+
+**Verdict:** FINDINGS (1 item) — dispositioned TEST, now passing.
+
+**Untested scenarios (from challenge agent, informational — not all promoted to Verdict
+Findings requiring disposition):**
+1. **[Promoted to Finding 1]** `Failed` + `open_exception_count > 0` branch never exercised
+   as true — the exact case the design note above was written to handle.
+2. `'Reconciling'`/`'Reconciled'` badge states not independently pinned in a dedicated test
+   (the happy-path test doesn't assert which of the three "show" badges it landed on).
+3. `'Retrying'` badge's implicit "no link" fallthrough not independently tested.
+Items 2–3 not actioned this task — same conditional already proven correct by construction
+via TC-1/TC-2/TC-4 covering the boundary cases; noted as residual, non-blocking coverage
+gaps rather than disposed findings (challenge agent's own verdict named only 1 Finding
+requiring disposition).
+
+**Unverified assumptions (from challenge agent):**
+1. The "no click-through on failure" test asserted only the badge label text, never
+   `open_exception_count` directly — couldn't distinguish "correctly hid link" from
+   "accidentally hid link via an unrelated bug." Fixed — see Finding disposition.
+
+**Invariant coverage gaps:** IC-2 — the `open_exception_count > 0` branch (encoding
+"structurally/arithmetically valid extraction with lines that exist") had zero coverage.
+Closed by the new TC-4 test.
+
+**Scope boundary observations:** None — diff confined to declared files.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (Failed+exception "show" branch untested) | TEST | Added TC-4: uploads, extracts, and runs matching with no NetSuite row seeded (genuine reconciliation exception, not extraction failure) — confirms `open_exception_count > 0` and the click-through IS visible and navigates correctly. Also strengthened TC-3 to assert `open_exception_count === 0` directly via the API response, not just the badge label text. | PASS |
+
+### Code Review
+No invariant enforcement point touched — the click-through is read-only navigation, no
+state mutation. `open_exception_count` is read, not written.
+
+### Scope Decisions
+Extended beyond the CC prompt's literal binary framing (its own "once extraction
+completes" wording didn't anticipate the `Failed`-badge ambiguity) after reading
+`documents.ts`'s own doc comment on `open_exception_count` — reusing an existing,
+documented disambiguation mechanism rather than inventing a new one or leaving the
+reconciliation-exception case silently broken.
+
+### BCE Impact
+M-070 (`UploadForm.tsx`) — new `Link` import, no interface/contract change. No new touch
+point beyond what's declared (`open_exception_count` was already part of `ApiDocument`).
+
+| Artifact | Field | Change |
+|---|---|---|
+| MODULE_CONTRACTS.md | M-070 description | No change — click-through is a UI addition, not a contract change |
+
+### Verification Verdict
+[x] All planned cases passed (10/10 relevant to this task, across repeated runs; 1
+    pre-existing unrelated test intermittently fails due to the documented M-011 N+1
+    issue at current local-DB size — see Deviations, not a regression from this diff)
+[x] Challenge agent run — verdict recorded — FINDINGS (1), TEST-dispositioned
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded — see below
+[x] Code review complete — N/A, no invariant touched
+[x] Scope decisions documented
+
+**Status:** COMPLETE. Ready to commit.
+
+### Pre-Commit Declaration
+**Functions touched:** None modified (JSX-only addition — new conditional `Link` render
+inside the existing Action column, no function signature change).
+**Schemas touched:** None.
+**Config touched:** None.
+**Files touched:** `src/app/(app)/upload/UploadForm.tsx`, `ui_tests/upload.spec.ts` — both
+within declared blast radius.
+**Scope confirmed:** YES.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities';
 import type { ApiDocument } from '@/lib/documents';
@@ -264,15 +265,38 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
                       {extractingIds.has(doc.document_id) ? 'Starting…' : 'Extract'}
                     </button>
                   ) : (
-                    // Task 2.3's computed display badge — never the raw internal
-                    // status column (see documents.ts's ApiDocument doc comment
-                    // for why conflating the two was a real defect).
-                    <span
-                      className={`badge status-badge ${doc.status_badge.badge.toLowerCase()}`}
-                      data-testid={`status-badge-${doc.document_id}`}
-                    >
-                      {doc.status_badge.label}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {/* Task 2.3's computed display badge — never the raw internal
+                          status column (see documents.ts's ApiDocument doc comment
+                          for why conflating the two was a real defect). */}
+                      <span
+                        className={`badge status-badge ${doc.status_badge.badge.toLowerCase()}`}
+                        data-testid={`status-badge-${doc.document_id}`}
+                      >
+                        {doc.status_badge.label}
+                      </span>
+                      {/* ENH-001 Task 1.3: click-through once extraction has actually
+                          completed. 'Extracted'/'Reconciling'/'Reconciled' are only
+                          reachable after a successful extraction (computeDocumentStatus).
+                          'Processing'/'Retrying' mean extraction isn't done yet — no link.
+                          'Failed' is ambiguous by badge alone (documents.ts's own doc
+                          comment: it covers both a genuine extraction failure with
+                          nothing to view, and a reconciliation exception where extraction
+                          DID succeed and lines exist) — open_exception_count > 0
+                          disambiguates it, same field Home's own display mapping uses
+                          for the identical distinction. */}
+                      {(doc.status_badge.badge === 'Extracted' ||
+                        doc.status_badge.badge === 'Reconciling' ||
+                        doc.status_badge.badge === 'Reconciled' ||
+                        (doc.status_badge.badge === 'Failed' && doc.open_exception_count > 0)) && (
+                        <Link
+                          href={`/documents/${doc.document_id}`}
+                          data-testid={`view-extracted-lines-${doc.document_id}`}
+                        >
+                          View extracted lines
+                        </Link>
+                      )}
+                    </div>
                   )}
                 </td>
               </tr>
