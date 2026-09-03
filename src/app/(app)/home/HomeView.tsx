@@ -19,26 +19,27 @@ function formatUploadTimestamp(isoLike: string): string {
   });
 }
 
-/** Home's own display mapping over status_badge (engineer-directed, 2026-08-31) — softer
- * wording than the underlying badge value, which other screens/logic (canReconcile, etc.)
- * still use unchanged: "Success" once extraction is done (not "Extracted"), and "Done"
- * once reconciliation has run AT ALL, whether or not it left open exceptions — a
- * reconciled-with-exceptions document previously showed the same alarming "Failed — see
- * Exceptions" wording an outright extraction failure does, even though the process itself
- * completed successfully; those are genuinely different situations (distinguished via
- * open_exception_count, since status_badge's 'Failed' value alone covers both). A real
- * extraction failure (exhausted retries, nothing to reconcile) still shows "Failed".
+/** Home's own display mapping over status_badge (engineer-directed, 2026-08-31, labels
+ * renamed 2026-09-03 per ENH-001 Task 1.1) — softer wording than the underlying badge
+ * value, which other screens/logic (canReconcile, etc.) still use unchanged: "Extraction
+ * success" once extraction is done (not "Extracted"), and "Recon done" once reconciliation
+ * has run AT ALL, whether or not it left open exceptions — a reconciled-with-exceptions
+ * document previously showed the same alarming "Failed — see Exceptions" wording an
+ * outright extraction failure does, even though the process itself completed successfully;
+ * those are genuinely different situations (distinguished via open_exception_count, since
+ * status_badge's 'Failed' value alone covers both). A real extraction failure (exhausted
+ * retries, nothing to reconcile) still shows "Failed".
  */
 function homeDisplayStatus(doc: ApiDocument): { label: string; showExceptionsLink: boolean; badgeClass: string } {
   const badge = doc.status_badge.badge;
   if (badge === 'Extracted') {
-    return { label: 'Success', showExceptionsLink: false, badgeClass: 'extracted' };
+    return { label: 'Extraction success', showExceptionsLink: false, badgeClass: 'extracted' };
   }
   if (badge === 'Reconciled') {
-    return { label: 'Done', showExceptionsLink: false, badgeClass: 'reconciled' };
+    return { label: 'Recon done', showExceptionsLink: false, badgeClass: 'reconciled' };
   }
   if (badge === 'Failed' && doc.open_exception_count > 0) {
-    return { label: 'Done', showExceptionsLink: true, badgeClass: 'reconciled' };
+    return { label: 'Recon done', showExceptionsLink: true, badgeClass: 'reconciled' };
   }
   return { label: doc.status_badge.label, showExceptionsLink: false, badgeClass: badge.toLowerCase() };
 }
