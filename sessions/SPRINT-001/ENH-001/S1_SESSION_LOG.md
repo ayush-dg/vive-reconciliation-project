@@ -49,7 +49,7 @@
 | 1.1     | Status label renames | Completed | 66a4743 |
 | 1.2     | Document Detail: combined summary + drop two columns | Completed | 33a466d |
 | 1.3     | Click-through from Upload to a document's extracted lines | Completed | (pending) |
-| 1.4     | Upload time display in IST | Completed | (pending) |
+| 1.4     | Upload time display in IST | Completed | e4efb45 |
 
 ---
 
@@ -102,10 +102,13 @@ None otherwise noticed during Task 1.1.
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED
-**All tasks verified:** [ ] Yes
-**Blocked tasks resolved:** [ ] Yes — N/A if no BLOCKED tasks occurred
-**PR raised:** [ ] Yes — PR #: [branch] → main
-**Status updated to:**
-**Engineer sign-off:**
+**Session integration check:** [x] PASSED — all 4 tasks completed, verified, challenge-agent
+findings TEST-dispositioned and passing. Full spec-file runs green aside from confirmed
+non-reproducing transient failures (parallel-worker/webServer-startup races, documented
+in Deviations — none tied to this session's diffs).
+**All tasks verified:** [x] Yes — 1.1 (66a4743), 1.2 (33a466d), 1.3 (a688bee), 1.4 (e4efb45)
+**Blocked tasks resolved:** [x] Yes — N/A, no BLOCKED tasks occurred
+**PR raised:** [ ] Yes — PR #: [branch] → main — not yet raised, awaiting engineer sign-off below
+**Status updated to:** [pending engineer sign-off]
+**Engineer sign-off:** [pending — CC cannot self-sign]
 SIGNED OFF: [name] — [date]
