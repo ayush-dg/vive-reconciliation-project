@@ -193,14 +193,12 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
               <tr>
                 <th>Invoice Ref</th>
                 <th>Amount</th>
-                <th>Confidence</th>
-                <th>Provider</th>
               </tr>
             </thead>
             <tbody>
               {detail.lines.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ color: 'var(--text-faint)', textAlign: 'center' }}>
+                  <td colSpan={2} style={{ color: 'var(--text-faint)', textAlign: 'center' }}>
                     No extracted lines yet.
                   </td>
                 </tr>
@@ -209,8 +207,6 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
                 <tr key={line.lineId} data-testid={`statement-line-${line.lineId}`}>
                   <td className="mono">{line.invoiceRef ?? '—'}</td>
                   <td className="mono">{line.amount.toFixed(2)}</td>
-                  <td className="mono">{line.confidence !== null ? line.confidence.toFixed(2) : '—'}</td>
-                  <td>{line.providerUsed ? providerLabel(line.providerUsed) : '—'}</td>
                 </tr>
               ))}
             </tbody>

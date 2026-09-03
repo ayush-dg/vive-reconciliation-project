@@ -93,3 +93,105 @@ comment text; no branching/logic change).
 **Files touched:** `src/app/(app)/home/HomeView.tsx`, `ui_tests/home.spec.ts` — both within
 declared blast radius (Pre-Build Validation, Session Log).
 **Scope confirmed:** YES — within `docs/Claude.md` Section 3 (`/src/**`, `/ui_tests/**`).
+
+---
+
+## Task 1.2 — Document Detail: combined summary + drop two columns
+
+### Pre-Task Finding
+On inspection, the "combine extraction and reconciliation summary" requirement was
+**already satisfied** in the existing code before this task began — the "Extracted lines
+(N total)" heading and "Reconciliation complete — X matched, Y exceptions" line were
+already rendered in the same panel container (`documentDetail.ts` already assembles
+`reconciliation` counts; likely already fixed during the S6→S8 lightweight-patch UI
+redesign, per `PROJECT_MANIFEST.md`'s note on that gap). No code change made for this
+part — a test was added to confirm the existing behavior instead of building a no-op.
+Same pattern as the badge-fix item found already resolved elsewhere in this enhancement.
+The only actual code change: removing the Confidence and Provider columns from the table.
+
+### Test Cases Applied
+Source: ENH-001_EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | Document Detail rendering | One combined summary block (already existing), not two separate ones | WRITTEN — 3 assertions (new test, strengthened post-challenge to assert DOM containment) | PASS |
+| TC-2 | Extracted-lines table | Renders without Confidence and Provider columns | WRITTEN — 4 assertions (new test) | PASS |
+| TC-3 | `documentDetail.ts` data layer | `confidence`/`providerUsed` still returned (UI-only removal) | WRITTEN — 3 assertions (new test, added post-challenge — see Finding 1 below) | PASS |
+| TC-4 | Extraction-method summary block | Still renders correctly, unaffected by column removal | WRITTEN — reused existing provider-count assertion within TC-2's test | PASS |
+| TC-5 | Other columns/summary values | Unaffected | Covered by pre-existing tests (Invoice Ref/Amount columns, exception count, status badge) — all still pass | PASS |
+
+### Prediction Statement
+N/A — Autonomous mode.
+
+### Challenge Agent Output
+Same mechanism note as Task 1.1 (fresh context-free subagent substituting for
+`./tools/challenge.sh`'s `claude --print` call).
+
+**Verdict:** FINDINGS (2 items) — both dispositioned TEST, both now passing.
+
+**Untested scenarios (from challenge agent):**
+1. The task spec's own data-assembly regression case (`confidence`/`providerUsed` still
+   returned by `documentDetail.ts`) had no assertion anywhere — the claim that provider-
+   summary tests covered it was checked and found incorrect (different function/query).
+2. The "renders together in one block" test only asserted independent visibility of two
+   text fragments, not DOM containment — couldn't actually detect a regression that
+   re-separated the two summaries into different panels.
+
+**Unverified assumptions (from challenge agent):**
+1. Ambiguity flagged between the CC prompt's "extraction summary" (the thing to combine)
+   and the DOM's separately-labelled "Extraction summary" panel (`extraction-summary-strip`,
+   the provider-breakdown block, Task 3.5) which the same CC prompt says is unaffected.
+   Resolved by re-reading the brief's own worked example ("Extracted lines (273 total)"
+   next to "Reconciliation complete...") — confirms "extraction summary" means the line-count
+   heading, not the provider-breakdown panel. The strengthened containment test (Finding 2
+   fix) now verifies this reading is correct by construction.
+2. Comment claiming data-layer coverage was factually wrong (`getExtractionMethodSummary`
+   and `getStatementLinesForDocument` are separate functions/queries) — corrected.
+
+**Invariant coverage gaps:** NONE — presentation-layer only.
+
+**Scope boundary observations:** None — diff confined to declared files.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (no data-layer regression test) | TEST | Added a new test hitting `/api/documents/:id/detail` directly, asserting `lines[0].confidence`/`providerUsed` are present and correctly typed. Corrected the inaccurate comment that claimed this was already covered. | PASS |
+| 2 (no DOM containment check) | TEST | Strengthened the combined-summary test to scope both assertions inside `page.locator('.panel', { has: reconciliation-progress testid })` — genuine containment, not just co-presence on the page. | PASS |
+
+### Code Review
+No invariant touched — presentation-layer only, confirmed by inspection (no change to
+`documentDetail.ts`'s data assembly, per the task's own constraint).
+
+### Scope Decisions
+The "combine summary" instruction was found already satisfied by existing code — treated
+as a verified pre-existing state, not re-implemented or forced into a redundant rewrite.
+Documented rather than silently claimed as new work.
+
+### BCE Impact
+M-013 (`documentDetail.ts`) — not modified. M-076 (`DocumentDetailView.tsx`) — UI-only
+column removal, no interface/contract change.
+
+| Artifact | Field | Change |
+|---|---|---|
+| MODULE_CONTRACTS.md | M-076 description | No change — table column display is not part of the documented contract |
+
+### Verification Verdict
+[x] All planned cases passed (10/10, including 1 flaky parallel-worker failure confirmed
+    non-reproducing on isolated re-run — not a regression)
+[x] Challenge agent run — verdict recorded — FINDINGS (2), both TEST-dispositioned
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded — see below
+[x] Code review complete — N/A, no invariant touched
+[x] Scope decisions documented
+
+**Status:** COMPLETE. Ready to commit.
+
+### Pre-Commit Declaration
+**Functions touched:** None modified (JSX table structure only — no function signature or
+logic change in `DocumentDetailView.tsx`).
+**Schemas touched:** None.
+**Config touched:** None.
+**Files touched:** `src/app/(app)/documents/[id]/DocumentDetailView.tsx`,
+`ui_tests/document-detail.spec.ts` — both within declared blast radius.
+**Scope confirmed:** YES.

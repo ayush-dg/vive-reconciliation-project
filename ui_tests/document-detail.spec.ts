@@ -145,6 +145,78 @@ test.describe('Document Detail screen', () => {
   // Task 6.4 challenge-review addition: DocumentDetailView.tsx's refresh() previously
   // swallowed a failed /api/documents/:id/detail response with zero user-facing signal —
   // same defect as Home's, generalized via the shared InlineLoadError component.
+  // ENH-001 Task 1.2: "Extracted lines (N total)" and "Reconciliation complete — X
+  // matched, Y exceptions" were found already adjacent in the same panel-head block on
+  // inspection (documentDetail.ts already assembles reconciliation counts; the display
+  // was already combined, likely from the S6->S8 lightweight-patch UI redesign) — this
+  // test confirms that existing behavior, not newly-built behavior.
+  test('extraction and reconciliation summary render together in one block', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `DocDetail_CombinedSummary_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const invoiceRef = `INV-DD-COMBINED-${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, invoiceRef, '75.00'));
+    await page.request.post(`/api/documents/${documentId}/extract`);
+    // No bronze_netsuite_vendorbill row seeded — resolves to a NOT_POSTED exception, so
+    // both "matched" and "exception" counts are exercised together, not just zero/zero.
+    await page.request.post(`/api/documents/${documentId}/match`);
+
+    await page.goto(`/documents/${documentId}`);
+    // Containment, not just co-presence: both pieces must share one panel container —
+    // this is what actually distinguishes "combined into one block" from "both exist
+    // somewhere on the page" (challenge agent Finding 2).
+    const summaryBlock = page.locator('.panel', { has: page.getByTestId('reconciliation-progress') });
+    await expect(summaryBlock.getByText(/Extracted lines \(\d+ total\)/)).toBeVisible();
+    const progress = summaryBlock.getByTestId('reconciliation-progress');
+    await expect(progress).toContainText('Reconciliation complete');
+    await expect(progress).toContainText('exception');
+  });
+
+  // ENH-001 Task 1.2: Confidence and Provider are per-attempt values duplicated across
+  // every line, not per-line data — removed from the table UI only. documentDetail.ts's
+  // confidence/providerUsed fields are unchanged — see the dedicated data-layer
+  // regression test below (challenge agent Finding 1: the provider-summary tests above
+  // query a different function, getExtractionMethodSummary, and do not actually cover
+  // this case).
+  test('extracted-lines table no longer shows Confidence or Provider columns', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `DocDetail_NoConfProvCols_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, 'INV-DD-NOCOLS', '85.00'));
+    await page.request.post(`/api/documents/${documentId}/extract`);
+
+    await page.goto(`/documents/${documentId}`);
+    const table = page.getByTestId('statement-lines-table');
+    await expect(table.getByRole('columnheader', { name: 'Invoice Ref' })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'Amount' })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'Confidence' })).toHaveCount(0);
+    await expect(table.getByRole('columnheader', { name: 'Provider' })).toHaveCount(0);
+    // The extraction-method summary block (provider breakdown) is unaffected by the
+    // per-line column removal.
+    await expect(page.getByTestId('provider-count-claude_sonnet')).toContainText('1');
+  });
+
+  // ENH-001 Task 1.2, challenge agent Finding 1: the task spec's own regression case —
+  // "documentDetail.ts's confidence/providerUsed fields are still returned by the data
+  // layer... verifiable at the data-assembly level, not just the rendered table" — had no
+  // assertion anywhere. getExtractionMethodSummary (provider-count tests above) queries
+  // extracted_extraction_attempt directly and is a separate function from
+  // getStatementLinesForDocument's correlated subquery; it does not cover this case.
+  test('documentDetail.ts still returns confidence/providerUsed per line (UI-only removal, data layer unaffected)', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendor = `DocDetail_DataLayerFields_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, 'INV-DD-DATAFIELDS', '95.00'));
+    await page.request.post(`/api/documents/${documentId}/extract`);
+
+    const res = await page.request.get(`/api/documents/${documentId}/detail`);
+    const detail = await res.json();
+    expect(detail.lines.length).toBeGreaterThan(0);
+    expect(detail.lines[0].confidence).not.toBeNull();
+    expect(typeof detail.lines[0].confidence).toBe('number');
+    expect(detail.lines[0].providerUsed).toBe('claude_sonnet');
+  });
+
   test('a failed post-action refresh shows the shared inline error, and Retry recovers — without misreporting the action itself as failed', async ({
     page,
     context,

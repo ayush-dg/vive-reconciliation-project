@@ -46,8 +46,8 @@
 
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
-| 1.1     | Status label renames | Completed | (pending) |
-| 1.2     | Document Detail: combined summary + drop two columns | | |
+| 1.1     | Status label renames | Completed | 66a4743 |
+| 1.2     | Document Detail: combined summary + drop two columns | Completed | (pending) |
 | 1.3     | Click-through from Upload to a document's extracted lines | | |
 | 1.4     | Upload time display in IST | | |
 
@@ -67,6 +67,7 @@ Session was not resumed as of this entry.
 | Task | Decision made | Rationale |
 |------|---------------|-----------|
 | Pre-Build | Waive Schema Validation HALT (5 STALE-OR-INVALID IDs) | `IC-1`–`IC-5` vs. canonical `G1`–`G5` label mismatch, content unchanged — engineer deferred the relabel to after this execution plan, see Schema Validation table above |
+| 1.2 | "Combine extraction and reconciliation summary" found already satisfied by existing code — no rebuild, test added to confirm existing behavior instead | Matches the pattern of other ENH-001 items already found resolved on inspection (badge fix, legal-entity default) — verified against source before building, not assumed from the task description |
 
 ---
 
@@ -76,6 +77,7 @@ Session was not resumed as of this entry.
 |------|--------------------|--------------|
 | 1.1 | A stale `node` dev server (PID 10984, started 10:53:17 same day) was squatting on port 3000, reused by Playwright's `reuseExistingServer` option and returning HTML error pages instead of JSON from API routes, failing all 8 tests in `home.spec.ts` with an unrelated symptom (`SyntaxError: Unexpected token '<'`). | Stopped the stale process; re-ran the same command against a freshly-started dev server. All 8 tests passed. Environmental, not a code defect — not a loop condition. |
 | 1.1 | Task 1.1 was built and committed directly on `sprint/SPRINT-001-initiation` — the session prompt file (`S1_execution_prompt.md`, which did not yet exist on disk when Task 1.1 began) specifies branch `session/s1_ui_clarity_fixes` and a LAUNCH ERROR check that this branch exists before any task work. Session prompt files for both S1/S2 appeared mid-Task-1.1, produced elsewhere. | Created `session/s1_ui_clarity_fixes` at the current commit (which already includes Task 1.1) immediately after discovering the prompt file — no work lost, no rebuild needed. All subsequent tasks (1.2 onward) proceed on this branch. Also corrected a stale `v1.3` Claude.md version reference in both S1 and S2 execution prompts (actual current version is v1.4) and renamed `S1_execution_prompt (1).md` to `S1_execution_prompt.md`. |
+| 1.2 | One test (`Extract/Reconcile actions appear only when applicable...`, pre-existing, unrelated to this task's diff) failed once under `--reporter=list`'s default 4-worker parallel run, then passed both in isolation and in a full re-run. | Confirmed non-reproducing (parallel-worker resource contention, not a code regression) before proceeding. Not a loop condition. |
 
 ---
 
