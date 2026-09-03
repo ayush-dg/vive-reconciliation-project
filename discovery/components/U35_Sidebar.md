@@ -1,0 +1,15 @@
+**Module:** Sidebar
+**ID:** M-082
+**Layer:** component
+**Primary Responsibility:** Renders the app-wide primary navigation (Home/Upload/Exceptions), a disabled Admin placeholder group, and the user identity/logout control.
+
+**Inputs (Props):** `{ username: string }`.
+**Outputs (Rendered UI + Side Effects):** Renders `<aside className="sidebar">` with: a brand block (logo + "Reconciliation"/"Vive Collision"); a "Workspace" nav group with three `next/link` items (`/home`, `/upload`, `/exceptions`, each with an icon `<use>` referencing M-080's sprite); an "Admin" group label with a single disabled `<button data-testid="nav-admin-settings">Settings</button>` (non-functional placeholder — per comment, "Admin group present but disabled/non-functional (single-role build, D-E — no admin surface exists)... 'Settings' is a representative placeholder label, not a real screen this task builds"); a footer block containing `<form action={logoutAction}><button type="submit">...</button></form>` showing the user's initials (computed via local `initials()` helper), username, and "Sign out" label. Side effect: submitting the logout form invokes `logoutAction` (M-054) as a Server Action — presumably clears the session cookie, though that internal behavior is out of this session's scope.
+**State Consumed:** None (no store/context reads) — `username` is prop-driven only.
+**Public Interface:** `export default function Sidebar({ username }: { username: string })`; internal (non-exported) `initials(name: string): string`.
+**Error Behaviour:** No error handling in this component — a failed `logoutAction` (M-054) would be handled (or not) entirely inside that out-of-scope Server Action; this component has no visible feedback path for a logout failure.
+**Known Fragility:** `initials()` splits on `[._-]+` and whitespace and takes the first two parts' first characters — an unusual username format (e.g., all-lowercase single word, or a username containing digits/symbols outside that regex) could produce a single-letter or empty-looking avatar; not validated against real username formats beyond what's inferable from source. The Admin/Settings button is a permanent, deliberate dead-end — a future engineer might mistake it for an unfinished feature and try to "wire it up" without realizing it's an intentional placeholder per an explicit architecture decision (D-E, single-role build).
+**Change Impact:** Rendered inside M-064 ((app) layout), so any change here affects every authenticated route. Removing/renaming icon references (`#i-home`, `#i-upload`, `#i-alert`, `#i-settings`) breaks nav icons unless M-080's sprite is updated in lockstep. Changing `href`s here changes the app's primary navigation targets for all users.
+**Callers:** M-064 ((app) layout) renders this, passing `session.username`.
+**Calls:** M-054 (`login/actions.ts` `logoutAction`, via form action at Sidebar.tsx:66).
+**Integration Points Used:** None (fetches internal API routes only) — N/A; uses a Server Action, not a fetch.

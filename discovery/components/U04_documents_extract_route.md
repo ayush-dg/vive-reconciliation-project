@@ -1,0 +1,18 @@
+**Module:** api/documents/[id]/extract/route.ts
+**ID:** M-046
+**Layer:** route
+**Primary Responsibility:** Manually triggers the extraction pipeline for one document, acquiring an atomic per-document processing lock so a concurrent trigger on the same document is rejected rather than double-run.
+
+**Inputs:** `POST(_request: Request, { params }: { params: Promise<{ id: string }> })` — path param `id` only; no body is read (`_request` unused), no query params.
+**Outputs:**
+- 200: `{ status: string }` where `status` is `'processing'` (the literal value `triggerExtraction` returns on success — the raw `extracted_document.status` value it just set, not a computed display badge).
+- 404: `{ error: 'Document not found.' }` when `result.reason === 'not_found'` (no row in `extracted_document` for that ID).
+- 409: `{ error: 'Extraction already in progress for this document.' }` when `result.reason === 'already_processing'` — i.e. the lock UPDATE (`WHERE status != 'processing'`) affected 0 rows.
+**Public Interface:**
+`export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse>`
+**Error Behaviour:** No try/catch in the route handler itself. `triggerExtraction` (M-015) can throw synchronously via `assertSqliteMode()` if `getDbMode() !== 'sqlite'` (Fabric mode not yet supported for extraction) — unhandled here, -> 500. Any error thrown by `runExtractionPipeline` (M-022, awaited inside M-015 at line 49, called from inside the lock-held window) also propagates unhandled to this route -> 500, and per M-015's own code, on that path the lock (the `'processing'` status) is NOT rolled back — there is no try/finally around the pipeline call in M-015, so a pipeline exception leaves the document stuck in `'processing'` status indefinitely (see Known Fragility).
+**Known Fragility:** [NOTABLE — confirmed G5 mechanism] The 409 lock is enforced via a single atomic SQL UPDATE with a `WHERE status != 'processing'` guard in M-015 (`triggerExtraction`) — "the status transition to 'processing' IS the ownership acquisition" per that module's own comment; `result.changes === 0` -> 409. This is a *non-releasing* lock (unlike M-047/M-053's matching lock, which explicitly releases via `recon_document_lock` DELETE in a `finally` block) — extraction is documented as a one-shot, non-repeatable operation, so there is no unlock path at all if `runExtractionPipeline` throws mid-run: the document is left permanently in `'processing'` status with no way to retry via this API short of a manual DB fix. A future engineer who assumes this route's lock behaves like M-047's (self-releasing on failure) would be wrong. Also: the request body is entirely unused (`_request`) — any client-sent payload to this POST is silently ignored, not validated or rejected.
+**Change Impact:** Called by both the Upload screen's inline per-document Extract action (M-070) and the Home screen's Extract trigger (M-068), and by the Document Detail screen's Extract button (M-076) — all three re-fetch their own display data afterward rather than trusting this route's response shape alone. Changing the 409-vs-200 semantics or the `status` field's value breaks any of those three UIs' "is extraction running" logic. Any change to M-015's lock mechanism directly changes this route's error/success taxonomy.
+**Callers:** M-068 (HomeView.tsx, fetch POST), M-070 (UploadForm.tsx, fetch POST), M-076 (DocumentDetailView.tsx, fetch POST)
+**Calls:** M-015 (`src/app/api/documents/[id]/extract/route.ts:10`)
+**Integration Points Used:** None (routes through serving-layer modules)

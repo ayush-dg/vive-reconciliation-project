@@ -1,5 +1,9 @@
 # EXECUTION_PLAN.md — VIVE Statement Reconciliation (Bounded First Build)
 
+> **FROZEN** — This document is sealed as of 2026-09-02 (Phase 8 sign-off,
+> S9 complete). No modifications are permitted. All future enhancement
+> planning uses `enhancements/ENH-NNN_EXECUTION_PLAN.md`.
+
 **Version:** 1.8 (2026-09-01 — Session 6→9 lightweight-patch doc-sync)
 **Traces to:** `docs/ARCHITECTURE.md` v1.6, `docs/INVARIANTS.md` v1.7, `docs/UI_SURFACE.md` v1.5
 **APPLICATION_SURFACE:** UI+API — Session 1 includes Playwright scaffolding per PBVI-011.
