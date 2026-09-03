@@ -3,7 +3,7 @@
 ## Session: ENH-001 Session 1 — UI Clarity Fixes (Home / Upload / Document Detail)
 **Date started:** 2026-09-03
 **Engineer:** Vaishali
-**Branch:** sprint/SPRINT-001-initiation
+**Branch:** session/s1_ui_clarity_fixes (see Deviations — created retroactively after Task 1.1)
 **Claude.md version:** v1.4
 **Execution mode:** [x] Autonomous (sequential, no interruption, no prediction)
                   | [ ] Manual (prediction discipline, prediction before verification)
@@ -75,6 +75,7 @@ Session was not resumed as of this entry.
 | Task | Deviation observed | Action taken |
 |------|--------------------|--------------|
 | 1.1 | A stale `node` dev server (PID 10984, started 10:53:17 same day) was squatting on port 3000, reused by Playwright's `reuseExistingServer` option and returning HTML error pages instead of JSON from API routes, failing all 8 tests in `home.spec.ts` with an unrelated symptom (`SyntaxError: Unexpected token '<'`). | Stopped the stale process; re-ran the same command against a freshly-started dev server. All 8 tests passed. Environmental, not a code defect — not a loop condition. |
+| 1.1 | Task 1.1 was built and committed directly on `sprint/SPRINT-001-initiation` — the session prompt file (`S1_execution_prompt.md`, which did not yet exist on disk when Task 1.1 began) specifies branch `session/s1_ui_clarity_fixes` and a LAUNCH ERROR check that this branch exists before any task work. Session prompt files for both S1/S2 appeared mid-Task-1.1, produced elsewhere. | Created `session/s1_ui_clarity_fixes` at the current commit (which already includes Task 1.1) immediately after discovering the prompt file — no work lost, no rebuild needed. All subsequent tasks (1.2 onward) proceed on this branch. Also corrected a stale `v1.3` Claude.md version reference in both S1 and S2 execution prompts (actual current version is v1.4) and renamed `S1_execution_prompt (1).md` to `S1_execution_prompt.md`. |
 
 ---
 
