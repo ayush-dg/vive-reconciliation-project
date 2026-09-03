@@ -7,8 +7,19 @@ import InlineLoadError from '@/components/InlineLoadError';
 import type { ApiDocument } from '@/lib/documents';
 import type { HomeSummaryStats } from '@/lib/homeSummary';
 
+// ENH-001 Task 1.4: fixed IST display (Asia/Kolkata), not user/locale-configurable —
+// reasonable v1 scope for a single-region deployment, per the brief's Known Constraints.
+// Underlying stored upload_timestamp value is unchanged; display-formatting only.
+//
+// upload_timestamp is SQLite's own `datetime('now')` — UTC, but stored as a naive
+// "YYYY-MM-DD HH:MM:SS" string with no timezone marker. new Date() on that exact format
+// parses it as the RUNTIME'S LOCAL system time, not UTC — silently wrong on any server
+// whose local timezone isn't UTC (found during this task; the space is replaced with 'T'
+// and 'Z' appended so it's unambiguously parsed as UTC before the IST conversion below).
 function formatUploadTimestamp(isoLike: string): string {
-  return new Date(isoLike).toLocaleString('en-US', {
+  const utcIsoLike = isoLike.includes('T') ? isoLike : `${isoLike.replace(' ', 'T')}Z`;
+  return new Date(utcIsoLike).toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',

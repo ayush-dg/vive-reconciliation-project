@@ -296,3 +296,124 @@ inside the existing Action column, no function signature change).
 **Files touched:** `src/app/(app)/upload/UploadForm.tsx`, `ui_tests/upload.spec.ts` — both
 within declared blast radius.
 **Scope confirmed:** YES.
+
+---
+
+## Task 1.4 — Upload time display in IST
+
+### Pre-Task Findings
+1. Document Detail (`DocumentDetailView.tsx`/`documentDetail.ts`) does **not** currently
+   display `upload_timestamp` at all — no field in the data shape, nothing rendered. The
+   CC prompt's premise (a timestamp exists there to convert) doesn't match source. No
+   code change made for Document Detail — adding a wholly new field/display would be
+   scope creep beyond "format it in IST."
+2. `UploadForm.tsx` (not named in the CC prompt) has its own duplicated
+   `formatUploadTimestamp()` rendering the same field — extended scope to fix it too,
+   since leaving it in a different timezone than Home would be a real, visible
+   inconsistency (same pattern as Task 1.3's extension).
+3. Pre-existing bug found and fixed: `upload_timestamp` is SQLite's `datetime('now')`
+   (UTC) stored as a naive `"YYYY-MM-DD HH:MM:SS"` string with no timezone marker.
+   `new Date()` on that exact format parses it as the **runtime's local system timezone**,
+   not UTC — silently wrong on any server not running in UTC (confirmed via direct DB
+   query — this dev machine's local timezone happens to be IST, masking the bug here).
+   Fixed by explicitly treating the naive string as UTC (`'T'` + `'Z'` insertion) before
+   applying the `Asia/Kolkata` display conversion.
+
+### Test Cases Applied
+Source: ENH-001_EXECUTION_PLAN.md Session 1
+
+| Case | Scenario | Expected | UI Tests | Result |
+|------|----------|----------|----------|--------|
+| TC-1 | Known UTC instant, mid-day (`2026-01-15 08:05:37`) | Displays as `1/15/2026, 1:35:37 PM` IST on Home | WRITTEN — 1 assertion (new test) | PASS |
+| TC-2 | Same known instant on Upload screen | Same conversion, same result | WRITTEN — 1 assertion (new test) | PASS |
+| TC-3 (added post-challenge, Finding 2) | Regression: raw DB value unaffected by display | `extracted_document.upload_timestamp` still the raw naive string post-render | WRITTEN — 2 assertions (added to TC-1/TC-2's tests) | PASS |
+| TC-4 (added post-challenge, Finding 1) | UTC instant crossing midnight into next IST day (`2026-01-15 20:00:00` → `2026-01-16 01:30:00` IST) | Correct date/day rollover, not just time-of-day conversion | WRITTEN — 1 assertion (new test) | PASS |
+
+Document Detail's own IST display test case is N/A per Pre-Task Finding 1 — no timestamp
+exists there to test.
+
+### Prediction Statement
+N/A — Autonomous mode.
+
+### Challenge Agent Output
+Same mechanism note as Tasks 1.1–1.3 (fresh context-free subagent).
+
+**Verdict:** FINDINGS (2 items) — both dispositioned TEST, both now passing.
+
+**Untested scenarios (from challenge agent, informational — 3 of 5 not promoted to
+Verdict Findings requiring disposition):**
+1. **[Promoted to Finding 1]** Day-boundary rollover never exercised — only a single
+   mid-day instant was tested.
+2. The `isoLike.includes('T')` branch (an already-"T"-formatted string with no `Z`) isn't
+   tested — if any future code path ever produces a naive "T but no Z" string, the
+   ternary would treat it as already-safe and reintroduce the local-timezone misparse
+   bug silently. Not actioned this task — no such code path currently exists (SQLite's
+   `datetime('now')` is the only producer of this field), so there's nothing to construct
+   a real fixture from; noted as a latent risk if that ever changes, not a current defect.
+3. **[Promoted to Finding 2]** No DB-level regression assertion for "stored value
+   unaffected."
+4. Cross-screen consistency (Home vs. Upload rendering the same document identically) not
+   directly compared — not actioned; both screens' correctness is independently proven by
+   TC-1–TC-4 against the same known instants, which is equivalent coverage by construction.
+5. Malformed/missing `upload_timestamp` input untested — not actioned; `upload_timestamp`
+   is a NOT NULL, DB-generated column with a single producer (SQLite's own `datetime('now')`),
+   so a malformed value isn't a reachable state in this build.
+
+**Unverified assumptions (from challenge agent):**
+1. Deployment Node build has full ICU (`Asia/Kolkata` timezone data) — not verified
+   against the actual Azure App Service runtime, only local/dev. Noted as a deployment-
+   environment risk outside what a Playwright test against the dev server can verify.
+2. Same as Untested Scenario #2 above.
+3. Duplicated function across two files could drift on a future edit to only one copy —
+   acknowledged in the code comment itself; no structural guard added (would mean
+   extracting a shared util, a larger refactor than this task's declared scope).
+
+**Invariant coverage gaps:** NONE — display-formatting only, confirmed by the challenge
+agent against IC-1–IC-5/CQ-001.
+
+**Scope boundary observations:** None — diff confined to declared files.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (day-boundary rollover untested) | TEST | Added a test with a UTC instant crossing midnight into the next IST calendar day (`20:00:00` UTC → `01:30:00` IST the next day) | PASS |
+| 2 (no DB-level regression assertion) | TEST | Added a direct DB query assertion in both TC-1/TC-2's tests confirming `upload_timestamp` is unchanged post-render | PASS |
+
+### Code Review
+No invariant enforcement point touched — pure display formatting, confirmed by the
+challenge agent.
+
+### Scope Decisions
+Extended beyond the CC prompt's literal two-screen list (Home, Document Detail) after
+finding Document Detail has no such field to convert, and Upload has an unlisted
+duplicate of the same display logic. Fixed a pre-existing timezone-parsing bug discovered
+while implementing the IST conversion, rather than building the correct display on top of
+an already-wrong underlying instant.
+
+### BCE Impact
+M-068 (`HomeView.tsx`), M-070 (`UploadForm.tsx`) — display-formatting only, no
+interface/contract change. No new touch point.
+
+| Artifact | Field | Change |
+|---|---|---|
+| MODULE_CONTRACTS.md | M-068/M-070 description | No change — timestamp display formatting is not part of the documented contract |
+
+### Verification Verdict
+[x] All planned cases passed
+[x] Challenge agent run — verdict recorded — FINDINGS (2), both TEST-dispositioned
+[x] All FINDINGS dispositioned — ACCEPT with rationale or TEST with result
+[x] Pre-commit declaration recorded — see below
+[x] Code review complete — N/A, no invariant touched
+[x] Scope decisions documented
+
+**Status:** COMPLETE. Session 1 (Tasks 1.1–1.4) finished. Ready to commit.
+
+### Pre-Commit Declaration
+**Functions touched:** `formatUploadTimestamp()` in both `HomeView.tsx` and
+`UploadForm.tsx` (identical fix in each — UTC-safe parsing + IST display conversion).
+**Schemas touched:** None.
+**Config touched:** None.
+**Files touched:** `src/app/(app)/home/HomeView.tsx`, `src/app/(app)/upload/UploadForm.tsx`,
+`ui_tests/home.spec.ts`, `ui_tests/upload.spec.ts` — all within declared blast radius.
+**Scope confirmed:** YES.

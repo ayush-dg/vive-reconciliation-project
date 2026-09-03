@@ -10,8 +10,20 @@ import type { ApiDocument } from '@/lib/documents';
 // runtime's default locale, which can (and did, in testing) differ between
 // the Node server render and the browser client render, causing a React
 // hydration mismatch ("8/27/2026, 2:16:10 PM" vs "27/8/2026, 2:16:10 pm").
+// ENH-001 Task 1.4 (scope extended to this screen too — same duplicated function as
+// HomeView.tsx's, same field, left inconsistent otherwise): fixed IST display
+// (Asia/Kolkata), not user/locale-configurable. Underlying stored upload_timestamp value
+// is unchanged; display-formatting only.
+//
+// upload_timestamp is SQLite's own `datetime('now')` — UTC, but stored as a naive
+// "YYYY-MM-DD HH:MM:SS" string with no timezone marker. new Date() on that exact format
+// parses it as the RUNTIME'S LOCAL system time, not UTC — silently wrong on any server
+// whose local timezone isn't UTC (found during this task; the space is replaced with 'T'
+// and 'Z' appended so it's unambiguously parsed as UTC before the IST conversion below).
 function formatUploadTimestamp(isoLike: string): string {
-  return new Date(isoLike).toLocaleString('en-US', {
+  const utcIsoLike = isoLike.includes('T') ? isoLike : `${isoLike.replace(' ', 'T')}Z`;
+  return new Date(utcIsoLike).toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',

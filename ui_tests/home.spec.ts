@@ -192,4 +192,48 @@ test.describe('Home screen', () => {
     await expect(page.getByTestId('error-boundary')).toHaveCount(0);
     await expect(page.getByTestId(`home-status-badge-${documentId}`)).toBeVisible();
   });
+
+  // ENH-001 Task 1.4: upload time displayed in IST (Asia/Kolkata), fixed. A known UTC
+  // instant (not "some value rendered") pins the actual conversion, and specifically
+  // exercises the naive-string UTC-parsing fix (upload_timestamp is stored as
+  // "YYYY-MM-DD HH:MM:SS" with no timezone marker — see formatUploadTimestamp's comment).
+  test('upload time displays correctly converted to IST', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_IST_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, 'INV-IST', '12.00'));
+
+    // 2026-01-15 08:05:37 UTC -> 13:35:37 IST (UTC+5:30).
+    const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET upload_timestamp = '2026-01-15 08:05:37' WHERE document_id = ?`).run(documentId);
+
+    await page.goto('/home');
+    const row = page.getByTestId(`home-document-row-${documentId}`);
+    await expect(row).toContainText('1/15/2026, 1:35:37 PM');
+
+    // Challenge agent Finding 2: the task's own regression case ("underlying stored
+    // value is unaffected") had no DB-level assertion — only the rendered string was
+    // checked. Confirm the raw column is still the unconverted naive string post-render.
+    const stored = db.prepare(`SELECT upload_timestamp FROM extracted_document WHERE document_id = ?`).get(documentId) as {
+      upload_timestamp: string;
+    };
+    expect(stored.upload_timestamp).toBe('2026-01-15 08:05:37');
+  });
+
+  // Challenge agent Finding 1: the other IST test only exercised a single mid-day
+  // instant. A UTC time in the ~18:30-23:59 window crosses into the *next* IST calendar
+  // day — the classic timezone-conversion failure mode (date/month/year rollover), left
+  // entirely unverified otherwise.
+  test('upload time IST conversion correctly rolls over to the next calendar day', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_ISTRollover_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, 'INV-IST-ROLL', '13.00'));
+
+    // 2026-01-15 20:00:00 UTC -> 2026-01-16 01:30:00 IST (UTC+5:30) — crosses midnight.
+    const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET upload_timestamp = '2026-01-15 20:00:00' WHERE document_id = ?`).run(documentId);
+
+    await page.goto('/home');
+    const row = page.getByTestId(`home-document-row-${documentId}`);
+    await expect(row).toContainText('1/16/2026, 1:30:00 AM');
+  });
 });

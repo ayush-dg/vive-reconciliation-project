@@ -319,4 +319,31 @@ test.describe('Upload', () => {
     await link.click();
     await expect(page).toHaveURL(`/documents/${documentId}`);
   });
+
+  // ENH-001 Task 1.4 (scope extended to this screen — see S1_SESSION_LOG.md Decision Log):
+  // upload time displayed in IST, same known-instant technique as home.spec.ts's
+  // equivalent test, also exercising the naive-string UTC-parsing fix.
+  test('upload time displays correctly converted to IST', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Upload_IST_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const res = await page.request.post('/api/documents', {
+      multipart: { file: samplePdf(vendor), legalEntityId: 'vive-holdings' },
+    });
+    const documentId = (await res.json()).document.document_id as string;
+
+    // 2026-01-15 08:05:37 UTC -> 13:35:37 IST (UTC+5:30).
+    const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET upload_timestamp = '2026-01-15 08:05:37' WHERE document_id = ?`).run(documentId);
+
+    await page.goto('/upload');
+    const row = page.getByTestId(`document-row-${documentId}`);
+    await expect(row).toContainText('1/15/2026, 1:35:37 PM');
+
+    // Challenge agent Finding 2: confirm the raw column is unaffected by display
+    // formatting — see home.spec.ts's equivalent assertion.
+    const stored = db.prepare(`SELECT upload_timestamp FROM extracted_document WHERE document_id = ?`).get(documentId) as {
+      upload_timestamp: string;
+    };
+    expect(stored.upload_timestamp).toBe('2026-01-15 08:05:37');
+  });
 });
