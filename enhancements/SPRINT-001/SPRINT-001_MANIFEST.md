@@ -51,23 +51,23 @@ MODULE_CONTRACTS.md / TOPOLOGY.md / DOMAIN_MODEL.json at the Prompt 1 brief revi
 
 Each watchpoint is a mandatory Phase 1 confirmation task — not optional monitoring.
 
+All watchpoints from this manifest are now resolved — none remain open for Phase 1.
+
 | ID | Enhancement | Surface | What Phase 1 Must Confirm | Assigned To |
 |---|---|---|---|---|
-| ~~WP-001~~ | ENH-001 | ToastProvider (`MODULE_CONTRACTS.md` → M-083) | **RESOLVED 2026-09-03** — no longer open. See below. | Vaishali |
 
-**WP-001 resolution (2026-09-03, post-commit — recorded here for traceability, manifest
-collision findings unaffected):** Running success-only counter toast ("N/10 uploaded"),
-reusing existing `dismiss()`/`add()` primitives in `toastStore.ts` — no change to `M-083`
-itself. Failures shown per-row via existing per-file progress state, not folded into the
-counter. Full decision recorded in `ENH-001_BRIEF.md` Known Constraints.
-
-**Findings surfaced and resolved before this manifest, no longer open watchpoints:**
+**Findings surfaced and resolved before Phase 1 begins:**
 - M-042/R-007 (positional `LEGAL_ENTITIES[0]` default) — resolved in brief update
   2026-09-03: confirmed unchanged existing behavior, no batch-specific handling required.
 - M-046/R-005 (IC-CANDIDATE-01, extraction lock non-releasing on failure) — resolved in
   brief update 2026-09-03: decision made to fix (try/finally status reset at
   `extraction.ts:49`), no schema change, stays Tier 1. Now an in-scope build item, not a
   watchpoint.
+- WP-001 — M-083 (ToastProvider) — resolved 2026-09-03: running success-only counter
+  toast ("N/10 uploaded"), built via existing `dismiss()`+`add()` in `toastStore.ts`.
+  M-083 stays untouched — the touch point table is unaffected. Failures shown per-row,
+  not rolled into the counter, per the sequential-extraction per-file progress state
+  already in scope.
 
 **Sprint Lead awareness note (not a collision watchpoint):** the brief's new sequential
 (one-file-at-a-time) extraction constraint was flagged for a Category-3-style check —

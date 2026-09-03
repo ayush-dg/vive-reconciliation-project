@@ -43,11 +43,10 @@ Not applicable — INDEPENDENT classification.
 
 ## Your Watchpoints
 
-| ID | Surface | What You Must Confirm in Phase 1 | Escalate If |
-|---|---|---|---|
-| ~~WP-001~~ | ToastProvider (`MODULE_CONTRACTS.md` → M-083) | **RESOLVED 2026-09-03** — running success-only counter toast ("N/10 uploaded"), reusing existing `toastStore.ts` primitives, no `M-083` change. Full decision in `ENH-001_BRIEF.md` Known Constraints. | N/A — resolved |
-
-No open watchpoints remain for this enhancement.
+None remaining. WP-001 (ToastProvider batch behavior) was resolved 2026-09-03, before
+Phase 1 began: running success-only counter toast, built via existing `dismiss()`+`add()`
+in `toastStore.ts` — M-083 stays untouched, no new touch point. Failures shown per-row,
+not in the counter.
 
 ---
 
