@@ -13,6 +13,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (result.reason === 'not_found') {
       return NextResponse.json({ error: 'Document not found.' }, { status: 404 });
     }
+    if (result.reason === 'recovery_exhausted') {
+      // ENH-001 Task 2.1 (IC-CANDIDATE-01/R-005): extraction genuinely succeeded but
+      // could never be saved, and no attempt slots remain (S7 bound reached) — distinct
+      // from "already in progress"; a 409 here would misleadingly suggest retrying later
+      // will help. It won't, without manual intervention.
+      return NextResponse.json(
+        { error: 'Extraction succeeded but could not be saved, and no retry attempts remain for this document.' },
+        { status: 422 }
+      );
+    }
     return NextResponse.json({ error: 'Extraction already in progress for this document.' }, { status: 409 });
   }
 
