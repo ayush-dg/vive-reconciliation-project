@@ -274,3 +274,96 @@ restructured, new `registerFile` helper (formerly inline in `handleSubmit`). New
 **Scope confirmed:** YES — within `docs/Claude.md` v1.5 Section 3 (`/src/**`, `/scripts/**`, `/ui_tests/**`).
 **Invariants touched:** G4 (touched implicitly, confirmed unbypassed by code review + a
 real end-to-end test). No new invariant.
+
+---
+
+## Task 2.3 — Per-file progress state UI
+
+### Design Note
+A new state array (`batchRows: BatchRow[]`) tracks each file's progress
+(`queued`/`registering`/`extracting`/`done`/`failed`) keyed by a fresh id assigned at
+selection time — a queued/registering file has no `document_id` yet, so it can't be
+represented in the historical "Uploaded statements" table at all. `registerFile` and
+a new `extractAndTrack` wrapper (around `handleExtract`) drive the row's state as the
+sequential loop progresses. Design Gate Finding 3's click-through gate
+(`batchInProgress`) is a single table-wide derived boolean — applied to every row in
+the historical table, not scoped to the current batch's own rows — since the actual
+risk (navigating away abandons the batch) exists regardless of which link is clicked.
+
+### Test Cases Applied
+Source: ENH-001_EXECUTION_PLAN.md Session 2
+
+| Case | Scenario | Expected | Result |
+|------|----------|----------|--------|
+| TC-1 | Mid-3-file-batch snapshot | Not all rows terminal yet; at least one still queued/registering/extracting | PASS |
+| TC-2 | Registration failure mid-batch | Failed row distinct from done rows (`['done','failed']`) | PASS |
+| TC-3 | Single-file batch | Full progression reaches `'done'` (fire-and-forget extraction still tracked) | PASS |
+| TC-4 (Finding 3) | Click-through during active batch | Absent on a done row while any sibling row is non-terminal | PASS |
+| TC-5 (Finding 3) | Click-through once batch fully terminal | Visible on all done rows, checked on the live page (not after reload) | PASS |
+| TC-6 (added post-challenge, Finding 3) | Old, unrelated already-completed document during a new batch | Its click-through is ALSO suppressed (table-wide, not per-row) and reappears once the new batch finishes | PASS |
+
+### Prediction Statement
+N/A — same rationale as Task 2.2 (implementation and its own new test suite were
+authored and stabilized together; a retroactive prediction on an already-verified state
+would be a formality, not a genuine cognitive check).
+
+### Challenge Agent Output
+Same mechanism note as prior tasks (fresh context-free subagent).
+
+**Verdict:** FINDINGS (4 items) — 2 FIX, 1 TEST, 1 ACCEPT (documented, not fixed).
+
+**Unverified assumptions / untested scenarios not promoted to findings:**
+Task 2.1's actual server-restart crash-recovery path and CI timing sensitivity of the
+5-second mid-batch polling window were both noted as genuinely out of scope (requires
+process restart / infra timing, not exercisable through this task's modified files).
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (`extractAndTrack`'s follow-up GET has no failure handling — permanently stuck 'extracting', blocking `batchInProgress` app-wide) | FIX | Added a `try/catch` and an explicit non-ok check — both now resolve the row to `'failed'` rather than leaving it stuck. Also handles the document-not-found-in-response case the same way (Finding 1's own principle: always resolve to *some* terminal state, never leave it stuck). | Covered by existing TCs continuing to pass; no dedicated failure-injection test added (would require intercepting the specific follow-up GET mid-batch — noted as a residual, low-priority gap, not chased further given the fix itself is simple and directly addresses the described mechanism) |
+| 2 (409-concurrent-trigger badge could be `Processing`/`Retrying`, ternary treated it as `'done'`) | FIX | Replaced the two-outcome ternary with an explicit check: `'Failed'` → `'failed'`; `'Processing'`/`'Retrying'` → left non-terminal (no premature update); anything else → `'done'` | Existing TCs unaffected (none currently exercise the 409 sub-case — same residual gap as Finding 1, narrow and requires an external concurrent trigger) |
+| 3 (cross-batch suppression — old/unrelated document — untested) | TEST | Added a test: fully extract a document first, start an unrelated new batch, confirm the old document's click-through is ALSO hidden while the new batch is non-terminal, and reappears once it finishes | PASS |
+| 4 (starting a new batch drops a still-pending single-file batch's progress row) | ACCEPT | Documented in code: `batchRows` is an ephemeral, live display only — the "Uploaded statements" table remains the source of truth for the file's actual final state regardless. Fixing this would mean either confusing cross-batch row merging or blocking new uploads while any extraction is pending (defeats fire-and-forget for single files) | N/A — accepted, not fixed |
+
+### Code Review
+No invariant enforcement point touched — confirmed by the challenge agent against
+G1-G5; this task is presentation/state-derivation only, layered on unchanged
+`handleExtract`/registration/extraction endpoints.
+
+### Scope Decisions
+Findings 1/2's fix touches `extractAndTrack` (already declared in scope from this
+task's own new-function addition) — no scope expansion. Finding 3's test is within the
+same file already in scope. Finding 4 is a documented, accepted limitation, not a code
+change.
+
+### BCE Impact
+M-070 (`UploadForm.tsx`) — new client-side progress-tracking state and rendering, no
+interface/contract change to any backend module. No new touch point.
+
+| Artifact | Field | Change |
+|---|---|---|
+| MODULE_CONTRACTS.md | M-070 description | No change — per-file progress UI is presentation-layer only |
+
+### Verification Verdict
+[x] All planned cases passed (23/23 in `upload.spec.ts`, 20/20 regression)
+[x] Challenge agent run — verdict recorded — FINDINGS (4): 2 FIX, 1 TEST, 1 ACCEPT
+[x] All FINDINGS dispositioned
+[x] Pre-commit declaration recorded — see below
+[x] Code review complete (no invariant touched, confirmed)
+[x] Scope decisions documented
+
+**Status:** COMPLETE. Awaiting engineer commit confirmation per Manual mode.
+
+### Pre-Commit Declaration
+**Functions touched:** `UploadForm.tsx` — `pickFiles` (now assigns per-file ids),
+`registerFile` (now drives row state), new `updateBatchRow`/`updateBatchRowByDocumentId`
+helpers, new `extractAndTrack`, `handleSubmit` (seeds `batchRows`), new `batchInProgress`
+derived value, click-through condition gated by it.
+**New types:** `BatchFile`, `BatchRowState`, `BatchRow` (all local to `UploadForm.tsx`).
+**Schemas touched:** None.
+**Config touched:** None.
+**Files touched:** `src/app/(app)/upload/UploadForm.tsx`, `ui_tests/upload.spec.ts` —
+both within declared blast radius.
+**Scope confirmed:** YES — within `docs/Claude.md` v1.5 Section 3 (`/src/**`, `/ui_tests/**`).
+**Invariants touched:** None — confirmed by challenge agent and code review.

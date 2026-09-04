@@ -53,8 +53,8 @@ amendment:
 | Task Id | Task Name | Status | Commit |
 |---------|-----------|--------|--------|
 | 2.1     | Extraction crash-recovery fix (IC-CANDIDATE-01/R-005) | Completed | d8503ad |
-| 2.2     | Sequential batch upload loop + registration-failure skip + batch cap | Completed | (pending) |
-| 2.3     | Per-file progress state UI | | |
+| 2.2     | Sequential batch upload loop + registration-failure skip + batch cap | Completed | 63d5ecf |
+| 2.3     | Per-file progress state UI | Completed | (pending) |
 | 2.4     | Running success-only toast counter | | |
 
 ---
@@ -74,6 +74,8 @@ N/A — Manual mode.
 | 2.1 | `needsSilverRecovery()` added to `extraction.ts` (not in the original CC prompt) | Required to make `skipSuccessGuard` reachable from a real `triggerExtraction()` call — the CC prompt specified the recovery mechanism but not how a future trigger decides to invoke it |
 | 2.2 | Extracted `src/lib/batchUploadSequencing.ts` as a standalone pure function rather than writing the sequencing loop inline in `UploadForm.tsx` (as the CC prompt's literal text implies) | The "no two extractions in flight simultaneously" acceptance criterion needs to be genuinely unit-testable, matching this codebase's own convention (every other `test_*.sh` script tests `src/lib` directly, never React component internals) — the alternative was inferring timing from Playwright network waterfalls only, a weaker form of evidence |
 | 2.2 | Challenge agent Finding 1/2 fix: `runBatchUploadSequenced` now treats an extraction failure the same as a registration failure (skip, continue) and an anomalous ok/no-documentId result as a no-op skip, rather than the original design's implicit assumption that extraction never throws | The function's own contract shouldn't silently depend on today's caller (`handleExtract`) happening to swallow all its own errors — defensive by construction, not by coincidence |
+| 2.3 | Design Gate Finding 3's click-through gate (`batchInProgress`) implemented as a single table-wide boolean, suppressing every row's click-through (not just the current batch's own rows) while a multi-file batch is non-terminal | The actual risk (navigating away abandons the in-flight batch) exists regardless of which link the user clicks — an old, unrelated document's link is just as dangerous to click mid-batch as one of the batch's own rows |
+| 2.3 | Challenge agent Finding 1/2 fix: `extractAndTrack`'s follow-up status check now has explicit failure handling (never leaves a row stuck at 'extracting') and correctly distinguishes a genuine 409-concurrent-trigger 'Processing'/'Retrying' badge from an actual terminal state | A row stuck non-terminal forever would permanently block `batchInProgress` from clearing, hiding every click-through app-wide — a worse variant of the exact Design Gate Finding 3 defect this task exists to fix |
 
 ---
 

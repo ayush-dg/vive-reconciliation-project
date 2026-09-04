@@ -48,9 +48,24 @@ const DEFAULT_LEGAL_ENTITY_ID = LEGAL_ENTITIES[0].id;
 // cap. A batch exceeding this is rejected outright, not silently truncated to 15.
 const MAX_BATCH_SIZE = 15;
 
+// ENH-001 Task 2.3 — a stable per-file identity assigned at selection time, since a
+// queued/registering file has no document_id yet (that only exists once registration
+// succeeds) — batch progress rows need something to key on before that point.
+type BatchFile = { id: string; file: File };
+
+type BatchRowState = 'queued' | 'registering' | 'extracting' | 'done' | 'failed';
+
+type BatchRow = {
+  id: string;
+  fileName: string;
+  state: BatchRowState;
+  documentId: string | null;
+};
+
 export default function UploadForm({ initialDocuments }: { initialDocuments: ApiDocument[] }) {
   const [documents, setDocuments] = useState(initialDocuments);
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<BatchFile[]>([]);
+  const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -114,15 +129,29 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       setFileError(`Select up to ${MAX_BATCH_SIZE} files at a time — ${selected.length} were selected.`);
       return;
     }
-    setFiles(selected);
+    // ENH-001 Task 2.3 — a stable id per file, assigned now rather than derived from
+    // File identity/index, so batch progress rows have something reliable to key on.
+    setFiles(selected.map((file) => ({ id: crypto.randomUUID(), file })));
     setFileError(null);
+  }
+
+  function updateBatchRow(id: string, patch: Partial<BatchRow>) {
+    setBatchRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  function updateBatchRowByDocumentId(documentId: string, patch: Partial<BatchRow>) {
+    setBatchRows((prev) => prev.map((row) => (row.documentId === documentId ? { ...row, ...patch } : row)));
   }
 
   // ENH-001 Task 2.2 — registers one file: toasts, refreshes the list, reports the
   // outcome to runBatchUploadSequenced's pure sequencing loop. Registration failure
   // is reported here (toast) and reported as ok:false, not thrown — the batch loop
   // continues to the next file regardless, it never aborts on one file's failure.
-  async function registerFile(file: File): Promise<BatchRegisterResult> {
+  // ENH-001 Task 2.3 — also drives this file's own batch-progress row: queued (set
+  // when the row list was first seeded) -> registering -> failed, or -> extracting
+  // (done immediately for a duplicate, since no extraction will run for it).
+  async function registerFile({ id, file }: BatchFile): Promise<BatchRegisterResult> {
+    updateBatchRow(id, { state: 'registering' });
     try {
       const body = new FormData();
       body.set('file', file);
@@ -137,6 +166,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
 
       if (!res.ok) {
         showError(data.error ?? `Upload failed for ${file.name}.`);
+        updateBatchRow(id, { state: 'failed' });
         return { ok: false, duplicate: false, documentId: null };
       }
 
@@ -158,16 +188,66 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       // like nothing had happened (engineer-directed fix, 2026-08-31).
       await refreshDocuments();
 
+      const documentId = data.document?.document_id ?? null;
       // A duplicate hit (existing document, possibly already extracted/extracting) is
       // left alone — not re-triggered; the refresh above already covers it. This is
       // also what correctly handles Design Gate Finding 2 (the same file selected
       // twice within one batch) — the second occurrence hits this exact duplicate
       // path via registerDocument()'s existing race-tolerant catch, with no
-      // batch-specific handling needed.
-      return { ok: true, duplicate: !!data.duplicate, documentId: data.document?.document_id ?? null };
+      // batch-specific handling needed. No extraction runs for a duplicate, so its
+      // row goes straight to 'done', not 'extracting'.
+      updateBatchRow(id, { state: data.duplicate ? 'done' : 'extracting', documentId });
+      return { ok: true, duplicate: !!data.duplicate, documentId };
     } catch {
       showError(`Upload failed for ${file.name} — check your connection and try again.`);
+      updateBatchRow(id, { state: 'failed' });
       return { ok: false, duplicate: false, documentId: null };
+    }
+  }
+
+  // ENH-001 Task 2.3 — wraps handleExtract to resolve the row's terminal state.
+  // handleExtract itself never throws (its own try/catch swallows everything) and
+  // its HTTP response alone can't distinguish "genuinely extracted" from "ran to
+  // completion but ended in a Failed badge" (both return 200) — so the document's
+  // actual resulting badge is re-checked directly after extraction settles.
+  async function extractAndTrack(documentId: string) {
+    await handleExtract(documentId, { silent: true });
+    try {
+      const res = await fetch('/api/documents');
+      if (!res.ok) {
+        // Challenge agent Finding 1: leaving the row at 'extracting' here would
+        // permanently block batchInProgress from ever clearing (it requires every
+        // row in a >1-row batch to reach a terminal state) — hiding every
+        // click-through in the whole table until the next batch overwrites
+        // batchRows. A transient failure on this follow-up GET must still resolve
+        // the row to a terminal state, even if we can't confirm which one.
+        updateBatchRowByDocumentId(documentId, { state: 'failed' });
+        return;
+      }
+      const data = (await res.json()) as { documents: ApiDocument[] };
+      const doc = data.documents.find((d) => d.document_id === documentId);
+      if (!doc) {
+        // Same Finding 1 principle: a document that vanished from the list
+        // (shouldn't happen, but must still resolve to a terminal state) —
+        // inconclusive, treated as failed rather than left stuck.
+        updateBatchRowByDocumentId(documentId, { state: 'failed' });
+        return;
+      }
+      const badge = doc.status_badge.badge;
+      // Challenge agent Finding 2: handleExtract's 409 branch ("already in
+      // progress" — some other trigger, e.g. a manual Extract click on this same
+      // row, holds the G5 lock) returns early without this document's own
+      // extraction having actually run; its badge can legitimately still be
+      // 'Processing'/'Retrying' at this point. Only resolve to a terminal state
+      // once the badge itself indicates one — otherwise leave the row as
+      // 'extracting' rather than falsely marking it 'done'.
+      if (badge === 'Failed') {
+        updateBatchRowByDocumentId(documentId, { state: 'failed' });
+      } else if (badge !== 'Processing' && badge !== 'Retrying') {
+        updateBatchRowByDocumentId(documentId, { state: 'done' });
+      }
+    } catch {
+      updateBatchRowByDocumentId(documentId, { state: 'failed' });
     }
   }
 
@@ -180,6 +260,22 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
     }
 
     setSubmitting(true);
+    // ENH-001 Task 2.3 — seed every row as 'queued' before the batch starts, so a
+    // file later in the queue visibly shows 'queued' while an earlier one is still
+    // 'extracting', not all rows jumping to a final state at once.
+    //
+    // Challenge agent Finding 4 (accepted, not fixed): this unconditionally replaces
+    // the whole array. Starting a new batch while a prior single-file batch's
+    // fire-and-forget extraction (still pending) means that older row's progress
+    // entry is silently dropped, and its later terminal-state update becomes a
+    // no-op against the new array. batchRows is an ephemeral, live progress display
+    // only — the "Uploaded statements" table (backed by `documents`) remains the
+    // source of truth for the file's actual final state regardless; only the
+    // transient progress list forgets it. Not fixed: preventing this would mean
+    // either merging old rows into new batches (confusing UX — mixing two unrelated
+    // uploads' progress) or blocking a new upload while any extraction is still
+    // pending (defeats the whole point of fire-and-forget for single files).
+    setBatchRows(files.map(({ id, file }) => ({ id, fileName: file.name, state: 'queued', documentId: null })));
     try {
       // ENH-001 Task 2.2 — the actual sequencing policy (single-file fire-and-forget
       // vs. multi-file strictly sequential) lives in runBatchUploadSequenced, a pure
@@ -187,13 +283,21 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       // (scripts/test_batch_upload_sequencing.sh) without a browser. submitting
       // stays true for a multi-file batch's whole duration — the deliberate,
       // accepted tradeoff of real sequencing, distinct from the batch-of-1 case.
-      await runBatchUploadSequenced(files, registerFile, (documentId) => handleExtract(documentId, { silent: true }));
+      await runBatchUploadSequenced(files, registerFile, extractAndTrack);
     } finally {
       setSubmitting(false);
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
+
+  // ENH-001 Task 2.3, Design Gate Finding 3: while a multi-file batch is actively
+  // running, navigating away via ANY click-through (not just one belonging to this
+  // batch) would abandon the rest of it — there's no backend job queue, the
+  // sequential loop is entirely client-side and unmounts with the page. Single-file
+  // uploads are excluded: that click-through was never gated before this task, and a
+  // 1-file "batch" was never at risk of leaving anything behind.
+  const batchInProgress = batchRows.length > 1 && batchRows.some((row) => row.state !== 'done' && row.state !== 'failed');
 
   return (
     <div className="upload-grid">
@@ -232,8 +336,8 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
           </button>
           {files.length > 0 && (
             <div data-testid="selected-files-list" style={{ marginTop: 18, textAlign: 'left' }}>
-              {files.map((f, i) => (
-                <div className="file-row" key={`${f.name}-${i}`}>
+              {files.map(({ id, file }) => (
+                <div className="file-row" key={id}>
                   <div className="file-icon">
                     <svg className="icon">
                       <use href="#i-file" />
@@ -241,8 +345,8 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
                   </div>
                   <div className="file-row-main">
                     <div className="file-row-top">
-                      <span className="fname">{f.name}</span>
-                      <span className="fsize">{(f.size / (1024 * 1024)).toFixed(1)} MB</span>
+                      <span className="fname">{file.name}</span>
+                      <span className="fsize">{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
                     </div>
                   </div>
                 </div>
@@ -263,6 +367,30 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
             </button>
           </div>
         </form>
+
+        {/* ENH-001 Task 2.3 — per-file batch progress, driven live by the sequential
+            loop above. Distinct from the historical "Uploaded statements" table below:
+            a queued/registering row has no document_id yet, so it can't be represented
+            there at all. */}
+        {batchRows.length > 0 && (
+          <div className="panel" style={{ marginTop: 20 }} data-testid="batch-progress-list">
+            <div className="panel-head">
+              <h2>Batch progress</h2>
+            </div>
+            {batchRows.map((row) => (
+              <div className="file-row" key={row.id} data-testid={`batch-row-${row.id}`}>
+                <div className="file-row-main">
+                  <div className="file-row-top">
+                    <span className="fname">{row.fileName}</span>
+                    <span className={`badge status-badge ${row.state}`} data-testid={`batch-row-state-${row.id}`}>
+                      {row.state}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -326,10 +454,11 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
                           DID succeed and lines exist) — open_exception_count > 0
                           disambiguates it, same field Home's own display mapping uses
                           for the identical distinction. */}
-                      {(doc.status_badge.badge === 'Extracted' ||
-                        doc.status_badge.badge === 'Reconciling' ||
-                        doc.status_badge.badge === 'Reconciled' ||
-                        (doc.status_badge.badge === 'Failed' && doc.open_exception_count > 0)) && (
+                      {!batchInProgress &&
+                        (doc.status_badge.badge === 'Extracted' ||
+                          doc.status_badge.badge === 'Reconciling' ||
+                          doc.status_badge.badge === 'Reconciled' ||
+                          (doc.status_badge.badge === 'Failed' && doc.open_exception_count > 0)) && (
                         <Link
                           href={`/documents/${doc.document_id}`}
                           data-testid={`view-extracted-lines-${doc.document_id}`}

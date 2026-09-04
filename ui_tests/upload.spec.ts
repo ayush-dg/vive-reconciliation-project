@@ -478,4 +478,198 @@ test.describe('Upload', () => {
     const dupeDocs = body.documents.filter((d: { original_filename: string | null }) => d.original_filename === dupeFilename);
     expect(dupeDocs.length, 'same content hash registers exactly once, not twice (G4)').toBe(1);
   });
+
+  // ENH-001 Task 2.3: per-file progress state UI.
+  test('mid-batch, a mix of states is observable — not all rows jump to a final state at once', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_MixedState_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 3 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-MIX-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // Real sequential processing of 3 files takes measurable time — catching this
+    // snapshot requires polling shortly after submit, before the whole batch (which
+    // completes in several seconds) has had a chance to finish.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states, 'not all 3 rows are already terminal').not.toEqual(['done', 'done', 'done']);
+      expect(states.some((s) => s === 'queued' || s === 'registering' || s === 'extracting'), 'at least one row is still in progress').toBe(true);
+    }).toPass({ timeout: 5_000 });
+
+    // Eventually the whole batch completes.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done')).toBe(true);
+    }).toPass({ timeout: 30_000 });
+  });
+
+  test('a failed (skipped registration) row is visually and textually distinct from a done row', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_FailedRowState_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = [
+      { name: `${vendorBase}-1.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(`${vendorBase}_1`, 'INV-ROWFAIL-1', '10.00')) },
+      { name: `${vendorBase}-bad.exe`, mimeType: '', buffer: Buffer.from('not a PDF') },
+    ];
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.sort()).toEqual(['done', 'failed']);
+    }).toPass({ timeout: 15_000 });
+  });
+
+  test('a single-file upload still shows the full state progression through to done', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Batch_SingleProgression_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', {
+      name: `${vendor}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(vendor, 'INV-SINGLEPROG', '10.00')),
+    });
+    await page.getByTestId('upload-submit').click();
+
+    await expect(page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]')).toHaveText('done', {
+      timeout: 15_000,
+    });
+  });
+
+  // ENH-001 Task 2.3, Design Gate Finding 3.
+  test('click-through is absent on a done row while any other row in the same batch is still non-terminal', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ClickGate_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 3 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-GATE-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // Catch the moment file 0 is done but the batch overall is not — its row in the
+    // main uploaded-documents table must not show a click-through link yet.
+    await expect(async () => {
+      const res = await page.request.get('/api/documents');
+      const body = await res.json();
+      const doc0 = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-0.pdf`);
+      expect(doc0, 'file 0 has registered').toBeTruthy();
+      expect(doc0.status_badge.label, 'file 0 has finished extracting').toBe('Extracted');
+
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done'), 'the batch as a whole is not yet fully terminal').toBe(false);
+
+      await expect(page.getByTestId(`view-extracted-lines-${doc0.document_id}`)).toHaveCount(0);
+    }).toPass({ timeout: 10_000 });
+  });
+
+  test('click-through becomes visible on all done rows once the whole batch reaches a terminal state', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ClickReady_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 2 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-READY-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done')).toBe(true);
+    }).toPass({ timeout: 30_000 });
+
+    // Checked on the SAME live page, not after a reload — navigating away would
+    // reset batchRows to empty regardless of whether the batch actually finished,
+    // which would make this assertion pass trivially without proving anything.
+    const res = await page.request.get('/api/documents');
+    const body = await res.json();
+    for (let i = 0; i < 2; i++) {
+      const doc = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-${i}.pdf`);
+      await expect(page.getByTestId(`view-extracted-lines-${doc.document_id}`)).toBeVisible();
+    }
+  });
+
+  // ENH-001 Task 2.3, Design Gate Finding 3 — challenge agent Finding 3: the gate is
+  // a single table-wide boolean (batchInProgress), not scoped to only the current
+  // batch's own rows — an already-completed, wholly UNRELATED document's
+  // click-through must also disappear while a new batch runs, and reappear once it
+  // finishes. Confirms the suppression isn't accidentally per-row.
+  test('an unrelated, already-completed document also loses its click-through while a new batch runs', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+
+    // An older, fully-extracted, unrelated document — uploaded and extracted BEFORE
+    // the new batch even starts.
+    const oldVendor = `Batch_Unrelated_Old_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const oldRes = await page.request.post('/api/documents', {
+      multipart: {
+        file: { name: `${oldVendor}.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(oldVendor, 'INV-OLD', '10.00')) },
+        legalEntityId: 'vive-holdings',
+      },
+    });
+    const oldDocumentId = (await oldRes.json()).document.document_id as string;
+    await page.request.post(`/api/documents/${oldDocumentId}/extract`);
+
+    await page.goto('/upload');
+    await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toBeVisible();
+
+    const vendorBase = `Batch_Unrelated_New_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 2 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-UNRELATED-${i}`, '10.00')),
+    }));
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // While the new (unrelated) batch is non-terminal, the OLD document's
+    // click-through must also be hidden — not just the new batch's own rows.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done'), 'the new batch is not yet fully terminal').toBe(false);
+      await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toHaveCount(0);
+    }).toPass({ timeout: 10_000 });
+
+    // Once the new batch finishes, the old document's click-through reappears.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done')).toBe(true);
+    }).toPass({ timeout: 30_000 });
+    await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toBeVisible();
+  });
 });
