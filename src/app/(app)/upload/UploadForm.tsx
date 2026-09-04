@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
+import { toastStore } from '@/lib/toastStore';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities';
 import { runBatchUploadSequenced } from '@/lib/batchUploadSequencing';
 import type { BatchRegisterResult } from '@/lib/batchUploadSequencing';
@@ -72,6 +73,29 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
   const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { showSuccess, showError } = useToast();
+  // ENH-001 Task 2.4 — a single running "X/N uploaded" toast for a real (>1 file)
+  // batch, replacing N individual per-file success toasts. A ref, not state: it only
+  // ever drives imperative toastStore calls, never a render, and N must be the batch's
+  // actual starting size — read once here, not re-derived later once `files` is
+  // cleared to [] in handleSubmit's finally block. null means "not a tracked batch"
+  // (N=1 stays on the existing per-file toast — Task 2.2 already treats a lone file as
+  // fire-and-forget, not a batch in this sense).
+  const batchToastRef = useRef<{ toastId: string | null; successCount: number; total: number } | null>(null);
+
+  function bumpBatchToast() {
+    const state = batchToastRef.current;
+    if (!state) return;
+    state.successCount += 1;
+    if (state.toastId) toastStore.dismiss(state.toastId);
+    // Challenge agent Finding 1: the default 5s auto-dismiss is shorter than a real
+    // file's full register+extract cycle can take (live Claude, not this suite's
+    // mock) — an un-suppressed running counter would flicker off mid-batch and only
+    // reappear on the next success, defeating the point of one persistent running
+    // toast. Suppressed here (autoDismissMs: 0); handleSubmit's finally block
+    // promotes the final count to a normal auto-dismissing toast once the batch
+    // actually settles.
+    state.toastId = toastStore.add('success', `${state.successCount}/${state.total} uploaded`, 0);
+  }
 
   async function refreshDocuments() {
     const res = await fetch('/api/documents');
@@ -171,9 +195,13 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       }
 
       if (data.duplicate && data.legalEntityMismatch) {
+        // A mismatch is still an error worth its own toast even inside a tracked
+        // batch — Task 2.4's counter only ever counts and displays successes.
         showError(
           'This exact statement was already uploaded under a different legal entity — the entity you selected was not applied.'
         );
+      } else if (batchToastRef.current) {
+        bumpBatchToast();
       } else {
         showSuccess(
           data.duplicate
@@ -260,6 +288,9 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
     }
 
     setSubmitting(true);
+    // ENH-001 Task 2.4 — N fixed at the batch's actual starting size; null (not a
+    // tracked batch) for a lone file, so its existing per-file toast is unaffected.
+    batchToastRef.current = files.length > 1 ? { toastId: null, successCount: 0, total: files.length } : null;
     // ENH-001 Task 2.3 — seed every row as 'queued' before the batch starts, so a
     // file later in the queue visibly shows 'queued' while an earlier one is still
     // 'extracting', not all rows jumping to a final state at once.
@@ -285,6 +316,17 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       // accepted tradeoff of real sequencing, distinct from the batch-of-1 case.
       await runBatchUploadSequenced(files, registerFile, extractAndTrack);
     } finally {
+      // Challenge agent Finding 1 (cont'd): promote the batch's running-counter toast
+      // (auto-dismiss suppressed while in progress, see bumpBatchToast) to a normal,
+      // auto-dismissing one now that the batch has actually finished. An all-failure
+      // batch never set a toastId at all — per the CC prompt, no toast shows at all
+      // for that case — so there's nothing to promote.
+      if (batchToastRef.current?.toastId) {
+        const { toastId, successCount, total } = batchToastRef.current;
+        toastStore.dismiss(toastId);
+        toastStore.add('success', `${successCount}/${total} uploaded`);
+      }
+      batchToastRef.current = null;
       setSubmitting(false);
       setFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = '';

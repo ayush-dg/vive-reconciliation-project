@@ -460,10 +460,10 @@ test.describe('Upload', () => {
     await page.setInputFiles('#statement-file', batch);
     await page.getByTestId('upload-submit').click();
 
-    // 3 sequential files — the first "success" toast only confirms file 1 has
-    // started, not that the whole batch (all 3 files' register+extract cycles) has
-    // finished. Poll for the 3rd file specifically rather than assuming one visible
-    // toast means the batch is complete.
+    // 3 sequential files — Task 2.4's running counter toast only reflects how many
+    // registrations have succeeded so far, not that the whole batch (all 3 files'
+    // register+extract cycles) has finished. Poll for the 3rd file specifically
+    // rather than assuming any visible toast means the batch is complete.
     await expect(async () => {
       const res = await page.request.get('/api/documents');
       const body = await res.json();
@@ -671,5 +671,131 @@ test.describe('Upload', () => {
       expect(states.every((s) => s === 'done')).toBe(true);
     }).toPass({ timeout: 30_000 });
     await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toBeVisible();
+  });
+
+  // ENH-001 Task 2.4: running success-only toast counter.
+  test('a multi-file batch shows a single running success counter toast, not one toast per file', async ({
+    page,
+    context,
+  }) => {
+    // 5 real sequential register+extract cycles can exceed Playwright's own 30s
+    // default per-test timeout (a pre-existing gap in this file — every other
+    // multi-file test's inner toPass() timeout is silently capped by that same
+    // default; this test's own declared 30_000/60_000 need the room to mean anything).
+    test.setTimeout(120_000);
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ToastCounter_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 5 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-TOASTCOUNT-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // Catch a non-final count — proves the toast updates progressively (dismiss then
+    // re-add) rather than only ever appearing once at the very end. Never more than
+    // one success toast on screen at a time, at any sampled instant. Matched with no
+    // end anchor: the toast's own textContent also includes its dismiss button's "×".
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count(), 'exactly one running toast, never stacked').toBe(1);
+      const text = await toasts.first().textContent();
+      expect(text).toMatch(/^[1-4]\/5 uploaded/);
+    }).toPass({ timeout: 30_000 });
+
+    // Batch completes — still exactly one toast, now showing the final count.
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count()).toBe(1);
+      expect(await toasts.first().textContent()).toMatch(/^5\/5 uploaded/);
+    }).toPass({ timeout: 60_000 });
+  });
+
+  test('registration failures do not advance or appear in the batch toast counter', async ({ page, context }) => {
+    // 7 real sequential register+extract cycles — same 30s-default-timeout concern
+    // as the 5-file test above.
+    test.setTimeout(120_000);
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ToastFail_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    // Bad files first (fail registration near-instantly) so the counter reaches its
+    // final value ("7/10") on the very last file in the batch, rather than needing to
+    // be caught mid-batch several files earlier.
+    const badFiles = Array.from({ length: 3 }, (_, i) => ({
+      name: `${vendorBase}-bad-${i}.exe`,
+      mimeType: '',
+      buffer: Buffer.from(`definitely not a PDF ${i}`),
+    }));
+    const goodFiles = Array.from({ length: 7 }, (_, i) => ({
+      name: `${vendorBase}-good-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_good_${i}`, `INV-TOASTFAIL-${i}`, '10.00')),
+    }));
+    const batch = [...badFiles, ...goodFiles];
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // 7 real sequential extractions — generous timeout matching this suite's existing
+    // tolerance for live multi-file batches (e.g. the 5-file test above allows 9s/file).
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count()).toBe(1);
+      expect(await toasts.first().textContent(), 'not 10/10 and not 7/7 — N stays the full batch size').toMatch(
+        /^7\/10 uploaded/
+      );
+    }).toPass({ timeout: 90_000 });
+  });
+
+  // ENH-001 Task 2.4, challenge agent Finding 1: an unsuppressed running toast would
+  // hit its own default 5s auto-dismiss mid-batch (a real per-file cycle, live
+  // Claude, easily exceeds 5s) and flicker off — defeating the point of a single
+  // PERSISTENT running counter. Artificially delays one file's extraction well past
+  // 5s to prove the counter toast survives, rather than vanishing and only
+  // reappearing on the next success.
+  test('the running counter toast survives past its own 5s auto-dismiss while a file is still mid-batch', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ToastPersist_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 2 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-PERSIST-${i}`, '10.00')),
+    }));
+
+    let delayed = false;
+    await page.route('**/api/documents/*/extract', async (route) => {
+      if (!delayed) {
+        delayed = true;
+        await new Promise((resolve) => setTimeout(resolve, 6000));
+      }
+      await route.continue();
+    });
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // File 1 registers fast (registration itself isn't delayed) — counter reaches
+    // 1/2 well before its own extraction (delayed 6s) resolves.
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count()).toBe(1);
+      expect(await toasts.first().textContent()).toMatch(/^1\/2 uploaded/);
+    }).toPass({ timeout: 10_000 });
+
+    // Past the toast's own would-be 5s auto-dismiss, file 1's delayed extraction is
+    // still in flight (file 2 hasn't even started registering yet, sequential
+    // batching) — the SAME "1/2" toast must still be showing, not gone.
+    await page.waitForTimeout(5500);
+    await expect(page.getByTestId('toast-success')).toHaveCount(1);
+    await expect(page.getByTestId('toast-success').first()).toContainText('1/2 uploaded');
+
+    await page.unroute('**/api/documents/*/extract');
   });
 });

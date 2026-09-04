@@ -367,3 +367,139 @@ derived value, click-through condition gated by it.
 both within declared blast radius.
 **Scope confirmed:** YES — within `docs/Claude.md` v1.5 Section 3 (`/src/**`, `/ui_tests/**`).
 **Invariants touched:** None — confirmed by challenge agent and code review.
+
+---
+
+## Task 2.4 — Running success-only toast counter
+
+### Sequencing Deviation (Manual mode)
+Implementation was built and full verification (typecheck, both new Playwright tests,
+`toastStore.ts`/`ToastProvider.tsx` zero-diff check, full regression) was run BEFORE the
+engineer's prediction statement was obtained — a repeat of the prediction-before-verification
+sequencing error corrected earlier this sprint (see Session Log Decision Log). Caught and
+disclosed by the assistant before proceeding to commit. Engineer elected to give the
+prediction retroactively rather than void the run; both the prediction and the actual
+(already-obtained) result are recorded below side by side, same as a normal Manual-mode
+entry. Logged as a Deviation, not silently absorbed.
+
+### Design Note
+Counter tracks **registration** success, not extraction outcome — Task 2.3's per-row
+`done`/`failed` state already covers extraction; the toast literally says "uploaded", and
+the spec's own failure example (registration failures reduce the count) never mentions
+extraction failures. Implemented as a `useRef` (`batchToastRef`, holding
+`{ toastId, successCount, total }`) rather than `useState`, since it only ever drives
+imperative `toastStore.add()`/`dismiss()` calls, never a render. Only engages for a real
+multi-file batch (`files.length > 1`) — a lone file keeps its existing per-file toast
+unchanged, consistent with Task 2.2 already treating a single file as fire-and-forget, not
+a batch. A plain duplicate counts as a counter-incrementing success; a
+duplicate-with-legal-entity-mismatch does not (still gets its own `showError` toast,
+unchanged from before this task).
+
+### Test Cases Applied
+Source: ENH-001_EXECUTION_PLAN.md Session 2, plus one added post-challenge (Finding 1).
+
+| Case | Scenario | Expected | Result |
+|------|----------|----------|--------|
+| TC-1 | 5-file batch, all succeed | Toast progresses 1/5→…→5/5, exactly one toast on screen at any sampled instant | PASS |
+| TC-2 | 10-file batch, 3 registration failures (bad files first) | Counter lands on 7/10 — not 10/10, not 7/7 | PASS |
+| TC-3 (added post-challenge, Finding 1) | One file's extraction artificially delayed 6s (past the default 5s auto-dismiss) | Running counter toast still visible unchanged at 5.5s, not vanished mid-batch | PASS |
+| Regression | `toastStore.ts` / `ToastProvider.tsx` diff | Zero lines changed | Confirmed via `git status --short` — empty |
+
+### Prediction Statement (given retroactively — see Sequencing Deviation above)
+Engineer's prediction, in full: **all 45 pass** (2 new Task 2.4 tests + 23 pre-existing
+`upload.spec.ts` + 20 `home.spec.ts`/`document-detail.spec.ts`), with reasoning:
+- TC-1 passes because `runBatchUploadSequenced` is strictly sequential (file 2 doesn't
+  start registering until file 1's full cycle finishes) — `bumpBatchToast()` calls can
+  structurally never overlap, so "never two stacked" isn't a timing accident, it's
+  guaranteed by the sequencing itself.
+- TC-2 passes because a registration failure returns and marks the row `'failed'` before
+  ever reaching the `bumpBatchToast()` call — the counter is physically unreachable from
+  that path, so the 3 bad files can't touch `successCount` and the 7 good ones land
+  exactly on 7/10 (`total` fixed once at batch start, never recomputed).
+- Nothing else breaks because single-file tests never populate `batchToastRef`; the other
+  batch tests (progress rows, click-through gating, duplicates) assert nothing about
+  toast content; and `toastStore.ts`/`ToastProvider.tsx` have zero new code, so nothing
+  downstream (Home, Document Detail) is touched.
+- Named, but dismissed as irrelevant here: each toast's own 5s auto-dismiss could in
+  theory cause a flash of zero toasts if a single file's cycle ever exceeded it — judged
+  not to apply since this suite runs against the local mock extractor (near-instant), not
+  live Claude.
+
+**Actual vs. predicted — a real, material discrepancy:** the "irrelevant" auto-dismiss
+risk the engineer explicitly named and set aside was in fact the exact defect the
+challenge agent's Finding 1 caught (see below) — not because the local mock is slow (it
+isn't), but because it applies to **production**, where extraction is live Claude and
+routinely exceeds 5s per file. Unfixed, TC-1/TC-2 would still have passed exactly as
+predicted (Playwright's polling only needs to catch *some* passing instant, so a toast
+flickering off and on between polls is invisible to those two tests) while shipping a
+real, user-visible defect. TC-3 was added specifically because the first verification
+pass (pre-fix) could not have caught this with the original two tests alone. All 45
+originally-predicted tests do pass — but "all pass" was not sufficient evidence that the
+prediction's own named risk was actually absent from the shipped behavior.
+
+### Challenge Agent Output
+Same mechanism note as prior tasks (fresh context-free subagent).
+
+**Verdict:** FINDINGS (4 items) — 1 FIX, 1 TEST (same fix), 2 ACCEPT (documented, not fixed).
+
+**Checked and found sound (from the agent's own report, not promoted to findings):**
+ref staleness/races (`submitting` genuinely blocks the button for a multi-file batch's
+entire duration, so no second tracked batch can ever race `batchToastRef`); single-file
+fire-and-forget batches never touch the ref; `useRef` identity survives re-renders safely;
+`toastStore` is an app-wide singleton so it keeps working even if `UploadForm` unmounts
+mid-batch; N=0 is unreachable (submit is blocked earlier); `add()`/`dismiss()` semantics
+are safe (dismiss on an absent id no-ops, add always returns a real id).
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 [HIGH] (default 5s auto-dismiss is shorter than a real per-file cycle can take — an un-suppressed running counter would flicker off mid-batch and reappear on the next success, defeating the point of a single persistent toast; invisible to TC-1/TC-2's own polling) | FIX | `bumpBatchToast()` now passes `autoDismissMs: 0` (suppressed) for every intermediate update; `handleSubmit`'s `finally` block promotes the last counter toast to a normal auto-dismissing one once the batch has actually settled | TC-3 added specifically to prove this — PASS |
+| 2 [MEDIUM] (a duplicate-with-legal-entity-mismatch: toast treats it as a failure, but Task 2.3's `updateBatchRow` call on that same branch still marks the row `'done'` — a real toast/row inconsistency, now more visible with a running counter that visibly stalls short of N) | ACCEPT | Pre-existing since Task 2.2/2.3 — this task doesn't introduce the row-state quirk, it makes an already-existing inconsistency more visible. Fixing it means changing Task 2.3's `BatchRowState` semantics (e.g. a new `'mismatch'` state), a genuinely separate scope decision. Logged as a new Out of Scope Observation (see Session Log) rather than folded into this task | N/A — accepted, not fixed |
+| 3 [LOW-MEDIUM] (an all-registration-failure batch shows zero aggregate toast — no "0/N" summary, only N individual per-file error toasts) | ACCEPT | Matches the CC prompt's literal wording ("on batch start, do not show a toast yet" / "do NOT touch the toast on a failed file") — intentional per spec, not a defect | N/A — accepted, not fixed; untested (no declared test case covers a 100%-failure batch) |
+| 4 [LOW] (flicker-free `dismiss()` then `add()` swap implicitly relies on React 18's automatic batching of the two resulting `setToasts` calls — undocumented coupling, would silently regress if `ToastProvider` or the store's `notify()` timing ever changed) | ACCEPT (documented) | Noted here for future reference; no code change — `toastStore.ts` is explicitly out of scope for this task, and TC-1/TC-3 already indirectly exercise the swap under real sequential load without a flash of zero toasts | N/A — accepted, no code change |
+
+### Code Review
+No invariant enforcement point touched — confirmed by challenge agent and code review.
+Confirmed via `git status --short src/lib/toastStore.ts src/components/ToastProvider.tsx`
+(empty output — zero-diff, per the task's own explicit constraint).
+
+### Scope Decisions
+Finding 1's fix stays entirely within `UploadForm.tsx` (already in scope). Findings 2-4
+are documented, accepted limitations — Finding 2 specifically escalated as a new Out of
+Scope Observation given it's a genuine toast/row-state inconsistency, not merely a
+theoretical edge case.
+
+### BCE Impact
+M-070 (`UploadForm.tsx`) — client-side toast-sequencing logic only, calling existing
+`toastStore.add()`/`dismiss()` (M-009) with no new primitive. No interface/contract
+change to any backend module, no new touch point.
+
+| Artifact | Field | Change |
+|---|---|---|
+| MODULE_CONTRACTS.md | M-070 description | No change — running counter is presentation-layer only, built entirely on M-009's existing primitives |
+
+### Verification Verdict
+[x] All planned cases passed (26/26 in `upload.spec.ts`, 20/20 regression)
+[x] Challenge agent run — verdict recorded — FINDINGS (4): 1 FIX (+1 TEST for the same
+    fix), 2 ACCEPT
+[x] All FINDINGS dispositioned
+[x] Pre-commit declaration recorded — see below
+[x] Code review complete (no invariant touched, confirmed; zero-diff on M-009/M-083 confirmed)
+[x] Scope decisions documented
+[x] Sequencing deviation disclosed and logged (see above and Session Log)
+
+**Status:** COMPLETE. Awaiting engineer commit confirmation per Manual mode.
+
+### Pre-Commit Declaration
+**Functions touched:** `UploadForm.tsx` — new `bumpBatchToast()` helper, `registerFile`'s
+success branch (routes through the counter when `batchToastRef.current` is set),
+`handleSubmit` (initializes `batchToastRef` at batch start, promotes the final toast in
+its `finally` block).
+**New state:** `batchToastRef` (a `useRef`, not `useState`).
+**Schemas touched:** None.
+**Config touched:** None.
+**Files touched:** `src/app/(app)/upload/UploadForm.tsx`, `ui_tests/upload.spec.ts` — both
+within declared blast radius. `toastStore.ts`/`ToastProvider.tsx` — confirmed untouched.
+**Scope confirmed:** YES — within `docs/Claude.md` v1.5 Section 3 (`/src/**`, `/ui_tests/**`).
+**Invariants touched:** None — confirmed by challenge agent and code review.
