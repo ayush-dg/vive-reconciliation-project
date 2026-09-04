@@ -6,21 +6,36 @@ import { useToast } from '@/components/ToastProvider';
 import InlineLoadError from '@/components/InlineLoadError';
 import type { DocumentDetailData } from '@/lib/documentDetail';
 
-// Labels per UI_SURFACE.md Document Detail: "pdfplumber_fallback labeled plainly as 'via
-// OCR fallback' for the AP user" — the other two providers get similarly plain labels
-// rather than showing the raw internal provider_used string.
+// Short, sentence-friendly labels for "extracted using X" (folded into the
+// reconciliation-progress line, not shown as its own panel — engineer-directed
+// 2026-09-04: the standalone per-provider stat panel was removed as unwanted
+// visual noise once this sentence already carries the same information).
+// pdfplumber_fallback's label deliberately drops "via" (unlike the old standalone
+// panel's "via OCR fallback") since the surrounding sentence already supplies it.
 const PROVIDER_LABELS: Record<string, string> = {
-  python_library_pdfplumber: 'Deterministic (pdfplumber)',
+  python_library_pdfplumber: 'pdfplumber',
   claude_sonnet: 'Claude Sonnet',
-  pdfplumber_fallback: 'via OCR fallback',
+  pdfplumber_fallback: 'OCR fallback',
   // extractionMethodSummary.ts's own "unknown" bucket (a catastrophic pre-provider-
   // selection failure, Task 3.1's Finding 3) — plainly labeled like the other three,
   // not left showing the raw internal bucket key.
-  unknown: 'Unknown (extraction failed before a provider was selected)',
+  unknown: 'an unknown method (extraction failed before a provider was selected)',
 };
 
 function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider;
+}
+
+// Joins 1+ providers into "Claude Sonnet" / "pdfplumber" / "Claude Sonnet and OCR
+// fallback" / "A, B and C". Empty when no attempt has been made yet — a genuinely
+// FAILED extraction still has a recorded provider (attempted, just unsuccessful) even
+// though it produced zero lines, so callers must check this independently of line
+// count, not assume "no lines" means "no provider to name" (they're different facts).
+function extractionMethodNames(providerEntries: [string, number][]): string {
+  if (providerEntries.length === 0) return '';
+  const labels = providerEntries.map(([provider]) => providerLabel(provider));
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
 
 export default function DocumentDetailView({ detail: initialDetail }: { detail: DocumentDetailData }) {
@@ -154,22 +169,6 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
           </div>
         </div>
 
-        <div className="panel" style={{ padding: 20, marginBottom: 20 }} data-testid="extraction-summary-strip">
-          <h2 style={{ marginBottom: 12 }}>Extraction summary</h2>
-          {providerEntries.length === 0 ? (
-            <p style={{ color: 'var(--text-faint)' }}>No extraction attempts yet.</p>
-          ) : (
-            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-              {providerEntries.map(([provider, count]) => (
-                <div key={provider} data-testid={`provider-count-${provider}`}>
-                  <div style={{ fontSize: 22, fontWeight: 700 }}>{count}</div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{providerLabel(provider)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         <div className="panel">
           <div className="panel-head">
             <div>
@@ -178,12 +177,21 @@ export default function DocumentDetailView({ detail: initialDetail }: { detail: 
                 {(() => {
                   const { totalLines, matchedLines, exceptionLines } = detail.reconciliation;
                   const processed = matchedLines + exceptionLines;
-                  if (totalLines === 0) return 'No lines extracted yet.';
-                  if (processed === 0) return 'Reconciliation not started yet.';
+                  const methodNames = extractionMethodNames(providerEntries);
+                  if (totalLines === 0) {
+                    // A genuinely FAILED extraction (e.g. validation failed, zero Silver
+                    // rows produced) still has a recorded provider — worth surfacing here,
+                    // not just silently "no lines" with no clue what was even attempted.
+                    return methodNames ? `No lines extracted yet — attempted using ${methodNames}.` : 'No lines extracted yet.';
+                  }
+                  if (processed === 0) {
+                    return methodNames ? `Reconciliation not started yet — extracted using ${methodNames}.` : 'Reconciliation not started yet.';
+                  }
                   // matchingPipeline.ts commits a document's matching results atomically
                   // (all lines at once) — processed is always either 0 or totalLines,
                   // never a partial figure from a still-in-progress run.
-                  return `Reconciliation complete — ${matchedLines} matched, ${exceptionLines} exception${exceptionLines === 1 ? '' : 's'}.`;
+                  const base = `Reconciliation complete — ${matchedLines} matched, ${exceptionLines} exception${exceptionLines === 1 ? '' : 's'}`;
+                  return methodNames ? `${base}, extracted using ${methodNames}.` : `${base}.`;
                 })()}
               </div>
             </div>

@@ -47,19 +47,22 @@ test.describe('Document Detail screen', () => {
     await expect(page.getByTestId(/^statement-line-/)).toBeVisible();
   });
 
-  test('extraction summary strip shows correct counts by provider (Claude-primary path)', async ({ page, context }) => {
+  // Engineer-directed 2026-09-04: the standalone per-provider stat panel was removed
+  // (unwanted visual noise) — the same provider information is now folded directly into
+  // the reconciliation-progress sentence instead (see 'extraction and reconciliation
+  // summary render together in one block' below for the combined-block assertion).
+  test('reconciliation-progress line names the extraction method used (Claude-primary path)', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `DocDetail_Summary_Vendor_${crypto.randomUUID().slice(0, 8)}`;
     const documentId = await uploadFixture(page, statementText(vendor, 'INV-DD-SUM', '25.00'));
     await page.request.post(`/api/documents/${documentId}/extract`);
 
     await page.goto(`/documents/${documentId}`);
-    await expect(page.getByTestId('provider-count-claude_sonnet')).toContainText('1');
-    await expect(page.getByTestId('provider-count-python_library_pdfplumber')).toHaveCount(0);
-    await expect(page.getByTestId('provider-count-pdfplumber_fallback')).toHaveCount(0);
+    await expect(page.getByTestId('reconciliation-progress')).toContainText('extracted using Claude Sonnet');
+    await expect(page.getByTestId('extraction-summary-strip')).toHaveCount(0);
   });
 
-  test('a document extracted via the known-vendor deterministic path shows 100% python_library_pdfplumber, no Claude/OCR-fallback counts', async ({
+  test('a document extracted via the known-vendor deterministic path names pdfplumber, not Claude/OCR-fallback', async ({
     page,
     context,
   }) => {
@@ -79,12 +82,13 @@ test.describe('Document Detail screen', () => {
     await page.request.post(`/api/documents/${documentId}/extract`);
 
     await page.goto(`/documents/${documentId}`);
-    await expect(page.getByTestId('provider-count-python_library_pdfplumber')).toContainText('1');
-    await expect(page.getByTestId('provider-count-claude_sonnet')).toHaveCount(0);
-    await expect(page.getByTestId('provider-count-pdfplumber_fallback')).toHaveCount(0);
+    const progress = page.getByTestId('reconciliation-progress');
+    await expect(progress).toContainText('extracted using pdfplumber');
+    await expect(progress).not.toContainText('Claude Sonnet');
+    await expect(progress).not.toContainText('OCR fallback');
   });
 
-  test('a document with some AI-failure fallback rows shows a non-zero OCR-fallback count', async ({ page, context }) => {
+  test('a document with some AI-failure fallback rows names OCR fallback in the reconciliation-progress line', async ({ page, context }) => {
     await signInViaCookie(context);
     const vendor = `DocDetail_Fallback_Vendor_${crypto.randomUUID().slice(0, 8)}`;
     const documentId = await uploadFixture(page, statementText(vendor, 'INV-DD-FB', '45.00'));
@@ -100,8 +104,10 @@ test.describe('Document Detail screen', () => {
     ).run(crypto.randomUUID(), documentId);
 
     await page.goto(`/documents/${documentId}`);
-    await expect(page.getByTestId('provider-count-pdfplumber_fallback')).toContainText('1');
-    await expect(page.getByTestId('provider-count-pdfplumber_fallback')).toContainText('via OCR fallback');
+    // No actual silver_statement_line rows exist for this synthetic attempt (only the
+    // extraction_attempt row was inserted directly) — "No lines extracted yet" branch,
+    // but the recorded provider must still be named, not silently dropped.
+    await expect(page.getByTestId('reconciliation-progress')).toContainText('attempted using OCR fallback');
   });
 
   test('Extract/Reconcile actions appear only when applicable to the document\'s current status', async ({ page, context }) => {
@@ -169,6 +175,9 @@ test.describe('Document Detail screen', () => {
     const progress = summaryBlock.getByTestId('reconciliation-progress');
     await expect(progress).toContainText('Reconciliation complete');
     await expect(progress).toContainText('exception');
+    // Engineer-directed 2026-09-04: the extraction-method info that used to live in its
+    // own standalone panel is now folded into this same sentence too — one block, not two.
+    await expect(progress).toContainText('extracted using Claude Sonnet');
   });
 
   // ENH-001 Task 1.2: Confidence and Provider are per-attempt values duplicated across
@@ -189,9 +198,9 @@ test.describe('Document Detail screen', () => {
     await expect(table.getByRole('columnheader', { name: 'Amount' })).toBeVisible();
     await expect(table.getByRole('columnheader', { name: 'Confidence' })).toHaveCount(0);
     await expect(table.getByRole('columnheader', { name: 'Provider' })).toHaveCount(0);
-    // The extraction-method summary block (provider breakdown) is unaffected by the
-    // per-line column removal.
-    await expect(page.getByTestId('provider-count-claude_sonnet')).toContainText('1');
+    // The extraction-method phrase (folded into reconciliation-progress) is unaffected by
+    // the per-line column removal.
+    await expect(page.getByTestId('reconciliation-progress')).toContainText('extracted using Claude Sonnet');
   });
 
   // ENH-001 Task 1.2, challenge agent Finding 1: the task spec's own regression case —

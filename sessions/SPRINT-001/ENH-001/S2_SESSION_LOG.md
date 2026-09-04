@@ -55,7 +55,7 @@ amendment:
 | 2.1     | Extraction crash-recovery fix (IC-CANDIDATE-01/R-005) | Completed | d8503ad |
 | 2.2     | Sequential batch upload loop + registration-failure skip + batch cap | Completed | 63d5ecf |
 | 2.3     | Per-file progress state UI | Completed | feb46eb |
-| 2.4     | Running success-only toast counter | Completed | (pending) |
+| 2.4     | Running success-only toast counter | Completed | 26d4b29 |
 
 ---
 
@@ -103,6 +103,7 @@ N/A — Manual mode.
 | 2.4 | A duplicate-registration outcome with a legal-entity mismatch (`data.duplicate && data.legalEntityMismatch`) shows its own error toast, but `registerFile`'s shared `updateBatchRow` call on that same branch still marks the row `'done'` (identical to a genuine success) — a pre-existing quirk from Task 2.2/2.3, now made more visible by Task 2.4's persistent running counter visibly stalling short of N while every "Batch progress" row reads `'done'`. A user watching both widgets could reasonably read the counter itself as buggy. | DESIGN GAP (UX inconsistency) | BACKLOG — likely needs a distinct `BatchRowState` value (e.g. `'mismatch'` or folding it into `'failed'`) rather than silently treating it as `'done'`; a real scope decision for `batchRowState`'s design, not a one-line fix, so not folded into Task 2.4 |
 | 2.4 | `upload.spec.ts` has no test ever calling `test.setTimeout()`, so every test — including the pre-existing 5-file real-batch test's declared `toPass({timeout: 45_000})` — is silently capped by Playwright's 30s default per-test timeout regardless of what's declared inside a `toPass()` call. Currently masked because real completion times have stayed comfortably under 30s in practice; a future slower environment or larger batch test would fail with a confusing "test timeout exceeded" pointing at the wrong number. | FRAGILITY (latent) | BACKLOG — audit every multi-second real-batch test in this file and add explicit `test.setTimeout()` matching (or exceeding) its own largest declared `toPass` timeout |
 | 2.4 | A full default-parallel (`fullyParallel: true`) run of `upload.spec.ts` intermittently fails 1-2 pre-existing, unrelated tests with `ECONNRESET`/stuck-navigation symptoms against the single shared dev-server instance — reproduced 3 times this session (Task 2.4 verification alone), a different pair of tests each time, and every failure reproduces as a clean pass in isolation. Likely the same underlying class of issue as the N+1 DB fragility above (shared local resources under concurrent load), though not confirmed to share a root cause. | FRAGILITY | BACKLOG — consider `workers: 1` for this spec file specifically, or investigate whether the dev server / SQLite connection handling can tolerate genuine concurrent request load; until then, treat isolated (`--workers=1` or `-g`) reruns of any full-suite failure as the authoritative signal before treating it as a real regression |
+| Session Integration Check | `ui_tests/loading-error-consistency.spec.ts`'s "Home, Exceptions, and Document Detail render the IDENTICAL client-side refetch error" test uses a FIXED, non-randomized upload fixture (`uploadFixture('%PDF-1.4 consistency-home')`, no per-run unique content) — root-caused via direct DB inspection: G4's own content-hash idempotency means every run resolves to the SAME document, so once that document reaches a terminal state from any past run (confirmed: extracted twice, both attempts failed, during this session's own earlier full-suite pass), every subsequent run hangs forever waiting for an "Extract" button that no longer renders for a non-`'registered'` document. Self-poisoning, and now permanently broken until that specific document is cleared or the test is fixed. **Confirmed unrelated to any of this session's 4 tasks** — the file was never touched, and the same self-poisoning bug pattern (fixed fixture content colliding with prior runs) was already fixed in 3 different places within THIS session's own new tests, but this occurrence is pre-existing, in a file outside Session 2's declared blast radius. | PRE-EXISTING BUG (test-fixture non-idempotency) | Not fixed here — out of scope for `docs/Claude.md` v1.5 Section 3's declared blast radius (`loading-error-consistency.spec.ts` is not part of ENH-001). BACKLOG — switch `uploadFixture()` to per-run-unique content, matching this file's own already-established convention elsewhere in the suite |
 
 None otherwise noticed during Task 2.1.
 
@@ -117,10 +118,45 @@ None otherwise noticed during Task 2.1.
 ---
 
 ## Session Completion
-**Session integration check:** [ ] PASSED — Task 2.1 of 4 complete
-**All tasks verified:** [ ] Yes — 2.1 only so far
+**Session integration check:** [x] PASSED — all 4 tasks completed, verified, challenge-agent
+findings dispositioned (FIX/TEST/ACCEPT throughout, none glossed over). Session-wide regression
+run: `upload.spec.ts` 26/26, `home.spec.ts`+`document-detail.spec.ts` 20/20 (all isolated —
+`--workers=1`/`-g` — the authoritative signal per the Deviations entries above), full
+`ui_tests/` 9-file suite otherwise clean; script-level regressions for every module touched
+across 2.1/2.2/2.4 (`test_extraction_crash_recovery.sh` — 20/20 assertions before hitting the
+already-documented stale-fixture FK collision from Task 2.1's own Deviations, not re-chased;
+`test_batch_upload_sequencing.sh` 12/12; `test_silver_normalization.sh` 13/13;
+`test:toast` 11/11; `test_bounded_retry.sh` — one known/dismissed DRIFT-001 failure, expected,
+not new) all green or matching an already-known, already-dismissed state. One additional,
+pre-existing, self-poisoning bug found and root-caused during this check in
+`loading-error-consistency.spec.ts` (fixed non-randomized fixture content, G4 idempotency
+causes it to hang on old terminal state) — confirmed unrelated to any of this session's 4
+tasks (file untouched, outside declared blast radius), logged as a new Deviation, not fixed
+here. Full default-parallel runs continue to show non-reproducing `ECONNRESET`/dev-server
+contention on a rotating set of unrelated tests, documented, not tied to this session's diffs.
+**All tasks verified:** [x] Yes — 2.1 (`d8503ad`), 2.2 (`63d5ecf`), 2.3 (`feb46eb`),
+2.4 (`26d4b29`)
 **Blocked tasks resolved:** [x] Yes — N/A, no BLOCKED tasks occurred
 **PR raised:** [ ] Yes — PR #: [branch] → feature/pbvi_execution — not yet raised
-**Status updated to:** In Progress
-**Engineer sign-off:** [pending — session not yet complete]
-SIGNED OFF: [name] — [date]
+**Status updated to:** Session integration check passed, engineer signed off — ready for PR
+
+SIGNED OFF: Vaishali 04-09-2026
+
+---
+
+## Post-Sign-Off Hotfixes (Out of ENH-001 Scope)
+
+Two small fixes made on this same branch during the engineer's manual browser QA of the
+signed-off Session 2 build, discovered against real vendor PDFs and a live Azure Claude
+key. Neither is part of ENH-001's task list (batch upload) or blast radius — recorded here,
+lightweight-patch mode (implement + verify + commit, no Challenge Agent), same convention
+as `sessions/S08_SESSION_LOG.md`/`S09_SESSION_LOG.md`'s own precedent for unscheduled fixes,
+rather than silently folding them into the Session 2 task table or omitting them.
+
+| # | Change | File(s) | Why | Verification |
+|---|--------|---------|-----|---------------|
+| H1 | `EXTRACTION_SYSTEM_PROMPT` now explicitly instructs Claude to exclude non-transactional summary rows ("Previous Balance", "Balance Forward", "Opening Balance", "Beginning Balance") from extracted lines | `src/lib/aiProvider.ts` | Root-caused live, against a real statement (Berlin City Auto Group / "BERLIN HEW 0726 (1) 2.pdf"): Claude included a balance-forward row (no invoice/RO number, amount -11128.26) as if it were a transaction line. That single row failed BOTH validation gates at once — structural (missing invoice_ref/ro_number) and arithmetic (the extracted-lines sum came out exactly $11,128.26 short of the statement's own total — the magnitude of that one row — because the vendor's stated total already reflects it, so counting it again double-counted it) | Typecheck clean; `EXTRACTION_SYSTEM_PROMPT`'s G3 byte-identity test (`test_prompt_injection_defense.mjs`) references the constant directly, unaffected by content changes. **Not independently confirmed against the live Claude path for Berlin specifically** — the engineer's actual retry after this fix resolved via the known-vendor DETERMINISTIC (pdfplumber) route instead of Claude (Berlin's vendor was apparently already/separately registered as a deterministic vendor), so this fix's real effect on Berlin's original failure mode remains unexercised by live data. Recorded honestly as a gap, not claimed as verified. |
+| H2 | Removed the standalone "Extraction summary" per-provider panel on Document Detail; the same information (which extraction method(s) were used) is now folded directly into the existing `reconciliation-progress` sentence across all three of its states (no lines yet / not reconciled yet / complete) | `src/app/(app)/documents/[id]/DocumentDetailView.tsx`, `ui_tests/document-detail.spec.ts` | Engineer-directed: the separate panel was unwanted visual noise once the same info could live in one sentence. Found and fixed a real gap of my own construction mid-change: my first pass gated the new phrase behind `totalLines > 0`, which would have silently dropped the provider info for a genuinely FAILED extraction (zero Silver lines, but a provider WAS attempted) — exactly the case that matters most diagnostically. Fixed before commit, not after. | 4 of 10 `document-detail.spec.ts` tests rewritten to match the new consolidated text (was asserting on the removed `provider-count-*` testids); full suite 10/10 pass, `home.spec.ts` 10/10 regression pass, typecheck clean. |
+
+**Not yet committed** — both changes and this log entry are staged for the engineer's
+review before a commit.
