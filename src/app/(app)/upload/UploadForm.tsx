@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities';
+import { runBatchUploadSequenced } from '@/lib/batchUploadSequencing';
+import type { BatchRegisterResult } from '@/lib/batchUploadSequencing';
 import type { ApiDocument } from '@/lib/documents';
 
 // Fixed locale + explicit options — bare toLocaleString() depends on the
@@ -41,9 +43,14 @@ function formatUploadTimestamp(isoLike: string): string {
 // than before, in fact, since there is no longer a code path that can omit it.
 const DEFAULT_LEGAL_ENTITY_ID = LEGAL_ENTITIES[0].id;
 
+// ENH-001 Task 2.2 — no defined maximum was set anywhere upstream (brief's own
+// Known Constraints flagged this as an open decision); 15 chosen as a reasonable v1
+// cap. A batch exceeding this is rejected outright, not silently truncated to 15.
+const MAX_BATCH_SIZE = 15;
+
 export default function UploadForm({ initialDocuments }: { initialDocuments: ApiDocument[] }) {
   const [documents, setDocuments] = useState(initialDocuments);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -97,21 +104,25 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
     }
   }
 
-  function pickFile(f: File | null) {
-    setFile(f);
+  // ENH-001 Task 2.2 — accepts the full selection (drag-drop FileList or the file
+  // input's FileList), rejecting the WHOLE batch if it exceeds MAX_BATCH_SIZE rather
+  // than silently truncating to the first 15.
+  function pickFiles(fileList: FileList | null) {
+    const selected = Array.from(fileList ?? []);
+    if (selected.length > MAX_BATCH_SIZE) {
+      setFiles([]);
+      setFileError(`Select up to ${MAX_BATCH_SIZE} files at a time — ${selected.length} were selected.`);
+      return;
+    }
+    setFiles(selected);
     setFileError(null);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-
-    if (!file) {
-      setFileError('Select a PDF statement.');
-      return;
-    }
-
-    setSubmitting(true);
-    let newDocumentId: string | null = null;
+  // ENH-001 Task 2.2 — registers one file: toasts, refreshes the list, reports the
+  // outcome to runBatchUploadSequenced's pure sequencing loop. Registration failure
+  // is reported here (toast) and reported as ok:false, not thrown — the batch loop
+  // continues to the next file regardless, it never aborts on one file's failure.
+  async function registerFile(file: File): Promise<BatchRegisterResult> {
     try {
       const body = new FormData();
       body.set('file', file);
@@ -125,8 +136,8 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       };
 
       if (!res.ok) {
-        showError(data.error ?? 'Upload failed.');
-        return;
+        showError(data.error ?? `Upload failed for ${file.name}.`);
+        return { ok: false, duplicate: false, documentId: null };
       }
 
       if (data.duplicate && data.legalEntityMismatch) {
@@ -140,8 +151,6 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
             : 'Statement uploaded successfully — extraction starting…'
         );
       }
-      setFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
 
       // Refresh immediately so the new row appears right away — extraction
       // (below) can take real, multi-second time with live Claude, and
@@ -150,24 +159,39 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
       await refreshDocuments();
 
       // A duplicate hit (existing document, possibly already extracted/extracting) is
-      // left alone — not re-triggered; the refresh above already covers it.
-      if (!data.duplicate && data.document) {
-        newDocumentId = data.document.document_id;
-      }
+      // left alone — not re-triggered; the refresh above already covers it. This is
+      // also what correctly handles Design Gate Finding 2 (the same file selected
+      // twice within one batch) — the second occurrence hits this exact duplicate
+      // path via registerDocument()'s existing race-tolerant catch, with no
+      // batch-specific handling needed.
+      return { ok: true, duplicate: !!data.duplicate, documentId: data.document?.document_id ?? null };
     } catch {
-      showError('Upload failed — check your connection and try again.');
-    } finally {
-      // Ends here, not after extraction — the Upload button (disabled={submitting})
-      // must not stay blocked for however long extraction takes, or a second PDF
-      // couldn't be uploaded until the first one finished extracting (real complaint,
-      // 2026-08-31 fix). Extraction still starts automatically, just as its own
-      // independent, non-blocking call below — extractingIds already tracks it
-      // per-document for that row's own "Extracting…" state.
-      setSubmitting(false);
+      showError(`Upload failed for ${file.name} — check your connection and try again.`);
+      return { ok: false, duplicate: false, documentId: null };
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (files.length === 0) {
+      setFileError('Select a PDF statement.');
+      return;
     }
 
-    if (newDocumentId) {
-      void handleExtract(newDocumentId, { silent: true });
+    setSubmitting(true);
+    try {
+      // ENH-001 Task 2.2 — the actual sequencing policy (single-file fire-and-forget
+      // vs. multi-file strictly sequential) lives in runBatchUploadSequenced, a pure
+      // function independent of React state so it's directly unit-testable
+      // (scripts/test_batch_upload_sequencing.sh) without a browser. submitting
+      // stays true for a multi-file batch's whole duration — the deliberate,
+      // accepted tradeoff of real sequencing, distinct from the batch-of-1 case.
+      await runBatchUploadSequenced(files, registerFile, (documentId) => handleExtract(documentId, { silent: true }));
+    } finally {
+      setSubmitting(false);
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -184,7 +208,7 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
           onDrop={(e) => {
             e.preventDefault();
             setDragActive(false);
-            pickFile(e.dataTransfer.files[0] ?? null);
+            pickFiles(e.dataTransfer.files);
           }}
         >
           <div className="dropzone-icon">
@@ -192,32 +216,37 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
               <use href="#i-folder" />
             </svg>
           </div>
-          <h3>Drop vendor PDF here</h3>
-          <p>PDF files only · up to 50 MB · text or scanned</p>
+          <h3>Drop vendor PDF(s) here</h3>
+          <p>PDF files only · up to 50 MB each · up to {MAX_BATCH_SIZE} at a time · text or scanned</p>
           <input
             ref={fileInputRef}
             type="file"
             accept="application/pdf"
+            multiple
             style={{ display: 'none' }}
             id="statement-file"
-            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => pickFiles(e.target.files)}
           />
           <button type="button" className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
             Browse files
           </button>
-          {file && (
-            <div className="file-row" style={{ marginTop: 18, textAlign: 'left' }}>
-              <div className="file-icon">
-                <svg className="icon">
-                  <use href="#i-file" />
-                </svg>
-              </div>
-              <div className="file-row-main">
-                <div className="file-row-top">
-                  <span className="fname">{file.name}</span>
-                  <span className="fsize">{(file.size / (1024 * 1024)).toFixed(1)} MB</span>
+          {files.length > 0 && (
+            <div data-testid="selected-files-list" style={{ marginTop: 18, textAlign: 'left' }}>
+              {files.map((f, i) => (
+                <div className="file-row" key={`${f.name}-${i}`}>
+                  <div className="file-icon">
+                    <svg className="icon">
+                      <use href="#i-file" />
+                    </svg>
+                  </div>
+                  <div className="file-row-main">
+                    <div className="file-row-top">
+                      <span className="fname">{f.name}</span>
+                      <span className="fsize">{(f.size / (1024 * 1024)).toFixed(1)} MB</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           )}
           {fileError && (

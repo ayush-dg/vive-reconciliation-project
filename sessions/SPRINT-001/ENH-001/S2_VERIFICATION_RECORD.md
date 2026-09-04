@@ -164,3 +164,113 @@ radius (Interpretation Confirmation, Session Log).
 **Scope confirmed:** YES — within `docs/Claude.md` v1.5 Section 3 (`/src/**`, `/scripts/**`).
 **Invariants touched:** G5 (enforcement extended, guard itself unchanged — confirmed by
 code review above). No new invariant.
+
+---
+
+## Task 2.2 — Sequential batch upload loop + registration-failure skip + batch cap
+
+### Design Note
+The CC prompt's literal design (register file N, await its extraction, then register
+file N+1 — for every batch, including size 1) conflicts with a pre-existing regression
+requirement: single-file uploads are relied on elsewhere (a pre-existing test,
+"a second PDF can be uploaded while the first one is still extracting") to be
+fire-and-forget on extraction. Resolved by making the sequencing policy explicitly
+size-dependent: a 1-file batch preserves the exact old behavior; a 2+-file batch awaits
+each file's full register+extract cycle before the next file's registration (new,
+tested). Extracted into `src/lib/batchUploadSequencing.ts`'s `runBatchUploadSequenced` —
+a pure, framework-agnostic function — specifically so this policy is directly
+unit-testable without a browser, matching this codebase's established convention (all
+other `test_*.sh`/`.mjs` scripts test `src/lib` modules directly, never React/Playwright
+internals).
+
+### Test Cases Applied
+Source: ENH-001_EXECUTION_PLAN.md Session 2
+
+| Case | Scenario | Expected | Result |
+|------|----------|----------|--------|
+| TC-1 | 3-file batch, instrumented delays | Never more than 1 extraction in flight; each fully completes before the next starts | PASS |
+| TC-2 | Single-file batch | Function returns without awaiting the file's extraction (byte-for-byte regression) | PASS |
+| TC-3 | Registration failure mid-batch (3 files, middle fails) | Batch does not abort; extraction never called for the failed file; both others still process | PASS |
+| TC-4 | Same file registered twice (fakes) | Extraction only triggered once, not for the duplicate | PASS |
+| Playwright: 15-file cap | Exactly 15 files selected | Accepted, no validation error | PASS |
+| Playwright: 16-file cap | 16 files selected | Rejected outright with a clear message — no partial 15-of-16 kept | PASS |
+| Playwright: 5-file batch | 5 real extractable PDFs | All 5 reach `'Extracted'` badge state | PASS |
+| Playwright: mid-batch registration failure | 3 files, middle one genuinely invalid (no MIME, non-.pdf) | Files 1 and 3 both still registered; bad file never registered | PASS |
+| Playwright: same file twice (real API, Design Gate Finding 2) | Real duplicate bytes selected twice in one 3-file batch | Registers exactly once (G4); batch continues to the 3rd file | PASS |
+
+### Prediction Statement
+N/A — per the engineer's direction, the prediction-then-verify exercise was skipped for
+this task since verification had already been run and stabilized while authoring the new
+test infrastructure itself (see chat record); asking for a prediction against an already-
+known-passing state would have been a formality, not a genuine cognitive check.
+
+### Challenge Agent Output
+Same mechanism note as Task 2.1 (fresh context-free subagent).
+
+**Verdict:** FINDINGS (4 items) — all four dispositioned FIX/TEST, all now passing.
+
+**Invariant coverage gaps (from challenge agent):** G4 (sequential-duplicate-in-batch)
+was only verified against instrumented fakes, never the real `registerDocument()` via a
+real Playwright test — closed by the new "same file twice (real API)" test above.
+CQ-001 nesting-depth compliance for `runBatchUploadSequenced` was asserted but never
+checked — reviewed by hand as part of the Finding 1/2 fix (see Code Review below); the
+fix's early-continue restructuring is flatter than the original, max 1 level of
+conditional nesting inside the `for` loop, well within the 2-level cap.
+
+**Finding dispositions:**
+
+| Finding # | Disposition | Rationale / Test case added | Test result |
+|-----------|-------------|------------------------------|-------------|
+| 1 (unguarded extraction failure could abort remaining batch) | FIX | `handleExtract` (the real implementation) never actually rejects today, confirmed by code review — but `runBatchUploadSequenced`'s own contract shouldn't silently depend on that. Added an internal try/catch around the extraction call, symmetric to registration-failure handling. Added TC-5. | PASS |
+| 2 (anomalous ok:true/duplicate:false/documentId:null silently mishandled) | FIX | Added an explicit `continue` for this case — the real API never produces it, but the type allows it, and silently falling through was worse than an explicit no-op skip. Added TC-6. | PASS |
+| 3 (G4 sequential-duplicate only tested against fakes) | TEST | Added a real Playwright test uploading identical bytes twice within one 3-file batch through the actual API, confirming exactly 1 registration and that the batch continues to the 3rd file | PASS |
+| 4 (CQ-001 nesting compliance unstated) | ACCEPT (now improved) | Reviewed by hand: the Finding 1/2 fix's early-continue restructuring reduced nesting further (max 1 level inside the loop) — compliant, and now more clearly so than before. No test needed; this is a static structural property. | N/A (code review) |
+
+### Code Review
+**G4 (required — task's own note: "touched implicitly"):** Confirmed
+`registerDocument()` itself is untouched by this task — the new sequencing loop calls
+the same existing registration endpoint per file, in order, with no batching or
+short-circuiting of its own duplicate-detection logic. The real-API duplicate test
+(Finding 3's fix) confirms this holds end-to-end, not just by inspection.
+**CQ-001:** See Finding 4 disposition above.
+
+### Scope Decisions
+Extracted `src/lib/batchUploadSequencing.ts` as a new, small module beyond the CC
+prompt's literal text (which described the policy inline in `UploadForm.tsx`) —
+engineer-directed choice to make the "no two extractions in flight" acceptance criterion
+genuinely unit-testable per this codebase's established test conventions, rather than
+only inferrable from Playwright network timing.
+
+### BCE Impact
+M-070 (`UploadForm.tsx`) — multi-file selection, new sequencing logic, batch cap. New
+module `src/lib/batchUploadSequencing.ts` — not yet M-numbered (post-Phase-8 addition,
+to be recorded in `ENH-001_BCE_IMPACT.md` at Phase 8 close-out, not `discovery/`
+mid-sprint). M-011 (`documents.ts`) — not modified, confirmed by code review (G4 above).
+
+| Artifact | Field | Change |
+|---|---|---|
+| MODULE_CONTRACTS.md | New module, no M-NNN ID yet | `src/lib/batchUploadSequencing.ts` will need an ID assignment at Phase 8 close-out (`ENH-001_BCE_IMPACT.md`), not `discovery/` mid-sprint |
+
+### Verification Verdict
+[x] All planned cases passed (12/12 pure-function assertions; 17/17 Playwright tests in
+    `upload.spec.ts`; 20/20 in `home.spec.ts`+`document-detail.spec.ts` regression)
+[x] Challenge agent run — verdict recorded — FINDINGS (4), all dispositioned
+[x] All FINDINGS dispositioned — FIX (2), TEST (1), ACCEPT-with-improvement (1)
+[x] Pre-commit declaration recorded — see below
+[x] Code review complete (G4, CQ-001 — both confirmed above)
+[x] Scope decisions documented
+
+**Status:** COMPLETE. Awaiting engineer commit confirmation per Manual mode.
+
+### Pre-Commit Declaration
+**Functions touched:** `UploadForm.tsx` — `pickFile`→`pickFiles`, `handleSubmit`
+restructured, new `registerFile` helper (formerly inline in `handleSubmit`). New file
+`src/lib/batchUploadSequencing.ts` — `runBatchUploadSequenced`.
+**Schemas touched:** None.
+**Config touched:** None.
+**Files touched:** `src/app/(app)/upload/UploadForm.tsx`, `src/lib/batchUploadSequencing.ts`
+(new), `scripts/test_batch_upload_sequencing.mjs` (new), `scripts/test_batch_upload_sequencing.sh`
+(new), `ui_tests/upload.spec.ts` — all within declared blast radius.
+**Scope confirmed:** YES — within `docs/Claude.md` v1.5 Section 3 (`/src/**`, `/scripts/**`, `/ui_tests/**`).
+**Invariants touched:** G4 (touched implicitly, confirmed unbypassed by code review + a
+real end-to-end test). No new invariant.
