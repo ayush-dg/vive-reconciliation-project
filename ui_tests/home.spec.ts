@@ -59,7 +59,7 @@ test.describe('Home screen', () => {
     expect(shown).toBeGreaterThanOrEqual(floor);
   });
 
-  test('clicking Reconcile on an extracted document triggers matching and the badge updates to Done', async ({
+  test('clicking Reconcile on an extracted document triggers matching and the badge updates to Recon done', async ({
     page,
     context,
   }) => {
@@ -83,19 +83,41 @@ test.describe('Home screen', () => {
     await page.goto('/home');
     await page.getByTestId(`home-reconcile-button-${documentId}`).click();
     await expect(page.getByTestId('toast-success')).toBeVisible({ timeout: 15_000 });
-    // "Done", not "Reconciled" — Home's own softer display mapping (2026-08-31), same
-    // underlying computeDocumentStatus() badge ('Reconciled') Document Detail still shows
-    // verbatim.
-    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toHaveText('Done');
+    // "Recon done", not "Reconciled" — Home's own softer display mapping (2026-08-31,
+    // renamed 2026-09-03 per ENH-001 Task 1.1), same underlying computeDocumentStatus()
+    // badge ('Reconciled') Document Detail still shows verbatim.
+    const badge = page.getByTestId(`home-status-badge-${documentId}`);
+    await expect(badge).toHaveText('Recon done');
+    // Task 1.1 CC prompt: only the label strings change, badgeClass must be untouched.
+    await expect(badge).toHaveClass(/reconciled/);
+  });
+
+  test('an extracted document (not yet reconciled) shows "Extraction success" on Home', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_ExtractionSuccess_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, `INV-EXTRACTED-${crypto.randomUUID().slice(0, 8)}`, '25.00'));
+    await page.request.post(`/api/documents/${documentId}/extract`);
+
+    await page.goto('/home');
+    // "Extraction success", not "Success" — ENH-001 Task 1.1 rename, so it's clear this
+    // reflects the extraction stage completing, not reconciliation.
+    const badge = page.getByTestId(`home-status-badge-${documentId}`);
+    await expect(badge).toHaveText('Extraction success');
+    // Task 1.1 CC prompt: only the label strings change, badgeClass must be untouched.
+    await expect(badge).toHaveClass(/extracted/);
   });
 
   // Engineer-directed (2026-08-31): a document whose matching run produced an open
-  // exception should read as "Done" on Home too (reconciliation genuinely finished, just
-  // with something to review) — not the same alarming "Failed — see Exceptions" wording a
-  // real extraction failure gets, which was the previous, conflated behavior. A "Show
-  // exceptions" link appears alongside it, pre-filtering the Exceptions screen to this
-  // vendor via the existing ?search= support (exceptionsList.ts).
-  test('a document whose matching run produces an open exception shows "Done" with a "Show exceptions" link, not "Failed"', async ({
+  // exception should read as "Recon done" on Home too (reconciliation genuinely finished,
+  // just with something to review) — not the same alarming "Failed — see Exceptions"
+  // wording a real extraction failure gets, which was the previous, conflated behavior. A
+  // "Show exceptions" link appears alongside it, pre-filtering the Exceptions screen to
+  // this vendor via the existing ?search= support (exceptionsList.ts). Label renamed
+  // 'Done' -> 'Recon done' 2026-09-03 per ENH-001 Task 1.1.
+  test('a document whose matching run produces an open exception shows "Recon done" with a "Show exceptions" link, not "Failed"', async ({
     page,
     context,
   }) => {
@@ -107,7 +129,7 @@ test.describe('Home screen', () => {
     await page.request.post(`/api/documents/${documentId}/match`);
 
     await page.goto('/home');
-    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toHaveText('Done');
+    await expect(page.getByTestId(`home-status-badge-${documentId}`)).toHaveText('Recon done');
     const exceptionsLink = page.getByTestId(`home-show-exceptions-${documentId}`);
     await expect(exceptionsLink).toBeVisible();
 
@@ -169,5 +191,49 @@ test.describe('Home screen', () => {
     await page.getByTestId('error-retry').click();
     await expect(page.getByTestId('error-boundary')).toHaveCount(0);
     await expect(page.getByTestId(`home-status-badge-${documentId}`)).toBeVisible();
+  });
+
+  // ENH-001 Task 1.4: upload time displayed in IST (Asia/Kolkata), fixed. A known UTC
+  // instant (not "some value rendered") pins the actual conversion, and specifically
+  // exercises the naive-string UTC-parsing fix (upload_timestamp is stored as
+  // "YYYY-MM-DD HH:MM:SS" with no timezone marker — see formatUploadTimestamp's comment).
+  test('upload time displays correctly converted to IST', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_IST_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, 'INV-IST', '12.00'));
+
+    // 2026-01-15 08:05:37 UTC -> 13:35:37 IST (UTC+5:30).
+    const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET upload_timestamp = '2026-01-15 08:05:37' WHERE document_id = ?`).run(documentId);
+
+    await page.goto('/home');
+    const row = page.getByTestId(`home-document-row-${documentId}`);
+    await expect(row).toContainText('1/15/2026, 1:35:37 PM');
+
+    // Challenge agent Finding 2: the task's own regression case ("underlying stored
+    // value is unaffected") had no DB-level assertion — only the rendered string was
+    // checked. Confirm the raw column is still the unconverted naive string post-render.
+    const stored = db.prepare(`SELECT upload_timestamp FROM extracted_document WHERE document_id = ?`).get(documentId) as {
+      upload_timestamp: string;
+    };
+    expect(stored.upload_timestamp).toBe('2026-01-15 08:05:37');
+  });
+
+  // Challenge agent Finding 1: the other IST test only exercised a single mid-day
+  // instant. A UTC time in the ~18:30-23:59 window crosses into the *next* IST calendar
+  // day — the classic timezone-conversion failure mode (date/month/year rollover), left
+  // entirely unverified otherwise.
+  test('upload time IST conversion correctly rolls over to the next calendar day', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Home_ISTRollover_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const documentId = await uploadFixture(page, statementText(vendor, 'INV-IST-ROLL', '13.00'));
+
+    // 2026-01-15 20:00:00 UTC -> 2026-01-16 01:30:00 IST (UTC+5:30) — crosses midnight.
+    const db = getSqliteDb();
+    db.prepare(`UPDATE extracted_document SET upload_timestamp = '2026-01-15 20:00:00' WHERE document_id = ?`).run(documentId);
+
+    await page.goto('/home');
+    const row = page.getByTestId(`home-document-row-${documentId}`);
+    await expect(row).toContainText('1/16/2026, 1:30:00 AM');
   });
 });

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { useToast } from '@/components/ToastProvider';
 import { LEGAL_ENTITIES } from '@/lib/legalEntities';
 import type { ApiDocument } from '@/lib/documents';
@@ -9,8 +10,20 @@ import type { ApiDocument } from '@/lib/documents';
 // runtime's default locale, which can (and did, in testing) differ between
 // the Node server render and the browser client render, causing a React
 // hydration mismatch ("8/27/2026, 2:16:10 PM" vs "27/8/2026, 2:16:10 pm").
+// ENH-001 Task 1.4 (scope extended to this screen too — same duplicated function as
+// HomeView.tsx's, same field, left inconsistent otherwise): fixed IST display
+// (Asia/Kolkata), not user/locale-configurable. Underlying stored upload_timestamp value
+// is unchanged; display-formatting only.
+//
+// upload_timestamp is SQLite's own `datetime('now')` — UTC, but stored as a naive
+// "YYYY-MM-DD HH:MM:SS" string with no timezone marker. new Date() on that exact format
+// parses it as the RUNTIME'S LOCAL system time, not UTC — silently wrong on any server
+// whose local timezone isn't UTC (found during this task; the space is replaced with 'T'
+// and 'Z' appended so it's unambiguously parsed as UTC before the IST conversion below).
 function formatUploadTimestamp(isoLike: string): string {
-  return new Date(isoLike).toLocaleString('en-US', {
+  const utcIsoLike = isoLike.includes('T') ? isoLike : `${isoLike.replace(' ', 'T')}Z`;
+  return new Date(utcIsoLike).toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
@@ -264,15 +277,38 @@ export default function UploadForm({ initialDocuments }: { initialDocuments: Api
                       {extractingIds.has(doc.document_id) ? 'Starting…' : 'Extract'}
                     </button>
                   ) : (
-                    // Task 2.3's computed display badge — never the raw internal
-                    // status column (see documents.ts's ApiDocument doc comment
-                    // for why conflating the two was a real defect).
-                    <span
-                      className={`badge status-badge ${doc.status_badge.badge.toLowerCase()}`}
-                      data-testid={`status-badge-${doc.document_id}`}
-                    >
-                      {doc.status_badge.label}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {/* Task 2.3's computed display badge — never the raw internal
+                          status column (see documents.ts's ApiDocument doc comment
+                          for why conflating the two was a real defect). */}
+                      <span
+                        className={`badge status-badge ${doc.status_badge.badge.toLowerCase()}`}
+                        data-testid={`status-badge-${doc.document_id}`}
+                      >
+                        {doc.status_badge.label}
+                      </span>
+                      {/* ENH-001 Task 1.3: click-through once extraction has actually
+                          completed. 'Extracted'/'Reconciling'/'Reconciled' are only
+                          reachable after a successful extraction (computeDocumentStatus).
+                          'Processing'/'Retrying' mean extraction isn't done yet — no link.
+                          'Failed' is ambiguous by badge alone (documents.ts's own doc
+                          comment: it covers both a genuine extraction failure with
+                          nothing to view, and a reconciliation exception where extraction
+                          DID succeed and lines exist) — open_exception_count > 0
+                          disambiguates it, same field Home's own display mapping uses
+                          for the identical distinction. */}
+                      {(doc.status_badge.badge === 'Extracted' ||
+                        doc.status_badge.badge === 'Reconciling' ||
+                        doc.status_badge.badge === 'Reconciled' ||
+                        (doc.status_badge.badge === 'Failed' && doc.open_exception_count > 0)) && (
+                        <Link
+                          href={`/documents/${doc.document_id}`}
+                          data-testid={`view-extracted-lines-${doc.document_id}`}
+                        >
+                          View extracted lines
+                        </Link>
+                      )}
+                    </div>
                   )}
                 </td>
               </tr>

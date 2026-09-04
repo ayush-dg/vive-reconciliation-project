@@ -7,8 +7,19 @@ import InlineLoadError from '@/components/InlineLoadError';
 import type { ApiDocument } from '@/lib/documents';
 import type { HomeSummaryStats } from '@/lib/homeSummary';
 
+// ENH-001 Task 1.4: fixed IST display (Asia/Kolkata), not user/locale-configurable —
+// reasonable v1 scope for a single-region deployment, per the brief's Known Constraints.
+// Underlying stored upload_timestamp value is unchanged; display-formatting only.
+//
+// upload_timestamp is SQLite's own `datetime('now')` — UTC, but stored as a naive
+// "YYYY-MM-DD HH:MM:SS" string with no timezone marker. new Date() on that exact format
+// parses it as the RUNTIME'S LOCAL system time, not UTC — silently wrong on any server
+// whose local timezone isn't UTC (found during this task; the space is replaced with 'T'
+// and 'Z' appended so it's unambiguously parsed as UTC before the IST conversion below).
 function formatUploadTimestamp(isoLike: string): string {
-  return new Date(isoLike).toLocaleString('en-US', {
+  const utcIsoLike = isoLike.includes('T') ? isoLike : `${isoLike.replace(' ', 'T')}Z`;
+  return new Date(utcIsoLike).toLocaleString('en-US', {
+    timeZone: 'Asia/Kolkata',
     year: 'numeric',
     month: 'numeric',
     day: 'numeric',
@@ -19,26 +30,27 @@ function formatUploadTimestamp(isoLike: string): string {
   });
 }
 
-/** Home's own display mapping over status_badge (engineer-directed, 2026-08-31) — softer
- * wording than the underlying badge value, which other screens/logic (canReconcile, etc.)
- * still use unchanged: "Success" once extraction is done (not "Extracted"), and "Done"
- * once reconciliation has run AT ALL, whether or not it left open exceptions — a
- * reconciled-with-exceptions document previously showed the same alarming "Failed — see
- * Exceptions" wording an outright extraction failure does, even though the process itself
- * completed successfully; those are genuinely different situations (distinguished via
- * open_exception_count, since status_badge's 'Failed' value alone covers both). A real
- * extraction failure (exhausted retries, nothing to reconcile) still shows "Failed".
+/** Home's own display mapping over status_badge (engineer-directed, 2026-08-31, labels
+ * renamed 2026-09-03 per ENH-001 Task 1.1) — softer wording than the underlying badge
+ * value, which other screens/logic (canReconcile, etc.) still use unchanged: "Extraction
+ * success" once extraction is done (not "Extracted"), and "Recon done" once reconciliation
+ * has run AT ALL, whether or not it left open exceptions — a reconciled-with-exceptions
+ * document previously showed the same alarming "Failed — see Exceptions" wording an
+ * outright extraction failure does, even though the process itself completed successfully;
+ * those are genuinely different situations (distinguished via open_exception_count, since
+ * status_badge's 'Failed' value alone covers both). A real extraction failure (exhausted
+ * retries, nothing to reconcile) still shows "Failed".
  */
 function homeDisplayStatus(doc: ApiDocument): { label: string; showExceptionsLink: boolean; badgeClass: string } {
   const badge = doc.status_badge.badge;
   if (badge === 'Extracted') {
-    return { label: 'Success', showExceptionsLink: false, badgeClass: 'extracted' };
+    return { label: 'Extraction success', showExceptionsLink: false, badgeClass: 'extracted' };
   }
   if (badge === 'Reconciled') {
-    return { label: 'Done', showExceptionsLink: false, badgeClass: 'reconciled' };
+    return { label: 'Recon done', showExceptionsLink: false, badgeClass: 'reconciled' };
   }
   if (badge === 'Failed' && doc.open_exception_count > 0) {
-    return { label: 'Done', showExceptionsLink: true, badgeClass: 'reconciled' };
+    return { label: 'Recon done', showExceptionsLink: true, badgeClass: 'reconciled' };
   }
   return { label: doc.status_badge.label, showExceptionsLink: false, badgeClass: badge.toLowerCase() };
 }
