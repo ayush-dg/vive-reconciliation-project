@@ -1109,6 +1109,92 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         )
         print(f"  Fabric Bronze: {fabric_bronze_count} rows copied for {statement_id}.")
 
+        # document_intake_log + Blob Storage archival (2026-09-05 fix) --
+        # previously ONLY done in the Cache MISS branch below, so every
+        # cache-hit re-upload (a distinct upload event, even though its
+        # content is byte-identical to a prior one) never got logged or
+        # archived at all: no document_intake_log row, no PDF copy in Blob
+        # Storage, for that statement_id. Mirrors the Cache MISS branch's
+        # Step 7/Step 8 calls field-for-field, sourcing what a fresh
+        # extraction would have put in schema_result from the ORIGINAL
+        # cached run's own document_intake_log row instead (re-running
+        # extraction here would defeat the point of the cache). Falls back
+        # to filename-derived/None values if that original row is itself
+        # missing (e.g. a cache-hit-of-a-cache-hit chain from before this
+        # fix existed).
+        original_intake_row = execute_query(
+            "SELECT * FROM document_intake_log WHERE statement_id = ? ORDER BY ingestion_timestamp DESC",
+            [cached_statement_id],
+        )
+        original_intake_row = original_intake_row[0] if original_intake_row else None
+
+        cache_vendor_name = (
+            original_intake_row.get("vendor_name")
+            if original_intake_row and original_intake_row.get("vendor_name")
+            else derive_vendor_name_from_filename(pdf_path)
+        )
+        cache_doc_type = (
+            original_intake_row.get("document_type") if original_intake_row else "VENDOR_STATEMENT"
+        )
+        cache_routing = "RECONCILIATION" if cache_doc_type == "VENDOR_STATEMENT" else "PARKED"
+
+        cache_schema_result = {
+            "document_metadata": {
+                "document_type": cache_doc_type,
+                "document_type_confidence": (
+                    original_intake_row.get("document_type_confidence") if original_intake_row else None
+                ),
+            },
+            "vendor_metadata": {
+                "vendor_name": cache_vendor_name,
+                "shop_or_entity": (
+                    json.loads(original_intake_row["shop_or_entity"])
+                    if original_intake_row and original_intake_row.get("shop_or_entity")
+                    else []
+                ),
+            },
+            "statement_metadata": {
+                "statement_date": original_intake_row.get("statement_date") if original_intake_row else None,
+                "currency": original_intake_row.get("currency") if original_intake_row else None,
+                "statement_total_as_printed": (
+                    original_intake_row.get("statement_total_as_printed") if original_intake_row else None
+                ),
+            },
+            "extraction_confidence": {
+                "overall": (
+                    original_intake_row.get("extraction_confidence_overall") if original_intake_row else None
+                ),
+            },
+            "_model_used": original_intake_row.get("extraction_model") if original_intake_row else None,
+            "_provider_used": cached.get("extraction_method"),
+            "warnings": (
+                json.loads(original_intake_row["warnings"])
+                if original_intake_row and original_intake_row.get("warnings")
+                else []
+            ),
+            "aging_summary": (
+                json.loads(original_intake_row["raw_aging_summary"])
+                if original_intake_row and original_intake_row.get("raw_aging_summary")
+                else {}
+            ),
+        }
+
+        print(f"\n[Step 7 - cache hit] Writing intake log...")
+        write_intake_log(
+            document_id, pdf_path, document_hash, cache_schema_result,
+            statement_id, statement_period, bronze_count, cache_routing
+        )
+
+        print(f"\n[Step 8 - cache hit] Uploading PDF to Blob Storage...")
+        blob_storage_path = upload_pdf_to_blob_storage(
+            pdf_path, cache_vendor_name, statement_period, document_hash
+        )
+        if blob_storage_path:
+            update_intake_log_blob_path(statement_id, blob_storage_path)
+            print(f"  Uploaded to: {blob_storage_path}")
+        else:
+            print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
+
         return {
             "statement_id": statement_id,
             "cache_hit": True,
