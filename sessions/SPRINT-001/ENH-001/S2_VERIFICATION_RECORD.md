@@ -128,12 +128,20 @@ reachable from a real trigger call rather than only from a direct, internal
 M-022 (`extractionPipeline.ts`) — new exported error classes, new optional parameter, no
 change to existing call signature compatibility. M-015 (`extraction.ts`) — new
 `needsSilverRecovery()` helper, new `TriggerExtractionResult` variant, new try/catch
-around the pipeline call. `route.ts` (M-044's sibling extract route, not separately
-M-numbered in the touch points table) — new 422 response branch.
+around the pipeline call. The extract route is **M-046** (correction, found at Phase 8
+BCE Gap Detection: this section previously called it "M-044's sibling extract route, not
+separately M-numbered" — M-046 is in fact already catalogued in `MODULE_CONTRACTS.md`) —
+new 422 response branch.
 
 | Artifact | Field | Change |
 |---|---|---|
 | MODULE_CONTRACTS.md | M-022 "No rollback of the 'processing' status column if the pipeline throws" (M-015's known-fragility note) | This fragility is now fixed — note is stale as of this task, to be corrected in `ENH-001_BCE_IMPACT.md` at Phase 8 close-out, not edited in `discovery/` mid-sprint per Rule 3/sprint doctrine |
+| TOPOLOGY.md | A01 Layer Boundary Map's "Failure mode" field for the M-046 crossing (`api/documents/[id]/extract/route.ts`), which documents only 404/409 | **Found at Phase 8 BCE Gap Detection:** this task added a third failure mode — a 422 response (`{ok:false, reason:'recovery_exhausted'}`) — never reflected in A01. To be corrected in `ENH-001_BCE_IMPACT.md` at Phase 8 close-out. |
+| MODULE_CONTRACTS.md | M-046's own "Most notable finding" ("Lock is non-releasing on failure... no finally/unlock path") | **Found at Phase 8 BCE Gap Detection, not caught at task time:** also now stale, for the same underlying reason as M-015's note above — `extraction.ts`'s new try/catch (called by this route) resets `extracted_document.status` on both `SilverNormalizationFailure` and any other caught error (TC-6/TC-7 below). To be corrected in `ENH-001_BCE_IMPACT.md` at Phase 8 close-out. |
+| MODULE_CONTRACTS.md | "Cross-cutting findings" section's claim that only the matching lock (M-047) "recovers cleanly from a mid-run crash" while the extraction lock (M-046) does not | **Found at Phase 8 BCE Gap Detection:** this cross-cutting paragraph restates the same now-stale claim as the two rows above (a separate, standalone location in the document, not just M-015's own fragility note) — also to be corrected in `ENH-001_BCE_IMPACT.md`. |
+| INVARIANT_CATALOGUE.md | IC-CANDIDATE-01: "Currently enforced: PARTIAL — YES for matching, NO for extraction," supported by the claim "`src/lib/extraction.ts:36-49` sets `status='processing'` and never resets it on any failure path" | **Found at Phase 8 BCE Gap Detection:** this task directly contradicts that verdict — `triggerExtraction()` now resets status to `'registered'` on both a recoverable `SilverNormalizationFailure` and an exhausted-recovery error (TC-6/TC-7). The residual true gap (an OS-level process crash, not a JS exception — explicitly out of scope, see Task 2.3's Session Log) is narrower than IC-CANDIDATE-01 currently describes. Neither the verdict nor the Rationale text has been updated — to be corrected in `ENH-001_BCE_IMPACT.md`. |
+| RISK_REGISTER.md | R-005: extraction's lock "has no equivalent [to matching's self-releasing lock]... Only direct DB intervention recovers it" | **Found at Phase 8 BCE Gap Detection:** inaccurate for the in-process-exception case this task fixes. Should be re-scored/re-scoped to the narrower residual case (a true process crash/restart, not a regression) rather than left describing the pre-Task-2.1 state as current — to be corrected in `ENH-001_BCE_IMPACT.md`. |
+| ANNOTATION_CHECKLIST.md | P2-S3-009 (OPEN — IC-CANDIDATE-01 "Owning module" mislabeling) | **Found at Phase 8 BCE Gap Detection:** this item's whole subject is IC-CANDIDATE-01, whose underlying facts this task changed (see row above) — the checklist item still frames its discussion around the pre-fix "NO for extraction" state. Resolve together with the IC-CANDIDATE-01 update at `ENH-001_BCE_IMPACT.md` close-out, not independently against now-stale facts. |
 
 ### Verification Verdict
 [x] All planned cases passed (27/27 assertions, `test_extraction_crash_recovery.sh`)
@@ -250,6 +258,8 @@ mid-sprint). M-011 (`documents.ts`) — not modified, confirmed by code review (
 | Artifact | Field | Change |
 |---|---|---|
 | MODULE_CONTRACTS.md | New module, no M-NNN ID yet | `src/lib/batchUploadSequencing.ts` will need an ID assignment at Phase 8 close-out (`ENH-001_BCE_IMPACT.md`), not `discovery/` mid-sprint |
+| TOPOLOGY.md | A02 Module Call Map's "COMPLETE, 78 modules" roster-completeness claim | **Found at Phase 8 BCE Gap Detection:** the new `batchUploadSequencing.ts` module (row above) doesn't appear in that roster, so the completeness/count claim is now stale — to be corrected alongside the module's own ID assignment in `ENH-001_BCE_IMPACT.md`. |
+| MODULE_CONTRACTS.md | M-070's "Most notable finding" ("Auto-chains a silent, un-awaited extraction call after upload") | **Found at Phase 8 BCE Gap Detection:** only true for a single-file upload now. For a 2+-file batch, this task makes extraction explicitly *awaited* before the next file's registration, by design (see this task's own Design Note) — the general characterization in the contract index no longer holds unconditionally. To be corrected in `ENH-001_BCE_IMPACT.md`. |
 
 ### Verification Verdict
 [x] All planned cases passed (12/12 pure-function assertions; 17/17 Playwright tests in
