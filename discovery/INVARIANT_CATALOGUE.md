@@ -113,8 +113,12 @@ cited per entry below as a cross-reference, not substituted for the Stage 1 rule
   data, not commands. Per the Module Contracts index (M-027's finding), this is genuinely
   two separate, independently-maintained enforcement sites, not one shared path — a future
   change to one's discipline would not automatically apply to the other.
-- **Enforcement point:** `src/lib/aiProvider.ts:67-79,190-216` (`EXTRACTION_SYSTEM_PROMPT`,
-  `buildExtractionRequest`)
+- **Enforcement point:** `src/lib/aiProvider.ts:67-80,191-217` (`EXTRACTION_SYSTEM_PROMPT`,
+  `buildExtractionRequest`) — **[line citations updated 2026-09-06, SPRINT-001 BCE refresh:
+  ENH-001 post-sign-off hotfix H1 added one line of new instruction text to
+  `EXTRACTION_SYSTEM_PROMPT`, shifting both ranges by +1. The structural-separation
+  mechanism itself is unaffected — confirmed unchanged by `test_prompt_injection_defense.mjs`'s
+  own byte-identity test, which reads the constant directly rather than a hardcoded copy.]
 - **Owning module:** M-028
 - **Enforcing modules:** M-028 (extraction call), M-027 (`aiResidualMatching.ts` — its own
   independent enforcement, `RESIDUAL_SYSTEM_PROMPT` + JSON-structured content, not routed
@@ -499,33 +503,53 @@ catalogued invariant — it would become one immediately if a second caller of
 **IC-CANDIDATE-01 — A processing-ownership lock (G5) must be recoverable after an unhandled failure; no work item may be left permanently stuck with no path back to eligibility**
 Category: Operational
 Scope: GLOBAL
-Currently enforced: PARTIAL — YES for matching, NO for extraction
+Currently enforced: PARTIAL — YES for matching (unchanged); YES for extraction's
+in-process-exception case (fixed 2026-09-04, ENH-001 Task 2.1, SPRINT-001 BCE refresh
+2026-09-06); NO for extraction's OS-level process-crash/restart case (residual gap,
+narrower than previously described — see below)
 Enforcement point: `src/lib/matchingInvocation.ts:39,48-58` (`LOCK_STALE_AFTER_MINUTES` +
 `acquireMatchingLock`'s `WHERE acquired_at < staleness-window` reclaim) enforces this for
-matching. No equivalent exists for extraction — `src/lib/extraction.ts:36-49` sets
-`status='processing'` and never resets it on any failure path; `runExtractionPipeline`
-itself (`extractionPipeline.ts`) has no `finally`/rollback around the pipeline call at its
-own call site either. **This is the gap** for the extraction side.
-Owning module: M-017
-Enforcing modules: M-017 only (matching side). None on the extraction side (M-015, M-046).
+matching, unchanged. For extraction, `src/lib/extraction.ts`'s `triggerExtraction` now
+wraps its `runExtractionPipeline` call in a try/catch that resets
+`extracted_document.status` from `'processing'` back to `'registered'` on either a
+recoverable `SilverNormalizationFailure` or an exhausted-recovery
+`RecoveryAttemptsExhausted` error (ENH-001 Task 2.1, `S2_VERIFICATION_RECORD.md` TC-6/TC-7).
+This covers every in-process JS exception. **The residual gap:** a true OS-level process
+crash or restart mid-extraction (not a caught JS exception — the process itself dying)
+still leaves `status='processing'` forever, since no code runs to reset it in that case;
+`runExtractionPipeline` itself still has no `finally`/rollback at its own call site for
+that scenario. This residual case is genuinely out of scope for a try/catch fix (a dead
+process can't run its own catch block) and would need an external recovery mechanism
+(e.g. a staleness-reclaim sweep, matching the matching lock's own TTL approach) to close.
+Owning module: M-017 (matching side, unchanged). M-015 (extraction side, now partially
+enforcing — see above).
+Enforcing modules: M-017 (matching). M-015 (extraction, in-process-exception case only,
+as of ENH-001 Task 2.1). M-046 (route-layer caller of M-015, inherits the same coverage).
 Rationale: G5 itself only requires that two owners can never process the same item
 concurrently — both lock implementations satisfy that. This is a distinct, narrower
 property G5 doesn't speak to: that a lock must not become a permanent dead end after a
-crash. An unhandled exception mid-extraction (subprocess crash, unexpected DB error) leaves
-`extracted_document.status='processing'` forever; `triggerExtraction`'s own G5 guard
-(`WHERE status != 'processing'`) then permanently rejects every future Extract attempt for
-that document, with no code path in this repository that ever resets it back — only direct
-DB intervention recovers it. The matching lock, built later (Task 5.1) with a TTL-staleness
-reclaim, does not have this failure mode. There is no principled reason evident in source
-for the asymmetry — it reads as an implementation gap in the earlier (extraction) lock, not
-a deliberate design difference.
-Evidence: M-015's own Known Fragility ("No rollback of the 'processing' status column if
-the pipeline throws — a document could get permanently stuck"); M-046's own Known Fragility
-("Lock is non-releasing on failure... no finally/unlock path"); contrasted directly against
-`matchingInvocation.ts:39,48-58`'s self-releasing, TTL-reclaimable design; confirmed via
-direct read of `extraction.ts` (no `try/finally` around `runExtractionPipeline`) and
-`MODULE_CONTRACTS.md`'s own "Cross-cutting findings" note on the two G5 implementations'
-inconsistent recovery semantics.
+failure. Before ENH-001 Task 2.1, ANY unhandled exception mid-extraction (subprocess crash,
+unexpected DB error, or a genuine JS exception) left `extracted_document.status='processing'`
+forever, with `triggerExtraction`'s own G5 guard (`WHERE status != 'processing'`) then
+permanently rejecting every future Extract attempt. Task 2.1 closed this for the common
+case — any exception the JS runtime itself can catch and handle — by adding an explicit
+reset. What remains open is narrower and structurally different: only a crash of the
+process itself (not an exception within it) can still strand a document, since there is
+no code left running to catch and recover from that. The matching lock's TTL-staleness
+reclaim (Task 5.1) already handles its own equivalent of this residual case — closing the
+same gap for extraction (a staleness sweep, not just exception handling) remains a real,
+open opportunity, not yet built.
+Evidence (pre-fix, historical): M-015's and M-046's Known Fragility notes originally read
+"No rollback of the 'processing' status column if the pipeline throws" / "Lock is
+non-releasing on failure... no finally/unlock path" — both now updated (2026-09-06,
+SPRINT-001 BCE refresh) in `MODULE_CONTRACTS.md` to reflect ENH-001 Task 2.1's fix, per
+the residual-gap description above. Evidence for the CURRENT state: `S2_VERIFICATION_RECORD.md`
+Task 2.1's TC-4/TC-5/TC-6/TC-7 (status resets to `'registered'` after both a recoverable
+Silver failure and an exhausted-recovery error; a genuinely-processing document is still
+correctly rejected, not re-queued); direct read of `extraction.ts`'s `triggerExtraction`
+(the new try/catch); contrasted against `matchingInvocation.ts:39,48-58`'s
+self-releasing, TTL-reclaimable design, which extraction still has no equivalent of for
+the residual process-crash case.
 
 **IC-CANDIDATE-02 — Array order in a static registry/constant must never be the sole signal for a production routing or default-assignment decision without an explicit, named marker**
 Category: Data Correctness

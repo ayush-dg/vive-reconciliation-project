@@ -135,28 +135,35 @@ history). Only genuinely still-open risk is catalogued here.
   pool.
 
 - **Risk ID:** R-005
-- **Description:** The two G5 "no concurrent double-processing" lock implementations recover
-  from an unhandled failure asymmetrically. Matching's lock (M-017,
-  `acquireMatchingLock`/`LOCK_STALE_AFTER_MINUTES`) self-releases and is TTL-reclaimable.
-  Extraction's lock (M-015/M-046, the `extracted_document.status='processing'` flip) has no
-  equivalent — a mid-extraction crash (subprocess failure, unexpected DB error) leaves the
-  document permanently stuck in `'processing'`, with `triggerExtraction`'s own guard (`WHERE
-  status != 'processing'`) then rejecting every future Extract attempt indefinitely. Only
-  direct DB intervention recovers it. Now formally identified as IC-CANDIDATE-01 in
-  `INVARIANT_CATALOGUE.md`.
-- **Severity:** P2 — blocks the end user from ever re-attempting extraction on an affected
-  document with no self-service recovery, though it does not corrupt data (G1/S10's
-  append-only guarantees hold regardless).
+- **Description:** **[NARROWED 2026-09-06, SPRINT-001 BCE refresh, ENH-001 Task 2.1 — see
+  IC-CANDIDATE-01 for the full before/after]** The two G5 "no concurrent double-processing"
+  lock implementations still recover from an unhandled failure asymmetrically, but the gap
+  is now materially smaller. Matching's lock (M-017,
+  `acquireMatchingLock`/`LOCK_STALE_AFTER_MINUTES`) self-releases and is TTL-reclaimable, as
+  before. Extraction's lock (M-015/M-046, the `extracted_document.status='processing'` flip)
+  now DOES recover from any in-process JS exception (a caught error resets status back to
+  `'registered'`) — ENH-001 Task 2.1. The residual trigger is narrower: only a true
+  OS-level process crash or restart (not a caught exception) still leaves the document
+  permanently stuck in `'processing'`, with `triggerExtraction`'s own guard (`WHERE status !=
+  'processing'`) then rejecting every future Extract attempt indefinitely. When it does
+  still occur, the consequence is unchanged — only direct DB intervention recovers it.
+  Formally identified as IC-CANDIDATE-01 in `INVARIANT_CATALOGUE.md`.
+- **Severity:** P2 (unchanged) — the trigger frequency dropped (only a process crash, not
+  any exception, now causes this), but the impact when it does occur is identical to
+  before: blocks the end user from ever re-attempting extraction on an affected document
+  with no self-service recovery, no data corruption (G1/S10's append-only guarantees hold
+  regardless). Severity is scored on impact, not frequency, per this register's existing
+  convention (no finer-grained tier exists here to reflect a frequency-only change).
 - **Source artifact:** `discovery/INVARIANT_CATALOGUE.md` IC-CANDIDATE-01; M-015's and
-  M-046's own Known Fragility fields in `MODULE_CONTRACTS.md`; `MODULE_CONTRACTS.md`'s
-  Cross-cutting findings note on the two G5 implementations' inconsistent recovery semantics.
-- **Mitigation:** none — newly surfaced as a risk-register entry (the underlying fragility
-  was already documented independently at the module-contract level in M-015/M-046, but not
-  previously evaluated as an operational risk in its own right).
+  M-046's own Known Fragility fields in `MODULE_CONTRACTS.md` (both updated 2026-09-06);
+  `S2_VERIFICATION_RECORD.md` Task 2.1 TC-4/TC-5/TC-6/TC-7.
+- **Mitigation:** Task 2.1's finally-block-equivalent reset closes the in-process-exception
+  case. The residual case (process crash) has no mitigation yet.
 - **Recommended action:** give the extraction lock the same self-releasing/TTL-reclaimable
   design as the matching lock (`src/lib/extraction.ts`, contrast against
-  `matchingInvocation.ts:39,48-58`), or at minimum add an admin-facing "unstick" action.
-  Affected modules: M-015, M-046 (no recovery); M-017, M-047 (has recovery, for contrast).
+  `matchingInvocation.ts:39,48-58`) to close the residual process-crash case too, or at
+  minimum add an admin-facing "unstick" action. Affected modules: M-015, M-046 (partial
+  recovery, in-process exceptions only); M-017, M-047 (full recovery, for contrast).
   Threatened invariant: IC-CANDIDATE-01 (G5 itself is not violated — its narrower "no two
   concurrent owners" guarantee still holds on both sides).
 
@@ -246,6 +253,38 @@ history). Only genuinely still-open risk is catalogued here.
   `Server=<hostname>;Database=recon;Authentication=Active Directory Default;` for Managed
   Identity, or an explicit `User Id=`/`Password=` pair for SQL auth. This is now a
   concrete, scoped fix, not an open research question.
+
+- **Risk ID:** R-009
+- **Description:** **[NEW 2026-09-06, SPRINT-001 BCE refresh, ENH-001 Task 1.4]**
+  `formatUploadTimestamp()` (M-068 `HomeView.tsx`, M-070 `UploadForm.tsx`) converts stored
+  UTC `upload_timestamp` values to IST (`Asia/Kolkata`) for display via
+  `Date.prototype.toLocaleString(..., { timeZone: 'Asia/Kolkata' })`. This relies on the
+  Node runtime having full ICU data compiled in — verified working in local dev and in
+  every Playwright test run (Node's local/dev build includes full ICU by default), but
+  **never verified against the actual Azure App Service deployment target**. A Node build
+  without full ICU either silently falls back to UTC (wrong display, no error — the worse
+  failure mode) or throws a `RangeError` on an unsupported timeZone value, depending on the
+  specific runtime build. Flagged at Task 1.4's own challenge-agent review as "a
+  deployment-environment risk outside what a Playwright test against the dev server can
+  verify," but never promoted to a risk-register entry until this refresh.
+- **Severity:** P2 — if it manifests as silent UTC fallback, this is the same class of
+  risk as R-006 (silent business-data misrepresentation): every timestamp shown on Home and
+  Upload would be wrong by exactly the IST offset (5:30), plausible-looking and easy to
+  miss, not a crash. (If it manifests as a thrown error instead, actual severity would be
+  higher — but the "silent wrong data" mode is judged more likely for a missing-ICU Node
+  build based on common Intl polyfill/fallback behavior, hence P2 rather than P1.)
+- **Affected modules:** M-068 (`HomeView.tsx`), M-070 (`UploadForm.tsx`) —
+  `formatUploadTimestamp()` (duplicated verbatim in both, per `MODULE_CONTRACTS.md`'s own
+  existing cross-cutting note on that duplication).
+- **Source artifact:** `sessions/SPRINT-001/ENH-001/S1_VERIFICATION_RECORD.md` Task 1.4's
+  BCE Impact section (challenge-agent finding, added retroactively at this BCE refresh).
+- **Mitigation:** none yet — not exercisable via a Playwright test against the local dev
+  server, which always has full ICU.
+- **Recommended action:** verify the actual Azure App Service Node runtime's ICU data
+  includes `Asia/Kolkata` (either via a deployed smoke check, or by confirming the deployed
+  Node build includes `full-icu`) before relying on this display in production. If the
+  target runtime lacks full ICU, either bundle the `full-icu` package or switch to a
+  manual UTC+5:30 offset calculation that doesn't depend on `Intl`/ICU data at all.
 
 **Considered and not elevated: Fabric DDL missing `IF NOT EXISTS` (M-041/`vendorSchema.ts`).**
 `vendorSchema.ts`'s Fabric-dialect DDL for per-vendor raw tables has no `IF NOT EXISTS` guard

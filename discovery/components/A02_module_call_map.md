@@ -82,6 +82,19 @@ Note: these IDs are permanent. Do not reassign at later sessions.
 | M-081 | InlineLoadError.tsx | src/components/InlineLoadError.tsx | component |
 | M-082 | Sidebar.tsx | src/components/Sidebar.tsx | component |
 | M-083 | ToastProvider.tsx | src/components/ToastProvider.tsx | store |
+| M-084 | batchUploadSequencing.ts | src/lib/batchUploadSequencing.ts | module (pure function) |
+
+**M-084 added 2026-09-06 (SPRINT-001 BCE refresh, ENH-001 Task 2.2).** Exports
+`runBatchUploadSequenced(files, registerFile, extractDocument)` — a caller-injected pure
+function, no direct module dependencies of its own (registration/extraction are passed in
+by M-070, not imported). Policy: a single-file batch fires extraction without awaiting
+(fire-and-forget, matching pre-ENH-001 behavior byte-for-byte); a 2+-file batch awaits
+each file's full register+extract cycle before the next file's registration begins —
+"no two extractions in flight simultaneously." Extracted as a standalone module
+specifically so this sequencing guarantee could be directly unit-tested
+(`scripts/test_batch_upload_sequencing.sh`, 12/12) rather than only inferable from
+Playwright network waterfalls.
+| M-070 --[CALLS]--> M-084 | src/app/(app)/upload/UploadForm.tsx (handleSubmit) | Sync (in-process, awaited per its own policy above) |
 
 This roster is the canonical ID-to-module mapping for all subsequent sessions. Sessions B,
 C, D, and E must reference modules by M-NNN in all relationship fields — never by prose

@@ -331,25 +331,31 @@ session.
 ## P2-S3-009 · IC-CANDIDATE-01's "Owning module: M-017" names the side that already works, not the side with the gap — inconsistent with sibling candidates' convention (INVARIANT_CATALOGUE)
 
 **Severity:** P2
-**Type:** OPEN_QUESTION
+**Type:** OPEN_QUESTION → **RESOLVED 2026-09-06 (SPRINT-001 BCE refresh, ENH-001 Task 2.1)**
 **Source:** STAGE3_REVIEW
 **Surfaced by:** CD
 **Artifact:** INVARIANT_CATALOGUE
 **Section:** IC-CANDIDATE-01
 
-**Observation:** IC-CANDIDATE-03 names M-043 as Owning module — the module that
-*should* exclude the route but doesn't, i.e., the module where the gap lives.
+**Observation (historical, pre-fix):** IC-CANDIDATE-03 names M-043 as Owning module — the
+module that *should* exclude the route but doesn't, i.e., the module where the gap lives.
 IC-CANDIDATE-02 uses "Owning module: none (a cross-cutting gap, not one module's
-responsibility)" for a gap spanning two modules. IC-CANDIDATE-01 instead names M-017 —
-the matching-side lock, which is the implementation that already works correctly — as
-Owning module, while the actual gap (no crash-recovery) lives on the extraction side
-(M-015/M-046), which appears only under Enforcing modules with "None on the extraction
-side." This is a labeling inconsistency across the three candidates the same session
-produced, not a factual error.
+responsibility)" for a gap spanning two modules. IC-CANDIDATE-01 instead named only M-017 —
+the matching-side lock, which already worked correctly — as Owning module, while the actual
+gap (no crash-recovery) lived on the extraction side (M-015/M-046), appearing only under
+Enforcing modules with "None on the extraction side." This was a labeling inconsistency
+across the three candidates the same session produced, not a factual error.
 
-**Risk for planning:** Low on its own, but a future engineer scanning "Owning module"
-fields to find who's responsible for closing IC-CANDIDATE-01 would be pointed at the
-wrong side of the codebase.
+**Resolution:** ENH-001 Task 2.1 (2026-09-04) fixed the extraction-side gap for the
+in-process-exception case, which required rewriting IC-CANDIDATE-01's Owning
+module/Enforcement point/Rationale fields anyway (see `INVARIANT_CATALOGUE.md`, updated
+2026-09-06). The rewrite now names BOTH sides under Owning module — "M-017 (matching side,
+unchanged). M-015 (extraction side, now partially enforcing — see above)" — matching
+IC-CANDIDATE-02/03's convention of naming the module where the gap (or its owner) actually
+lives, not just the side that already worked. The residual gap (OS-level process crash,
+not a JS exception) is now correctly attributed to M-015/M-046 under Enforcing modules.
+Resolving this alongside the substantive fix, rather than as an independent relabeling
+against now-superseded facts, avoided doing the same rewrite twice.
 
 **Recommended action:** Either change Owning module to "none (gap is on the extraction
 side, M-015/M-046; M-017 is the working counterpart cited for contrast)" to match
@@ -461,11 +467,39 @@ Last run: 2026-09-02 By: CD (external Stage 3 review), corrected/re-verified by 
 | Check | Status | Notes |
 |---|---|---|
 | All invariants in INVARIANT_CATALOGUE.md match INVARIANTS.md | PASS | G1–G5, S1–S8/S10–S12, T1–T7-excluded all consistent; S9 correctly omitted (promoted to G1) |
-| All module names in MODULE_CONTRACTS.md match TOPOLOGY.md | PASS | Layer counts (infra 12, serving 10, pipeline 20, route 12, UI 24 = 78) and individual module names/files cross-verified |
+| All module names in MODULE_CONTRACTS.md match TOPOLOGY.md | PASS as of 2026-09-02; **stale as of 2026-09-06** | Layer counts (infra 12, serving 10, pipeline 20, route 12, UI 24 = 78) as of Stage 3. SPRINT-001 BCE refresh (2026-09-06, ENH-001 Task 2.2) added M-084 (UI layer, 24→25, total 78→79) — see SPRINT-001-BCE-001 below, not yet re-verified as a fresh consistency pass |
 | All external systems in INTEGRATION_CONTRACTS.md match TOPOLOGY.md A03 | PASS | 5 IP-NNN consistent post-backport; see P2-S3-008 for one residual open question on IP-005 direction |
 | All risks in RISK_REGISTER.md reference correct source artifacts | PASS | — |
 | INTAKE_SUMMARY.md open questions accounted for in artifacts | **PASS (was FAIL)** | OD6 now has IC-CANDIDATE-04 (P1-S3-004 resolved); Session F disposition confirmed complete, no longer contradicted (CON-S3-001 resolved) |
 | Entity names in DOMAIN_MODEL.json consistent with domain terminology | PASS | `DOMAIN_MODEL.json` produced; 6 entities (Document, Vendor, StatementLine, Match, Exception, AppUser) match the nouns used throughout MODULE_CONTRACTS.md/INVARIANT_CATALOGUE.md/RISK_REGISTER.md |
+
+---
+
+## SPRINT-001-BCE-001 · SYSTEM_GRAPH.json node/edge counts stale after M-084's addition (SYSTEM_GRAPH.json)
+
+**Severity:** P2
+**Type:** NOT_DETERMINABLE (graph regeneration not attempted this pass)
+**Source:** SPRINT-001 BCE refresh
+**Surfaced by:** CC
+**Artifact:** SYSTEM_GRAPH.json / TOPOLOGY.md / MODULE_CONTRACTS.md
+**Section:** Module Roster, Graph Construction
+
+**Observation:** ENH-001 Task 2.2 added a new module, `src/lib/batchUploadSequencing.ts`
+(M-084), recorded in `MODULE_CONTRACTS.md` and `TOPOLOGY.md`'s A02 roster at this refresh
+(2026-09-06). `SYSTEM_GRAPH.json` (committed 2026-09-02, Stage 3 close-out) still reflects
+the pre-M-084 state: 111 nodes (78 Module + 5 IntegrationPoint + 20 Invariant + 8
+RiskItem), 190 edges. Adding M-084 needs at minimum one new Module node and at least one
+new CALLS edge (M-070 --[CALLS]--> M-084, per the roster entry added at this refresh) —
+not attempted in this pass, since regenerating/hand-editing a validated graph JSON
+correctly (without introducing a dangling reference) is a larger, more error-prone task
+than the prose-artifact edits this refresh otherwise made.
+
+**Risk for planning:** Low urgency on its own (the graph is a derived/query convenience,
+not a source of truth — `MODULE_CONTRACTS.md`/`TOPOLOGY.md` are authoritative and are both
+current as of this refresh), but should be regenerated or hand-extended before the graph
+is relied on for any future collision-surface analysis (Prompt 2's graph-derived pass) —
+a stale graph could produce a false GRAPH-DEFINITE "no collision" finding by simply not
+knowing M-084 exists.
 
 ---
 
@@ -474,9 +508,15 @@ Produced by: BCE Adapter Pipeline Stage 3 (CD), updated by CC
 
 P1 items: 5 total — **all 5 RESOLVED** (P1-S3-001, P1-S3-002, P1-S3-003, P1-S3-004,
 CON-S3-001)
-P2 items: 5 total — 1 RESOLVED (P2-S3-006), 4 OPEN (lower urgency, non-blocking)
+P2 items: 5 total — 2 RESOLVED (P2-S3-006; P2-S3-009 resolved 2026-09-06, SPRINT-001 BCE
+refresh, ENH-001 Task 2.1), 3 OPEN (lower urgency, non-blocking)
 P3 items: 3 — informational backlog
 Total items: 13
+
+**Addendum, 2026-09-06 (SPRINT-001 BCE refresh):** one new P2 item added below
+(SPRINT-001-BCE-001, `SYSTEM_GRAPH.json` node/edge counts now stale after M-084's
+addition) — counts above reflect Stage 3's own original state plus this one refresh-time
+change; not a full Stage 3 re-run.
 
 Consistency check: **PASS** (was FAIL) — the one failing row (OD6/Session F) is now
 resolved on both counts.

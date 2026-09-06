@@ -35,6 +35,10 @@ confirmed/added.)**
   go through M-003's `getSqliteDb()`/`getFabricPool()`)
 - Failure mode: [STAGE-2-UPDATE — 2026-09-02]: M-046 returns 404 if the document doesn't
   exist, 409 if already processing (G5 lock, confirmed via M-015's atomic status flip).
+  [SPRINT-001 BCE REFRESH — 2026-09-06, ENH-001 Task 2.1]: a third failure mode added —
+  422 (`{ok:false, reason:'recovery_exhausted'}`) when a document's Silver-normalization
+  recovery attempt is exhausted (S7's 2-attempt bound already reached by the attempt that
+  failed Silver normalization).
 
 - Produced by: Extract action endpoint (Task 2.4) — M-046 — auto-triggered on upload as of
   D-I (amended 2026-09-01), previously a separate explicit click
@@ -115,9 +119,12 @@ confirmed/added.)**
 
 ## A02 — Module Call Map
 
-**COMPLETE as of 2026-09-02 (BCE Stage 2 Session A).** Full Module Roster (78 modules,
-M-001–M-054 backend + M-060–M-083 UI), Internal Call Table, Startup Sequence, and Async
-Boundaries live in `discovery/components/A02_module_call_map.md` — not duplicated here to
+**COMPLETE as of 2026-09-02 (BCE Stage 2 Session A); roster updated 2026-09-06 (SPRINT-001
+BCE refresh, ENH-001 Task 2.2).** Full Module Roster (79 modules, M-001–M-054 backend +
+M-060–M-083 UI + M-084) — M-084 (`src/lib/batchUploadSequencing.ts`) added at this
+refresh, see `discovery/components/A02_module_call_map.md` for its full entry — Internal
+Call Table, Startup Sequence, and Async Boundaries live in
+`discovery/components/A02_module_call_map.md` — not duplicated here to
 avoid drift between two copies of the same data. Key findings: no internal
 producer/consumer async boundaries exist anywhere in this codebase (no queue, no
 background worker); migrations are not auto-applied at app startup (a manual operational
