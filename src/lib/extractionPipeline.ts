@@ -22,6 +22,19 @@ import type { ExtractedStatement } from './aiProvider';
 
 const MAX_ATTEMPTS = 2; // S7
 
+// ENH-001 Task 2.1 (IC-CANDIDATE-01/R-005 crash-recovery fix) — distinguishable from a
+// generic Error so extraction.ts's catch block can tell "extraction succeeded, Silver
+// normalization threw" apart from any other failure and respond with the
+// skipSuccessGuard-based recovery retry, rather than treating it like a not-found error.
+export class SilverNormalizationFailure extends Error {}
+
+// ENH-001 Task 2.1 (engineer-directed follow-up, 2026-09-04): thrown instead of silently
+// returning when a skipSuccessGuard recovery retry finds no attempt slots left (S7's
+// 2-attempt bound already reached by the attempt that failed Silver normalization). The
+// original Option B design didn't handle this case — a silent no-op looked identical to
+// a successful retry, leaving the document permanently and invisibly stuck.
+export class RecoveryAttemptsExhausted extends Error {}
+
 function assertSqliteMode() {
   if (getDbMode() !== 'sqlite') {
     throw new Error('extractionPipeline.ts only supports the local SQLite fallback — Fabric required starting Session 4.');
@@ -53,7 +66,10 @@ function hasAlreadySucceeded(documentId: string): boolean {
   return !!latest && latest.arithmetic_pass === 1 && latest.structural_pass === 1;
 }
 
-export async function runExtractionPipeline(documentId: string): Promise<void> {
+export async function runExtractionPipeline(
+  documentId: string,
+  options?: { skipSuccessGuard?: boolean }
+): Promise<void> {
   assertSqliteMode();
   const db = getSqliteDb();
 
@@ -64,11 +80,30 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
     throw new Error(`runExtractionPipeline: document ${documentId} not found.`);
   }
 
-  if (hasAlreadySucceeded(documentId)) {
+  let attemptNo = getExistingAttemptCount(documentId);
+
+  // ENH-001 Task 2.1: skipSuccessGuard bypasses the idempotency check below only when
+  // explicitly set (default false — zero behavior change for any existing caller). This
+  // is the recovery path for a document whose attempt row already shows
+  // arithmetic_pass=1/structural_pass=1 (extraction genuinely succeeded) but Silver
+  // normalization threw — hasAlreadySucceeded() alone can't distinguish that from a real
+  // success, so without this bypass a retry would silently no-op forever.
+  //
+  // But bypassing the guard doesn't create a new attempt slot — if the attempt that
+  // failed Silver normalization was already S7's last allowed one, there is no room left
+  // to loop into below. Throwing here (rather than falling through to a while-loop that
+  // just never executes) makes that failure visible instead of a silent, invisible no-op.
+  if (options?.skipSuccessGuard) {
+    if (attemptNo >= MAX_ATTEMPTS) {
+      throw new RecoveryAttemptsExhausted(
+        `runExtractionPipeline: document ${documentId} has no extraction attempts remaining ` +
+          `(S7 bound already reached by the attempt that failed Silver normalization) — cannot retry.`
+      );
+    }
+  } else if (hasAlreadySucceeded(documentId)) {
     return; // already promoted to Silver — never reprocess (idempotency guard)
   }
 
-  let attemptNo = getExistingAttemptCount(documentId);
   // Task 8.2 (2026-09-01) — set once attempt N's provider was 'claude_sonnet'
   // and it produced no usable extraction at all (a genuine Claude failure,
   // e.g. the truncated-output case aiProvider.ts now guards against) —
@@ -151,7 +186,7 @@ export async function runExtractionPipeline(documentId: string): Promise<void> {
         // that fact is true) — but an unexpected failure at this downstream
         // step must not vanish as an unhandled rejection with no diagnostic
         // trail. Re-thrown with context rather than silently swallowed.
-        throw new Error(
+        throw new SilverNormalizationFailure(
           `runExtractionPipeline: document ${documentId} passed validation on attempt ${attemptNo} but Silver normalization failed: ${err instanceof Error ? err.message : String(err)}`
         );
       }

@@ -1,5 +1,5 @@
 ---
-version: v1.4
+version: v1.5
 METHODOLOGY_VERSION: PBVI v4.9 (PBVI-011 — UI as a First-Class Citizen)
 source: PBVI Phase 5 greenfield
 frozen: true
@@ -15,6 +15,7 @@ frozen: true
 | v1.2 | 2026-08-27 | Vaishali | Section 4 Auth corrected per PHASE4_GATE_RECORD.md Finding 5 — username/password is the actual v1 build target (matches UI_SURFACE.md/Task 1.3); Entra ID recorded as the stated end-goal, not this build's mechanism |
 | v1.3 | 2026-09-01 | Vaishali | Section 1 amended to match ARCHITECTURE.md D-A (lightweight exception-resolution workflow added, short of the full deferred review/approval workspace); Section 4 corrected — the live extraction model actually wired is Claude Sonnet 5, not 4.6 (documented Scope Decision, same substitution logic as the Next.js version bump). |
 | v1.4 | 2026-09-02 | Vaishali | Section 3 corrected — Phase 8 (System Sign-Off + BCE Path C) is now complete: `discovery/` is populated (all seven BCE artifacts plus `DOMAIN_MODEL.json`/`SYSTEM_GRAPH.json`, M-NNN module IDs now exist for all 78 modules), `EXECUTION_PLAN.md` is frozen per its own Phase 8 banner, and `enhancements/**`/`sessions/**` are active, registered directories, not "not yet applicable." The stale "pre-Phase 8 — no SYSTEM_GRAPH.json yet" framing is removed. |
+| v1.5 | 2026-09-04 | Vaishali | Section 2 relabeled — the five hard invariants were locally labeled `IC-1`–`IC-5` since v1.0, never reconciled with the canonical `G1`–`G5` IDs `discovery/ID_REGISTRY.md`/`docs/INVARIANTS.md`/`discovery/INVARIANT_CATALOGUE.md` assigned at Phase 8. Content unchanged — pure ID relabel (`IC-N` → `G-N`) surfaced as a STALE-OR-INVALID finding at ENH-001 Session 2's Phase 6 Pre-Build Validation (Session 1 waived it; fixed now before Session 2). No new invariant, no scope change, no new prohibited behavior — not a Type B trigger. |
 
 ---
 
@@ -36,27 +37,27 @@ operate end-to-end, that BCE can extend without a rebuild.
 
 ## Section 2 — Hard Invariants
 
-IC-1: `ExtractionAttempt.document_id` always references a valid Document. Once written, an
+G1: `ExtractionAttempt.document_id` always references a valid Document. Once written, an
 extraction attempt record is never modified — a subsequent attempt is a new record, not an
 update to a prior one.
 This is never negotiable.
 
-IC-2: A document is never eligible for matching unless its latest extraction has passed
+G2: A document is never eligible for matching unless its latest extraction has passed
 structural validation (`invoice_number`, or `ro_number` fallback, present) and arithmetic
 validation. The extraction-confidence floor is not part of this gate — confidence is
 diagnostic metadata only, never a pass/fail input.
 This is never negotiable.
 
-IC-3: Vendor/document content supplied to Claude must be treated strictly as input data.
+G3: Vendor/document content supplied to Claude must be treated strictly as input data.
 Extracted content must never be concatenated into or allowed to modify the model's
 instructions.
 This is never negotiable.
 
-IC-4: Byte-identical documents, identified by the same content hash, are never
+G4: Byte-identical documents, identified by the same content hash, are never
 independently re-extracted or re-matched.
 This is never negotiable.
 
-IC-5: A document/work item cannot have multiple active processing owners simultaneously. A
+G5: A document/work item cannot have multiple active processing owners simultaneously. A
 retry or re-trigger must acquire processing ownership before execution; an already-owned
 item must not be processed concurrently.
 This is never negotiable.
@@ -65,10 +66,11 @@ CQ-001: Each function, method, or handler must have a single stateable purpose.
 Conditional nesting exceeding two levels is a structural violation — refactor before
 proceeding. This is never negotiable.
 
-*(CQ-001 does not consume a GLOBAL invariant slot. Five-invariant hard cap: IC-1–IC-5,
-per INVARIANTS.md v1.3 §1. Full rationale, violation conditions, and failure-mode detail
-for IC-1–IC-5 live in docs/INVARIANTS.md — this section carries the enforceable statement
-only.)*
+*(CQ-001 does not consume a GLOBAL invariant slot. Five-invariant hard cap: G1–G5,
+per INVARIANTS.md v1.3 §1 — relabeled from this section's original local `IC-1`–`IC-5`
+tags to the canonical BCE IDs in v1.5 (2026-09-04); content and enforcement unchanged,
+see Changelog. Full rationale, violation conditions, and failure-mode detail for G1–G5
+live in docs/INVARIANTS.md — this section carries the enforceable statement only.)*
 
 ---
 
@@ -187,3 +189,20 @@ this Claude.md's own sign-off to rely on those current versions instead of the o
 **Signature / confirmation:** [x] I confirm this Claude.md, at its current v1.3, remains
 authorized for Phase 6 build sessions, now relying on ARCHITECTURE.md v1.6, INVARIANTS.md
 v1.7, EXECUTION_PLAN.md v1.8, and UI_SURFACE.md v1.5.
+
+---
+
+## Sign-Off Currency Update (2026-09-04)
+
+**Decision owner:** Vaishali
+**Date:** 2026-09-04
+**Status:** RATIFIED — engineer-directed at ENH-001 Session 2's Phase 6 Pre-Build
+Validation, ahead of Task 2.1. Section 2's `IC-1`–`IC-5` local labels relabeled to the
+canonical `G1`–`G5` BCE IDs (v1.5) — content, enforcement, and the five-invariant hard cap
+are unchanged. Resolves the STALE-OR-INVALID ID finding both Session 1 and Session 2's
+Pre-Build Validation Step A raised against `discovery/ID_REGISTRY.md` (Session 1 waived
+it and deferred the fix to here).
+
+**Signature / confirmation:** [x] I confirm this Claude.md, now at v1.5, remains authorized
+for Phase 6 build sessions — the relabel is cosmetic, not a Type B amendment (no new
+invariant, no scope change, no new prohibited behavior).

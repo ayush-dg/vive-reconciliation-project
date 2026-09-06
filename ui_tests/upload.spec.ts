@@ -346,4 +346,456 @@ test.describe('Upload', () => {
     };
     expect(stored.upload_timestamp).toBe('2026-01-15 08:05:37');
   });
+
+  // ENH-001 Task 2.2: batch cap and selection validation.
+  test('selecting exactly the 15-file cap is accepted, no validation error', async ({ page, context }) => {
+    await signInViaCookie(context);
+    await page.goto('/upload');
+
+    const batch = Array.from({ length: 15 }, (_, i) => samplePdf(`batch-cap-${i}`));
+    await page.setInputFiles('#statement-file', batch);
+
+    await expect(page.getByTestId('upload-validation-error')).toHaveCount(0);
+    await expect(page.getByTestId('selected-files-list').locator('.file-row')).toHaveCount(15);
+  });
+
+  test('selecting more than 15 files is rejected outright, not silently truncated', async ({ page, context }) => {
+    await signInViaCookie(context);
+    await page.goto('/upload');
+
+    const batch = Array.from({ length: 16 }, (_, i) => samplePdf(`batch-overflow-${i}`));
+    await page.setInputFiles('#statement-file', batch);
+
+    await expect(page.getByTestId('upload-validation-error')).toContainText('up to 15 files');
+    // Rejected outright — no partial 15-of-16 selection silently kept.
+    await expect(page.getByTestId('selected-files-list')).toHaveCount(0);
+
+    await page.getByTestId('upload-submit').click();
+    await expect(page.getByTestId('toast-success')).toHaveCount(0);
+  });
+
+  // ENH-001 Task 2.2: a real multi-file batch, sequential end to end.
+  test('a 5-file batch uploads and all 5 reach a terminal (extracted) row state', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch5_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 5 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-BATCH5-${i}`, '15.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // True sequential processing means file 2 doesn't even start registering until
+    // file 1's full extraction completes — so each file's registration must be
+    // polled for, not checked immediately (that would race the sequencing this task
+    // exists to guarantee). Generous overall timeout for 5 real sequential
+    // extractions, matching this suite's existing pattern for multi-second live paths.
+    for (let i = 0; i < 5; i++) {
+      await expect(async () => {
+        const res = await page.request.get('/api/documents');
+        const body = await res.json();
+        const doc = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-${i}.pdf`);
+        expect(doc).toBeTruthy();
+        // The raw computeDocumentStatus() label, not Home's own client-side
+        // "Extraction success" relabeling (HomeView.tsx-only, never applied here).
+        expect(doc.status_badge.label).toBe('Extracted');
+      }).toPass({ timeout: 45_000 });
+    }
+  });
+
+  // ENH-001 Task 2.2: a registration failure mid-batch (not extraction — a genuinely
+  // invalid file, no MIME type and no .pdf extension) is skipped, not fatal — the
+  // remaining files in the batch still process normally.
+  test('a registration failure mid-batch does not block subsequent files', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_SkipFail_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = [
+      { name: `${vendorBase}-1.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(`${vendorBase}_1`, 'INV-SKIP-1', '25.00')) },
+      { name: `${vendorBase}-bad.exe`, mimeType: '', buffer: Buffer.from('definitely not a PDF') },
+      { name: `${vendorBase}-3.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(`${vendorBase}_3`, 'INV-SKIP-3', '35.00')) },
+    ];
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    await expect(page.getByTestId('toast-error')).toContainText('PDF files only', { timeout: 15_000 });
+
+    const res = await page.request.get('/api/documents');
+    const body = await res.json();
+    const doc1 = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-1.pdf`);
+    const doc3 = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-3.pdf`);
+    const badDoc = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-bad.exe`);
+
+    expect(doc1, 'file 1 (before the bad file) still registered').toBeTruthy();
+    expect(doc3, 'file 3 (after the bad file) still registered — batch did not abort').toBeTruthy();
+    expect(badDoc, 'the invalid file itself was never registered').toBeFalsy();
+  });
+
+  // ENH-001 Task 2.2, Design Gate Finding 2 — challenge agent Finding 3: confirmed
+  // only against instrumented fakes in test_batch_upload_sequencing.sh; this drives
+  // the SAME real bytes twice through the actual registerDocument() API within one
+  // multi-select batch, not a mock.
+  test('the same file selected twice within one batch is handled as a duplicate, batch continues (G4)', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    // Unique per test run (not just per file within the batch) — a fixed name across
+    // runs would collide with leftover documents from earlier runs of this same test,
+    // since each run's random content still lands under the same original_filename.
+    const runId = crypto.randomUUID().slice(0, 8);
+    const dupeFilename = `dupe-in-batch-${runId}.pdf`;
+    const fixedBytes = Buffer.from(`%PDF-1.4 fixed duplicate-in-batch content ${runId} ${Math.random()}`);
+    const batch = [
+      { name: dupeFilename, mimeType: 'application/pdf', buffer: fixedBytes },
+      { name: dupeFilename, mimeType: 'application/pdf', buffer: fixedBytes },
+      samplePdf(`dupe-in-batch-third-${runId}`),
+    ];
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // 3 sequential files — Task 2.4's running counter toast only reflects how many
+    // registrations have succeeded so far, not that the whole batch (all 3 files'
+    // register+extract cycles) has finished. Poll for the 3rd file specifically
+    // rather than assuming any visible toast means the batch is complete.
+    await expect(async () => {
+      const res = await page.request.get('/api/documents');
+      const body = await res.json();
+      const thirdDoc = body.documents.find((d: { original_filename: string | null }) =>
+        d.original_filename?.startsWith(`dupe-in-batch-third-${runId}`)
+      );
+      expect(thirdDoc, 'the batch continued past the duplicate to the 3rd file').toBeTruthy();
+    }).toPass({ timeout: 30_000 });
+
+    const res = await page.request.get('/api/documents');
+    const body = await res.json();
+    const dupeDocs = body.documents.filter((d: { original_filename: string | null }) => d.original_filename === dupeFilename);
+    expect(dupeDocs.length, 'same content hash registers exactly once, not twice (G4)').toBe(1);
+  });
+
+  // ENH-001 Task 2.3: per-file progress state UI.
+  test('mid-batch, a mix of states is observable — not all rows jump to a final state at once', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_MixedState_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 3 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-MIX-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // Real sequential processing of 3 files takes measurable time — catching this
+    // snapshot requires polling shortly after submit, before the whole batch (which
+    // completes in several seconds) has had a chance to finish.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states, 'not all 3 rows are already terminal').not.toEqual(['done', 'done', 'done']);
+      expect(states.some((s) => s === 'queued' || s === 'registering' || s === 'extracting'), 'at least one row is still in progress').toBe(true);
+    }).toPass({ timeout: 5_000 });
+
+    // Eventually the whole batch completes.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done')).toBe(true);
+    }).toPass({ timeout: 30_000 });
+  });
+
+  test('a failed (skipped registration) row is visually and textually distinct from a done row', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_FailedRowState_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = [
+      { name: `${vendorBase}-1.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(`${vendorBase}_1`, 'INV-ROWFAIL-1', '10.00')) },
+      { name: `${vendorBase}-bad.exe`, mimeType: '', buffer: Buffer.from('not a PDF') },
+    ];
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.sort()).toEqual(['done', 'failed']);
+    }).toPass({ timeout: 15_000 });
+  });
+
+  test('a single-file upload still shows the full state progression through to done', async ({ page, context }) => {
+    await signInViaCookie(context);
+    const vendor = `Batch_SingleProgression_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', {
+      name: `${vendor}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(vendor, 'INV-SINGLEPROG', '10.00')),
+    });
+    await page.getByTestId('upload-submit').click();
+
+    await expect(page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]')).toHaveText('done', {
+      timeout: 15_000,
+    });
+  });
+
+  // ENH-001 Task 2.3, Design Gate Finding 3.
+  test('click-through is absent on a done row while any other row in the same batch is still non-terminal', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ClickGate_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 3 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-GATE-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // Catch the moment file 0 is done but the batch overall is not — its row in the
+    // main uploaded-documents table must not show a click-through link yet.
+    await expect(async () => {
+      const res = await page.request.get('/api/documents');
+      const body = await res.json();
+      const doc0 = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-0.pdf`);
+      expect(doc0, 'file 0 has registered').toBeTruthy();
+      expect(doc0.status_badge.label, 'file 0 has finished extracting').toBe('Extracted');
+
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done'), 'the batch as a whole is not yet fully terminal').toBe(false);
+
+      await expect(page.getByTestId(`view-extracted-lines-${doc0.document_id}`)).toHaveCount(0);
+    }).toPass({ timeout: 10_000 });
+  });
+
+  test('click-through becomes visible on all done rows once the whole batch reaches a terminal state', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ClickReady_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 2 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-READY-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done')).toBe(true);
+    }).toPass({ timeout: 30_000 });
+
+    // Checked on the SAME live page, not after a reload — navigating away would
+    // reset batchRows to empty regardless of whether the batch actually finished,
+    // which would make this assertion pass trivially without proving anything.
+    const res = await page.request.get('/api/documents');
+    const body = await res.json();
+    for (let i = 0; i < 2; i++) {
+      const doc = body.documents.find((d: { original_filename: string | null }) => d.original_filename === `${vendorBase}-${i}.pdf`);
+      await expect(page.getByTestId(`view-extracted-lines-${doc.document_id}`)).toBeVisible();
+    }
+  });
+
+  // ENH-001 Task 2.3, Design Gate Finding 3 — challenge agent Finding 3: the gate is
+  // a single table-wide boolean (batchInProgress), not scoped to only the current
+  // batch's own rows — an already-completed, wholly UNRELATED document's
+  // click-through must also disappear while a new batch runs, and reappear once it
+  // finishes. Confirms the suppression isn't accidentally per-row.
+  test('an unrelated, already-completed document also loses its click-through while a new batch runs', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+
+    // An older, fully-extracted, unrelated document — uploaded and extracted BEFORE
+    // the new batch even starts.
+    const oldVendor = `Batch_Unrelated_Old_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const oldRes = await page.request.post('/api/documents', {
+      multipart: {
+        file: { name: `${oldVendor}.pdf`, mimeType: 'application/pdf', buffer: makeTestPdf(statementText(oldVendor, 'INV-OLD', '10.00')) },
+        legalEntityId: 'vive-holdings',
+      },
+    });
+    const oldDocumentId = (await oldRes.json()).document.document_id as string;
+    await page.request.post(`/api/documents/${oldDocumentId}/extract`);
+
+    await page.goto('/upload');
+    await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toBeVisible();
+
+    const vendorBase = `Batch_Unrelated_New_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 2 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-UNRELATED-${i}`, '10.00')),
+    }));
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // While the new (unrelated) batch is non-terminal, the OLD document's
+    // click-through must also be hidden — not just the new batch's own rows.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done'), 'the new batch is not yet fully terminal').toBe(false);
+      await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toHaveCount(0);
+    }).toPass({ timeout: 10_000 });
+
+    // Once the new batch finishes, the old document's click-through reappears.
+    await expect(async () => {
+      const rows = page.getByTestId('batch-progress-list').locator('[data-testid^="batch-row-state-"]');
+      const states = await rows.allTextContents();
+      expect(states.every((s) => s === 'done')).toBe(true);
+    }).toPass({ timeout: 30_000 });
+    await expect(page.getByTestId(`view-extracted-lines-${oldDocumentId}`)).toBeVisible();
+  });
+
+  // ENH-001 Task 2.4: running success-only toast counter.
+  test('a multi-file batch shows a single running success counter toast, not one toast per file', async ({
+    page,
+    context,
+  }) => {
+    // 5 real sequential register+extract cycles can exceed Playwright's own 30s
+    // default per-test timeout (a pre-existing gap in this file — every other
+    // multi-file test's inner toPass() timeout is silently capped by that same
+    // default; this test's own declared 30_000/60_000 need the room to mean anything).
+    test.setTimeout(120_000);
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ToastCounter_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 5 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-TOASTCOUNT-${i}`, '10.00')),
+    }));
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // Catch a non-final count — proves the toast updates progressively (dismiss then
+    // re-add) rather than only ever appearing once at the very end. Never more than
+    // one success toast on screen at a time, at any sampled instant. Matched with no
+    // end anchor: the toast's own textContent also includes its dismiss button's "×".
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count(), 'exactly one running toast, never stacked').toBe(1);
+      const text = await toasts.first().textContent();
+      expect(text).toMatch(/^[1-4]\/5 uploaded/);
+    }).toPass({ timeout: 30_000 });
+
+    // Batch completes — still exactly one toast, now showing the final count.
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count()).toBe(1);
+      expect(await toasts.first().textContent()).toMatch(/^5\/5 uploaded/);
+    }).toPass({ timeout: 60_000 });
+  });
+
+  test('registration failures do not advance or appear in the batch toast counter', async ({ page, context }) => {
+    // 7 real sequential register+extract cycles — same 30s-default-timeout concern
+    // as the 5-file test above.
+    test.setTimeout(120_000);
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ToastFail_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    // Bad files first (fail registration near-instantly) so the counter reaches its
+    // final value ("7/10") on the very last file in the batch, rather than needing to
+    // be caught mid-batch several files earlier.
+    const badFiles = Array.from({ length: 3 }, (_, i) => ({
+      name: `${vendorBase}-bad-${i}.exe`,
+      mimeType: '',
+      buffer: Buffer.from(`definitely not a PDF ${i}`),
+    }));
+    const goodFiles = Array.from({ length: 7 }, (_, i) => ({
+      name: `${vendorBase}-good-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_good_${i}`, `INV-TOASTFAIL-${i}`, '10.00')),
+    }));
+    const batch = [...badFiles, ...goodFiles];
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // 7 real sequential extractions — generous timeout matching this suite's existing
+    // tolerance for live multi-file batches (e.g. the 5-file test above allows 9s/file).
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count()).toBe(1);
+      expect(await toasts.first().textContent(), 'not 10/10 and not 7/7 — N stays the full batch size').toMatch(
+        /^7\/10 uploaded/
+      );
+    }).toPass({ timeout: 90_000 });
+  });
+
+  // ENH-001 Task 2.4, challenge agent Finding 1: an unsuppressed running toast would
+  // hit its own default 5s auto-dismiss mid-batch (a real per-file cycle, live
+  // Claude, easily exceeds 5s) and flicker off — defeating the point of a single
+  // PERSISTENT running counter. Artificially delays one file's extraction well past
+  // 5s to prove the counter toast survives, rather than vanishing and only
+  // reappearing on the next success.
+  test('the running counter toast survives past its own 5s auto-dismiss while a file is still mid-batch', async ({
+    page,
+    context,
+  }) => {
+    await signInViaCookie(context);
+    const vendorBase = `Batch_ToastPersist_Vendor_${crypto.randomUUID().slice(0, 8)}`;
+    const batch = Array.from({ length: 2 }, (_, i) => ({
+      name: `${vendorBase}-${i}.pdf`,
+      mimeType: 'application/pdf',
+      buffer: makeTestPdf(statementText(`${vendorBase}_${i}`, `INV-PERSIST-${i}`, '10.00')),
+    }));
+
+    let delayed = false;
+    await page.route('**/api/documents/*/extract', async (route) => {
+      if (!delayed) {
+        delayed = true;
+        await new Promise((resolve) => setTimeout(resolve, 6000));
+      }
+      await route.continue();
+    });
+
+    await page.goto('/upload');
+    await page.setInputFiles('#statement-file', batch);
+    await page.getByTestId('upload-submit').click();
+
+    // File 1 registers fast (registration itself isn't delayed) — counter reaches
+    // 1/2 well before its own extraction (delayed 6s) resolves.
+    await expect(async () => {
+      const toasts = page.getByTestId('toast-success');
+      expect(await toasts.count()).toBe(1);
+      expect(await toasts.first().textContent()).toMatch(/^1\/2 uploaded/);
+    }).toPass({ timeout: 10_000 });
+
+    // Past the toast's own would-be 5s auto-dismiss, file 1's delayed extraction is
+    // still in flight (file 2 hasn't even started registering yet, sequential
+    // batching) — the SAME "1/2" toast must still be showing, not gone.
+    await page.waitForTimeout(5500);
+    await expect(page.getByTestId('toast-success')).toHaveCount(1);
+    await expect(page.getByTestId('toast-success').first()).toContainText('1/2 uploaded');
+
+    await page.unroute('**/api/documents/*/extract');
+  });
 });

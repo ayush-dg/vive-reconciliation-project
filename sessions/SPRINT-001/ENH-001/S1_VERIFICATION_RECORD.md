@@ -398,6 +398,7 @@ interface/contract change. No new touch point.
 | Artifact | Field | Change |
 |---|---|---|
 | MODULE_CONTRACTS.md | M-068/M-070 description | No change — timestamp display formatting is not part of the documented contract |
+| RISK_REGISTER.md | No existing entry | **Found at Phase 8 BCE Gap Detection:** the challenge agent's own unverified assumption for this task — "deployment Node build has full ICU (`Asia/Kolkata` timezone data) — not verified against the actual Azure App Service runtime, only local/dev" — is a real, named production risk (IST display could silently degrade to UTC or throw on a runtime lacking full ICU data), explicitly flagged at the time as "a deployment-environment risk outside what a Playwright test against the dev server can verify" but never promoted to a registered risk. To be added in `ENH-001_BCE_IMPACT.md` at Phase 8 close-out. |
 
 ### Verification Verdict
 [x] All planned cases passed
