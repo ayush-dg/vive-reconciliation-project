@@ -55,7 +55,12 @@ function registerTestDoc(text, legalEntityId = 'entity-1') {
   check('TC-1: second attempt is attempt_no=2', attempts[1].attempt_no === 2);
 
   const status = computeDocumentStatus(documentId);
-  check('TC-1: document proceeds to matching-eligible (Processing badge, not Failed/Retrying)', status.badge === 'Processing');
+  // DRIFT-001 fix (2026-09-06, SPRINT-001 close-out): 'Extracted' is the correct terminal
+  // badge for a successful extraction awaiting Reconcile (added 2026-08-31, distinct from
+  // 'Processing', per documentStatus.ts's own comment) — this assertion predated that
+  // badge and was never updated, producing a stale false FAIL (see
+  // verification/VERIFICATION_CHECKLIST.md's S7 correction note).
+  check('TC-1: document proceeds to matching-eligible (Extracted badge, not Failed/Retrying)', status.badge === 'Extracted');
 
   const silverRows = db.prepare('SELECT COUNT(*) AS n FROM silver_statement_line WHERE document_id = ?').get(documentId);
   check('TC-1: a silver.statement_line row was produced on the successful 2nd attempt', silverRows.n > 0);
