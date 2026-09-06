@@ -1,9 +1,9 @@
 # SPRINT-001_LOG.md
 
 **Sprint ID:** SPRINT-001
-**Timebox:** 2026-09-03 → [End date — TBD by Sprint Lead]
+**Timebox:** 2026-09-03 → 2026-09-06
 **Sprint Lead:** Vaishali
-**Status:** OPEN
+**Status:** CLOSED
 
 ## Enhancements
 
@@ -149,5 +149,6 @@ regression).
     WARNING FAIL: [x] N/A — clean PASS, no new DRIFT item needed
 [x] REGISTRY.md updated — ENH-001 → COMPLETE, SPRINT-001 → CLOSED (2026-09-06)
 
-**Close-out date:** [PENDING — engineer confirms]
-**Sprint Lead sign-off:** [PENDING — engineer signs]
+
+**Close-out date:** 06-09-2026
+**Sprint Lead sign-off:** Vaishali
