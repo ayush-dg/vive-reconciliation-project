@@ -83,26 +83,36 @@ target: before this sprint's close-out harness re-run (Sprint Close-Out checklis
 ## Sprint Integration Check
 
 **Trigger:** All Phase 8 Part 1 sign-offs complete
-**Date:** —
-**Sprint Lead:** —
+**Date:** 06-09-2026
+**Sprint Lead:** Vaishali
 
 **All Phase 8 Part 1 sign-offs confirmed:**
 
 | ENH ID | Sign-Off Tier | Sign-Off Artifact | Confirmed |
 |---|---|---|---|
-| ENH-001 | [pending SCOPE.md] | — | [ ] Yes |
+| ENH-001 | 2 | `verification/ENH-001_VERIFICATION_CHECKLIST.md` (signed off 06-09-2026) | [x] Yes |
 
 ### Interaction Invariant Identification
 
 **Combined change surface reviewed in CD:** [ ] Yes | [x] Not required (single-enhancement sprint)
 
+**Merge integrity:** Both sessions merged into `feature/pbvi_execution` via clean
+fast-forward (PR #10, PR #11) — no 3-way merge, no conflict resolution, byte-identical
+tree to each session's own tested state. No merge-introduced risk by construction.
+
+**Confirming run against the merged branch** (`feature/pbvi_execution` @ `0d69082`):
+typecheck clean; `upload.spec.ts` + `document-detail.spec.ts` + `home.spec.ts` — 46/46
+pass, single worker (avoids this environment's known dev-server-contention flake under
+full parallel load, documented in `S2_SESSION_LOG.md` Deviations — not a functional
+regression).
+
 ### Outcome
 
-[ ] All invariants PASS — sprint close-out may begin
+[x] All invariants PASS — sprint close-out may begin
 [ ] FAIL — loop re-entered, sprint boundary extended, close-out blocked
 
-**Sprint Lead sign-off:**
-**Date:**
+**Sprint Lead sign-off:** Vaishali
+**Date:** 06-09-2026
 
 ---
 
@@ -112,12 +122,19 @@ target: before this sprint's close-out harness re-run (Sprint Close-Out checklis
 
 **Steps completed:**
 
-[ ] All enhancements merged to sprint branch
-[ ] All ENH-NNN_BCE_IMPACT.md logs signed off — confirmed before BCE refresh begins
-[ ] BCE refresh complete in CC — [N] artifacts updated
-[ ] Conflicts resolved — [N] conflicts identified, all resolved with Sprint Lead judgment
-[ ] ANNOTATION_CHECKLIST.md updated
-[ ] Single sprint close-out commit to discovery/ — commit hash: [hash]
+[x] All enhancements merged to sprint branch
+[x] All ENH-NNN_BCE_IMPACT.md logs signed off — confirmed before BCE refresh begins (ENH-001, 06-09-2026)
+[x] BCE refresh complete in CC — 5 artifacts updated (TOPOLOGY.md, MODULE_CONTRACTS.md,
+    INVARIANT_CATALOGUE.md, RISK_REGISTER.md, ANNOTATION_CHECKLIST.md — matching
+    ENH-001_BCE_IMPACT.md's own AFFECTED list; INTEGRATION_CONTRACTS.md and
+    DOMAIN_MODEL.json correctly left untouched, both NOT AFFECTED). New module M-084
+    (`batchUploadSequencing.ts`) given a full 9-field contract
+    (`components/U37_batchUploadSequencing.md`). One new backlog item added
+    (SPRINT-001-BCE-001 — `SYSTEM_GRAPH.json` node/edge counts now stale, regeneration
+    deferred, flagged not silently skipped).
+[x] Conflicts resolved — 0 conflicts (single-enhancement sprint, only one impact log)
+[x] ANNOTATION_CHECKLIST.md updated — P2-S3-009 resolved; new SPRINT-001-BCE-001 added
+[x] Single sprint close-out commit to discovery/ — commit hash: `0b711ae`
 [ ] CD project files updated — all seven BCE artifacts uploaded
 [ ] HARNESS.sh updated — HARNESS-CANDIDATE commands from all sprint ENH items merged
     (includes DRIFT-001's stale `test_bounded_retry.sh` assertion fix, if DISMISSED)
