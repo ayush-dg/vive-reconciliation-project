@@ -182,6 +182,34 @@ run_check "9.7" "Umbrella verification: all known-vendor extractors reconcile to
   "npx tsx scripts/verify_known_vendor_extractors.mjs"
 
 # ---------------------------------------------------------------------------
+# ENH-001 — UI clarity fixes + multiple PDF upload (SPRINT-001)
+# Task IDs prefixed "ENH1-" to avoid colliding with the numbered build sessions'
+# own Task 2.1-2.4 above (Document intake) - ENH-001 is a separate, later
+# enhancement, not a renumbering of Session 2.
+#
+# Sessions 1 (Tasks 1.1-1.4) and 2 (Tasks 2.3, 2.4) extend EXISTING spec files
+# already covered by the checks above - home.spec.ts (6.1), document-detail.spec.ts
+# (6.5), upload.spec.ts (2.1) - not duplicated here as separate entries, since
+# re-running those same commands already exercises ENH-001's additions to those
+# same files.
+# ---------------------------------------------------------------------------
+
+run_check "ENH1-2.1" "Extraction crash-recovery (Silver-normalization failure + exhausted recovery)" \
+  "./scripts/test_extraction_crash_recovery.sh"
+
+run_check "ENH1-2.2" "Sequential batch upload (no two extractions in flight simultaneously)" \
+  "./scripts/test_batch_upload_sequencing.sh"
+
+run_check "ENH1-toast" "Toast store (M-009) regression - zero-diff confirmed separately via git, this just re-verifies the store's own behavior" \
+  "npm run test:toast"
+
+# Two post-sign-off hotfixes (H1/H2, sessions/SPRINT-001/ENH-001/S2_SESSION_LOG.md
+# "Post-Sign-Off Hotfixes") are covered by the SAME existing document-detail.spec.ts
+# entry above (6.5) - no separate entry needed, H1 has no dedicated script (its
+# effect on the live-Claude path was never confirmed, per that section's own
+# honest note - not something a portable regression check can exercise).
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

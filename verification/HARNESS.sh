@@ -129,6 +129,35 @@ run_assertion "G3" "CRITICAL" "./scripts/test_ai_residual_matching.sh"
 run_assertion "G4" "CRITICAL" "./scripts/test_document_registration.sh"
 
 # =============================================================================
+# G5 — Single active processing owner (= Claude.md's G5). First harness assertion
+# for this invariant — added at SPRINT-001 close-out (2026-09-06), ENH-001 Task
+# 2.1's crash-recovery fix extended G5's existing enforcement (a finally-block
+# equivalent status reset around the unchanged lock guard) and is the first task
+# to give it dedicated harness coverage.
+# Severity:         CRITICAL
+# Expected outcome: scripts/test_extraction_crash_recovery.sh exits 0 — the
+#                    atomic guard rejects a genuinely-processing document
+#                    unchanged (TC-5), AND a recoverable/exhausted failure
+#                    resets status back to 'registered' rather than leaving it
+#                    permanently stuck (TC-4, TC-6, TC-7).
+# Source: ENH-001 Task 2.1 (SPRINT-001)
+# =============================================================================
+run_assertion "G5" "CRITICAL" "./scripts/test_extraction_crash_recovery.sh"
+
+# =============================================================================
+# G4 (re-asserted, batch-upload context) — sequential batch processing must not
+# bypass the existing content-hash dedup path (registerDocument()'s race-tolerant
+# catch block, relied on unchanged).
+# Severity:         CRITICAL
+# Expected outcome: scripts/test_batch_upload_sequencing.sh exits 0 — no two
+#                    extractions in flight simultaneously (the acceptance
+#                    criterion this task exists to guarantee), and a duplicate
+#                    hit within one batch is skipped, not double-registered.
+# Source: ENH-001 Task 2.2 (SPRINT-001)
+# =============================================================================
+run_assertion "G4" "CRITICAL" "./scripts/test_batch_upload_sequencing.sh"
+
+# =============================================================================
 # S6 — Normalization version traceability.
 # Severity:         WARNING
 # Expected outcome: scripts/test_silver_normalization.sh exits 0.
