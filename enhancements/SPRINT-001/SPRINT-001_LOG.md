@@ -135,14 +135,19 @@ regression).
 [x] Conflicts resolved — 0 conflicts (single-enhancement sprint, only one impact log)
 [x] ANNOTATION_CHECKLIST.md updated — P2-S3-009 resolved; new SPRINT-001-BCE-001 added
 [x] Single sprint close-out commit to discovery/ — commit hash: `0b711ae`
-[ ] CD project files updated — all seven BCE artifacts uploaded
-[ ] HARNESS.sh updated — HARNESS-CANDIDATE commands from all sprint ENH items merged
-    (includes DRIFT-001's stale `test_bounded_retry.sh` assertion fix, if DISMISSED)
-[ ] REGRESSION_SUITE.sh updated — REGRESSION-RELEVANT portable commands from all sprint ENH items merged
-[ ] Post-close-out harness run complete
-    Result: [ ] PASS — all assertions hold | [ ] CRITICAL FAIL — close-out blocked | [ ] WARNING FAIL only
-    WARNING FAIL: [ ] New DRIFT item(s) created for next sprint — [DRIFT-NNN list or N/A]
-[ ] REGISTRY.md updated — all enhancements COMPLETE, sprint status CLOSED
+[x] CD project files updated — all seven BCE artifacts uploaded (engineer confirmed)
+[x] HARNESS.sh updated — HARNESS-CANDIDATE commands from ENH-001 merged (G5's first-ever
+    harness assertion via Task 2.1's `test_extraction_crash_recovery.sh`; G4 re-asserted
+    in batch context via Task 2.2's `test_batch_upload_sequencing.sh`). DRIFT-001's stale
+    `test_bounded_retry.mjs:58` assertion fixed (commit `5fe7b54`) before this update.
+[x] REGRESSION_SUITE.sh updated — new ENH1-2.1/ENH1-2.2/ENH1-toast entries (commit `7027e56`)
+[x] Post-close-out harness run complete
+    Result: [x] PASS — all assertions hold | [ ] CRITICAL FAIL — close-out blocked | [ ] WARNING FAIL only
+    12/12 run, 0 failed, 5 NOT_RUN (pre-existing non-portable/missing-script, unrelated to
+    this sprint) — against a fully reset local DB (including `extracted_vendor_registry`)
+    to eliminate this session's own accumulated test-fixture pollution from the signal.
+    WARNING FAIL: [x] N/A — clean PASS, no new DRIFT item needed
+[x] REGISTRY.md updated — ENH-001 → COMPLETE, SPRINT-001 → CLOSED (2026-09-06)
 
-**Close-out date:** [date]
-**Sprint Lead sign-off:** [name]
+**Close-out date:** [PENDING — engineer confirms]
+**Sprint Lead sign-off:** [PENDING — engineer signs]
