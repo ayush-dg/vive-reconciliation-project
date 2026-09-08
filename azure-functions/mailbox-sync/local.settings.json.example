@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "<storage account connection string>",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_TENANT_ID": "<graph app tenant id>",
+    "AZURE_CLIENT_ID": "<graph app client id>",
+    "AZURE_CLIENT_SECRET": "<graph app client secret>",
+    "TARGET_MAILBOX": "ai_vendor_statements@vivecollision.com",
+    "MAILBOX_CONTAINER": "mailbox",
+    "WATERMARK_BLOB_PATH": "mailbox/_state/watermark.json"
+  }
+}

@@ -42,6 +42,7 @@
     <div class="nav-group-label">Workspace</div>
     <a href="/" class="nav-item {{ 'active' if active_page == 'home' }}"><svg class="icon"><use href="#i-home"/></svg> Home</a>
     <a href="/upload" class="nav-item {{ 'active' if active_page == 'upload' }}"><svg class="icon"><use href="#i-upload"/></svg> Upload PDF</a>
+    <a href="/mailbox-sync" class="nav-item {{ 'active' if active_page == 'mailbox_sync' }}"><svg class="icon"><use href="#i-download"/></svg> Sync Outlook</a>
     <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
       {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
     </a>
