@@ -279,3 +279,125 @@ def write_bronze_fabric(invoices: list, schema_result: dict, statement_id: str,
             vendor_id, statement_id,
         )
         return 0
+
+
+def copy_bronze_fabric_for_cache_hit(cached_statement_id: str, new_statement_id: str,
+                                      vendor_id: str, version_info: dict = None) -> int:
+    """On a cache hit (see notebooks/01_document_intake.py's run_intake()),
+    reuses the ORIGINAL Fabric Bronze rows already written under
+    cached_statement_id by an earlier real extraction, instead of
+    re-extracting -- reads them back (SELECT is fine on the read-only SQL
+    analytics endpoint; only DML is blocked there, see write_bronze_fabric()'s
+    deltalake-based write), re-stamps statement_id/ingestion_timestamp/
+    version_info, and appends the result under new_statement_id via the
+    same write_deltalake() path write_bronze_fabric() uses -- so this new
+    statement_id gets a real Bronze row set and flows through the existing
+    (already statement_id-generic, already unconditional -- see
+    scripts/run_full_pipeline.py) dbt Silver build / NetSuite matching
+    exactly like a fresh upload.
+
+    Guarded against duplicating: if new_statement_id already has any Fabric
+    Bronze rows (e.g. a retried run_intake() call with an explicit
+    --statement-id), skips the copy entirely rather than appending a second
+    copy on top -- write_deltalake(mode="append") has no upsert semantics,
+    unlike write_to_bronze()'s local DELETE-then-INSERT.
+
+    Does NOT flip any prior version's is_latest_version to 0 -- that's a
+    pre-existing gap in resolve_version_info() (which only updates
+    bronze_vendor_statement_raw/silver_reconciliation_standard/
+    gold_reconciliation_summary, all local/Azure SQL, never Fabric) that
+    already affects every fresh upload today, not just cache hits; fixing
+    it here would only paper over it for cache-hit-copied rows while
+    leaving fresh uploads still broken. Tracked separately, not in scope
+    here.
+
+    Same silent-no-op-on-failure/not-Fabric-configured contract as
+    write_bronze_fabric(). Returns rows copied, 0 if Fabric isn't
+    configured, the source has nothing to copy, new_statement_id already
+    has rows, or the copy failed (all non-fatal to the caller)."""
+    if not _fabric_configured():
+        logger.debug("Fabric not configured -- skipping Fabric Bronze cache-hit copy")
+        return 0
+
+    try:
+        import struct as _struct
+
+        import pandas as pd
+        import pyodbc
+        from deltalake import write_deltalake
+
+        table = _table_name(vendor_id)
+        token = _get_credential().get_token("https://database.windows.net/.default")
+        token_bytes = token.token.encode("utf-16-le")
+        token_struct = _struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
+        conn_str = (
+            "Driver={ODBC Driver 18 for SQL Server};"
+            f"Server={os.environ['FABRIC_SQL_ENDPOINT']},1433;"
+            f"Database={os.environ['FABRIC_LAKEHOUSE_NAME']};"
+            "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+        )
+        conn = pyodbc.connect(conn_str, attrs_before={1256: token_struct})
+        cur = conn.cursor()
+
+        # Duplicate-write guard -- see docstring. new_statement_id is freshly
+        # minted per call in the common case, so this is normally 0; a
+        # nonzero count here means a prior copy (or write_bronze_fabric()
+        # call) for this exact statement_id already succeeded and was
+        # confirmed visible via _wait_for_row_visibility() before returning,
+        # so this check reliably sees it -- see the module's own discussion
+        # of the residual race if that prior wait had instead timed out.
+        cur.execute(f"SELECT COUNT(*) FROM bronze.[{table}] WHERE statement_id = ?", [new_statement_id])
+        if cur.fetchone()[0] > 0:
+            logger.warning(
+                "Fabric Bronze already has rows for statement_id=%s -- skipping "
+                "cache-hit copy to avoid duplicating", new_statement_id,
+            )
+            conn.close()
+            return 0
+
+        cur.execute(f"SELECT * FROM bronze.[{table}] WHERE statement_id = ?", [cached_statement_id])
+        cols = [c[0] for c in cur.description]
+        source_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        conn.close()
+
+        if not source_rows:
+            logger.debug(
+                "No Fabric Bronze rows found under cached_statement_id=%s (vendor_id=%s) -- "
+                "nothing to copy for cache-hit statement_id=%s",
+                cached_statement_id, vendor_id, new_statement_id,
+            )
+            return 0
+
+        version_info = version_info or {
+            "version_number": 1,
+            "previous_statement_id": None,
+            "is_latest_version": 1,
+        }
+        now = datetime.now(timezone.utc)
+        for row in source_rows:
+            row["statement_id"] = new_statement_id
+            row["ingestion_timestamp"] = now
+            row["version_number"] = version_info["version_number"]
+            row["previous_statement_id"] = version_info["previous_statement_id"]
+            row["is_latest_version"] = version_info["is_latest_version"]
+
+        df = pd.DataFrame(source_rows)
+
+        table_uri = _table_uri(vendor_id)
+        write_deltalake(
+            table_uri, df, mode="append", schema_mode="merge",
+            storage_options=_storage_options(),
+        )
+
+        _refresh_sql_endpoint_metadata()
+        _wait_for_row_visibility(vendor_id, new_statement_id, len(source_rows))
+
+        return len(source_rows)
+
+    except Exception:
+        logger.exception(
+            "Fabric Bronze cache-hit copy failed for vendor_id=%s cached_statement_id=%s "
+            "new_statement_id=%s (non-fatal, local Silver normalization is unaffected)",
+            vendor_id, cached_statement_id, new_statement_id,
+        )
+        return 0

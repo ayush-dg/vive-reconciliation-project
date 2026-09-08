@@ -33,8 +33,17 @@ _lookup_cache = None
 
 
 def _normalize(name: str) -> str:
+    """Strips punctuation, uppercases, and sorts words alphabetically --
+    the sort makes matching insensitive to word order, which real
+    extractions vary on for the same vendor (e.g. "Nucar (DCD Automotive
+    Holdings)" on one statement vs "DCD Automotive Holdings / Nucar" on
+    another -- same legal entity, different letterhead phrasing). Doesn't
+    help with genuinely different word sets for the same vendor (e.g. a
+    shortened "Bald Hill Dodge Chrysler" vs the full "Bald Hill Dodge
+    Chrysler Jeep Kia") -- those still need an explicit alias entry."""
     cleaned = re.sub(r"[^A-Za-z0-9 ]", "", name).upper()
-    return re.sub(r"\s+", " ", cleaned).strip()
+    words = re.sub(r"\s+", " ", cleaned).strip().split(" ")
+    return " ".join(sorted(words))
 
 
 def _load_lookup() -> dict:

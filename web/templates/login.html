@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VIVE Reconciliation — Sign in</title>
+<title>VIVE Collision — Sign in</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <style>
   body { display: flex; }
-  .login-view { display: flex; width: 100%; min-height: 100vh; }
+  .login-view { display: flex; width: 100%; min-height: 100vh; background: #FAFEFD; }
 </style>
 </head>
 <body>
@@ -21,8 +21,8 @@
 <div class="login-view">
   <div class="login-panel">
     <div class="login-card">
-      <div class="login-brand-icon">📄</div>
-      <h2>Sign in to VIVE Reconciliation</h2>
+      <div class="vc-mark"><img src="/static/img/logo-full.png" alt="VIVE Collision"></div>
+      <h2>Sign in to VIVE Collision</h2>
       <p class="sub">Use your VIVE Collision work account.</p>
       {% if error %}
       <div class="login-error">{{ error }}</div>
@@ -44,7 +44,6 @@
         Sign in with company SSO
       </button>
       <a class="login-alt-link" href="#" onclick="return false">Don't have access yet? Contact IT</a>
-      <div class="login-foot">VIVE Collision · Insight Factory · Confidential</div>
     </div>
   </div>
 </div>

@@ -40,10 +40,14 @@ BULK_APPROVE_THRESHOLD = 0.99
 
 @router.get("/exceptions")
 def exceptions_vendors(request: Request, user: str = Depends(require_login)):
+    # get_vendor_summaries() already attaches "aging" per vendor via a
+    # batched query (see queries.py's _attach_aging_summaries()) -- this
+    # used to call get_exception_aging_summary() once per vendor here
+    # instead, one more Fabric round-trip per vendor on top of the ones
+    # inside get_vendor_summaries() itself. See 2026-09-02 investigation.
     vendors = queries.get_vendor_summaries()
     for v in vendors:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
-        v["aging"] = queries.get_exception_aging_summary(v["vendor_name"])
 
     vendors_with_ex = [v for v in vendors if v["exception_count"] > 0]
     total_open = sum(v["exception_count"] for v in vendors_with_ex)

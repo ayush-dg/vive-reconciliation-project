@@ -1,4 +1,5 @@
 pdfplumber>=0.11.0
+python-dateutil>=2.9.0  # src/extraction/python_library/adapter.py's _normalize_date() catch-all for date formats not covered by its explicit format attempts -- was an undeclared transitive dependency; explicit now since production code imports it directly
 pymupdf>=1.24.0  # fitz -- used by src/extraction/python_library/extract_ksi.py's OCR vendor-detection path
 python-dotenv>=1.0.0
 anthropic==0.125.0
@@ -9,9 +10,36 @@ pytesseract==0.3.13
 pdf2image==1.17.0
 pypdf>=6.0.0
 azure-storage-blob>=12.19.0
-azure-identity>=1.19.0  # ClientSecretCredential/AzureCliCredential for Fabric auth (src/lakehouse/connection.py) -- was previously an undeclared transitive dep
+azure-identity>=1.19.0  # required by src/lakehouse/connection.py's get_fabric_connection() -- was an undeclared transitive dependency; explicit now since production's real config exercises this code path
 deltalake>=1.6.0  # Bronze writes to per-vendor Fabric Lakehouse Delta tables
+pandas>=2.0.0  # src/lakehouse/fabric_bronze.py's write_bronze_fabric() builds a DataFrame
+               # before handing it to write_deltalake() -- was an undeclared transitive
+               # dependency (deltalake itself only requires arro3-core/deprecated, not
+               # pandas), so every Fabric Bronze write failed with ModuleNotFoundError in
+               # any environment installed strictly from this file (confirmed: production's
+               # actual container). Silent because write_bronze_fabric()'s own except
+               # Exception: swallows it (by design, non-fatal to the caller) and
+               # web/worker.py's subprocess.run(capture_output=True) then swallows that
+               # logged exception too -- so it never surfaced in container logs.
+pyarrow>=14.0.0  # write_deltalake() converts the pandas DataFrame via pandas' Arrow C
+                 # Stream interface, which pandas only supports if pyarrow>=14.0.0 is
+                 # importable (see pandas.compat._optional's version floor) -- same
+                 # undeclared-transitive-dependency gap as pandas above, same failure mode.
 pyodbc>=5.0.0
+dbt-core==1.12.3   # Bronze -> Silver normalization (dbt/) run by
+                   # src/lakehouse/fabric_dbt_runner.py's run_dbt_silver_build() -- was
+                   # kept in a separate dbt/requirements-dbt.txt out of a theoretical
+                   # concern about click/jinja2/requests/protobuf version collisions with
+                   # the main app. Verified 2026-09-01 via a clean-venv
+                   # `pip install --dry-run -r requirements.txt -r dbt/requirements-dbt.txt`:
+                   # no actual conflict -- dbt-core/dbt-fabric resolve cleanly alongside
+                   # every existing pin here. Never having been installed in the app's own
+                   # image meant run_dbt_silver_build() silently no-op'd on every single
+                   # job (dbt executable not found -> logged warning, swallowed by
+                   # web/worker.py's subprocess.run(capture_output=True), same invisible
+                   # failure pattern as the pandas/pyarrow gap above) -- Bronze never
+                   # reached Silver/matching in production until this was added.
+dbt-fabric==1.11.1  # dbt adapter for the Fabric Warehouse target (dbt/profiles.yml.example)
 pytest==9.1.1
 fastapi>=0.110.0
 uvicorn>=0.27.0

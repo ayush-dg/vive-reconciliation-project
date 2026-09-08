@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}VIVE Reconciliation — Extracted Data{% endblock %}
+{% block title %}VIVE Collision — Extracted Data{% endblock %}
 
 {% block topbar %}
 <div class="topbar">
@@ -12,25 +12,57 @@
 {% endblock %}
 
 {% block content %}
-<div class="section-header">
-  <div class="section-title">Extracted data ({{ rows | length }} rows)</div>
-</div>
 {% if rows %}
-<table class="table">
-  <thead>
-    <tr><th>Invoice</th><th>Charges</th><th>Credits</th><th>Amount due</th></tr>
-  </thead>
-  <tbody>
-    {% for r in rows %}
-    <tr>
-      <td>{{ r.invoice_number or "—" }}</td>
-      <td>{{ r.charges | money if r.charges is not none else "—" }}</td>
-      <td>{{ r.credits | money if r.credits is not none else "—" }}</td>
-      <td>{{ r.amount_due | money if r.amount_due is not none else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+{% if rows.aging_summary_display %}
+<div class="section-header">
+  <div class="section-title">Aging Summary</div>
+</div>
+<div class="detail-view-sub" style="padding-top:0">
+  Statement-level total printed on the vendor's statement — not an individual invoice row.
+</div>
+<div class="field-grid" style="margin-bottom:28px">
+  {% for label, value in rows.aging_summary_display %}
+  <div class="field-box">
+    <div class="fb-label">{{ label }}</div>
+    <div class="fb-value{% if value is none %} muted{% endif %}">{{ value if value is not none else "—" }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+<div class="section-header">
+  <div class="section-title">Extracted Data ({{ rows | length }} rows)</div>
+</div>
+{% if rows.columns %}
+<div class="table-responsive" style="overflow-x:auto">
+  <table class="table">
+    <thead>
+      <tr>
+        {% for col in rows.columns %}
+        <th>{{ col }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        {% for col in rows.columns %}
+        <td>
+          {% if r.raw_columns and col in r.raw_columns and r.raw_columns[col] is not none %}
+          {{ r.raw_columns[col] }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">Full column data not available for this job.</div>
+{% endif %}
+
 {% else %}
 <div class="empty-state">No extracted rows found for this job.</div>
 {% endif %}

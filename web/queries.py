@@ -10,6 +10,7 @@ SQL abstraction). Routers stay thin; this module owns the SQL.
 import hashlib
 import json
 import os
+import re
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -207,16 +208,26 @@ def get_open_exceptions_count() -> int:
     exception_count (see _with_live_exception_counts()) disagree — the
     whole point of both is to describe the same "open exceptions right
     now" state.
-    """
-    rows = execute_query(
-        """
-        SELECT COUNT(*) AS c
-        FROM gold_exceptions ge
-        INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
-        WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
-        """
-    )
-    return rows[0]["c"] or 0 if rows else 0
+
+    Called from sidebar_context() on every page (see web/deps.py) -- wrapped
+    in a broad try/except so a transient DB/connectivity failure here only
+    degrades the sidebar's nav-dot count to 0 instead of taking down every
+    page in the app (same defensive posture as get_pending_review_count()
+    below, added 2026-08-29 after a Fabric auth failure here crashed
+    /exceptions, /upload, and /jobs/history in production)."""
+    try:
+        rows = execute_query(
+            """
+            SELECT COUNT(*) AS c
+            FROM gold_exceptions ge
+            INNER JOIN gold_reconciliation_summary s ON ge.statement_id = s.statement_id
+            WHERE ge.exception_status = 'OPEN' AND s.is_latest_version = 1
+            """
+        )
+        return rows[0]["c"] or 0 if rows else 0
+    except Exception as e:
+        print(f"[queries] get_open_exceptions_count failed, defaulting to 0: {e}")
+        return 0
 
 
 def get_open_recon_exceptions_count() -> int:
@@ -349,30 +360,103 @@ def get_vendor_summaries() -> list:
         latest_by_vendor[row["vendor_name"]] = row  # later (ASC) rows win
     vendors = list(latest_by_vendor.values())
 
-    for vendor in vendors:
+    # Batched (was one recon_query() call per vendor) -- each recon_query()
+    # call is a fresh Fabric round-trip (~4-8s measured, dominated by AAD
+    # auth before fabric_sql.py's credential caching fix), so N per-vendor
+    # calls here directly multiplied the exceptions page's load time by N.
+    # See 2026-09-02 investigation: 4 vendors, ~55s total. Empty-`vendors`
+    # guard below avoids emitting "IN ()", invalid SQL on both SQLite and
+    # T-SQL.
+    if vendors:
+        statement_ids = [v["statement_id"] for v in vendors]
+        placeholders = ", ".join("?" for _ in statement_ids)
         reason_rows = recon_query(
-            """
-            SELECT exception_reason, COUNT(*) AS c
+            f"""
+            SELECT statement_id, exception_reason, COUNT(*) AS c
             FROM silver.recon_exceptions
-            WHERE statement_id = ? AND exception_status = 'OPEN'
-            GROUP BY exception_reason
+            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+            GROUP BY statement_id, exception_reason
             """,
-            [vendor["statement_id"]],
+            statement_ids,
         )
-        vendor["reason_breakdown"] = {
-            REASON_LABELS.get(r["exception_reason"], r["exception_reason"]): r["c"]
-            for r in reason_rows
-        }
-        # Live count (sum of the OPEN breakdown just fetched above) —
-        # replaces the stale exception_count from gold_reconciliation_summary,
-        # which matching writes once from Silver-classified exceptions only
-        # and never updates again. See _live_open_exception_count().
-        vendor["exception_count"] = sum(r["c"] for r in reason_rows)
+        reasons_by_statement = {}
+        for r in reason_rows:
+            reasons_by_statement.setdefault(r["statement_id"], []).append(r)
+
+        for vendor in vendors:
+            rows_for_vendor = reasons_by_statement.get(vendor["statement_id"], [])
+            vendor["reason_breakdown"] = {
+                REASON_LABELS.get(r["exception_reason"], r["exception_reason"]): r["c"]
+                for r in rows_for_vendor
+            }
+            # Live count (sum of the OPEN breakdown just fetched above) —
+            # replaces the stale exception_count from gold_reconciliation_summary,
+            # which matching writes once from Silver-classified exceptions only
+            # and never updates again. See _live_open_exception_count().
+            vendor["exception_count"] = sum(r["c"] for r in rows_for_vendor)
 
     vendors.extend(_get_exceptions_only_vendors())
+    _attach_aging_summaries(vendors)
     for vendor in vendors:
         vendor["vendor_display_name"] = vendor_display_name(vendor["vendor_name"])
     return sorted(vendors, key=lambda v: v["vendor_name"] or "")
+
+
+def _attach_aging_summaries(vendors: list) -> None:
+    """Batched equivalent of calling get_exception_aging_summary(vendor_name)
+    once per vendor (mutates each vendor dict in place, adding "aging") --
+    same 2026-09-02 N+1 fix as the reason_breakdown batching above. Splits
+    vendors into the two kinds get_exception_aging_summary() itself
+    branches on: summary-backed (real statement_id) vs. exceptions-only
+    (no statement_id, keyed by source_file -- see
+    _get_exceptions_only_vendors()). Both batches are single set-based
+    queries regardless of vendor count. get_exception_aging_summary()
+    itself is left unchanged (and still used directly elsewhere/by tests)
+    -- this is purely an alternate, batched path for the vendor-list page."""
+    for vendor in vendors:
+        vendor["aging"] = None
+
+    with_statement = [v for v in vendors if v.get("statement_id")]
+    if with_statement:
+        statement_ids = [v["statement_id"] for v in with_statement]
+        placeholders = ", ".join("?" for _ in statement_ids)
+        aging_rows = recon_query(
+            f"""
+            SELECT statement_id, MIN(date_raised) AS oldest_date_raised
+            FROM silver.recon_exceptions
+            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+            GROUP BY statement_id
+            """,
+            statement_ids,
+        )
+        oldest_by_statement = {r["statement_id"]: r["oldest_date_raised"] for r in aging_rows}
+        for vendor in with_statement:
+            oldest = oldest_by_statement.get(vendor["statement_id"])
+            if oldest:
+                vendor["aging"] = {"oldest_date_raised": oldest, "days_open": _days_since(oldest)}
+
+    exceptions_only = [v for v in vendors if not v.get("statement_id") and v.get("source_file")]
+    if exceptions_only:
+        source_files = [v["source_file"] for v in exceptions_only]
+        placeholders = ", ".join("?" for _ in source_files)
+        aging_rows = recon_query(
+            f"""
+            SELECT ge.source_file, MIN(ge.date_raised) AS oldest_date_raised
+            FROM silver.recon_exceptions ge
+            WHERE ge.source_file IN ({placeholders}) AND ge.exception_status = 'OPEN'
+              AND NOT EXISTS (
+                  SELECT 1 FROM silver.recon_summary s
+                  WHERE s.statement_id = ge.statement_id
+              )
+            GROUP BY ge.source_file
+            """,
+            source_files,
+        )
+        oldest_by_source_file = {r["source_file"]: r["oldest_date_raised"] for r in aging_rows}
+        for vendor in exceptions_only:
+            oldest = oldest_by_source_file.get(vendor["source_file"])
+            if oldest:
+                vendor["aging"] = {"oldest_date_raised": oldest, "days_open": _days_since(oldest)}
 
 
 def _get_exceptions_only_vendors() -> list:
@@ -412,6 +496,7 @@ def _get_exceptions_only_vendors() -> list:
     for source_file, reason_counts in by_source_file.items():
         vendors.append({
             "statement_id": None,
+            "source_file": source_file,
             "vendor_name": _vendor_name_from_source_file(source_file),
             "statement_period": None,
             "total_invoice_count": 0,
@@ -861,12 +946,14 @@ def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str
 # ---------------------------------------------------------------------------
 
 def get_vendor_name_for_statement(statement_id: str):
-    # document_intake_log is cut over to Fabric Warehouse — see
-    # get_fabric_connection() in src/lakehouse/connection.py.
-    # execute_query_fabric() has no dialect translation, so no trailing
-    # LIMIT here (harmless to drop: write_intake_log() DELETEs any existing
-    # row for this statement_id before inserting, so there's at most one).
-    rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure SQL
+    # via execute_query() -- the Fabric SQL Database item this used to read
+    # is unreachable in production right now (FABRIC_CLIENT_ID lacks Read
+    # permission on it). Revert to execute_query_fabric() once that's
+    # granted. No trailing LIMIT here (harmless either way: write_intake_log()
+    # DELETEs any existing row for this statement_id before inserting, so
+    # there's at most one).
+    rows = execute_query(
         "SELECT vendor_name FROM document_intake_log WHERE statement_id = ?",
         [statement_id],
     )
@@ -995,10 +1082,15 @@ def claim_next_pending_job():
 
 def update_job_status(job_id: str, status: str, started_at: str = None,
                        completed_at: str = None, statement_id: str = None,
-                       vendor_name: str = None, error_message: str = None) -> None:
+                       vendor_name: str = None, error_message: str = None,
+                       document_hash: str = None) -> None:
     """Builds the SET clause from whichever fields are relevant to this
     transition — PENDING->PROCESSING only sets started_at; COMPLETED/FAILED
-    also set completed_at plus their own outcome fields."""
+    also set completed_at plus their own outcome fields.
+
+    document_hash (2026-09-03) lets _resolve_bronze_statement_id() find a
+    cache-hit job's real Bronze statement_id without re-reading the
+    original PDF from local disk -- see that function's docstring."""
     sets = ["status = ?"]
     params = [status]
     if started_at is not None:
@@ -1016,6 +1108,9 @@ def update_job_status(job_id: str, status: str, started_at: str = None,
     if error_message is not None:
         sets.append("error_message = ?")
         params.append(error_message)
+    if document_hash is not None:
+        sets.append("document_hash = ?")
+        params.append(document_hash)
     params.append(job_id)
     execute_sql(f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ?", params)
 
@@ -1055,15 +1150,21 @@ def _resolve_bronze_statement_id(job: dict) -> str:
     legitimately have zero Bronze rows even though the file was
     successfully processed.
 
-    Resolves this the same way run_intake() itself would on a fresh
-    upload of this file: re-hash job["pdf_path"] (uploads are saved
-    permanently to SAMPLE_DATA_DIR and never cleaned up -- see
-    web/routers/upload.py -- so the file reliably still exists) and look
-    up extraction_cache for the most recent successful (row_count > 0)
+    Resolution order: (1) job["document_hash"] -- stored on the jobs row
+    at completion time since 2026-09-03 (see update_job_status()), the
+    same hash run_intake() computes unconditionally before its cache
+    check, so this needs no disk access at all; (2) for jobs that predate
+    that column, fall back to re-hashing job["pdf_path"] the same way
+    run_intake() itself would on a fresh upload -- but uploads are NOT
+    guaranteed to still be on local disk (WEBSITES_ENABLE_APP_SERVICE_STORAGE
+    is false in production, so local disk is wiped on every container
+    restart), so this fallback is best-effort only, kept for any future
+    edge case rather than relied on. Either way, once a hash is found,
+    look up extraction_cache for the most recent successful (row_count > 0)
     entry for that hash, mirroring notebooks/01_document_intake.py's
     check_cache() query exactly. Falls back to job["statement_id"]
-    unchanged if the file is missing or no cache entry is found -- a
-    safe degradation (an empty/short result) rather than an error."""
+    unchanged if no hash or no cache entry can be found -- a safe
+    degradation (an empty/short result) rather than an error."""
     statement_id = job["statement_id"]
 
     direct_count = execute_query(
@@ -1073,17 +1174,22 @@ def _resolve_bronze_statement_id(job: dict) -> str:
     if direct_count and direct_count[0]["c"] > 0:
         return statement_id
 
-    pdf_path = job.get("pdf_path")
-    if not pdf_path or not os.path.exists(pdf_path):
-        return statement_id
+    document_hash = job.get("document_hash")
 
-    try:
-        with open(pdf_path, "rb") as f:
-            document_hash = hashlib.sha256(f.read()).hexdigest()
-    except OSError:
-        return statement_id
+    if not document_hash:
+        pdf_path = job.get("pdf_path")
+        if not pdf_path or not os.path.exists(pdf_path):
+            return statement_id
+        try:
+            with open(pdf_path, "rb") as f:
+                document_hash = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            return statement_id
 
-    cached_rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): extraction_cache pointed back at Azure SQL --
+    # see get_vendor_name_for_statement()'s comment above for why. Revert
+    # to execute_query_fabric() once the Fabric permission issue is resolved.
+    cached_rows = execute_query(
         """
         SELECT statement_id, ingestion_timestamp FROM extraction_cache
         WHERE document_hash = ? AND row_count > 0
@@ -1118,6 +1224,46 @@ def get_silver_row_count(statement_id: str) -> int:
     return rows[0]["c"] or 0 if rows else 0
 
 
+def _prettify_aging_label(key: str) -> str:
+    """"aging_over_30" -> "Over 30 Days", "aging_31_60" -> "31-60 Days",
+    "aging_pay_this_amount" -> "Pay This Amount" -- generic, not a lookup
+    table of specific field names, so a future vendor's own aging_* keys
+    get a reasonable label automatically instead of falling back to the
+    raw key. Never changes the underlying value, purely cosmetic."""
+    label = key[len("aging_"):] if key.startswith("aging_") else key
+    label = re.sub(r"(\d+)_(\d+)", r"\1-\2", label)  # "31_60" -> "31-60"
+    label = label.replace("_", " ").strip().title()
+    if re.fullmatch(r"(Over )?[\d\-]+", label):
+        label += " Days"
+    return label
+
+
+class _RowsWithColumns(list):
+    """A plain list of row dicts, with the ordered union of every row's
+    raw_columns keys attached as `.columns` -- lets extracted_data.html do
+    `{% for r in rows %}` exactly as before (this IS the rows list) while
+    also reading `rows.columns` for the flat full-data table's header row,
+    without jobs.py needing to change how it builds extracted_data.html's
+    context (it just does `"rows": queries.get_extracted_rows_for_job(...)`
+    today, unchanged).
+
+    `.aging_summary` is the same idea for document_intake_log's
+    raw_aging_summary (see get_extracted_rows_for_job()) -- a dict, empty
+    when this statement has none, so the template can do a plain
+    `{% if rows.aging_summary %}` with no separate context key needed.
+    `.aging_summary_display` is the same data as a (label, value) list,
+    in printed order, with keys run through _prettify_aging_label() for
+    the template to render directly without needing its own logic."""
+
+    def __init__(self, rows, columns, aging_summary=None):
+        super().__init__(rows)
+        self.columns = columns
+        self.aging_summary = aging_summary or {}
+        self.aging_summary_display = [
+            (_prettify_aging_label(k), v) for k, v in self.aging_summary.items()
+        ]
+
+
 def get_extracted_rows_for_job(job_id: str) -> list:
     """The true raw extraction for Job History's "View extracted data"
     link, read directly from bronze_vendor_statement_raw -- every row and
@@ -1128,26 +1274,123 @@ def get_extracted_rows_for_job(job_id: str) -> list:
     different, earlier statement_id -- see _resolve_bronze_statement_id()).
 
     Column names are kept as invoice_number/charges/credits/amount_due
-    (aliased from Bronze's raw_-prefixed columns) so extracted_data.html
-    doesn't need to change."""
+    (aliased from Bronze's raw_-prefixed columns) so extracted_data.html's
+    existing 4-column summary table doesn't need to change.
+
+    raw_ai_response (the AI-extracted row's full as-printed columns_found
+    dict -- see ClaudeSonnetClient._row_to_invoice()'s "_raw_row" -- null
+    for python-library/pdfplumber rows, which never produce one, and for
+    jobs run before this column started being saved) is parsed into
+    raw_columns here so extracted_data.html can render it without also
+    needing to import json.
+
+    Also pulls document_intake_log.raw_aging_summary for the same
+    statement_id -- a statement-level (not per-invoice) JSON blob of
+    printed aging bucket totals, populated only for vendors whose
+    extractor found one (see extract_wilberts.py's / extract_quirk.py's
+    parse_aging_summary() and adapter.py's generic "aging_"-prefix
+    pass-through). NULL/absent for every other vendor -- never merged
+    into the per-invoice rows (INV-03).
+
+    Returns a _RowsWithColumns: same list of row dicts as before, plus a
+    `.columns` attribute -- the ordered union of every row's raw_columns
+    keys (first-seen order), i.e. the real printed header names for this
+    job's flat full-data table. Sourced from raw_ai_response when present
+    (AI-routed vendors); falls back to the dedicated Bronze columns
+    (charges/credits/amount_due/invoice_number/invoice_date/due_date/
+    ro_number/po_number/work_order_number/description, plus Keystone's 4
+    ledger columns) when it isn't (every python-library/pdfplumber
+    vendor). Only genuinely empty if a job predates both -- a job run
+    before raw_ai_response started being saved AND before this fallback
+    existed; extracted_data.html's "not available" note is now that rare
+    case, not the default for pdfplumber vendors. Also a `.aging_summary`
+    attribute -- a dict, empty when this statement has none."""
     job = get_job_by_id(job_id)
     if not job or not job.get("statement_id"):
-        return []
+        return _RowsWithColumns([], [])
     statement_id = _resolve_bronze_statement_id(job)
 
-    return execute_query(
+    rows = execute_query(
         """
         SELECT
             raw_invoice_number AS invoice_number,
             raw_charges AS charges,
             raw_credits AS credits,
-            raw_amount_due AS amount_due
+            raw_amount_due AS amount_due,
+            raw_ai_response,
+            raw_invoice_date, raw_due_date, raw_ro_number, raw_po_number,
+            raw_work_order_number, raw_description,
+            raw_balance_forward, raw_period_activity, raw_credit_applied, raw_payment_applied
         FROM bronze_vendor_statement_raw
         WHERE statement_id = ?
         ORDER BY page_number, row_number
         """,
         [statement_id],
     )
+
+    columns = []
+    seen = set()
+    for row in rows:
+        raw_response = row.get("raw_ai_response")
+        try:
+            raw_columns = json.loads(raw_response) if raw_response else None
+        except (TypeError, ValueError):
+            raw_columns = None
+        row["raw_columns"] = raw_columns
+
+        if raw_columns:
+            for key in raw_columns.keys():
+                if key not in seen:
+                    seen.add(key)
+                    columns.append(key)
+
+    if not columns:
+        # No row in this job has raw_ai_response (every python-library/
+        # pdfplumber vendor, see get_extracted_rows_for_job()'s own
+        # docstring) -- fall back to the dedicated Bronze columns
+        # adapter.py's PythonLibraryExtractionEngine actually populates,
+        # same table format as the AI-sourced one above, just built from
+        # named columns instead of a JSON blob. A label is only added to
+        # `columns` if at least one row has a real value for it, so e.g.
+        # Keystone's 4 ledger columns don't show up as empty for every
+        # other vendor.
+        columns, seen = [], set()
+        for row in rows:
+            fallback = {
+                "Invoice Number": row.get("invoice_number"),
+                "Invoice Date": row.get("raw_invoice_date"),
+                "Due Date": row.get("raw_due_date"),
+                "Charges": row.get("charges"),
+                "Credits": row.get("credits"),
+                "Amount Due": row.get("amount_due"),
+                "RO Number": row.get("raw_ro_number"),
+                "PO Number": row.get("raw_po_number"),
+                "Work Order Number": row.get("raw_work_order_number"),
+                "Description": row.get("raw_description"),
+                "Balance Forward": row.get("raw_balance_forward"),
+                "Period Activity": row.get("raw_period_activity"),
+                "Credit Applied": row.get("raw_credit_applied"),
+                "Payment Applied": row.get("raw_payment_applied"),
+            }
+            row["raw_columns"] = fallback
+            for key, value in fallback.items():
+                if value is not None and key not in seen:
+                    seen.add(key)
+                    columns.append(key)
+
+    intake_log_rows = execute_query(
+        "SELECT raw_aging_summary FROM document_intake_log WHERE statement_id = ?",
+        [statement_id],
+    )
+    aging_summary = None
+    if intake_log_rows:
+        raw_aging = intake_log_rows[0].get("raw_aging_summary")
+        try:
+            aging_summary = json.loads(raw_aging) if raw_aging else None
+        except (TypeError, ValueError):
+            aging_summary = None
+
+    return _RowsWithColumns(rows, columns, aging_summary)
 
 
 # ---------------------------------------------------------------------------
@@ -1333,12 +1576,13 @@ def get_statement_report(statement_id: str) -> dict:
     )
     summary = summary_rows[0] if summary_rows else None
 
-    # document_intake_log is cut over to Fabric Warehouse — see
-    # get_fabric_connection() in src/lakehouse/connection.py. No trailing
-    # LIMIT (execute_query_fabric() has no dialect translation): harmless
-    # to drop since write_intake_log() DELETEs any existing row for this
-    # statement_id first, so there's at most one anyway.
-    intake_rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure SQL
+    # -- see get_vendor_name_for_statement()'s comment above for why.
+    # Revert to execute_query_fabric() once the Fabric permission issue is
+    # resolved. No trailing LIMIT here (harmless either way: write_intake_log()
+    # DELETEs any existing row for this statement_id first, so there's at
+    # most one anyway).
+    intake_rows = execute_query(
         "SELECT * FROM document_intake_log WHERE statement_id = ?",
         [statement_id],
     )
@@ -1397,18 +1641,37 @@ def _parse_review_row(row: dict) -> dict:
 
 
 def get_pending_review_count() -> int:
-    # validation_document_review_queue is cut over to Fabric Warehouse —
-    # see get_fabric_connection() in src/lakehouse/connection.py.
-    rows = execute_query_fabric(
-        "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
-    )
-    return rows[0]["c"] or 0 if rows else 0
+    # TEMPORARY (2026-08-29): validation_document_review_queue pointed back
+    # at Azure SQL via execute_query() -- the Fabric SQL Database item this
+    # used to read (get_fabric_connection() in src/lakehouse/connection.py)
+    # is unreachable in production right now (FABRIC_CLIENT_ID lacks Read
+    # permission on it). Revert to execute_query_fabric() once that's
+    # granted.
+    #
+    # Called from sidebar_context() on every page (see web/deps.py) --
+    # still wrapped in a broad try/except (kept even after this swap) so
+    # any transient DB connectivity failure here only degrades the
+    # sidebar's nav-dot count to 0 instead of taking down every page in
+    # the app.
+    try:
+        rows = execute_query(
+            "SELECT COUNT(*) AS c FROM validation_document_review_queue WHERE review_status = 'PENDING_REVIEW'"
+        )
+        return rows[0]["c"] or 0 if rows else 0
+    except Exception as e:
+        print(f"[queries] get_pending_review_count failed, defaulting to 0: {e}")
+        return 0
 
 
 def get_review_queue_vendors() -> list:
     """One row per source_file with pending review rows, plus a
-    rejection_category breakdown for that source_file's footer note."""
-    rows = execute_query_fabric(
+    rejection_category breakdown for that source_file's footer note.
+
+    TEMPORARY (2026-08-29): validation_document_review_queue pointed back
+    at Azure SQL -- see get_pending_review_count()'s comment above for why.
+    Revert to execute_query_fabric() once the Fabric permission issue is
+    resolved."""
+    rows = execute_query(
         """
         SELECT source_file, COUNT(*) AS pending_count
         FROM validation_document_review_queue
@@ -1418,7 +1681,7 @@ def get_review_queue_vendors() -> list:
         """
     )
     for row in rows:
-        cat_rows = execute_query_fabric(
+        cat_rows = execute_query(
             """
             SELECT rejection_category, COUNT(*) AS c
             FROM validation_document_review_queue
@@ -1432,7 +1695,8 @@ def get_review_queue_vendors() -> list:
 
 
 def get_review_queue_for_vendor(source_file: str) -> list:
-    rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): see get_pending_review_count()'s comment above.
+    rows = execute_query(
         """
         SELECT * FROM validation_document_review_queue
         WHERE source_file = ? AND review_status = 'PENDING_REVIEW'
@@ -1444,7 +1708,8 @@ def get_review_queue_for_vendor(source_file: str) -> list:
 
 
 def get_review_queue_item(review_id: str):
-    rows = execute_query_fabric(
+    # TEMPORARY (2026-08-29): see get_pending_review_count()'s comment above.
+    rows = execute_query(
         "SELECT * FROM validation_document_review_queue WHERE review_id = ?",
         [review_id],
     )
@@ -1461,16 +1726,23 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
     rejection_category, e.g. MISSING_MANDATORY_FIELD, is genuinely an
     incomplete extraction).
 
-    Only the review-queue UPDATE below is Fabric (see get_review_queue_item()
-    above) — the recon_exceptions INSERT and _recompute_summary_counts()'s
-    recon_summary update stay on Azure SQL via execute_sql(), untouched by
-    validation_document_review_queue's cutover."""
+    TEMPORARY (2026-08-29): the review-queue UPDATE below was
+    execute_sql_fabric() (reading/writing if_vive_recon, the Fabric SQL
+    Database item) -- see get_pending_review_count()'s comment for why
+    it's pointed at Azure SQL via execute_sql() instead right now. Revert
+    once the Fabric permission issue on if_vive_recon is resolved.
+
+    The recon_exceptions INSERT and _recompute_summary_counts()'s
+    silver.recon_summary update (both via recon_sql()) are untouched by
+    that swap -- they target the Fabric Warehouse (if_vive_warehouse), a
+    separate Fabric item from if_vive_recon with its own working
+    credentials, unaffected by the SQLDB permission gap."""
     item = get_review_queue_item(review_id)
     if not item:
         return
     now = datetime.now(timezone.utc).isoformat()
     status = "APPROVED" if action == "approve" else "FLAGGED"
-    execute_sql_fabric(
+    execute_sql(
         """
         UPDATE validation_document_review_queue
         SET review_status = ?, reviewed_by = ?, reviewed_timestamp = ?
