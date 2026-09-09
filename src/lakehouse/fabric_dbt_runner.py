@@ -38,12 +38,28 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DBT_PROJECT_DIR = os.path.join(PROJECT_ROOT, "dbt", "vive_recon")
 DBT_PROFILES_DIR = os.path.join(PROJECT_ROOT, "dbt")
+
+# _regenerate_sources_yml() rewrites one shared file, and `dbt run` reads/
+# writes its own shared compiled-artifacts state under DBT_PROJECT_DIR/target/
+# -- neither is safe for two calls to run_dbt_silver_build() at once. The web
+# app's job worker pool runs several jobs concurrently (see web/worker.py),
+# so a multi-PDF upload landing on more than one worker at the same moment
+# reliably raced here in practice: whichever run's sources.yml got
+# overwritten mid-read, or whose target/ compiled state collided with
+# another's, silently failed its dbt build (confirmed 2026-09-09 -- 2 of 6,
+# then all 6 of a batch failed this way, timing-dependent as a real race
+# always is). One process-wide lock serializes every dbt run instead --
+# each run only takes a few seconds, so losing parallelism here specifically
+# is cheap compared to the alternative of debugging silent, non-deterministic
+# per-statement failures.
+_dbt_run_lock = threading.Lock()
 
 
 def _default_dbt_executable() -> str:
@@ -154,22 +170,23 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
         return False
 
     try:
-        _ensure_local_profile()
-        _regenerate_sources_yml(known_vendor_ids)
-        env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
-        dbt_vars = json.dumps({"statement_id": statement_id, "known_vendor_ids": known_vendor_ids})
-        result = subprocess.run(
-            [
-                dbt_executable, "run",
-                "--project-dir", DBT_PROJECT_DIR,
-                "--vars", dbt_vars,
-            ],
-            cwd=DBT_PROJECT_DIR,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
+        with _dbt_run_lock:
+            _ensure_local_profile()
+            _regenerate_sources_yml(known_vendor_ids)
+            env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
+            dbt_vars = json.dumps({"statement_id": statement_id, "known_vendor_ids": known_vendor_ids})
+            result = subprocess.run(
+                [
+                    dbt_executable, "run",
+                    "--project-dir", DBT_PROJECT_DIR,
+                    "--vars", dbt_vars,
+                ],
+                cwd=DBT_PROJECT_DIR,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
         if result.returncode != 0:
             logger.error(
                 "dbt run failed for statement_id=%s (exit %d):\n%s",
