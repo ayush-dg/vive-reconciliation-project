@@ -355,6 +355,7 @@ COLUMNS = {
     "jobs": [
         ("claim_token", "ALTER TABLE jobs ADD claim_token NVARCHAR(255)"),
         ("batch_id", "ALTER TABLE jobs ADD batch_id NVARCHAR(36)"),
+        ("source_blob_path", "ALTER TABLE jobs ADD source_blob_path NVARCHAR(MAX)"),
     ],
     "bronze_vendor_statement_raw": [
         # Python-library extraction path (see
