@@ -74,6 +74,7 @@ sources:
       - name: bronze_fred_beans_parts_raw
       - name: bronze_gates_gmc___nissan_raw
       - name: bronze_goodwin_s_chevrolet_mazda_raw
+      - name: bronze_goodwins_chevrolet_mazda_raw
       - name: bronze_goodwins_volvo_raw
       - name: bronze_goyette_s_inc_raw
       - name: bronze_goyette_s_inc_prp_ne_raw

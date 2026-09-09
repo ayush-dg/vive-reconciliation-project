@@ -148,7 +148,7 @@
     <div class="sec-label">NetSuite record</div>
     <div class="ns-panel">
       <div class="field-grid" style="margin-bottom:0">
-        <div class="field-box" style="background:var(--navy-tint)"><div class="fb-label">Vendor invoice number</div><div class="fb-value">{{ netsuite_record.custbody_kes_inv_number or netsuite_record.tranid or '—' }}</div></div>
+        <div class="field-box" style="background:var(--navy-tint)"><div class="fb-label">Vendor invoice number</div><div class="fb-value">{{ netsuite_record.tranid or '—' }}</div></div>
         <div class="field-box"><div class="fb-label">Transaction number</div><div class="fb-value">{{ netsuite_record.transactionnumber or '—' }}</div></div>
         <div class="field-box"><div class="fb-label">Transaction date</div><div class="fb-value">{{ netsuite_record.trandate or '—' }}</div></div>
         <div class="field-box"><div class="fb-label">Status</div><div class="fb-value">{{ netsuite_record.status or '—' }}</div></div>
