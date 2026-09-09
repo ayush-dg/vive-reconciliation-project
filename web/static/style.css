@@ -4,9 +4,9 @@
   --bg: #F2F4F6;
   --surface: #FFFFFF;
   --surface-sunk: #EBEEF1;
-  --navy: #132D4A;
-  --navy-2: #1B4A78;
-  --navy-tint: #E8EEF4;
+  --navy: #040B14;
+  --navy-2: #0A73F7;
+  --navy-tint: #EAF2FE;
   --steel: #7C8A98;
   --steel-tint: #F0F2F4;
   --border: #DEE3E8;
@@ -25,18 +25,100 @@
   --info-tint: #E4EEF7;
   --badge-grey: #6A4E9C;
   --badge-grey-tint: #EFE9F8;
+
+  /* border/hover-bg pairs for tinted components (buttons, error/success
+     boxes, why-box) that need a themed edge distinct from the tint fill —
+     kept as separate tokens since dark mode needs different values than
+     just darkening the tint, not literal hex inline in each rule. */
+  --success-border: #BFE3CC;
+  --success-hover-bg: #D9EEE0;
+  --danger-border: #EFC9C6;
+  --danger-hover-bg: #F6DBD8;
+  --warning-border: #F0DBB0;
+  --warning-hover-bg: #F8E7C6;
+  --exception-border: #BFD9FB;
+  --review-border: #E8CE8A;
+
+  /* reconciliation state vocabulary — matched/review/exception/aged. Distinct
+     from success/warning/danger/info above (which stay generic job/pipeline
+     status colors) so each reconciliation state carries exactly one meaning:
+     an open exception is normal work-queue output (blue, = --accent), not a
+     fault; --aged is the only true alarm color. */
+  --matched: #00806B;
+  --matched-tint: #E4F2EF;
+  --review: #B58200;
+  --review-tint: #FBF1DC;
+  --exception: var(--navy-2);
+  --exception-tint: var(--navy-tint);
+  --aged: #C02B0A;
+  --aged-tint: #FBEAE6;
+
   --radius: 10px;
   --radius-sm: 6px;
   --shadow-sm: 0 1px 2px rgba(19,45,74,0.06);
   --shadow-md: 0 4px 16px rgba(19,45,74,0.08);
-  --font-display: 'Barlow Semi Condensed', sans-serif;
+  --font-display: 'Inter', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
 
   /* legacy aliases used by pages not yet re-skinned (batches, users, review-queue, jobs, report/batch detail) */
   --accent: var(--navy-2);
-  --accent-hover: #163C61;
+  --accent-hover: #0060D6;
   --text-secondary: var(--text-muted);
+}
+
+/* Dark mode — follows the OS-level setting only (no in-app toggle). Its own
+   steps re-stepped against the dark ground, not brightened light values.
+   --accent/--exception/--exception-tint/--text-secondary are var()
+   references in :root above, so they follow automatically once --navy-2/
+   --navy-tint/--text-muted are redefined here — no need to repeat them. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #070D16;
+    --surface: #0E1620;
+    --surface-sunk: #141F2C;
+    --navy: #040A12;
+    --navy-2: #4A90F0;
+    --navy-tint: #12233A;
+    --steel: #5A6B82;
+    --steel-tint: #182233;
+    --border: #1E2B3A;
+    --border-light: #17212E;
+    --border-strong: #2C3D51;
+    --text: #E9EEF6;
+    --text-muted: #9AA9BE;
+    --text-faint: #6F7F96;
+    --success: #34A67F;
+    --success-tint: #0F2A20;
+    --warning: #D9A233;
+    --warning-tint: #2E2410;
+    --danger: #E2645C;
+    --danger-tint: #2E1512;
+    --info: #5B9BDE;
+    --info-tint: #16233A;
+    --badge-grey: #A88FD1;
+    --badge-grey-tint: #241E33;
+
+    --success-border: #1F4A3A;
+    --success-hover-bg: #163527;
+    --danger-border: #4A2320;
+    --danger-hover-bg: #3A1B18;
+    --warning-border: #4A3B15;
+    --warning-hover-bg: #3A2E10;
+    --exception-border: #1F3A5C;
+    --review-border: #4A3C15;
+
+    --matched: #229A83;
+    --matched-tint: #0D2621;
+    --review: #AD8A24;
+    --review-tint: #241D0C;
+    --aged: #E0526B;
+    --aged-tint: #2A1218;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.5);
+    --accent-hover: #6BA5F5;
+  }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -73,6 +155,12 @@ svg { display: block; }
 .badge-neutral { background: var(--steel-tint); color: var(--text-muted); }
 .badge-missing { background: var(--steel-tint); color: var(--text-muted); border: 1px dashed var(--border-strong); }
 
+/* reconciliation state badges — hyphenated scheme */
+.badge-matched { background: var(--matched-tint); color: var(--matched); }
+.badge-review { background: var(--review-tint); color: var(--review); }
+.badge-exception { background: var(--exception-tint); color: var(--exception); }
+.badge-aged { background: var(--aged-tint); color: var(--aged); }
+
 /* space-separated scheme — used by not-yet-re-skinned pages (batches, users, review-queue, jobs/report/batch detail) */
 .badge.success { background: var(--success-tint); color: var(--success); }
 .badge.warning { background: var(--warning-tint); color: var(--warning); }
@@ -80,6 +168,12 @@ svg { display: block; }
 .badge.neutral { background: var(--steel-tint); color: var(--text-muted); }
 .badge.grey { background: var(--badge-grey-tint); color: var(--badge-grey); }
 .badge.info { background: var(--info-tint); color: var(--info); }
+
+/* reconciliation state badges — space-separated scheme */
+.badge.matched { background: var(--matched-tint); color: var(--matched); }
+.badge.review { background: var(--review-tint); color: var(--review); }
+.badge.exception { background: var(--exception-tint); color: var(--exception); }
+.badge.aged { background: var(--aged-tint); color: var(--aged); }
 
 /* ================================================================== Buttons */
 
@@ -91,12 +185,12 @@ svg { display: block; }
 .btn:hover { border-color: var(--steel); color: var(--text); background: var(--steel-tint); }
 .btn.btn-primary { width: auto; background: var(--navy-2); color: #fff; border-color: var(--navy-2); font-weight: 500; margin-top: 0; }
 .btn.btn-primary:hover { filter: brightness(1.1); }
-.btn.btn-accept { background: var(--success-tint); color: var(--success); border-color: #BFE3CC; }
-.btn.btn-accept:hover { background: #D9EEE0; }
-.btn.btn-dispute { background: var(--danger-tint); color: var(--danger); border-color: #EFC9C6; }
-.btn.btn-dispute:hover { background: #F6DBD8; }
-.btn.btn-writeoff { background: var(--warning-tint); color: var(--warning); border-color: #F0DBB0; }
-.btn.btn-writeoff:hover { background: #F8E7C6; }
+.btn.btn-accept { background: var(--success-tint); color: var(--success); border-color: var(--success-border); }
+.btn.btn-accept:hover { background: var(--success-hover-bg); }
+.btn.btn-dispute { background: var(--danger-tint); color: var(--danger); border-color: var(--danger-border); }
+.btn.btn-dispute:hover { background: var(--danger-hover-bg); }
+.btn.btn-writeoff { background: var(--warning-tint); color: var(--warning); border-color: var(--warning-border); }
+.btn.btn-writeoff:hover { background: var(--warning-hover-bg); }
 
 /* standalone (single-class) variants used by re-skinned pages */
 .btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: none; border-radius: var(--radius-sm); background: var(--navy-2); color: #fff; width: 100%; padding: 12px; font-size: 14.5px; font-weight: 600; }
@@ -174,15 +268,16 @@ svg { display: block; }
 /* ================================================================== Cards / grid / table */
 
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+/* Rail reserved for the one tile that needs attention — not a per-tile
+   accent. --flagged uses --exception (work to do), not --aged: a healthy
+   count of open exceptions isn't an alarm, just the thing to look at. */
 .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 18px 16px; border-left: 3px solid var(--steel); box-shadow: var(--shadow-sm); }
-.stat-card.accent-success { border-left-color: var(--success); }
-.stat-card.accent-warning { border-left-color: var(--warning); }
-.stat-card.accent-navy { border-left-color: var(--navy-2); }
+.stat-card--flagged { border-left-color: var(--exception); }
 .stat-card .stat-label { font-size: 12.5px; color: var(--text-muted); font-weight: 500; margin-bottom: 8px; }
 .stat-card .stat-num { font-family: var(--font-display); font-size: 32px; font-weight: 700; line-height: 1; letter-spacing: -.01em; }
 .stat-card .stat-sub { font-size: 12px; color: var(--text-faint); margin-top: 7px; }
-.stat-num.success { color: var(--success); }
-.stat-num.warning { color: var(--warning); }
+.stat-num.matched { color: var(--matched); }
+.stat-num.exception { color: var(--exception); }
 
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); margin-bottom: 28px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--border); gap: 12px; }
@@ -202,6 +297,16 @@ thead th, .table th { text-align: left; font-size: 11px; letter-spacing: .07em; 
 tbody td, .table td { padding: 14px 20px; border-bottom: 1px solid var(--border-light); font-size: 14px; vertical-align: middle; }
 tbody tr:last-child td, .table tr:last-child td { border-bottom: none; }
 tbody tr:hover, .table tbody tr:hover td { background: var(--steel-tint); }
+/* Money and count columns — decimals must stack, non-negotiable in an AP tool. */
+.num, td.money, td.count, .stat-value, .mono {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* th.num keeps the uppercase label but drops letter-spacing — trailing
+   tracking after the last character throws off right-alignment against
+   the numbers below it otherwise. */
+th.num { letter-spacing: normal; }
 .mono { font-family: var(--font-mono); font-size: 13.5px; }
 .vendor-cell { display: flex; align-items: center; gap: 10px; }
 .vendor-name { min-width: 0; }
@@ -238,16 +343,16 @@ tbody tr:hover, .table tbody tr:hover td { background: var(--steel-tint); }
 .login-hero p { color: #B9C9D8; font-size: 15.5px; line-height: 1.55; margin: 0 0 34px; }
 .login-stats { display: flex; gap: 30px; flex-wrap: wrap; }
 .login-stat { border-left: 2px solid #2A507A; padding-left: 14px; }
-.login-stat .num { font-family: var(--font-display); font-weight: 700; font-size: 26px; display: block; }
+.login-stat .num { font-family: var(--font-display); font-weight: 700; font-size: 26px; display: block; text-align: left; white-space: normal; }
 .login-stat .lbl { font-size: 12.5px; color: #9FB4C9; margin-top: 2px; }
 
-.login-panel { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; background: #FAFEFD; min-height: 100vh; }
+.login-panel { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px; background: var(--surface); min-height: 100vh; }
 .login-card { width: 100%; max-width: 360px; }
 .login-card .vc-mark { display: block; margin: 0 auto 18px; }
 .login-card .vc-mark img { display: block; width: 150px; height: auto; object-fit: contain; margin: 0 auto; }
 .login-card h2 { font-family: var(--font-display); font-size: 23px; font-weight: 700; margin: 0 0 4px; text-align: center; }
 .login-card .sub { color: var(--text-muted); font-size: 14px; margin: 0 0 28px; text-align: center; }
-.login-error { background: var(--danger-tint); border: 1px solid #EFC9C6; color: var(--danger); font-size: 12.5px; border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 16px; }
+.login-error { background: var(--danger-tint); border: 1px solid var(--danger-border); color: var(--danger); font-size: 12.5px; border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 16px; }
 .form-field { margin-bottom: 16px; }
 .form-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
 .form-field input, .form-field select, .form-field textarea {
@@ -283,9 +388,9 @@ select {
 }
 .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--navy-2); }
 
-.upload-error { background: var(--danger-tint); border: 1px solid #EFC9C6; color: var(--danger); font-size: 12px; border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 20px; }
-.upload-error pre { white-space: pre-wrap; font-size: 11px; color: #8A3530; margin-top: 8px; max-height: 160px; overflow: auto; }
-.upload-success { background: var(--success-tint); border: 1px solid #BFE3CC; color: var(--success); font-size: 12px; border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.upload-error { background: var(--danger-tint); border: 1px solid var(--danger-border); color: var(--danger); font-size: 12px; border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 20px; }
+.upload-error pre { white-space: pre-wrap; font-size: 11px; color: var(--danger); margin-top: 8px; max-height: 160px; overflow: auto; }
+.upload-success { background: var(--success-tint); border: 1px solid var(--success-border); color: var(--success); font-size: 12px; border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* ================================================================== Upload view */
 
@@ -332,8 +437,9 @@ select {
 .vendor-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .vendor-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; border-top: 3px solid var(--steel); display: block; }
 .vendor-card:hover { border-color: var(--border-strong); }
-.vendor-card.has-exceptions, .vendor-card.has-ex { border-top-color: var(--warning); }
-.vendor-card.clean { border-top-color: var(--success); }
+.vendor-card.has-exceptions { border-top-color: var(--exception); }
+.vendor-card.has-ex { border-top-color: var(--review); }
+.vendor-card.clean { border-top-color: var(--matched); }
 .vendor-card-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 18px 14px; gap: 10px; }
 .vendor-card-id { display: flex; gap: 12px; align-items: flex-start; }
 .vendor-badge-lg { width: 40px; height: 40px; border-radius: 8px; background: var(--navy-tint); color: var(--navy-2); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 14px; flex-shrink: 0; }
@@ -342,15 +448,15 @@ select {
 .vendor-card-body { display: grid; grid-template-columns: 1fr 1fr; padding: 0 18px 14px; }
 .vc-metric { padding: 10px 0; }
 .vc-metric + .vc-metric { border-left: 1px solid var(--border); padding-left: 16px; }
-.vc-metric .num { font-family: var(--font-display); font-size: 24px; font-weight: 700; }
+.vc-metric .num { font-family: var(--font-display); font-size: 24px; font-weight: 700; text-align: left; white-space: normal; }
 .vc-metric .lbl { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .aging-line { font-size: 12px; color: var(--text-faint); padding: 0 18px 10px; }
-.aging-line b { color: var(--warning); font-weight: 600; }
-.aging-line.stale b { color: var(--danger); }
+.aging-line b { color: var(--text-muted); font-weight: 600; }
+.aging-line.stale b { color: var(--aged); }
 .vendor-card-foot { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--surface-sunk); border-top: 1px solid var(--border); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
 .breakdown { color: var(--text-muted); }
 .breakdown b { color: var(--text); font-weight: 600; }
-.clean-note { color: var(--success); font-weight: 600; display: flex; align-items: center; gap: 5px; }
+.clean-note { color: var(--matched); font-weight: 600; display: flex; align-items: center; gap: 5px; }
 .clean-note .icon { width: 14px; height: 14px; }
 
 .toggle-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
@@ -381,8 +487,8 @@ select {
 /* ================================================================== Exception detail / review-queue split view */
 
 .detail-layout { display: grid; grid-template-columns: 340px 1fr; gap: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-sm); }
-.detail-list { border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.detail-list-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+.detail-list { background: var(--surface-sunk); border-right: 1px solid var(--border-strong); display: flex; flex-direction: column; }
+.detail-list-head { padding: 22px 18px 12px; border-bottom: 1px solid var(--border-strong); }
 .detail-list-head h3 { font-family: var(--font-display); font-size: 16px; font-weight: 700; margin: 0 0 10px; }
 .filter-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
 .filter-tab { padding: 6px 12px; font-size: 12.5px; font-weight: 600; border-radius: 100px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); }
@@ -416,11 +522,18 @@ select {
 .field-box { background: var(--surface-sunk); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; }
 .field-box .fb-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); font-weight: 600; margin-bottom: 5px; }
 .field-box .fb-value { font-family: var(--font-mono); font-size: 14.5px; font-weight: 600; }
-.field-box .fb-value.danger { color: var(--danger); }
 .field-box .fb-value.muted { color: var(--text-faint); font-family: var(--font-body); font-weight: 500; }
+/* Reason-driven, not a blanket "red = problem" — matches the badge/why-box
+   treatment above. --aged only ever applies via the aging badge elsewhere,
+   never to a value just because it's missing or nonzero. */
+.field-box .fb-value.fb-exception { color: var(--exception); }
+.field-box .fb-value.fb-review { color: var(--review); }
+.field-box .fb-value.fb-grey { color: var(--text-muted); }
 
-.why-box { background: var(--danger-tint); border: 1px solid #EFC9C6; border-radius: var(--radius-sm); padding: 14px 16px; font-size: 13.5px; line-height: 1.55; color: #7A2A26; margin-bottom: 22px; }
-.why-box .why-label { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: var(--danger); margin-bottom: 6px; display: block; }
+.why-box { border-radius: var(--radius-sm); padding: 14px 16px; font-size: 13.5px; line-height: 1.55; margin-bottom: 22px; border: 1px solid transparent; }
+.why-box--exception { background: var(--exception-tint); border-color: var(--exception-border); color: var(--exception); }
+.why-box--review { background: var(--review-tint); border-color: var(--review-border); color: var(--review); }
+.why-box--grey { background: var(--steel-tint); border-color: var(--border-strong); color: var(--text-muted); }
 .note-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 .note-field textarea {
   width: 100%; padding: 11px 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
@@ -457,7 +570,7 @@ select {
 .fv { font-size: 14px; font-weight: 600; }
 .fv.red { color: var(--danger); }
 .fv.green { color: var(--success); }
-.reason { background: var(--danger-tint); border: 1px solid #EFC9C6; border-radius: var(--radius-sm); padding: 12px 14px; font-size: 13px; color: #7A2A26; line-height: 1.6; margin-bottom: 20px; }
+.reason { background: var(--danger-tint); border: 1px solid var(--danger-border); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 13px; color: var(--danger); line-height: 1.6; margin-bottom: 20px; }
 .note-label { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; display: block; }
 .action-bar { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
 .action-bar .btn { padding: 8px 16px; font-size: 13px; font-weight: 500; border-radius: var(--radius-sm); }

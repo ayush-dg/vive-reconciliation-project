@@ -22,22 +22,22 @@
 </div>
 
 <div class="stat-grid">
-  <div class="stat-card accent-navy">
+  <div class="stat-card">
     <div class="stat-label">Total invoices</div>
     <div class="stat-num">{{ "{:,}".format(kpis.total_invoices) }}</div>
     <div class="stat-sub">across {{ kpis.vendor_count }} vendor{{ "s" if kpis.vendor_count != 1 }}</div>
   </div>
-  <div class="stat-card accent-success">
+  <div class="stat-card">
     <div class="stat-label">Auto-reconciled</div>
-    <div class="stat-num success">—</div>
-    <div class="stat-sub">—</div>
+    <div class="stat-num matched">{{ "{:,}".format(kpis.auto_reconciled) }}</div>
+    <div class="stat-sub">{{ kpis.match_rate }}% of invoices</div>
   </div>
-  <div class="stat-card accent-warning">
+  <div class="stat-card{{ ' stat-card--flagged' if kpis.open_exceptions > 0 }}">
     <div class="stat-label">Open exceptions</div>
-    <div class="stat-num warning">—</div>
-    <div class="stat-sub">—</div>
+    <div class="stat-num exception">{{ "{:,}".format(kpis.open_exceptions) }}</div>
+    <div class="stat-sub">{{ "needs review" if kpis.open_exceptions > 0 else "none open" }}</div>
   </div>
-  <div class="stat-card accent-navy">
+  <div class="stat-card">
     <div class="stat-label">Statement total</div>
     <div class="stat-num">{{ kpis.statement_total | money_short }}</div>
     <div class="stat-sub">this period</div>
@@ -154,9 +154,9 @@
     <thead>
       <tr>
         <th>Vendor</th>
-        <th>Invoices</th>
-        <th>Matched</th>
-        <th>Exceptions</th>
+        <th class="num">Invoices</th>
+        <th class="num">Matched</th>
+        <th class="num">Exceptions</th>
         <th>Status</th>
         <th>Completed</th>
         <th></th>
@@ -167,13 +167,13 @@
       <tr>
         <td><div class="vendor-cell"><div class="vendor-chip">{{ run.vendor_display_name | initials }}</div><div class="vendor-name" title="{{ run.vendor_name }}">{{ run.vendor_display_name }}</div></div></td>
         <td class="mono">{{ run.total_invoice_count }}</td>
-        <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
-        <td class="mono" style="color:{{ 'var(--success)' if run.exception_count == 0 else 'var(--warning)' }}">{{ run.exception_count }}</td>
+        <td class="mono" style="color:{{ 'var(--matched)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
+        <td class="mono" style="color:{{ 'var(--matched)' if run.exception_count == 0 else 'var(--exception)' }}">{{ run.exception_count }}</td>
         <td>
           {% if run.overall_status == 'RECONCILED' %}
-          <span class="badge badge-success"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
+          <span class="badge badge-matched"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
           {% else %}
-          <span class="badge badge-warning"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>Exceptions</span>
+          <span class="badge badge-exception"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>Exceptions</span>
           {% endif %}
         </td>
         <td style="color:var(--text-muted)">{{ run.reconciliation_timestamp | friendly_dt }}</td>
@@ -196,9 +196,9 @@
     <thead>
       <tr>
         <th>Vendor</th>
-        <th>Invoices</th>
-        <th>Matched</th>
-        <th>Exceptions</th>
+        <th class="num">Invoices</th>
+        <th class="num">Matched</th>
+        <th class="num">Exceptions</th>
         <th>Status</th>
         <th>Completed</th>
         <th></th>
