@@ -4,6 +4,7 @@ __pycache__/
 *.env
 dbt/profiles.yml
 dbt/.user.yml
+dbt/.fabric_pipeline.lock
 dbt/vive_recon/target/
 dbt/vive_recon/logs/
 dbt/vive_recon/dbt_packages/
@@ -35,3 +36,5 @@ node_modules/
 .env.local
 test-results/
 tsconfig.tsbuildinfo
+
+

@@ -32,34 +32,82 @@ tooling/linters choke on outside of an actual dbt render pass). Nothing
 about a vendor's id needs to be typed into dbt/ ever again -- the next dbt
 run just picks up whatever tables exist.
 """
+import contextlib
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
-import threading
+import time
 
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DBT_PROJECT_DIR = os.path.join(PROJECT_ROOT, "dbt", "vive_recon")
 DBT_PROFILES_DIR = os.path.join(PROJECT_ROOT, "dbt")
+_LOCK_PATH = os.path.join(DBT_PROFILES_DIR, ".fabric_pipeline.lock")
 
-# _regenerate_sources_yml() rewrites one shared file, and `dbt run` reads/
-# writes its own shared compiled-artifacts state under DBT_PROJECT_DIR/target/
-# -- neither is safe for two calls to run_dbt_silver_build() at once. The web
-# app's job worker pool runs several jobs concurrently (see web/worker.py),
-# so a multi-PDF upload landing on more than one worker at the same moment
-# reliably raced here in practice: whichever run's sources.yml got
-# overwritten mid-read, or whose target/ compiled state collided with
-# another's, silently failed its dbt build (confirmed 2026-09-09 -- 2 of 6,
-# then all 6 of a batch failed this way, timing-dependent as a real race
-# always is). One process-wide lock serializes every dbt run instead --
-# each run only takes a few seconds, so losing parallelism here specifically
-# is cheap compared to the alternative of debugging silent, non-deterministic
-# per-statement failures.
-_dbt_run_lock = threading.Lock()
+
+@contextlib.contextmanager
+def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5):
+    """Cross-process exclusive lock for the whole "touches shared Fabric/dbt
+    state" portion of one statement's pipeline -- see
+    scripts/run_full_pipeline.py's caller, which wraps both
+    run_dbt_silver_build() and run_fabric_matching() in this together.
+
+    A plain threading.Lock() does NOT work here: web/worker.py's job pool
+    runs each job's pipeline as a separate subprocess (`python
+    scripts/run_full_pipeline.py ...`), not as threads sharing one
+    interpreter -- a thread lock object in one process has zero visibility
+    into a lock object in another. This uses atomic exclusive file creation
+    (os.O_CREAT | os.O_EXCL, atomic on POSIX and Windows alike) as a mutex
+    every process can see via the shared filesystem, instead.
+
+    _regenerate_sources_yml() rewrites one shared file, `dbt run` reads/
+    writes shared compiled-artifacts state under DBT_PROJECT_DIR/target/,
+    and run_fabric_matching() opens its own Warehouse/Lakehouse connections
+    -- none of that is safe for two statements' pipelines to touch at once.
+    A multi-PDF upload landing on more than one worker at the same moment
+    reliably raced here in practice (confirmed 2026-09-09): sources.yml
+    corruption when the dbt step collided, and separately, transient
+    Fabric-connection failures with no visible error when the matching step
+    collided, once the dbt-level race alone was fixed. Serializing the
+    whole sequence removes both. Each pipeline's Fabric-touching portion
+    only takes on the order of a minute, so losing parallelism here
+    specifically is cheap compared to debugging silent, non-deterministic
+    per-statement failures -- extraction (Phase 1, before this) is
+    unaffected and still runs concurrently across the worker pool.
+
+    timeout_seconds also doubles as the stale-lock threshold: if a process
+    holding the lock is killed without cleaning up (a crash, a container
+    restart mid-run), a lock file older than this is assumed abandoned and
+    is removed so the pipeline doesn't hang forever.
+    """
+    deadline = time.time() + timeout_seconds
+    while True:
+        try:
+            fd = os.open(_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(_LOCK_PATH) > timeout_seconds:
+                    os.remove(_LOCK_PATH)
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                raise TimeoutError(f"Could not acquire {_LOCK_PATH} within {timeout_seconds}s")
+            time.sleep(poll_interval)
+    try:
+        yield
+    finally:
+        try:
+            os.remove(_LOCK_PATH)
+        except OSError:
+            pass
 
 
 def _default_dbt_executable() -> str:
@@ -170,23 +218,22 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
         return False
 
     try:
-        with _dbt_run_lock:
-            _ensure_local_profile()
-            _regenerate_sources_yml(known_vendor_ids)
-            env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
-            dbt_vars = json.dumps({"statement_id": statement_id, "known_vendor_ids": known_vendor_ids})
-            result = subprocess.run(
-                [
-                    dbt_executable, "run",
-                    "--project-dir", DBT_PROJECT_DIR,
-                    "--vars", dbt_vars,
-                ],
-                cwd=DBT_PROJECT_DIR,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-            )
+        _ensure_local_profile()
+        _regenerate_sources_yml(known_vendor_ids)
+        env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
+        dbt_vars = json.dumps({"statement_id": statement_id, "known_vendor_ids": known_vendor_ids})
+        result = subprocess.run(
+            [
+                dbt_executable, "run",
+                "--project-dir", DBT_PROJECT_DIR,
+                "--vars", dbt_vars,
+            ],
+            cwd=DBT_PROJECT_DIR,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
         if result.returncode != 0:
             logger.error(
                 "dbt run failed for statement_id=%s (exit %d):\n%s",
