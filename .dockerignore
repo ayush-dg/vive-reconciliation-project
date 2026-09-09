@@ -38,8 +38,16 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
-# Deployment staging artifacts — not needed inside the image
-deploy/
+# Deployment staging artifacts (Terraform, docs) -- not needed inside the
+# image. NOT container-start.sh: that's the App Service's actual startup
+# command (see main.tf's app_command_line) and must exist inside the
+# image, or the container silently falls back to whatever bare command
+# was manually set as a workaround, skipping the Azure SQL migration step
+# entirely -- exactly what happened here before this fix. Docker requires
+# re-including parent directories explicitly to un-exclude a nested file.
+deploy/**
+!deploy/azure-app-service-demo/
+!deploy/azure-app-service-demo/container-start.sh
 deploy.zip
 
 # Ad-hoc local output/backups, not build inputs
