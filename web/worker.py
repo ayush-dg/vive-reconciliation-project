@@ -72,6 +72,30 @@ def _pool_size() -> int:
     return int(os.environ.get("VIVE_WORKER_POOL_SIZE", DEFAULT_WORKER_POOL_SIZE))
 
 
+def _write_blob_outcome(job: dict, status: str, error_message: str = None) -> None:
+    """Writes a finished job's outcome back onto its originating blob's
+    metadata (jobs.source_blob_path), so the next "Sync to Webapp" click
+    knows not to re-queue it (status='completed') or can retry it up to
+    RETRY_CAP times (status='failed') -- see
+    web/routers/mailbox_sync.py's _queue_eligible_blobs(). No-op for any
+    job without a source_blob_path (manual uploads, dropzone/Event-Grid
+    intake) -- there's nothing to write back to. Never raises -- a
+    tracking-metadata write failing must never affect the job's own
+    already-recorded outcome."""
+    source_blob_path = job.get("source_blob_path")
+    if not source_blob_path:
+        return
+    try:
+        from src.storage.blob_client import BlobStorageClient
+        client = BlobStorageClient(
+            container_name="raw",
+            connection_string_env_var="AZURE_BLOB_MAILBOX_CONNECTION_STRING",
+        )
+        client.set_blob_extraction_outcome(source_blob_path, status, last_error=error_message)
+    except Exception as e:
+        print(f"[worker] Failed to write blob outcome for {source_blob_path}: {e}")
+
+
 def _run_job(job: dict) -> None:
     from web import queries
 
@@ -126,15 +150,18 @@ def _run_job(job: dict) -> None:
                             f"loaded for this vendor yet, matching skipped. See scripts/load_voucher_data.py."
                         ),
                     )
+                    _write_blob_outcome(job, "completed")
                     return
 
             print(f"[worker] Job {job_id} FAILED (exit {result.returncode})")
+            error_message = output.strip()[-4000:] or "Pipeline exited with no output."
             queries.update_job_status(
                 job_id,
                 status="FAILED",
                 completed_at=completed_at,
-                error_message=output.strip()[-4000:] or "Pipeline exited with no output.",
+                error_message=error_message,
             )
+            _write_blob_outcome(job, "failed", error_message)
             return
 
         statement_id = match.group(1)
@@ -150,16 +177,18 @@ def _run_job(job: dict) -> None:
         silver_count = queries.get_silver_row_count(statement_id)
         if silver_count == 0:
             print(f"[worker] Job {job_id} FAILED (exit 0, but {statement_id} has zero Silver rows)")
+            error_message = (
+                f"Extraction completed but produced 0 rows for statement_id {statement_id} "
+                f"-- see application logs for this job's real output.\n\n{output.strip()[-4000:]}"
+            )
             queries.update_job_status(
                 job_id,
                 status="FAILED",
                 completed_at=completed_at,
                 statement_id=statement_id,
-                error_message=(
-                    f"Extraction completed but produced 0 rows for statement_id {statement_id} "
-                    f"-- see application logs for this job's real output.\n\n{output.strip()[-4000:]}"
-                ),
+                error_message=error_message,
             )
+            _write_blob_outcome(job, "failed", error_message)
             return
 
         vendor_name = queries.get_vendor_name_for_statement(statement_id)
@@ -172,6 +201,7 @@ def _run_job(job: dict) -> None:
             vendor_name=vendor_name,
             document_hash=document_hash,
         )
+        _write_blob_outcome(job, "completed")
     except Exception as e:
         print(f"[worker] Job {job_id} FAILED with worker error: {e}")
         try:
@@ -183,6 +213,7 @@ def _run_job(job: dict) -> None:
             )
         except Exception:
             pass  # even the failure write must never take the worker loop down
+        _write_blob_outcome(job, "failed", f"Worker error: {e}")
 
 
 def _worker_loop(worker_name: str) -> None:

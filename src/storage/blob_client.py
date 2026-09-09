@@ -156,6 +156,96 @@ class BlobStorageClient:
             print(f"[blob_client] Failed to list blobs in {self.container_name}: {e}")
             return []
 
+    def get_blob_metadata_map(self, prefix: Optional[str] = None) -> dict:
+        """
+        Returns {blob_name: {"metadata": {...}, "etag": str}} for every PDF
+        blob in the configured container (optionally scoped to prefix) --
+        one listing call, metadata included, no per-blob downloads. Used by
+        the "Sync to Webapp" mailbox-ingest flow (web/routers/mailbox_sync.py)
+        to decide what needs processing without downloading anything first.
+        Returns {} on any failure -- never raises.
+        """
+        if not self.connection_string:
+            return {}
+        try:
+            from azure.storage.blob import BlobServiceClient
+
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            container_client = service_client.get_container_client(self.container_name)
+            result = {}
+            for b in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+                if b.name.lower().endswith(".pdf"):
+                    result[b.name] = {"metadata": b.metadata or {}, "etag": b.etag}
+            return result
+        except Exception as e:
+            print(f"[blob_client] Failed to list blob metadata in {self.container_name}: {e}")
+            return {}
+
+    def try_claim_blob_for_processing(self, blob_name: str, etag: str, existing_metadata: dict) -> bool:
+        """
+        Conditionally sets extraction_status=processing on blob_name, only
+        if its ETag still matches what the caller last saw (via
+        get_blob_metadata_map()) -- an atomic compare-and-set so two
+        near-simultaneous "Sync to Webapp" clicks can't both claim the same
+        blob and queue duplicate jobs for it. Carries existing_metadata's
+        other keys (attempt_count/last_error from a prior failed attempt)
+        forward unchanged, since set_blob_metadata() REPLACES the whole
+        metadata set rather than merging -- otherwise claiming a
+        previously-failed blob would silently erase its attempt history.
+        Returns True if this call won the claim, False if the blob was
+        already changed by someone else (or any other failure) -- never
+        raises.
+        """
+        if not self.connection_string:
+            return False
+        try:
+            from azure.core import MatchConditions
+            from azure.storage.blob import BlobServiceClient
+
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            blob_client = service_client.get_blob_client(container=self.container_name, blob=blob_name)
+            new_metadata = dict(existing_metadata)
+            new_metadata["extraction_status"] = "processing"
+            blob_client.set_blob_metadata(
+                new_metadata, etag=etag, match_condition=MatchConditions.IfNotModified,
+            )
+            return True
+        except Exception as e:
+            print(f"[blob_client] Failed to claim {blob_name}: {e}")
+            return False
+
+    def set_blob_extraction_outcome(self, blob_name: str, status: str,
+                                     last_error: Optional[str] = None) -> bool:
+        """
+        Writes the final outcome (status='completed' or 'failed') back onto
+        blob_name's metadata, incrementing its attempt_count by one for
+        this attempt -- called by web/worker.py once a job tied to this
+        blob (jobs.source_blob_path) finishes. Reads the blob's current
+        metadata first to get its prior attempt_count -- claiming a blob
+        (try_claim_blob_for_processing()) doesn't increment it; only a
+        real, finished attempt does, exactly once each. Unconditional (no
+        etag check): by this point the blob is uniquely "owned" by the job
+        that claimed it, so there's no concurrent writer to race against.
+        Returns True on success, False on any failure -- never raises.
+        """
+        if not self.connection_string:
+            return False
+        try:
+            from azure.storage.blob import BlobServiceClient
+
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            blob_client = service_client.get_blob_client(container=self.container_name, blob=blob_name)
+            current_metadata = blob_client.get_blob_properties().metadata or {}
+            attempt_count = int(current_metadata.get("attempt_count", "0")) + 1
+            metadata = {"extraction_status": status, "attempt_count": str(attempt_count)}
+            if last_error:
+                metadata["last_error"] = last_error[:1000]
+            blob_client.set_blob_metadata(metadata)
+            return True
+        except Exception as e:
+            print(f"[blob_client] Failed to set extraction outcome for {blob_name}: {e}")
+            return False
+
     def download_blob_by_name(self, blob_name: str, dest_path: str) -> bool:
         """
         Downloads blob_name (as returned by list_pdf_blobs(), not a full

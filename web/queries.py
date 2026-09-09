@@ -1006,14 +1006,21 @@ def delete_user_by_email(email: str) -> None:
 # ---------------------------------------------------------------------------
 
 def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
-                batch_id: str = None) -> None:
+                batch_id: str = None, source_blob_path: str = None) -> None:
+    """source_blob_path is only ever set for jobs from the mailbox-ingest
+    "Sync to Webapp" flow (web/routers/mailbox_sync.py) -- NULL for manual
+    uploads and every other existing intake path, since they have no blob
+    origin (or, for dropzone/Event-Grid, already download-then-forget it).
+    web/worker.py uses it to write a job's outcome back onto its
+    originating blob's metadata when the job finishes; NULL means it skips
+    that step entirely, nothing to write back to."""
     now = datetime.now(timezone.utc).isoformat()
     execute_sql(
         """
-        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at, batch_id)
-        VALUES (?, ?, ?, 'PENDING', ?, ?, ?)
+        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at, batch_id, source_blob_path)
+        VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?)
         """,
-        [job_id, pdf_filename, pdf_path, submitted_by, now, batch_id],
+        [job_id, pdf_filename, pdf_path, submitted_by, now, batch_id, source_blob_path],
     )
 
 
