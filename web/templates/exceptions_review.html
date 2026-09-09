@@ -144,6 +144,41 @@
       {% endif %}
     </div>
 
+    {% if netsuite_record %}
+    <div class="sec-label">NetSuite record</div>
+    <div class="ns-panel">
+      <div class="field-grid" style="margin-bottom:0">
+        <div class="field-box" style="background:var(--navy-tint)"><div class="fb-label">Vendor invoice number</div><div class="fb-value">{{ netsuite_record.custbody_kes_inv_number or netsuite_record.tranid or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Transaction number</div><div class="fb-value">{{ netsuite_record.transactionnumber or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Transaction date</div><div class="fb-value">{{ netsuite_record.trandate or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Status</div><div class="fb-value">{{ netsuite_record.status or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Approval status</div><div class="fb-value">{{ netsuite_record.custbody_kesapt_approvalstatus or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Total</div><div class="fb-value">{{ netsuite_record.total | money }}</div></div>
+        <div class="field-box"><div class="fb-label">Posting period</div><div class="fb-value">{{ netsuite_record.postingperiod or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Due date</div><div class="fb-value">{{ netsuite_record.duedate or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Location</div><div class="fb-value">{{ netsuite_record.location or '—' }}</div></div>
+        <div class="field-box"><div class="fb-label">Repair order</div><div class="fb-value">{{ netsuite_record.custbody_cgh_ro or '—' }}</div></div>
+      </div>
+      <div class="field-box" style="margin-top:14px"><div class="fb-label">Memo</div><div class="fb-value" style="font-family:var(--font-body);font-weight:500">{{ netsuite_record.memo or '—' }}</div></div>
+
+      <div class="ns-toggle-link" id="nsToggleLink" onclick="
+        var list = document.getElementById('nsRawList');
+        var open = list.classList.toggle('open');
+        document.getElementById('nsToggleText').textContent = open ? 'Hide all fields' : 'Show all fields';
+      ">
+        <span id="nsToggleText">Show all fields</span>
+      </div>
+      <div class="ns-raw-list" id="nsRawList">
+        <div class="ns-raw-grid">
+          {% for key, value in netsuite_record.items() if not key.startswith('_') %}
+          <div class="ns-raw-row"><span class="ns-raw-key">{{ key }}</span><span class="ns-raw-val">{{ value if value is not none else '—' }}</span></div>
+          {% endfor %}
+        </div>
+        <div class="ns-raw-count">{{ netsuite_record.items() | list | length }} fields from the NetSuite {{ 'vendor bill' if netsuite_record._source_table == 'netsuite_vendorbill' else 'vendor credit' }} record</div>
+      </div>
+    </div>
+    {% endif %}
+
     <div class="note-field">
       <label>Add a note <span class="field-hint">(optional)</span></label>
       <textarea rows="4" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>

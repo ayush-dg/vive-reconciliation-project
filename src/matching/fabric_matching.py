@@ -311,6 +311,56 @@ def run_fabric_matching(statement_id: str) -> dict:
         return {"error": "matching_failed"}
 
 
+def fetch_netsuite_record_for_invoice(vendor_id: str, vendor_name: str, invoice_number: str) -> dict:
+    """Looks up the full NetSuite record for one invoice, for display on
+    the Exceptions review page's "Amount Mismatch" detail (see
+    web/routers/exceptions.py) -- a display-only lookup, not part of the
+    matching run itself. Checks bronze.netsuite_vendorbill first
+    (tranid = invoice_number, scoped to this vendor's resolved
+    entity_ids -- same resolution _fetch_netsuite_transactions() uses
+    during matching); if nothing there, falls back to
+    bronze.netsuite_vendorcredit. Returns the row as a plain dict (every
+    raw column, unmodified -- no code-to-label translation, since this
+    app has no authoritative mapping for NetSuite's internal status/
+    location/posting-period lookup lists) plus a "_source_table" key
+    saying which table it came from. Returns None if genuinely not found
+    in either table, Fabric isn't configured, or the vendor's entity_ids
+    couldn't be resolved. Best-effort, same as the rest of this module:
+    never raises -- a display-only lookup failing should never break the
+    review page itself."""
+    if not _fabric_configured() or not invoice_number:
+        return None
+    try:
+        entity_ids = resolve_entity_ids(vendor_id, vendor_name)
+        if not entity_ids:
+            return None
+
+        conn = get_lakehouse_connection()
+        try:
+            cur = conn.cursor()
+            placeholders = ",".join("?" * len(entity_ids))
+            for table in ("netsuite_vendorbill", "netsuite_vendorcredit"):
+                cur.execute(
+                    f"SELECT * FROM bronze.{table} WHERE tranid = ? AND entity IN ({placeholders})",
+                    [invoice_number] + entity_ids,
+                )
+                row = cur.fetchone()
+                if row:
+                    cols = [c[0] for c in cur.description]
+                    record = dict(zip(cols, row))
+                    record["_source_table"] = table
+                    return record
+            return None
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception(
+            "NetSuite record lookup failed for vendor_id=%s invoice_number=%s",
+            vendor_id, invoice_number,
+        )
+        return None
+
+
 def _write_match(cur, statement_id, vendor_id, shop, invoice_number, ro_number,
                   stmt_amount, erp_amount, now):
     cur.execute(

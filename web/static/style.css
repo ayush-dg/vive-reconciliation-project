@@ -534,6 +534,15 @@ select {
 .why-box--exception { background: var(--exception-tint); border-color: var(--exception-border); color: var(--exception); }
 .why-box--review { background: var(--review-tint); border-color: var(--review-border); color: var(--review); }
 .why-box--grey { background: var(--steel-tint); border-color: var(--border-strong); color: var(--text-muted); }
+.ns-panel { background: var(--surface-sunk); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 22px; }
+.ns-toggle-link { font-size: 12.5px; font-weight: 600; color: var(--navy-2); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; }
+.ns-raw-list { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: none; }
+.ns-raw-list.open { display: block; }
+.ns-raw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.ns-raw-row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; font-family: var(--font-mono); font-size: 12px; border-bottom: 1px solid var(--border); }
+.ns-raw-row .ns-raw-key { color: var(--text-faint); }
+.ns-raw-row .ns-raw-val { color: var(--text); text-align: right; word-break: break-all; }
+.ns-raw-count { font-size: 11.5px; color: var(--text-faint); margin-top: 10px; }
 .note-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 .note-field textarea {
   width: 100%; padding: 11px 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);

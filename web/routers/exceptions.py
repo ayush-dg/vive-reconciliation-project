@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 from web.deps import render, require_login, sidebar_context
 from web import queries
 from src.vendor_identity import display_name as vendor_display_name
+from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
 
 router = APIRouter()
 
@@ -106,6 +107,18 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
 
     progress_pct = round((resolved / total) * 100) if total else 0
 
+    # Amount Mismatch only -- every other reason has no NetSuite record
+    # worth showing (Invoice Missing means nothing was found there at
+    # all; the others aren't about a specific transaction). A live Fabric
+    # query, once per page view of this one exception -- see
+    # fetch_netsuite_record_for_invoice()'s own docstring for why this
+    # isn't cached.
+    netsuite_record = None
+    if selected_exc and selected_exc.get("exception_reason") == "Amount Mismatch":
+        netsuite_record = fetch_netsuite_record_for_invoice(
+            selected_exc.get("vendor_id"), vendor_name, selected_exc.get("invoice_number")
+        )
+
     ctx = {
         "active_page": "exceptions",
         "vendor_name": vendor_name,
@@ -122,6 +135,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "reason_badge": REASON_BADGE,
         "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
+        "netsuite_record": netsuite_record,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
