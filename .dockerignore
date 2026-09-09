@@ -13,6 +13,14 @@ venv/
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Stray Next.js/Node tooling artifacts -- no package.json in this repo at
+# all, this app is Python/FastAPI only. Not just dead weight (1GB+): a
+# broken path inside .next/dev/node_modules/ has crashed `az acr build`'s
+# local tar-packing step outright before, well before .dockerignore would
+# even apply.
+node_modules/
+.next/
 .pytest_cache/
 
 # Local SQLite database — mounted as a volume at runtime instead
