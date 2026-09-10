@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}VIVE Collision{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body data-page="{{ active_page }}">
@@ -42,6 +42,7 @@
     <div class="nav-group-label">Workspace</div>
     <a href="/" class="nav-item {{ 'active' if active_page == 'home' }}"><svg class="icon"><use href="#i-home"/></svg> Home</a>
     <a href="/upload" class="nav-item {{ 'active' if active_page == 'upload' }}"><svg class="icon"><use href="#i-upload"/></svg> Upload PDF</a>
+    <a href="/mailbox-sync" class="nav-item {{ 'active' if active_page == 'mailbox_sync' }}"><svg class="icon"><use href="#i-download"/></svg> Sync Outlook</a>
     <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
       {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
     </a>

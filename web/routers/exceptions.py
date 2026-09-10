@@ -19,12 +19,12 @@ from src.vendor_identity import display_name as vendor_display_name
 router = APIRouter()
 
 REASON_BADGE = {
-    "Invoice Missing": {"label": "Missing in ERP", "css": "danger"},
-    "Amount Mismatch": {"label": "Amount mismatch", "css": "warning"},
+    "Invoice Missing": {"label": "Missing in ERP", "css": "exception"},
+    "Amount Mismatch": {"label": "Amount mismatch", "css": "review"},
     "EXTRACTION_INCOMPLETE": {"label": "Extraction incomplete", "css": "grey"},
-    "DUPLICATE_RECORD": {"label": "Duplicate record", "css": "info"},
+    "DUPLICATE_RECORD": {"label": "Duplicate record", "css": "exception"},
     # New reasons from src/matching/fabric_matching.py's NetSuite matching.
-    "Not Found in NetSuite": {"label": "Not found in NetSuite", "css": "danger"},
+    "Not Found in NetSuite": {"label": "Not found in NetSuite", "css": "exception"},
     "Vendor Not Resolved in NetSuite": {"label": "Vendor not resolved", "css": "grey"},
 }
 

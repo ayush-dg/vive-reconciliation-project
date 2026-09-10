@@ -67,11 +67,11 @@
     <tr>
       <td>{{ m.invoice_number }}</td>
       <td style="color:var(--text-secondary)">{{ m.ro_number or "—" }}</td>
-      <td>{{ m.charges | money if m.charges is not none else "—" }}</td>
-      <td>{{ m.credits | money if m.credits is not none else "—" }}</td>
-      <td>{{ m.amount_due | money if m.amount_due is not none else "—" }}</td>
-      <td>{{ m.statement_amount | money }}</td>
-      <td>{{ m.erp_amount | money }}</td>
+      <td class="num">{{ m.charges | money if m.charges is not none else "—" }}</td>
+      <td class="num">{{ m.credits | money if m.credits is not none else "—" }}</td>
+      <td class="num">{{ m.amount_due | money if m.amount_due is not none else "—" }}</td>
+      <td class="num">{{ m.statement_amount | money }}</td>
+      <td class="num">{{ m.erp_amount | money }}</td>
       <td style="color:var(--text-secondary)">L{{ m.match_level }}</td>
     </tr>
     {% endfor %}
@@ -95,11 +95,11 @@
     <tr>
       <td>{{ exc.invoice_number }}</td>
       <td>{{ exc.exception_reason }}</td>
-      <td>{{ exc.charges | money if exc.charges is not none else "—" }}</td>
-      <td>{{ exc.credits | money if exc.credits is not none else "—" }}</td>
-      <td>{{ exc.amount_due | money if exc.amount_due is not none else "—" }}</td>
-      <td>{{ exc.statement_amount | money if exc.statement_amount is not none else "—" }}</td>
-      <td>{{ exc.erp_amount | money if exc.erp_amount is not none else "not in ERP" }}</td>
+      <td class="num">{{ exc.charges | money if exc.charges is not none else "—" }}</td>
+      <td class="num">{{ exc.credits | money if exc.credits is not none else "—" }}</td>
+      <td class="num">{{ exc.amount_due | money if exc.amount_due is not none else "—" }}</td>
+      <td class="num">{{ exc.statement_amount | money if exc.statement_amount is not none else "—" }}</td>
+      <td class="num">{{ exc.erp_amount | money if exc.erp_amount is not none else "not in ERP" }}</td>
       <td>
         {% if exc.exception_status == 'OPEN' %}
         <span class="badge warning">Open</span>

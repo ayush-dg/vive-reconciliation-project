@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .env
+*.env
 dbt/profiles.yml
 dbt/.user.yml
 dbt/vive_recon/target/
@@ -27,3 +28,10 @@ netsuite_tools/.env
 *.bak
 JOBS_BACKUP_*.json
 cache_bust_marker.txt
+.next/
+.data/
+*next-env.d.ts
+node_modules/
+.env.local
+test-results/
+tsconfig.tsbuildinfo

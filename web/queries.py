@@ -679,14 +679,23 @@ def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
     ))
 
 
+def _scalar_count(rows: list) -> int:
+    """Unwraps a `SELECT COUNT(*) AS c ...` result. A COUNT(*) query
+    always returns exactly one row when it actually runs -- the only way
+    rows is empty here is recon_query()'s Fabric-not-configured fallback
+    (see src/lakehouse/fabric_sql.py), which every COUNT(*) call site
+    needs to tolerate rather than crash on with a raw IndexError."""
+    return (rows[0]["c"] or 0) if rows else 0
+
+
 def get_exception_counts(statement_id: str):
-    total = recon_query(
+    total = _scalar_count(recon_query(
         "SELECT COUNT(*) AS c FROM silver.recon_exceptions WHERE statement_id = ?", [statement_id]
-    )[0]["c"] or 0
-    resolved = recon_query(
+    ))
+    resolved = _scalar_count(recon_query(
         "SELECT COUNT(*) AS c FROM silver.recon_exceptions WHERE statement_id = ? AND exception_status != 'OPEN'",
         [statement_id],
-    )[0]["c"] or 0
+    ))
     return total, resolved
 
 
@@ -728,17 +737,17 @@ def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = N
 
 
 def get_exception_counts_for_source_file(source_file: str):
-    total = recon_query(
+    total = _scalar_count(recon_query(
         f"SELECT COUNT(*) AS c FROM silver.recon_exceptions ge WHERE {_ORPHAN_EXCEPTIONS_WHERE}",
         [source_file],
-    )[0]["c"] or 0
-    resolved = recon_query(
+    ))
+    resolved = _scalar_count(recon_query(
         f"""
         SELECT COUNT(*) AS c FROM silver.recon_exceptions ge
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status != 'OPEN'
         """,
         [source_file],
-    )[0]["c"] or 0
+    ))
     return total, resolved
 
 
@@ -766,10 +775,10 @@ def _recompute_summary_counts(statement_id: str) -> None:
     its statement ever reached a full pipeline run) makes this UPDATE a
     harmless no-op.
     """
-    live_count = recon_query(
+    live_count = _scalar_count(recon_query(
         "SELECT COUNT(*) AS c FROM silver.recon_exceptions WHERE statement_id = ? AND exception_status = 'OPEN'",
         [statement_id],
-    )[0]["c"] or 0
+    ))
     recon_sql(
         "UPDATE silver.recon_summary SET exception_count = ?, overall_status = ? WHERE statement_id = ?",
         [live_count, score_overall_status(live_count), statement_id],
@@ -875,7 +884,7 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
             """,
             [statement["statement_id"], threshold],
         )
-        return rows[0]["c"] or 0
+        return _scalar_count(rows)
 
     statement = get_exceptions_only_vendor(vendor_name)
     if not statement:
@@ -887,7 +896,7 @@ def get_high_confidence_exception_count(vendor_name: str, threshold: float = 0.9
         """,
         [statement["source_file"], threshold],
     )
-    return rows[0]["c"] or 0
+    return _scalar_count(rows)
 
 
 def bulk_approve_exceptions(vendor_name: str, threshold: float, reviewed_by: str) -> int:
@@ -1006,14 +1015,21 @@ def delete_user_by_email(email: str) -> None:
 # ---------------------------------------------------------------------------
 
 def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
-                batch_id: str = None) -> None:
+                batch_id: str = None, source_blob_path: str = None) -> None:
+    """source_blob_path is only ever set for jobs from the mailbox-ingest
+    "Sync to Webapp" flow (web/routers/mailbox_sync.py) -- NULL for manual
+    uploads and every other existing intake path, since they have no blob
+    origin (or, for dropzone/Event-Grid, already download-then-forget it).
+    web/worker.py uses it to write a job's outcome back onto its
+    originating blob's metadata when the job finishes; NULL means it skips
+    that step entirely, nothing to write back to."""
     now = datetime.now(timezone.utc).isoformat()
     execute_sql(
         """
-        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at, batch_id)
-        VALUES (?, ?, ?, 'PENDING', ?, ?, ?)
+        INSERT INTO jobs (job_id, pdf_filename, pdf_path, status, submitted_by, submitted_at, batch_id, source_blob_path)
+        VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?)
         """,
-        [job_id, pdf_filename, pdf_path, submitted_by, now, batch_id],
+        [job_id, pdf_filename, pdf_path, submitted_by, now, batch_id, source_blob_path],
     )
 
 

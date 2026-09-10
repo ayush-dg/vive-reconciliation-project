@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}VIVE Collision — Sync Outlook{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="topbar-title">
+    <div class="eyebrow">Mailbox</div>
+    <h1>Sync Outlook</h1>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="upload-grid">
+  <div>
+    <div class="form-card" style="margin-bottom:20px">
+      <div class="form-field">
+        <label>Mailbox</label>
+        <input type="text" value="ai_vendor_statements@vivecollision.com" disabled />
+      </div>
+      <p class="field-hint" style="margin:0 0 16px">
+        Pulls new PDF attachments from Outlook and archives them to Blob Storage. Doesn't touch the webapp or queue anything for extraction.
+      </p>
+      {% if blob_error %}
+      <div class="upload-error">{{ blob_error }}</div>
+      {% endif %}
+      {% if blob_success %}
+      <div class="upload-success"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> {{ blob_success }}</div>
+      {% endif %}
+      <form method="post" action="/mailbox-sync/to-blob">
+        <div class="form-actions">
+          <button class="btn-primary" style="width:auto;flex:1" type="submit">Sync to Blob</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="form-card">
+      <p class="field-hint" style="margin:0 0 16px">
+        Looks at what's already in Blob Storage and queues anything new — or anything that previously failed extraction — for extraction. Doesn't touch Outlook.
+      </p>
+      {% if webapp_error %}
+      <div class="upload-error">{{ webapp_error }}</div>
+      {% endif %}
+      {% if webapp_success %}
+      <div class="upload-success"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> {{ webapp_success }} <a href="/jobs/history" class="link">View job history →</a></div>
+      {% endif %}
+      <form method="post" action="/mailbox-sync/to-webapp">
+        <div class="form-actions">
+          <button class="btn-primary" style="width:auto;flex:1" type="submit">Sync to Webapp</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel howitworks-panel">
+    <div class="eyebrow" style="margin-bottom:14px">How it works</div>
+    <div class="step-row"><div class="step-num">1</div><div class="step-text"><b>Sync to Blob</b> checks the shared mailbox for messages received since the last sync and downloads PDF attachments only.</div></div>
+    <div class="step-row"><div class="step-num">2</div><div class="step-text">Each PDF is archived to Blob Storage, dated by the email it came from.</div></div>
+    <div class="step-row"><div class="step-num">3</div><div class="step-text"><b>Sync to Webapp</b> looks at what's in Blob Storage and queues anything new for extraction.</div></div>
+    <div class="step-row" style="margin-bottom:0"><div class="step-num">4</div><div class="step-text">Anything that failed extraction gets retried automatically on the next Sync to Webapp click, up to 10 attempts — after that it stays a visible failed job instead of retrying forever.</div></div>
+  </div>
+</div>
+{% endblock %}
