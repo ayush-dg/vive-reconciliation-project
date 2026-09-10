@@ -49,6 +49,17 @@ DEFAULT_WORKER_POOL_SIZE = 3
 STATEMENT_ID_RE = re.compile(r"Statement ID:\s*(\S+)")
 DOCUMENT_HASH_RE = re.compile(r"Document Hash:\s*(\S+)")
 
+# scripts/run_full_pipeline.py's own status lines for the Fabric Silver
+# build / NetSuite matching steps -- only ever surfaced here (never
+# printed elsewhere in this file) because the two branches below that DO
+# print `output` are both failure paths; a job that completes normally
+# discards the full captured output entirely. Confirmed 2026-09-10: this
+# silently hid every dbt/matching outcome (skip, error, or success) for
+# any job landing on the success path, making it impossible to tell
+# "matching genuinely didn't run" from "it ran and failed" from the
+# container logs alone.
+FABRIC_STATUS_RE = re.compile(r"^ {4}(Fabric Silver build:.*|NetSuite matching:.*)$", re.MULTILINE)
+
 # Exact substring from src/matching/engine.py's run_matching() guard --
 # identifies "extraction succeeded, matching had no real ERP data to
 # compare against" specifically, as opposed to any other non-zero exit.
@@ -118,6 +129,8 @@ def _run_job(job: dict) -> None:
             timeout=1800,  # 30 min safety cap so one stuck PDF can't wedge the worker forever
         )
         output = (result.stdout or "") + "\n" + (result.stderr or "")
+        for line in FABRIC_STATUS_RE.findall(output):
+            print(f"[worker] Job {job_id}: {line.strip()}")
         match = STATEMENT_ID_RE.search(output)
         hash_match = DOCUMENT_HASH_RE.search(output)
         document_hash = hash_match.group(1) if hash_match else None

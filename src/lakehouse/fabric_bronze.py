@@ -23,6 +23,8 @@ import struct
 import time
 from datetime import datetime, timezone
 
+from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
+
 logger = logging.getLogger(__name__)
 
 
@@ -254,21 +256,33 @@ def write_bronze_fabric(invoices: list, schema_result: dict, statement_id: str,
             df[c] = df[c].astype("string")
 
         table_uri = _table_uri(vendor_id)
-        write_deltalake(
-            table_uri, df, mode="append", schema_mode="merge",
-            storage_options=_storage_options(),
-        )
+        # Same cross-process lock scripts/run_full_pipeline.py uses around
+        # the dbt Silver build / NetSuite matching step -- this
+        # write_deltalake() append is just as unsafe to run concurrently:
+        # two jobs writing to the same bronze_<vendor_id>_raw table at once
+        # can hit a Delta Lake commit conflict, and the broad except below
+        # swallows it silently, leaving this statement's Bronze rows never
+        # written -- confirmed 2026-09-10 as the real cause of dbt/matching
+        # "succeeding" against zero rows for both fresh and cache-hit
+        # uploads alike (see copy_bronze_fabric_for_cache_hit(), which has
+        # this exact same gap for its own write_deltalake() call).
+        with fabric_pipeline_lock():
+            write_deltalake(
+                table_uri, df, mode="append", schema_mode="merge",
+                storage_options=_storage_options(),
+            )
 
-        # Always refresh -- cheap (a few seconds), and a new statement can
-        # still be the first to populate a previously-all-null column even
-        # on an existing table (schema_mode="merge" allows that silently).
-        _refresh_sql_endpoint_metadata()
+            # Always refresh -- cheap (a few seconds), and a new statement
+            # can still be the first to populate a previously-all-null
+            # column even on an existing table (schema_mode="merge" allows
+            # that silently).
+            _refresh_sql_endpoint_metadata()
 
-        # Block here (not in the caller) until the SQL endpoint can actually
-        # see these rows -- a dbt Silver build triggered right after this
-        # returns must not race the metadata sync. See
-        # _wait_for_row_visibility()'s docstring for how this was found.
-        _wait_for_row_visibility(vendor_id, statement_id, len(rows))
+            # Block here (not in the caller) until the SQL endpoint can
+            # actually see these rows -- a dbt Silver build triggered right
+            # after this returns must not race the metadata sync. See
+            # _wait_for_row_visibility()'s docstring for how this was found.
+            _wait_for_row_visibility(vendor_id, statement_id, len(rows))
 
         return len(rows)
 
@@ -384,13 +398,18 @@ def copy_bronze_fabric_for_cache_hit(cached_statement_id: str, new_statement_id:
         df = pd.DataFrame(source_rows)
 
         table_uri = _table_uri(vendor_id)
-        write_deltalake(
-            table_uri, df, mode="append", schema_mode="merge",
-            storage_options=_storage_options(),
-        )
+        # Same cross-process lock write_bronze_fabric() uses around its own
+        # write_deltalake() -- see that function's comment for why an
+        # unprotected append here silently loses this statement's Bronze
+        # rows under concurrent uploads to the same vendor table.
+        with fabric_pipeline_lock():
+            write_deltalake(
+                table_uri, df, mode="append", schema_mode="merge",
+                storage_options=_storage_options(),
+            )
 
-        _refresh_sql_endpoint_metadata()
-        _wait_for_row_visibility(vendor_id, new_statement_id, len(source_rows))
+            _refresh_sql_endpoint_metadata()
+            _wait_for_row_visibility(vendor_id, new_statement_id, len(source_rows))
 
         return len(source_rows)
 

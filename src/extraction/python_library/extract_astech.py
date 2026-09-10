@@ -75,8 +75,18 @@ def extract(pdf_path):
                     "due_date": row[5],
                 })
 
-    computed_total = round(sum(float(r["outstanding_amount"].replace(",", "")) for r in line_items), 2)
-    printed_total = float((total_outstanding or "0").replace("$", "").replace(",", "").strip())
+    def to_float(s):
+        # PDF text extraction sometimes splits a negative sign from its
+        # digits with a space (e.g. "- 74.96", seen live on
+        # outstanding_amount) -- float() rejects that outright, unlike a
+        # plain "-74.96". Collapse that gap before parsing.
+        if not s:
+            return 0.0
+        s = re.sub(r"^([+-])\s+", r"\1", s.replace("$", "").replace(",", "").strip())
+        return float(s)
+
+    computed_total = round(sum(to_float(r["outstanding_amount"]) for r in line_items), 2)
+    printed_total = to_float(total_outstanding)
 
     summary = dict(header_info)
     summary["total_outstanding_invoices_printed"] = total_outstanding
