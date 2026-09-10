@@ -58,7 +58,10 @@ DOCUMENT_HASH_RE = re.compile(r"Document Hash:\s*(\S+)")
 # any job landing on the success path, making it impossible to tell
 # "matching genuinely didn't run" from "it ran and failed" from the
 # container logs alone.
-FABRIC_STATUS_RE = re.compile(r"^ {4}(Fabric Silver build:.*|NetSuite matching:.*)$", re.MULTILINE)
+FABRIC_STATUS_RE = re.compile(
+    r"^ {4}(Fabric Silver build:.*|Fabric Silver build reason:.*|NetSuite matching:.*)$",
+    re.MULTILINE,
+)
 
 # Exact substring from src/matching/engine.py's run_matching() guard --
 # identifies "extraction succeeded, matching had no real ERP data to

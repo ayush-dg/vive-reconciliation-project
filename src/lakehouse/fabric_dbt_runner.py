@@ -162,8 +162,15 @@ def _discover_known_vendor_ids() -> list:
             row[0][len("bronze_"):-len("_raw")] for row in cur.fetchall()
         )
         return vendor_ids
-    except Exception:
+    except Exception as e:
         logger.exception("Discovering known_vendor_ids from the Fabric Lakehouse failed (non-fatal)")
+        # print(), not just logger.exception() -- see run_dbt_silver_build()'s
+        # own "Fabric Silver build reason:" prints for why: this subprocess's
+        # logging output isn't reliably surfaced to the container's own logs
+        # (web/worker.py only echoes captured stdout on specific failure
+        # branches), so a real exception here was previously indistinguishable
+        # from every other silent "no vendor ids" outcome.
+        print(f"    Fabric Silver build reason: vendor discovery query failed -- {type(e).__name__}: {e}")
         return []
 
 
@@ -201,6 +208,7 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
     """
     if not _fabric_configured():
         logger.debug("Fabric not configured -- skipping dbt Silver build")
+        print("    Fabric Silver build reason: _fabric_configured() returned False (missing FABRIC_* env var)")
         return False
 
     dbt_executable = os.getenv("DBT_EXECUTABLE_PATH") or _default_dbt_executable()
@@ -210,11 +218,13 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
             "lives elsewhere in this environment) -- skipping Silver build",
             dbt_executable,
         )
+        print(f"    Fabric Silver build reason: dbt executable not found at {dbt_executable}")
         return False
 
     known_vendor_ids = _discover_known_vendor_ids()
     if not known_vendor_ids:
         logger.warning("No bronze_<vendor_id>_raw tables discovered in the Lakehouse -- skipping Silver build")
+        print("    Fabric Silver build reason: no known_vendor_ids discovered (empty result, see prior line if an exception caused it)")
         return False
 
     try:
@@ -239,12 +249,16 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
                 "dbt run failed for statement_id=%s (exit %d):\n%s",
                 statement_id, result.returncode, result.stdout[-4000:],
             )
+            last_line = (result.stdout or "").strip().splitlines()[-1:] or ["(no output)"]
+            print(f"    Fabric Silver build reason: dbt run exited {result.returncode} -- {last_line[0][:300]}")
             return False
         return True
 
     except subprocess.TimeoutExpired:
         logger.error("dbt run timed out after %ds for statement_id=%s", timeout_seconds, statement_id)
+        print(f"    Fabric Silver build reason: dbt run timed out after {timeout_seconds}s")
         return False
-    except Exception:
+    except Exception as e:
         logger.exception("dbt run failed to start for statement_id=%s", statement_id)
+        print(f"    Fabric Silver build reason: dbt run failed to start -- {type(e).__name__}: {e}")
         return False
