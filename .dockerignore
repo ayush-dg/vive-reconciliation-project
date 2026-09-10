@@ -3,6 +3,19 @@
 .env.*
 !.env.example
 
+# dbt/profiles.yml is gitignored (per-developer, auto-generated at container
+# runtime by src/lakehouse/fabric_dbt_runner.py's _ensure_local_profile()
+# from the committed profiles.yml.example) but was NOT dockerignored --
+# meaning `az acr build` was tarring up and baking in WHATEVER local auth
+# config happened to exist on the machine running the build, silently
+# overriding the container's own auto-generation (which only runs when the
+# file doesn't already exist). Confirmed 2026-09-10: this shipped one
+# developer's local "environment" auth mode into production, which needs
+# AZURE_TENANT_ID/AZURE_CLIENT_ID/AZURE_CLIENT_SECRET App Settings that were
+# never configured there, silently breaking every dbt Silver build in
+# production regardless of concurrency.
+dbt/profiles.yml
+
 # Version control
 .git
 .gitignore
