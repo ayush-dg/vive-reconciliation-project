@@ -1,0 +1,79 @@
+vendor_id,raw_field_name,canonical_field_name,target_type,mapping_config_version
+ASTECH,invoice_date,line_date,date,v1
+ASTECH,invoice_no,invoice_number,string,v1
+ASTECH,work_order_no,work_order_number,string,v1
+ASTECH,ro_no,ro_number,string,v1
+ASTECH,outstanding_amount,amount_remaining,decimal,v1
+ASTECH,due_date,due_date,date,v1
+FRED_BEANS_PARTS,date,line_date,date,v1
+FRED_BEANS_PARTS,transaction_code,transaction_code,string,v1
+FRED_BEANS_PARTS,invoice_number,invoice_number,string,v1
+FRED_BEANS_PARTS,charges,charge_amount,decimal,v1
+FRED_BEANS_PARTS,credits,payment_amount,decimal,v1
+FRED_BEANS_PARTS,amount_due,amount_remaining,decimal,v1
+FRED_BEANS_PARTS,remit_invoice_no,invoice_number_ref,string,v1
+FRED_BEANS_PARTS,remit_amount_due,,,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,reference_date,line_date,date,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,reference_number,invoice_number,string,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,purchase_order_number,po_number,string,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,balance_forward,,,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,period_activity,,,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,credit_applied,,,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,payment_applied,payment_amount,decimal,v1
+KEYSTONE_AUTOMOTIVE_INDUSTRIES,balance_due,amount_remaining,decimal,v1
+QUIRK_AUTO_GROUP,date,line_date,date,v1
+QUIRK_AUTO_GROUP,source,transaction_code,string,v1
+QUIRK_AUTO_GROUP,invoice,invoice_number,string,v1
+QUIRK_AUTO_GROUP,reference,invoice_number_ref,string,v1
+QUIRK_AUTO_GROUP,description,description_raw,string,v1
+QUIRK_AUTO_GROUP,amount,charge_amount,decimal,v1
+QUIRK_AUTO_GROUP,age_in_days,age_in_days,integer,v1
+QUIRK_AUTO_GROUP,remit_date,,,v1
+QUIRK_AUTO_GROUP,remit_invoice,,,v1
+QUIRK_AUTO_GROUP,remit_balance,,,v1
+EMPIRE_AUTO_PARTS,transaction_date,line_date,date,v1
+EMPIRE_AUTO_PARTS,description,description_raw,string,v1
+EMPIRE_AUTO_PARTS,doc_no,invoice_number,string,v1
+EMPIRE_AUTO_PARTS,your_po_no,po_number,string,v1
+EMPIRE_AUTO_PARTS,orig_inv_no,invoice_number_ref,string,v1
+EMPIRE_AUTO_PARTS,amount,charge_amount,decimal,v1
+EMPIRE_AUTO_PARTS,due_date,due_date,date,v1
+EMPIRE_AUTO_PARTS,balance,amount_remaining,decimal,v1
+BOWSER_PONTIAC_SUBARU_INC.,DATE,line_date,date,v1
+BOWSER_PONTIAC_SUBARU_INC.,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1
+BOWSER_PONTIAC_SUBARU_INC.,UNLABELED_TRANSACTION_CODE_2,transaction_code_2,string,v1
+BOWSER_PONTIAC_SUBARU_INC.,DOCUMENT / TRANSACTION,invoice_number,string,v1
+BOWSER_PONTIAC_SUBARU_INC.,PURCHASES,charge_amount,decimal,v1
+BOWSER_PONTIAC_SUBARU_INC.,PAYMENTS & CREDITS,payment_amount,decimal,v1
+BOWSER_PONTIAC_SUBARU_INC.,BALANCE,amount_remaining,decimal,v1
+NUCAR,Invoice Date,line_date,date,v1
+NUCAR,Invoice#,invoice_number,string,v1
+NUCAR,Purchases,charge_amount,decimal,v1
+NUCAR,Payments,payment_amount,decimal,v1
+NUCAR,Balance,amount_remaining,decimal,v1
+NUCAR,DATE,line_date,date,v1
+NUCAR,SOURCE,transaction_code,string,v1
+NUCAR,INVOICE,invoice_number,string,v1
+NUCAR,REFERENCE,invoice_number_ref,string,v1
+NUCAR,DESCRIPTION,description_raw,string,v1
+NUCAR,AMOUNT,charge_amount,decimal,v1
+NUCAR,AGE IN DAYS,age_in_days,integer,v1
+RH_LONG_MOTOR_SALES_INC,TRANSACTION DATE,line_date,date,v1
+RH_LONG_MOTOR_SALES_INC,REFER#,invoice_number,string,v1
+RH_LONG_MOTOR_SALES_INC,PO#/MEMO,po_number,string,v1
+RH_LONG_MOTOR_SALES_INC,JR,transaction_code,string,v1
+RH_LONG_MOTOR_SALES_INC,CHARGES,charge_amount,decimal,v1
+RH_LONG_MOTOR_SALES_INC,PYMTS/CR,payment_amount,decimal,v1
+RH_LONG_MOTOR_SALES_INC,BALANCE DUE,amount_remaining,decimal,v1
+DOWNEAST_TOYOTA,DATE,line_date,date,v1
+DOWNEAST_TOYOTA,DOCUMENT / TRANSACTION,invoice_number,string,v1
+DOWNEAST_TOYOTA,PURCHASES,charge_amount,decimal,v1
+DOWNEAST_TOYOTA,PAYMENTS & CREDITS,payment_amount,decimal,v1
+DOWNEAST_TOYOTA,BALANCE,amount_remaining,decimal,v1
+NYE_AUTOMOTIVE_GROUP,DATE,line_date,date,v1
+NYE_AUTOMOTIVE_GROUP,SOURCE,transaction_code,string,v1
+NYE_AUTOMOTIVE_GROUP,INVOICE,invoice_number,string,v1
+NYE_AUTOMOTIVE_GROUP,REFERENCE,invoice_number_ref,string,v1
+NYE_AUTOMOTIVE_GROUP,DESCRIPTION,description_raw,string,v1
+NYE_AUTOMOTIVE_GROUP,AMOUNT,amount_remaining,decimal,v1
+NYE_AUTOMOTIVE_GROUP,AGE IN DAYS,age_in_days,integer,v1

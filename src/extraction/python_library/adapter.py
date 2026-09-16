@@ -507,6 +507,16 @@ class PythonLibraryExtractionEngine:
             for bronze_key, source_key in field_map.get("passthrough_fields", {}).items():
                 invoice[bronze_key] = _parse_money(item.get(source_key))
 
+            # Internal only -- the pre-mapping row exactly as this vendor's
+            # extractor module produced it (field names are whatever that
+            # module's own author chose, e.g. "invoice_no"/"doc_no" -- not
+            # guaranteed byte-identical to the PDF's literal header text,
+            # but the closest available "before mapping" snapshot for the
+            # pdfplumber path). Mirrors claude_sonnet_client.py's _raw_row
+            # on the AI path; consumed only by
+            # src/lakehouse/research_raw.py's raw-dump writer.
+            invoice["_raw_row"] = item
+
             invoices.append(invoice)
 
         summary = result.get("summary", {})

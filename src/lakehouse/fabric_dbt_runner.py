@@ -50,7 +50,8 @@ _LOCK_PATH = os.path.join(DBT_PROFILES_DIR, ".fabric_pipeline.lock")
 
 
 @contextlib.contextmanager
-def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5):
+def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5,
+                          lock_path: str = None):
     """Cross-process exclusive lock for the whole "touches shared Fabric/dbt
     state" portion of one statement's pipeline -- see
     scripts/run_full_pipeline.py's caller, which wraps both
@@ -83,29 +84,41 @@ def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5)
     holding the lock is killed without cleaning up (a crash, a container
     restart mid-run), a lock file older than this is assumed abandoned and
     is removed so the pipeline doesn't hang forever.
+
+    lock_path defaults to the shared dbt/Bronze/matching lock (_LOCK_PATH)
+    -- pass a different path to get an independent lock guarding some other
+    shared resource without contending with (or queuing behind) this one.
+    See src/lakehouse/research_raw.py, whose raw-dump write needs its own
+    lock (protecting concurrent writers to research_schema.raw_statement
+    from each other) but has no reason to wait behind unrelated Bronze/dbt/
+    matching work, especially in RESEARCH_MODE_EXTRACTION_ONLY where none
+    of that even runs -- confirmed 2026-09-15: sharing the one lock across
+    a large batch caused later jobs to queue past the 300s timeout and
+    silently lose their raw-dump write.
     """
+    path = lock_path or _LOCK_PATH
     deadline = time.time() + timeout_seconds
     while True:
         try:
-            fd = os.open(_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(fd, str(os.getpid()).encode())
             os.close(fd)
             break
         except FileExistsError:
             try:
-                if time.time() - os.path.getmtime(_LOCK_PATH) > timeout_seconds:
-                    os.remove(_LOCK_PATH)
+                if time.time() - os.path.getmtime(path) > timeout_seconds:
+                    os.remove(path)
                     continue
             except OSError:
                 pass
             if time.time() > deadline:
-                raise TimeoutError(f"Could not acquire {_LOCK_PATH} within {timeout_seconds}s")
+                raise TimeoutError(f"Could not acquire {path} within {timeout_seconds}s")
             time.sleep(poll_interval)
     try:
         yield
     finally:
         try:
-            os.remove(_LOCK_PATH)
+            os.remove(path)
         except OSError:
             pass
 

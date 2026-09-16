@@ -89,6 +89,23 @@ def main():
     statement_id = intake_result["statement_id"]
     print(f"    Statement ID: {statement_id}")
 
+    # RESEARCH_MODE_EXTRACTION_ONLY (local .env only -- see
+    # notebooks/01_document_intake.py's _research_mode_extraction_only()):
+    # intake already wrote the raw research_schema.raw_statement dump and
+    # deliberately left bronze_count/silver_count at 0 -- stop here rather
+    # than let the bronze_count==0 check below misreport this as "no
+    # invoices extracted" and rather than run Fabric Silver/matching/Gold/
+    # report against Bronze/Silver that was never written.
+    if os.getenv("RESEARCH_MODE_EXTRACTION_ONLY", "").strip().lower() == "true":
+        print(f"\n{'#'*65}")
+        print(f"  RESEARCH MODE — extraction-only, stopping after intake")
+        print(f"  Statement ID: {statement_id}")
+        print(f"  Total invoices extracted: {intake_result.get('total_invoices', intake_result.get('bronze_count', 0))}")
+        print(f"  Raw dump: research_schema.raw_statement (Fabric Lakehouse)")
+        print(f"  Bronze/Silver/matching/report: skipped (RESEARCH_MODE_EXTRACTION_ONLY=true)")
+        print(f"{'#'*65}\n")
+        return
+
     # Fabric Silver build (dbt/) -- additive to Phase 1, scoped to this
     # statement. Best-effort: a skip/failure here never stops the pipeline
     # -- Phase 2 (Matching) below still runs against the existing

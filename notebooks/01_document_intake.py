@@ -69,11 +69,23 @@ from src.extraction.python_library.adapter import (
 )
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.lakehouse.fabric_bronze import write_bronze_fabric
+from src.lakehouse.research_raw import write_raw_statement
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import resolve_vendor_id
 from src.storage.blob_client import BlobStorageClient
+
+
+def _research_mode_extraction_only() -> bool:
+    """True when RESEARCH_MODE_EXTRACTION_ONLY=true is set (local .env
+    only -- never set in the deployed App Service's settings). When on,
+    run_intake() still extracts and writes the raw research_schema.raw_statement
+    dump, but skips Bronze/Silver (and, in run_full_pipeline.py, the Fabric
+    Silver build / NetSuite matching / Gold matching / report generation
+    that depend on them). document_intake_log and Blob Storage archival
+    still happen either way -- they're audit/archival, not Bronze/Silver."""
+    return os.getenv("RESEARCH_MODE_EXTRACTION_ONLY", "").strip().lower() == "true"
 
 
 def compute_file_hash(pdf_path: str) -> str:
@@ -1077,14 +1089,21 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         version_info = resolve_version_info(cache_vendor_id, cache_statement_period)
         print(f"  Version: {version_info['version_number']} (previous: {version_info['previous_statement_id'] or 'none'})")
 
-        print(f"  Re-running Silver normalization...")
-        silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id, version_info)
-        print(f"  Silver: {silver_count} rows normalized.")
-        incomplete_count = copy_extraction_incomplete_exceptions(
-            cached_statement_id, statement_id, vendor_id,
-            os.path.basename(pdf_path), statement_period
-        )
-        print(f"  Copied {incomplete_count} EXTRACTION_INCOMPLETE exception(s) forward from the cached run.")
+        research_only = _research_mode_extraction_only()
+        if research_only:
+            print(f"  [RESEARCH MODE] Extraction-only -- skipping Silver/Fabric Bronze copy for this cache hit.")
+            silver_count = 0
+            incomplete_count = 0
+            fabric_bronze_count = 0
+        else:
+            print(f"  Re-running Silver normalization...")
+            silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id, version_info)
+            print(f"  Silver: {silver_count} rows normalized.")
+            incomplete_count = copy_extraction_incomplete_exceptions(
+                cached_statement_id, statement_id, vendor_id,
+                os.path.basename(pdf_path), statement_period
+            )
+            print(f"  Copied {incomplete_count} EXTRACTION_INCOMPLETE exception(s) forward from the cached run.")
 
         # Additive Fabric Lakehouse copy (2026-09-03 fix) -- without this, a
         # cache-hit re-upload's statement_id never gets Fabric Bronze rows
@@ -1103,11 +1122,12 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         # vendor-specific table by name, so it must match the table the
         # cached rows actually live in. Silent no-op on any failure or if
         # Fabric isn't configured -- same contract as write_bronze_fabric().
-        from src.lakehouse.fabric_bronze import copy_bronze_fabric_for_cache_hit
-        fabric_bronze_count = copy_bronze_fabric_for_cache_hit(
-            cached_statement_id, statement_id, cache_vendor_id, version_info
-        )
-        print(f"  Fabric Bronze: {fabric_bronze_count} rows copied for {statement_id}.")
+        if not research_only:
+            from src.lakehouse.fabric_bronze import copy_bronze_fabric_for_cache_hit
+            fabric_bronze_count = copy_bronze_fabric_for_cache_hit(
+                cached_statement_id, statement_id, cache_vendor_id, version_info
+            )
+            print(f"  Fabric Bronze: {fabric_bronze_count} rows copied for {statement_id}.")
 
         # document_intake_log + Blob Storage archival (2026-09-05 fix) --
         # previously ONLY done in the Cache MISS branch below, so every
@@ -1268,6 +1288,19 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     version_info = resolve_version_info(vendor_id, statement_period)
     print(f"  Version: {version_info['version_number']} (previous: {version_info['previous_statement_id'] or 'none'})")
 
+    # Raw research dump (research_schema.raw_statement) -- unconditional,
+    # separate from and additive to the real Bronze writes below. Captures
+    # every extracted row exactly as the extractor produced it, before
+    # validation/skip logic runs, regardless of RESEARCH_MODE_EXTRACTION_ONLY.
+    # See src/lakehouse/research_raw.py's docstring.
+    research_only = _research_mode_extraction_only()
+    write_raw_statement(
+        invoices, vendor_id, statement_id,
+        os.path.basename(pdf_path), provider_used,
+    )
+    if research_only:
+        print(f"  [RESEARCH MODE] Extraction-only -- Bronze/Silver will be skipped for this upload.")
+
     # Step 4: Validate invoices
     print(f"\n[Step 4] Validating extracted invoices...")
     with open("config/validation/extraction_rules.json", "r") as f:
@@ -1303,46 +1336,53 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     print(f"  Valid: {len(valid_invoices)} | Invalid/queued: {len(invalid_invoices)} | Skipped: {skipped_count}")
 
-    # Step 5: Write to Bronze
-    print(f"\n[Step 5] Writing to Bronze...")
-    bronze_count = write_to_bronze(
-        valid_invoices, schema_result, statement_id,
-        pdf_path, statement_period, vendor_id, version_info
-    )
-    print(f"  Bronze rows written: {bronze_count}")
-
-    # Additive Fabric Lakehouse write (new Bronze/Silver dbt pipeline,
-    # dbt/) -- never instead of the write above. Same inputs, one more
-    # place a copy of the data lands: bronze.bronze_<vendor_id>_raw,
-    # written generically for any vendor_id (extraction already normalizes
-    # every vendor into this shape -- see fabric_bronze.py's docstring).
-    # Silently a no-op when Fabric isn't configured (FABRIC_CLIENT_ID/etc
-    # unset in .env) -- the common case for local dev/tests -- and never
-    # raises, so a Fabric-side failure can't break this pipeline.
-    write_bronze_fabric(
-        valid_invoices, schema_result, statement_id,
-        pdf_path, statement_period, vendor_id, version_info
-    )
-
-    # Write invalid to review queue
-    if invalid_invoices:
-        write_to_review_queue(
-            invalid_invoices, invalid_reasons,
-            statement_id, os.path.basename(pdf_path), "AI_EXTRACTION"
+    if research_only:
+        print(f"\n[Step 5/6 skipped] RESEARCH MODE — Bronze/Silver not written for this upload.")
+        bronze_count = 0
+        silver_count = 0
+    else:
+        # Step 5: Write to Bronze
+        print(f"\n[Step 5] Writing to Bronze...")
+        bronze_count = write_to_bronze(
+            valid_invoices, schema_result, statement_id,
+            pdf_path, statement_period, vendor_id, version_info
         )
-        print(f"  Review queue entries: {len(invalid_invoices)}")
+        print(f"  Bronze rows written: {bronze_count}")
 
-    # Step 6: Silver normalization
-    print(f"\n[Step 6] Normalizing to Silver...")
-    silver_count = normalize_to_silver(statement_id, statement_id, vendor_id, version_info)
-    print(f"  Silver rows written: {silver_count}")
+        # Additive Fabric Lakehouse write (new Bronze/Silver dbt pipeline,
+        # dbt/) -- never instead of the write above. Same inputs, one more
+        # place a copy of the data lands: bronze.bronze_<vendor_id>_raw,
+        # written generically for any vendor_id (extraction already normalizes
+        # every vendor into this shape -- see fabric_bronze.py's docstring).
+        # Silently a no-op when Fabric isn't configured (FABRIC_CLIENT_ID/etc
+        # unset in .env) -- the common case for local dev/tests -- and never
+        # raises, so a Fabric-side failure can't break this pipeline.
+        write_bronze_fabric(
+            valid_invoices, schema_result, statement_id,
+            pdf_path, statement_period, vendor_id, version_info
+        )
 
-    # Step 7: Write intake log
+        # Write invalid to review queue
+        if invalid_invoices:
+            write_to_review_queue(
+                invalid_invoices, invalid_reasons,
+                statement_id, os.path.basename(pdf_path), "AI_EXTRACTION"
+            )
+            print(f"  Review queue entries: {len(invalid_invoices)}")
+
+        # Step 6: Silver normalization
+        print(f"\n[Step 6] Normalizing to Silver...")
+        silver_count = normalize_to_silver(statement_id, statement_id, vendor_id, version_info)
+        print(f"  Silver rows written: {silver_count}")
+
+    # Step 7: Write intake log (kept even in RESEARCH MODE -- audit-only,
+    # doesn't touch Bronze/Silver. invoice_count is len(valid_invoices),
+    # not bronze_count, so this stays meaningful when bronze_count is 0.)
     doc_type = schema_result.get("document_metadata", {}).get("document_type", "UNKNOWN")
     routing = "RECONCILIATION" if doc_type == "VENDOR_STATEMENT" else "PARKED"
     write_intake_log(
         document_id, pdf_path, document_hash, schema_result,
-        statement_id, statement_period, bronze_count, routing
+        statement_id, statement_period, len(valid_invoices), routing
     )
 
     # Step 8: Upload PDF to Blob Storage for permanent archival. Silent by
@@ -1357,9 +1397,12 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     else:
         print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
 
-    # Step 9: Update cache
-    update_cache(document_hash, statement_id, os.path.basename(pdf_path),
-                 provider_used, bronze_count)
+    # Step 9: Update cache (skipped in RESEARCH MODE -- bronze_count is 0,
+    # and check_cache() already requires row_count > 0 for a valid hit, so
+    # writing a 0-row cache entry here would be misleading, not just inert)
+    if not research_only:
+        update_cache(document_hash, statement_id, os.path.basename(pdf_path),
+                     provider_used, bronze_count)
 
     # Final summary
     print(f"\n{'='*60}")
