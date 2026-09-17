@@ -10,9 +10,12 @@ migrations/013_add_recon_tables.sql per the user 2026-08-26, accepting
 the latency of live Fabric queries over local SQLite for the Exceptions
 page in exchange for the data genuinely living in Fabric).
 
-Three matching rules (generalized from a validated Bald Hill query, same
-logic, applied to silver.statement_line's generic columns instead of that
-vendor's raw column names):
+Four matching rules (A/B/C generalized from a validated Bald Hill query,
+same logic, applied to silver.statement_line's generic columns instead of
+that vendor's raw column names; D added to generalize the
+prefix-stripped/aging-statement vendors -- Hoselton, NYE, Quirk -- into
+this same engine instead of a separate one, once their extractors emit a
+clean invoice_number the same way every other vendor's already does):
   A. exactly one CHARGE line for an invoice_number, no CREDIT/PAYMENT lines
      -- checked against bronze.netsuite_vendorbill (a normal invoice)
   B. exactly one CREDIT or PAYMENT line, no CHARGE lines -- checked
@@ -29,13 +32,37 @@ vendor's raw column names):
      magnitude, and that amount == NetSuite bill total -- checked against
      netsuite_vendorbill (a charge fully offset by its own reversal, both
      tying to the same original bill)
+  D. anything else with at least one CHARGE or CREDIT line -- take the
+     EARLIEST-dated CHARGE line, full stop, ignoring every other line on
+     that invoice_number (further credit-memo reversals, payment
+     applications, or a charge amount re-echoed on a later statement
+     cycle); if there's no CHARGE line at all, take the earliest-dated
+     CREDIT line instead. Checked against netsuite_vendorbill /
+     netsuite_vendorcredit respectively. Deliberately NOT count-based (an
+     earlier design counted charge lines and required exactly one; a
+     charge amount can be legitimately re-echoed as a second CHARGE-typed
+     line on a later cycle, which a count-based rule gets fooled by, so
+     "earliest wins" is the rule that actually holds up). A shape with
+     only PAYMENT lines (no CHARGE, no CREDIT) stays ineligible here --
+     not enough validated real-world evidence yet for what that shape
+     means; flagged rather than guessed.
+
+Credit-side NetSuite lookups use substring matching (_match_credit()), not
+an exact tranid match: a statement credit's real NetSuite tranid can take
+inconsistent forms relative to the statement's own invoice_number (e.g.
+CMA435584, CMA435584-1, CM-9435584X1 all logically the same credit) --
+an exact-match assumption silently misses real matches. Bills still use
+an exact tranid match (_fetch_netsuite_transactions()) since that pattern
+hasn't been observed there.
 
 Explicitly NOT implemented yet: the original query's "variants_on_statement"
 guard (skipping invoice_numbers that have multiple revisions on the
 statement) -- the generic extraction schema has no field capturing "this
 line is a revision of that other invoice", so this can't be computed today.
 Decided with the user 2026-08-26 to ship without it and revisit only if it
-causes real false-positive matches in practice.
+causes real false-positive matches in practice. Rule D's "earliest wins"
+behavior is this project's replacement for that guard on the vendors that
+actually needed it.
 
 Best-effort in the sense every other module here is: never raises into the
 caller (scripts/run_full_pipeline.py calls this right after the dbt Silver
@@ -107,7 +134,9 @@ def _fetch_netsuite_transactions(cur, entity_ids: list, table: str) -> dict:
     netsuite_vendorcredit -- same shape, tranid/entity/total/voided).
     Excludes voided rows and any tranid with more than one differing
     non-voided total among these entities (ambiguous -- treated as
-    unresolved rather than guessing which one to use)."""
+    unresolved rather than guessing which one to use). Used for BILLS
+    only -- see _fetch_netsuite_credit_candidates() for why credits need a
+    different lookup shape entirely, not just this same dict."""
     if not entity_ids:
         return {}
     placeholders = ",".join("?" * len(entity_ids))
@@ -130,6 +159,79 @@ def _fetch_netsuite_transactions(cur, entity_ids: list, table: str) -> dict:
         logger.warning("Multiple differing NetSuite %s totals for tranid=%s -- excluding from matching", table, tranid)
         del by_tranid[tranid]
     return by_tranid
+
+
+def _fetch_netsuite_credit_candidates(cur, entity_ids: list) -> list:
+    """Returns [(tranid, total)] from bronze.netsuite_vendorcredit for
+    these entities, excluding voided rows and deduplicating identical
+    (tranid, total) pairs. Deliberately a flat list consumed via substring
+    search (_match_credit()), not an exact-match dict like
+    _fetch_netsuite_transactions() -- a statement credit's real NetSuite
+    tranid can take wildly inconsistent forms relative to the statement's
+    own invoice_number (CMA435584, CMA435584-1, CM-9435584X1,
+    cm3000r0004355846ac all logically the same credit) -- an exact-match
+    assumption (e.g. tranid == 'CM' + invoice_number) silently misses real
+    matches that don't survive contact with real data. Applies to every
+    vendor's credit-typed shapes uniformly, not just the ones that
+    surfaced this.
+
+    The (tranid, total) dedup matters more here than it did for
+    _fetch_netsuite_transactions()'s dict (which dedupes for free by
+    construction): a NetSuite record synced into Bronze on more than one
+    run (identical tranid+total, different _run_id) produces two
+    IDENTICAL entries in this flat list, which _match_credit() then can't
+    tell apart from two genuinely different candidates -- it would see 2
+    matches, both tying out to the same amount, and report "Possible
+    Duplicate" instead of a clean match. Deduping here (not just relying
+    on the caller) keeps that distinction correct: a real duplicate (2+
+    DIFFERENT totals under a related tranid) still surfaces as a genuine
+    ambiguity; a same-value Bronze-sync artifact no longer masquerades as
+    one."""
+    if not entity_ids:
+        return []
+    placeholders = ",".join("?" * len(entity_ids))
+    cur.execute(
+        f"SELECT DISTINCT tranid, total FROM bronze.netsuite_vendorcredit "
+        f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
+        entity_ids,
+    )
+    candidates = []
+    for tranid, total in cur.fetchall():
+        try:
+            candidates.append((tranid, float(total)))
+        except (TypeError, ValueError):
+            continue
+    return candidates
+
+
+def _match_credit(invoice_number: str, statement_amount, credit_candidates: list) -> tuple:
+    """Searches credit_candidates for tranids CONTAINING invoice_number as
+    a substring (see _fetch_netsuite_credit_candidates() for why this
+    isn't an exact match). Returns (netsuite_total_or_None,
+    candidate_count).
+
+    candidate_count > 1 with netsuite_total is None means a genuine
+    ambiguity for the caller to flag ("Possible Duplicate"), not something
+    to silently resolve -- 2+ real NetSuite records can share a base
+    tranid (e.g. a credit memo split across multiple apply-against-bill
+    records, or an unrelated base/suffix pair), and guessing which one is
+    right risks a false match on a coincidental tranid collision under an
+    unrelated entity. If exactly one of several candidates ties out to
+    the statement amount, that candidate is returned (an unambiguous
+    answer even though other candidates exist); otherwise None is
+    returned so the caller reports "Possible Duplicate" rather than an
+    amount mismatch it can't actually attribute to one record."""
+    if not invoice_number or statement_amount is None:
+        return None, 0
+    matches = [total for tranid, total in credit_candidates if invoice_number in tranid]
+    if not matches:
+        return None, 0
+    if len(matches) == 1:
+        return matches[0], 1
+    exact = [t for t in matches if _amounts_tie_out(statement_amount, t)]
+    if len(exact) == 1:
+        return exact[0], len(matches)
+    return None, len(matches)
 
 
 def _build_invoice_shapes(lines: list) -> dict:
@@ -172,14 +274,24 @@ def _amounts_tie_out(a: float, b: float) -> bool:
     return a is not None and b is not None and abs(a - b) <= EXACT_AMOUNT_EPSILON
 
 
+def _earliest_of_type(lines: list, line_type: str):
+    """Returns the earliest-dated line of the given type from a shape's
+    lines, or None if there isn't one. A line with no line_date sorts
+    last rather than raising -- a missing date shouldn't crash matching,
+    just lose priority to lines that do have one."""
+    typed = [line for line in lines if line["line_type"] == line_type]
+    if not typed:
+        return None
+    return min(typed, key=lambda line: (line["line_date"] is None, line["line_date"]))
+
+
 def _shape_target(shape: dict) -> tuple:
     """Returns (statement_amount, netsuite_table_or_None) for one invoice
-    shape, applying rules A/B/C -- decides WHICH NetSuite table (bill vs
+    shape, applying rules A/B/C/D -- decides WHICH NetSuite table (bill vs
     credit memo) this shape should be checked against, before any lookup
-    happens. netsuite_table is None for an ineligible shape (multiple
-    charge lines for one invoice number, a charge+credit pair that
-    doesn't even internally net to zero, etc.) -- statement_amount is
-    still returned where available so an exception row isn't left with no
+    happens. netsuite_table is None for a shape with no CHARGE or CREDIT
+    line at all (e.g. payment-only activity) -- statement_amount is still
+    returned where available so an exception row isn't left with no
     amount at all."""
     line_count = len(shape["lines"])
     c, r, p = shape["charge_line_count"], shape["credit_line_count"], shape["payment_line_count"]
@@ -194,7 +306,24 @@ def _shape_target(shape: dict) -> tuple:
         stmt_amount = shape["charge_amt"]
         if _amounts_tie_out(shape["charge_amt"], shape["credit_amt"]):
             return stmt_amount, "netsuite_vendorbill"
-        return stmt_amount, None
+        # Doesn't tie out -- not the "charge fully offset by its own
+        # reversal" pattern Rule C was written for (e.g. a charge later
+        # reduced by an unrelated-magnitude credit that was never meant to
+        # net to zero). Falls through to Rule D instead of returning
+        # ineligible -- Rule D resolves it correctly (earliest charge
+        # line, checked against netsuite_vendorbill).
+
+    # Rule D -- see module docstring. Earliest CHARGE line wins outright;
+    # only falls back to earliest CREDIT line when there's no charge at
+    # all on this invoice_number.
+    earliest_charge = _earliest_of_type(shape["lines"], "CHARGE")
+    if earliest_charge is not None:
+        return earliest_charge["charge_amount"], "netsuite_vendorbill"
+    earliest_credit = _earliest_of_type(shape["lines"], "CREDIT")
+    if earliest_credit is not None:
+        charge_amount = earliest_credit["charge_amount"]
+        credit_amt = abs(charge_amount) if charge_amount is not None else None
+        return credit_amt, "netsuite_vendorcredit"
 
     return (shape["charge_amt"] or shape["credit_amt"] or shape["payment_amt"]), None
 
@@ -251,16 +380,34 @@ def run_fabric_matching(statement_id: str) -> dict:
             lh_conn = get_lakehouse_connection()
             lh_cur = lh_conn.cursor()
             bills = _fetch_netsuite_transactions(lh_cur, entity_ids, "netsuite_vendorbill")
-            credits = _fetch_netsuite_transactions(lh_cur, entity_ids, "netsuite_vendorcredit")
-            netsuite_by_table = {"netsuite_vendorbill": bills, "netsuite_vendorcredit": credits}
+            credit_candidates = _fetch_netsuite_credit_candidates(lh_cur, entity_ids)
 
             shapes = _build_invoice_shapes(lines)
             for shape in shapes.values():
                 stmt_amount, table = _shape_target(shape)
                 statement_total += stmt_amount or 0.0
-                netsuite_total = netsuite_by_table.get(table, {}).get(shape["invoice_number"]) if table else None
 
-                if netsuite_total is None:
+                candidate_count = 0
+                if table == "netsuite_vendorbill":
+                    netsuite_total = bills.get(shape["invoice_number"])
+                elif table == "netsuite_vendorcredit":
+                    netsuite_total, candidate_count = _match_credit(
+                        shape["invoice_number"], stmt_amount, credit_candidates
+                    )
+                else:
+                    netsuite_total = None
+
+                if candidate_count >= 2 and netsuite_total is None:
+                    # 2+ NetSuite credit records share this invoice_number as
+                    # a substring and none of them ties out cleanly -- a
+                    # genuine ambiguity (see _match_credit()), not a plain
+                    # not-found.
+                    _write_exception(
+                        wh_cur, statement_id, vendor_id, shop, shop_owner, shape["invoice_number"],
+                        shape["ro_number"], stmt_amount, None, "Possible Duplicate in NetSuite", now,
+                    )
+                    exception_count += 1
+                elif netsuite_total is None:
                     _write_exception(
                         wh_cur, statement_id, vendor_id, shop, shop_owner, shape["invoice_number"],
                         shape["ro_number"], stmt_amount, None, "Not Found in NetSuite", now,

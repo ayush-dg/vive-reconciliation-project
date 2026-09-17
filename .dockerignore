@@ -16,6 +16,17 @@
 # production regardless of concurrency.
 dbt/profiles.yml
 
+# Same class of bug as dbt/profiles.yml above -- these are gitignored
+# (regenerated fresh by every local `dbt run`, per
+# src/lakehouse/fabric_dbt_runner.py) but were NOT dockerignored, so
+# `az acr build`'s local-directory tar would bake in whatever compiled
+# SQL, partial-parse cache, and log files happened to exist on the machine
+# running the build -- stale local state overriding the container's own
+# fresh run, not just wasted image size.
+dbt/vive_recon/target/
+dbt/vive_recon/logs/
+dbt/vive_recon/dbt_packages/
+
 # Version control
 .git
 .gitignore
