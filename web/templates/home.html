@@ -42,6 +42,11 @@
     <div class="stat-num">{{ kpis.statement_total | money_short }}</div>
     <div class="stat-sub">this period</div>
   </div>
+  <div class="stat-card{{ ' stat-card--flagged' if (validation_kpis.mismatches + validation_kpis.total_not_found) > 0 }}">
+    <div class="stat-label">Arithmetic check</div>
+    <div class="stat-num">{{ "{:,}".format(validation_kpis.total_checked) }}</div>
+    <div class="stat-sub">{{ "{:,}".format(validation_kpis.matches) }} matched · {{ "{:,}".format(validation_kpis.mismatches + validation_kpis.total_not_found) }} flagged</div>
+  </div>
 </div>
 
 {% if kpis.pending_review_count %}

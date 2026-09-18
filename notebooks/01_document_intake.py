@@ -67,6 +67,9 @@ from src.ai.document_understanding_engine import (
 from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
+from src.validation.arithmetic_gate import compute_arithmetic_validation
+from src.validation.date_utils import normalize_statement_month
+from src.validation.location_lookup import resolve_billing_location
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.lakehouse.fabric_bronze import write_bronze_fabric
 from src.matching.engine import score_exception_confidence
@@ -769,6 +772,24 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     # stray "{}" string.
     aging_summary = schema_result.get("aging_summary") or {}
     raw_aging_summary = json.dumps(aging_summary) if aging_summary else None
+    # Arithmetic Validation Gate result (src/validation/arithmetic_gate.py)
+    # -- set once at the fresh-extraction convergence point in
+    # notebooks/01_document_intake.py (right after schema_result is
+    # assigned from either extraction engine), or reconstructed from this
+    # same column pair on a cache hit. NULL for any statement written
+    # before this migration, or if schema_result never got a "validation"
+    # key for some other reason.
+    validation = schema_result.get("validation") or {}
+    # billing_location (adapter.py's _normalize_billing_location(), pdfplumber
+    # path only for now -- vendor.get() is {} for the Foundry path, which
+    # doesn't extract a billing address at all yet) and statement_month
+    # (src/validation/date_utils.py's normalize_statement_month(), both
+    # paths -- derived from whatever raw statement_date format either path
+    # produced, since real data confirmed Foundry's raw format is
+    # inconsistent across vendors).
+    billing_location = vendor.get("billing_location")
+    billing_location_source = vendor.get("billing_location_source")
+    statement_month = normalize_statement_month(stmt.get("statement_date"))
 
     execute_sql(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
@@ -784,8 +805,9 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             currency, statement_total_as_printed,
             extraction_confidence_overall, extraction_model, extraction_method,
             routing_decision, statement_id, invoice_count, warnings, schema_version,
-            raw_aging_summary
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            raw_aging_summary, validation_status, validation_difference,
+            billing_location, statement_month, billing_location_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             document_id,
@@ -809,6 +831,11 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             json.dumps(warnings),
             "1.0",
             raw_aging_summary,
+            validation.get("status"),
+            validation.get("difference"),
+            billing_location,
+            statement_month,
+            billing_location_source,
         ]
     )
 
@@ -1152,6 +1179,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
                     if original_intake_row and original_intake_row.get("shop_or_entity")
                     else []
                 ),
+                "billing_location": original_intake_row.get("billing_location") if original_intake_row else None,
+                "billing_location_source": original_intake_row.get("billing_location_source") if original_intake_row else None,
             },
             "statement_metadata": {
                 "statement_date": original_intake_row.get("statement_date") if original_intake_row else None,
@@ -1177,6 +1206,10 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
                 if original_intake_row and original_intake_row.get("raw_aging_summary")
                 else {}
             ),
+            "validation": {
+                "status": original_intake_row.get("validation_status") if original_intake_row else None,
+                "difference": original_intake_row.get("validation_difference") if original_intake_row else None,
+            },
         }
 
         print(f"\n[Step 7 - cache hit] Writing intake log...")
@@ -1225,6 +1258,28 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Running Document Understanding Engine...")
         engine = DocumentUnderstandingEngine()
     schema_result = engine.understand(pdf_text, pdf_path, statement_id=statement_id)
+
+    stmt_meta_for_validation = schema_result.get("statement_metadata", {})
+    schema_result["validation"] = compute_arithmetic_validation(
+        stmt_meta_for_validation.get("statement_total_as_printed"),
+        stmt_meta_for_validation.get("statement_total_computed"),
+    )
+
+    # Three-tier billing_location fallback (src/validation/location_lookup.py)
+    # -- a printed address always wins (tier 1); when extraction found none
+    # (confirmed real case: templates like the lowercase-"nucar" statements
+    # never print a separate customer address at all), fall back to a
+    # curated shop-keyword lookup (tier 2), then a low-confidence guess
+    # parsed out of the shop name itself (tier 3). The source is stored
+    # alongside the result so a fallback value is never confused with a
+    # genuinely printed one downstream.
+    vendor_meta_for_location = schema_result.get("vendor_metadata", {})
+    resolved_location, location_source = resolve_billing_location(
+        vendor_meta_for_location.get("billing_location"),
+        vendor_meta_for_location.get("shop_or_entity"),
+    )
+    vendor_meta_for_location["billing_location"] = resolved_location
+    vendor_meta_for_location["billing_location_source"] = location_source
 
     if route["new_vendor_warning"]:
         schema_result.setdefault("warnings", []).append(

@@ -393,6 +393,30 @@ COLUMNS = {
         # extract_quirk.py's parse_aging_summary(). NULL for every vendor
         # that doesn't print an aging bucket summary.
         ("raw_aging_summary", "ALTER TABLE document_intake_log ADD raw_aging_summary NVARCHAR(MAX)"),
+        # Arithmetic Validation Gate (src/validation/arithmetic_gate.py) --
+        # see notebooks/01_document_intake.py's call to
+        # compute_arithmetic_validation() right after schema_result is
+        # assigned from either extraction engine. NULL for any statement
+        # written before this migration.
+        ("validation_status", "ALTER TABLE document_intake_log ADD validation_status NVARCHAR(MAX)"),
+        ("validation_difference", "ALTER TABLE document_intake_log ADD validation_difference FLOAT"),
+        # migrations/017_add_billing_location_and_month.sql (SQLite side of
+        # this same change) -- billing_location is a normalized "City,
+        # State" string (adapter.py's _normalize_billing_location()),
+        # pdfplumber path only for now; statement_month is a canonical
+        # "YYYY-MM" string (src/validation/date_utils.py's
+        # normalize_statement_month()), both paths. NULL for any
+        # statement written before this migration, and NULL for any
+        # Foundry-routed row until that path's own follow-up extracts a
+        # billing address.
+        ("billing_location", "ALTER TABLE document_intake_log ADD billing_location NVARCHAR(MAX)"),
+        ("statement_month", "ALTER TABLE document_intake_log ADD statement_month NVARCHAR(MAX)"),
+        # migrations/018_add_billing_location_source.sql (SQLite side of
+        # this same change) -- tracks which tier of the three-tier
+        # billing_location fallback (src/validation/location_lookup.py)
+        # produced the value in billing_location: "printed",
+        # "lookup_table", "shop_name_fallback", or NULL.
+        ("billing_location_source", "ALTER TABLE document_intake_log ADD billing_location_source NVARCHAR(MAX)"),
     ],
     "silver_reconciliation_standard": [
         ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),

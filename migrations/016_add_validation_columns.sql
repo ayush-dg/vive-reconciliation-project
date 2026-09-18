@@ -1,0 +1,35 @@
+-- 016_add_validation_columns.sql
+--
+-- Adds validation_status and validation_difference to document_intake_log
+-- -- the Arithmetic Validation Gate's result (src/validation/
+-- arithmetic_gate.py's compute_arithmetic_validation()), which compares a
+-- statement's printed total against a centrally-computed sum of its
+-- extracted line items. Called once at the fresh-extraction convergence
+-- point in notebooks/01_document_intake.py's run_intake() -- right after
+-- schema_result is assigned from either extraction engine
+-- (PythonLibraryExtractionEngine or DocumentUnderstandingEngine) -- and
+-- stored as schema_result["validation"]. document_intake_log is one row
+-- per statement_id already (see write_intake_log(), which DELETEs by
+-- statement_id before each INSERT), the natural existing home for this --
+-- these are statement-level results, not per-invoice data, so they never
+-- belong in bronze_vendor_statement_raw or line_items (INV-03: no
+-- summary/total row may ever be ingested and validated as if it were a
+-- real invoice line).
+--
+-- validation_status holds one of three values: "matches", "mismatch", or
+-- "total_not_found" (the last when statement_total_as_printed itself is
+-- NULL -- no printed total to compare against). validation_difference
+-- holds printed minus computed, rounded to 2 decimal places, or NULL
+-- whenever status is "total_not_found".
+--
+-- On a cache-hit run, run_intake() reconstructs cache_schema_result
+-- ["validation"] by reading these same two columns back from the
+-- original cached statement's document_intake_log row, the same pattern
+-- already used for statement_total_as_printed -- so a cache hit never
+-- recomputes this, it just carries the original run's result forward.
+-- NULL for any statement written before this migration.
+--
+-- Purely additive: no existing column dropped, renamed, or retyped.
+
+ALTER TABLE document_intake_log ADD COLUMN validation_status TEXT;
+ALTER TABLE document_intake_log ADD COLUMN validation_difference REAL;

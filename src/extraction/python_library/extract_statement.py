@@ -66,21 +66,52 @@ def group_rows(words):
     return rows
 
 
+CITY_STATE_ZIP_RE = re.compile(r"^([A-Z][A-Za-z .]+?)\s+([A-Z]{2})\s+\d{5}(-\d{4})?$")
+
+
 def parse_header_info(page_text):
     info = {}
-    m = re.search(r"(\d{2}[A-Z]{3}\d{2})\s+([A-Z0-9]+)\s+(\d+)\s*\n", page_text)
+    # The date and customer_no are usually separated by a real space
+    # ("31AUG26 Z66305001"), but confirmed real files sometimes render
+    # them glued together with zero whitespace ("31AUG26Z741248011") --
+    # \s* (zero-or-more) between them tolerates both without breaking the
+    # already-working glued-vs-spaced cases either way.
+    m = re.search(r"(\d{2}[A-Z]{3}\d{2})\s*([A-Z0-9]+)\s+(\d+)\s*\n", page_text)
     if m:
         info["statement_date"] = m.group(1)
         info["customer_no"] = m.group(2)
         info["page_no"] = m.group(3)
-    m = re.search(r"\n(VIVE COLLISION[^\n]*)\n", page_text)
-    if m:
-        info["customer_name"] = m.group(1).split("  ")[0].strip()
-    m = re.search(r"\n(CHURCHILL[^\n]*)\n([^\n]*ST GEORGES AVE[^\n]*)\n([^\n]*AVENEL[^\n]*)\n", page_text)
-    if m:
-        info["billing_line1"] = m.group(1).strip()
-        info["billing_line2"] = m.group(2).strip()
-        info["billing_line3"] = m.group(3).strip()
+
+    # customer_name (and the billing address lines right after it) are
+    # structurally positioned immediately following the standalone
+    # customer_no line, regardless of which VIVE-owned sub-brand prefixes
+    # the shop name (confirmed real cases: "VIVE COLLISION...", "VIVE
+    # COLLISION-MODERN...", "EVOLVE - ELECTRIC VEHICLE SPECIALIST...") --
+    # capturing by structural position generalizes across sub-brands
+    # without needing to enumerate every prefix in a hardcoded list that
+    # would just repeat the same narrow-regex mistake for the next one.
+    if info.get("customer_no"):
+        m = re.search(
+            r"\n" + re.escape(info["customer_no"]) + r"\n([^\n]+)\n"
+            r"((?:[^\n]+\n){0,3}?)PLEASE CIRCLE INVOICES BEING PAID",
+            page_text,
+        )
+        if m:
+            info["customer_name"] = m.group(1).split("  ")[0].strip()
+            billing_lines = [line.strip() for line in m.group(2).splitlines() if line.strip()]
+            if billing_lines:
+                # The last captured line is the city/state/zip line --
+                # confirmed real format has NO comma before the state
+                # ("CHERRY HILL NJ 08002", "SHREWSBURY NJ 07702-4012") --
+                # everything above it (a holding-company name line, a
+                # street line, or both) is the rest of the address, when
+                # present (some shops have no separate holding-company
+                # line at all, e.g. Lyndhurst/Nutley).
+                czm = CITY_STATE_ZIP_RE.match(billing_lines[-1])
+                if czm:
+                    info["billing_city_state_zip"] = billing_lines[-1]
+                    if len(billing_lines) > 1:
+                        info["billing_address"] = " ".join(billing_lines[:-1])
     return info
 
 

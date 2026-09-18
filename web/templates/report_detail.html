@@ -49,6 +49,10 @@
     <tr><td style="color:var(--text-secondary);width:220px">Statement ID</td><td>{{ statement_id }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Source file</td><td>{{ intake.source_file if intake else "—" }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Extraction method</td><td>{{ intake.extraction_method if intake else "—" }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Shop</td><td>{{ intake.shop_display if intake and intake.shop_display else "—" }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Billing location</td><td>{{ intake.billing_location if intake and intake.billing_location else "—" }}{% if intake and intake.billing_location and intake.billing_location_source == "lookup_table" %} (from shop lookup table){% elif intake and intake.billing_location and intake.billing_location_source == "shop_name_fallback" %} (best guess from shop name){% endif %}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Statement month</td><td>{{ intake.statement_month if intake and intake.statement_month else "—" }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Arithmetic check</td><td>{{ intake.validation_status if intake else "—" }}{% if intake and intake.validation_difference is not none %} ({{ intake.validation_difference | money_signed }}){% endif %}</td></tr>
     <tr><td style="color:var(--text-secondary)">ERP version</td><td>{{ summary.erp_version }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Reconciled at</td><td>{{ summary.reconciliation_timestamp | friendly_dt }}</td></tr>
   </tbody>

@@ -137,7 +137,7 @@ def parse_printed_total(last_page_text):
     """The last "Balance Due" line on the final page carries the printed
     account total (appears again once more on the tear-off stub, same
     value both times)."""
-    m = re.search(r"Balance Due\s*\n\$([\d,]+\.\d{2})", last_page_text)
+    m = re.search(r"Balance Due\s*\$([\d,]+\.\d{2})", last_page_text)
     if m:
         return m.group(1)
     return None
