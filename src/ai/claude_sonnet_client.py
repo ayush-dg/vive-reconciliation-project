@@ -49,6 +49,7 @@ import requests
 
 from .base_client import AIClient, AIResponse
 from .concurrency_limiter import ai_call_slot
+from src.validation.arithmetic_gate import compute_statement_total_from_invoices
 
 ROW_CONFIDENCE = 0.75
 
@@ -208,11 +209,43 @@ Also extract document-level metadata at the top of the JSON response:
 - vendor_name: the vendor/supplier company name as printed on the
   document (e.g. 'Fred Beans Parts Inc', 'asTech', 'KSI')
 - statement_date: the statement date if visible
+- statement_total_as_printed: a statement-level total or balance-due
+  figure that is PRINTED on the document itself (e.g. a "Total Due",
+  "Balance Due", or grand total line), distinct from the sum of the
+  rows you extracted. Do NOT calculate this yourself by adding up the
+  rows — only report a number here if you can see it printed on the
+  document as its own total figure. If no such total is printed
+  anywhere on the document, report null.
+
+Also look for the CUSTOMER's billing information -- the company/shop
+this statement is billed to (NOT the vendor issuing the statement).
+This is usually an unlabeled address block near the top of the page,
+before the line-item table -- there is rarely an explicit "Bill To"
+label, so identify it by context: it is a DIFFERENT company than the
+vendor's own name/address shown elsewhere on the page (e.g. in a
+"Remit To" block, a letterhead, or a "Make checks payable to" line).
+
+Only report a value if you are genuinely confident you have correctly
+identified the CUSTOMER's information, not the vendor's own address.
+If the page's layout is unusual, if text appears garbled or
+out-of-order, or if you are not confident which address belongs to
+the customer versus the vendor, report null rather than guessing --
+an incorrect answer here is worse than no answer.
+
+- shop_or_entity: the customer/billed-to company name as printed
+  (e.g. "VIVE Collision - Clarks Summit"), or null if not
+  confidently identifiable.
+- billing_location: the customer's city and state as printed
+  (e.g. "Clarks Summit, PA"), or null if not confidently
+  identifiable.
 
 Return JSON:
 {
   vendor_name: '...',
   statement_date: '...',
+  statement_total_as_printed: <number or null>,
+  shop_or_entity: <string or null>,
+  billing_location: <string or null>,
   columns_found: [exact column names from header, in left-to-right order],
   rows: [{<same keys as columns_found>: val, ..., confidence: 0.0-1.0}]
 }"""
@@ -280,7 +313,7 @@ EMBEDDED_INVOICE_RE = re.compile(r'(?:invoice|credit)\s*#\s*([A-Za-z0-9\-]+)', r
 DUE_DATE_KEYWORDS = ("due date",)
 DATE_KEYWORDS = ("invoice date", "posting date", "transaction date", "date")
 OUTSTANDING_KEYWORDS = ("amount due", "balance", "outstanding", "remaining", "remain", "net amount", "unpaid", "due")
-CREDIT_KEYWORDS = ("credits", "payments", "credit memo", "credit", "applied", "paid")
+CREDIT_KEYWORDS = ("credits", "payments", "credit memo", "credit", "applied", "paid", "pymt", "pymts")
 CHARGE_KEYWORDS = ("charges", "purchases", "amount charged", "invoice amt", "debit", "gross amount", "orig amt", "original amount", "charged", "invoice amount")
 RO_KEYWORDS = ("ro #", "ro no", "repair order")
 PO_KEYWORDS = ("po #", "po no", "purchase order")
@@ -446,6 +479,25 @@ class ClaudeSonnetClient(AIClient):
                 columns_found = parsed.get("columns_found", []) or []
                 vendor_name = parsed.get("vendor_name") or None
                 statement_date = parsed.get("statement_date") or None
+                shop_or_entity_raw = parsed.get("shop_or_entity") or None
+                billing_location = parsed.get("billing_location") or None
+                statement_total_as_printed = parsed.get("statement_total_as_printed")
+                if statement_total_as_printed is not None:
+                    try:
+                        statement_total_as_printed = float(statement_total_as_printed)
+                    except (TypeError, ValueError):
+                        statement_total_as_printed = None
+
+                # RH Long Motor's vision-based total detection is
+                # confirmed inconsistent (same file, different Foundry
+                # calls, sometimes null) despite the PDF having a real
+                # text layer with the total reliably printed after an
+                # "UNAPPLIED CREDITS" label on the last page. Recover it
+                # from the text layer directly rather than relying on
+                # another (possibly non-deterministic) vision call.
+                if statement_total_as_printed is None and vendor_name and "RH LONG MOTOR" in vendor_name.upper():
+                    statement_total_as_printed = self._find_total_after_anchor(pdf_path, "UNAPPLIED CREDITS")
+
                 print(f"  [ClaudeSonnetClient] Columns found: {columns_found}")
 
                 truncation_reason = self._detect_truncation(parsed, rows, columns_found, pdf_path)
@@ -463,6 +515,8 @@ class ClaudeSonnetClient(AIClient):
                     pdf_path, invoices, columns_found,
                     bool(parsed.get("_salvaged")), fallback_warnings,
                     vendor_name=vendor_name, statement_date=statement_date,
+                    statement_total_as_printed=statement_total_as_printed,
+                    shop_or_entity=shop_or_entity_raw, billing_location=billing_location,
                 )
 
                 latency_ms = (time.monotonic() - start) * 1000
@@ -993,6 +1047,45 @@ class ClaudeSonnetClient(AIClient):
         return None, None
 
     @staticmethod
+    def _find_total_after_anchor(pdf_path: str, anchor: str) -> Optional[float]:
+        """Vendor-specific text-layer fallback (RH Long Motor only, see
+        caller) -- recovers a printed total that Foundry's vision call
+        failed to find, by locating `anchor` on the PDF's last page and
+        taking the last money-shaped value that appears after it. Only
+        usable on PDFs with a real text layer; scanned/image-only PDFs
+        have no chars for pdfplumber to read, so this safely no-ops
+        (returns None) for those rather than attempting OCR."""
+        try:
+            import pdfplumber
+        except ImportError:
+            return None
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                last_page = pdf.pages[-1]
+                if not last_page.chars:
+                    return None
+                text = last_page.extract_text() or ""
+        except Exception:
+            return None
+
+        anchor_pos = text.upper().find(anchor.upper())
+        if anchor_pos == -1:
+            return None
+
+        matches = re.findall(r"-?\d{1,3}(?:,\d{3})*\.\d{2}-?", text[anchor_pos:])
+        if not matches:
+            return None
+
+        raw = matches[-1]
+        negative = raw.endswith("-")
+        raw = raw.rstrip("-").replace(",", "")
+        try:
+            value = float(raw)
+        except ValueError:
+            return None
+        return -value if negative else value
+
+    @staticmethod
     def _to_float(val) -> Optional[float]:
         if val is None:
             return None
@@ -1011,12 +1104,11 @@ class ClaudeSonnetClient(AIClient):
 
     def _build_schema(self, pdf_path: str, invoices: list, columns_found: list, salvaged: bool,
                        fallback_warnings: Optional[list] = None, vendor_name: Optional[str] = None,
-                       statement_date: Optional[str] = None) -> dict:
-        statement_total = sum(
-            inv.get("outstanding_amount", 0) or 0
-            for inv in invoices
-            if inv.get("outstanding_amount") is not None
-        )
+                       statement_date: Optional[str] = None,
+                       statement_total_as_printed: Optional[float] = None,
+                       shop_or_entity: Optional[str] = None,
+                       billing_location: Optional[str] = None) -> dict:
+        statement_total_computed = compute_statement_total_from_invoices(invoices)
         confidence = ROW_CONFIDENCE if invoices else 0.20
 
         warnings = []
@@ -1039,7 +1131,8 @@ class ClaudeSonnetClient(AIClient):
             "vendor_metadata": {
                 "vendor_name": vendor_name,
                 "vendor_address": None,
-                "shop_or_entity": [],
+                "shop_or_entity": [shop_or_entity] if shop_or_entity else [],
+                "billing_location": billing_location,
                 "vendor_confidence": 0.50 if vendor_name else 0.10,
             },
             "statement_metadata": {
@@ -1047,7 +1140,8 @@ class ClaudeSonnetClient(AIClient):
                 "statement_period_start": None,
                 "statement_period_end": None,
                 "currency": "USD",
-                "statement_total_as_printed": statement_total if invoices else None,
+                "statement_total_as_printed": statement_total_as_printed,
+                "statement_total_computed": statement_total_computed if invoices else None,
                 "statement_confidence": 0.30,
             },
             "invoices": invoices,

@@ -22,7 +22,11 @@ ROW_TOLERANCE = 3.0
 
 DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{2}$")
 MONEY_RE = re.compile(r"^-?[\d,]+\.\d{2}$")
-DOC_NO_RE = re.compile(r"^\d{7,9}$")
+# Some real statements print a doc number with a leading "/" (confirmed
+# on "empire Maurice 083026.PDF" and "empire harbour 083026.PDF") -- the
+# strict digits-only version silently dropped these rows entirely
+# (worth $88.00 and $42.00 respectively on those two statements).
+DOC_NO_RE = re.compile(r"^/?\d{7,9}$")
 
 # Column boundaries (x0), measured from this document's word positions.
 COLUMN_BOUNDS = [

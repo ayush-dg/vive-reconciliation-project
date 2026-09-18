@@ -101,7 +101,12 @@ TABLES = {
             blob_storage_path NVARCHAR(MAX),
             original_filename NVARCHAR(MAX),
             uploaded_by NVARCHAR(MAX),
-            uploaded_at NVARCHAR(MAX)
+            uploaded_at NVARCHAR(MAX),
+            validation_status NVARCHAR(MAX),
+            validation_difference FLOAT,
+            billing_location NVARCHAR(MAX),
+            statement_month NVARCHAR(MAX),
+            billing_location_source NVARCHAR(MAX)
         )
     """,
     "validation_document_review_queue": """

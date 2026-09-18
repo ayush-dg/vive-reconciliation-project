@@ -99,6 +99,51 @@ def get_kpis() -> dict:
     }
 
 
+def get_validation_kpis() -> dict:
+    """Arithmetic Validation Gate results (document_intake_log.validation_status/
+    validation_difference -- src/validation/arithmetic_gate.py), scoped to
+    "latest version of this vendor+period" using silver_reconciliation_standard's
+    own is_latest_version, NOT gold_reconciliation_summary's copy of it.
+    Silver is the actual source of truth resolve_version_info() writes at
+    intake time (notebooks/01_document_intake.py) -- it's populated on
+    every run regardless of whether ERP matching (and therefore Gold) ever
+    runs afterward, so scoping through Gold would silently hide every
+    statement with no NetSuite voucher data to match against yet. Scoping
+    through Silver instead means every extracted statement's arithmetic
+    check shows up here, matched or not.
+
+    DISTINCT in the subquery because Silver has one row per invoice line,
+    not one per statement -- an unguarded join would fan out and multiply
+    the count.
+
+    total_checked counts every row the gate actually ran on (validation_status
+    IS NOT NULL) -- total_not_found is a real gate outcome (ran, found no
+    printed total to compare), not the same as a NULL row that predates this
+    migration or was never intake-logged."""
+    totals = execute_query(
+        """
+        SELECT
+            COUNT(*) AS total_checked,
+            SUM(CASE WHEN d.validation_status = 'matches' THEN 1 ELSE 0 END) AS matches,
+            SUM(CASE WHEN d.validation_status = 'mismatch' THEN 1 ELSE 0 END) AS mismatches,
+            SUM(CASE WHEN d.validation_status = 'total_not_found' THEN 1 ELSE 0 END) AS total_not_found
+        FROM document_intake_log d
+        INNER JOIN (
+            SELECT DISTINCT statement_id
+            FROM silver_reconciliation_standard
+            WHERE is_latest_version = 1 AND record_source = 'VENDOR_STATEMENT'
+        ) latest ON d.statement_id = latest.statement_id
+        WHERE d.validation_status IS NOT NULL
+        """
+    )[0]
+    return {
+        "total_checked": totals["total_checked"] or 0,
+        "matches": totals["matches"] or 0,
+        "mismatches": totals["mismatches"] or 0,
+        "total_not_found": totals["total_not_found"] or 0,
+    }
+
+
 def get_kpi_debug_state() -> dict:
     """TEMPORARY diagnostic (added 2026-08-20 to investigate the Total
     invoices/Statement total KPI cards showing 156 instead of the expected
@@ -1594,6 +1639,15 @@ def get_statement_report(statement_id: str) -> dict:
         [statement_id],
     )
     intake = intake_rows[0] if intake_rows else None
+    if intake is not None:
+        # shop_or_entity is stored as a JSON list (see write_intake_log());
+        # the template just wants a display string, so join it here rather
+        # than adding a new template filter for one field.
+        try:
+            shop_list = json.loads(intake["shop_or_entity"]) if intake.get("shop_or_entity") else []
+        except (TypeError, ValueError):
+            shop_list = []
+        intake["shop_display"] = ", ".join(shop_list) if shop_list else None
 
     matched = execute_query(
         """

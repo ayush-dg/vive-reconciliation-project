@@ -19,6 +19,29 @@ VENDOR_SIGNATURE = ["asTech", "Repairify"]
 HEADER_ROW = ["Invoice Date", "Invoice #", "Work Order #", "RO #", "Outstanding Amount", "Due Date"]
 FIELDNAMES = ["invoice_date", "invoice_no", "work_order_no", "ro_no", "outstanding_amount", "due_date"]
 DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+MONEY_RE = re.compile(r"\$?\s*[\d,]+\.\d{2}")
+CURRENCY_CODE_RE = re.compile(r"^[A-Z]{3}$")
+
+
+def _find_money_cell(row):
+    """pdfplumber's extract_table() produces a different cell count for
+    the "Total Outstanding"/"Total Unapplied" row depending on the
+    document -- confirmed: Middletown has 3 cells with the amount at
+    index 1, Bristol/Lees have 6 cells with the amount at index 2 (extra
+    blank/merged cells before the trailing "USD"). A fixed index breaks
+    on that variance. Since the row is already unambiguously identified
+    by its label (row[0]) before this runs, scanning the remaining cells
+    for a money-shaped value that isn't a 3-letter currency code is safe
+    and tolerates any cell-count shape."""
+    for cell in row[1:]:
+        if not cell:
+            continue
+        cell = cell.strip()
+        if CURRENCY_CODE_RE.match(cell):
+            continue
+        if MONEY_RE.search(cell):
+            return cell
+    return None
 
 
 def parse_header_info(page1_text):
@@ -59,10 +82,10 @@ def extract(pdf_path):
                 if row == HEADER_ROW or all(not c for c in row):
                     continue
                 if row[0] and "Total Outstanding" in row[0]:
-                    total_outstanding = row[2]
+                    total_outstanding = _find_money_cell(row)
                     continue
                 if row[0] and "Total Unapplied" in row[0]:
-                    total_unapplied = row[2] if len(row) > 2 else None
+                    total_unapplied = _find_money_cell(row)
                     continue
                 if not DATE_RE.match(row[0] or ""):
                     continue

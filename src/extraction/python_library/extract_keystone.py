@@ -108,7 +108,11 @@ def parse_header_info(page1_text):
     if m:
         info["account_number"] = m.group(1)
         info["customer_name"] = m.group(2).strip()
-    m = re.search(r"\n([^\n]*?)\s+Keystone Automotive Industries, Inc\.\n([^\n]+)\n", page1_text)
+    # The trailing period after "Inc" is sometimes dropped by pdfplumber's
+    # text extraction depending on which Keystone regional office address
+    # follows it (confirmed: Antioch, TN drops it, Taunton, MA keeps it) --
+    # "Inc\.?" tolerates both instead of requiring the period literally.
+    m = re.search(r"\n([^\n]*?)\s+Keystone Automotive Industries, Inc\.?\n([^\n]+)\n", page1_text)
     if m:
         info["billing_address"] = m.group(1).strip()
         info["billing_city_state_zip"] = m.group(2).strip()

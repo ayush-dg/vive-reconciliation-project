@@ -44,6 +44,8 @@ import sys
 
 from dateutil import parser as _dateutil_parser
 
+from src.validation.arithmetic_gate import compute_statement_total_from_invoices
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
@@ -342,13 +344,43 @@ def _normalize_date(raw):
         return raw
 
 
+def _normalize_billing_location(summary):
+    """Normalizes the two billing-location shapes actually produced across
+    the vendor modules' summary dicts into one "City, State" string:
+    - extract_astech.py / extract_ksi.py set billing_city + billing_state
+      as separate keys.
+    - Every other module that captures a billing address sets a single
+      combined billing_city_state_zip string (e.g. "Clarks Summit, PA
+      18411") -- the trailing zip is stripped since only city/state is
+      wanted here.
+    Returns None if neither shape is present (module doesn't capture a
+    billing address at all)."""
+    city = summary.get("billing_city")
+    state = summary.get("billing_state")
+    if city and state:
+        return f"{city}, {state}"
+
+    combined = summary.get("billing_city_state_zip")
+    if combined:
+        # Strip a trailing ZIP (5 digits, optionally a ZIP+4) so
+        # "Clarks Summit, PA 18411" becomes "Clarks Summit, PA".
+        return re.sub(r"\s+\d{5}(-\d{4})?\s*$", "", combined.strip())
+
+    return None
+
+
 def _parse_money(raw):
     """'14,681.56' -> 14681.56, '100.00-' -> -100.00, '$27.11' -> 27.11,
     '-$27.11' -> -27.11 (extract_nimey prints amounts with a leading '$',
-    unlike every other module here), '' -> None."""
+    unlike every other module here), '' -> None. Also handles a leading
+    minus split from its digits by a space (e.g. "- 74.96", seen live on
+    asTech's outstanding_amount) -- float() rejects that outright, same
+    fix already present in extract_astech.py's own to_float() (confirmed
+    exact-match root cause for 5 real asTech statements)."""
     if raw is None or str(raw).strip() == "":
         return None
     s = str(raw).strip().replace("$", "").replace(",", "").strip()
+    s = re.sub(r"^([+-])\s+", r"\1", s)
     negative = s.endswith("-")
     if negative:
         s = s[:-1].strip()
@@ -537,6 +569,14 @@ class PythonLibraryExtractionEngine:
         # ever be ingested as if it were a real invoice line).
         aging_summary = {k: v for k, v in summary.items() if k.startswith("aging_")}
 
+        # Centrally-computed sum of extracted line items, netting credits --
+        # see src/validation/arithmetic_gate.py's compute_statement_total_from_invoices()
+        # docstring. Same shared function claude_sonnet_client.py's
+        # _build_schema() calls for the Foundry path, kept independent of
+        # any vendor-specific summary key so both paths can be compared by
+        # one shared arithmetic validation gate.
+        statement_total_computed = compute_statement_total_from_invoices(invoices)
+
         return {
             "document_metadata": {
                 "document_type": "VENDOR_STATEMENT",
@@ -548,6 +588,7 @@ class PythonLibraryExtractionEngine:
                 "vendor_name": vendor_name,
                 "vendor_address": None,
                 "shop_or_entity": [summary["customer_name"]] if summary.get("customer_name") else [],
+                "billing_location": _normalize_billing_location(summary),
                 "vendor_confidence": 1.0,
             },
             "statement_metadata": {
@@ -558,6 +599,7 @@ class PythonLibraryExtractionEngine:
                 "statement_total_as_printed": _parse_money(
                     summary.get(_PRINTED_TOTAL_KEY.get(module.__name__, "total_printed"))
                 ),
+                "statement_total_computed": statement_total_computed if invoices else None,
                 "statement_confidence": 1.0,
             },
             "invoices": invoices,
