@@ -73,7 +73,7 @@ from src.lakehouse.research_raw import write_raw_statement
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
-from src.vendor_identity import resolve_vendor_id
+from src.vendor_identity import resolve_vendor_id, display_name
 from src.storage.blob_client import BlobStorageClient
 
 
@@ -1297,7 +1297,31 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     write_raw_statement(
         invoices, vendor_id, statement_id,
         os.path.basename(pdf_path), provider_used,
+        vendor_display_name=display_name(vendor_name),
+        version_number=version_info["version_number"],
     )
+    # silver_silver build -- additive, mapping-driven bronze->silver test
+    # flow. Called from here, not alongside run_dbt_silver_build() in
+    # run_full_pipeline.py, because that call site is skipped entirely
+    # under RESEARCH_MODE_EXTRACTION_ONLY, while the raw dump/unnest this
+    # reads run unconditionally.
+    #
+    # Two steps, not one Python pivot -- see
+    # src/lakehouse/research_unnest.py's docstring for the full history:
+    # (1) write_unnested_from_invoices() explodes raw_payload into two
+    # narrow Lakehouse tables directly from this same in-memory `invoices`
+    # list (no read-back -- reading back what was just written raced its
+    # own propagation through OneLake/the SQL endpoint on 4 of 5 test
+    # vendors in an earlier version of this pipeline, silently building
+    # off stale/missing data). (2) run_dbt_silver_silver_build() then
+    # polls for that data's visibility before running the real dbt
+    # pivot/normalization models -- the same class of read-after-write
+    # race exists here too (confirmed 2026-09-18), just one step removed
+    # since dbt, not this Python code, is what reads it back.
+    from src.lakehouse.research_unnest import write_unnested_from_invoices
+    from src.lakehouse.fabric_dbt_runner import run_dbt_silver_silver_build
+    lines_written, fields_written = write_unnested_from_invoices(invoices, statement_id)
+    run_dbt_silver_silver_build(statement_id, lines_written, fields_written)
     if research_only:
         print(f"  [RESEARCH MODE] Extraction-only -- Bronze/Silver will be skipped for this upload.")
 

@@ -57,6 +57,7 @@ from datetime import datetime, timezone
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection, get_warehouse_connection
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
+from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.shop_owners import get_shop_owner
 
 logger = logging.getLogger(__name__)
@@ -94,20 +95,53 @@ def _fetch_statement(cur, statement_id: str):
 
 def _fetch_lines(cur, statement_id: str) -> list:
     cur.execute(
-        "SELECT statement_line_id, invoice_number, line_type, charge_amount, "
-        "payment_amount, ro_number, line_date FROM silver.statement_line WHERE statement_id = ?",
+        "SELECT statement_line_id, invoice_number, transaction_code, line_type, "
+        "charge_amount, payment_amount, ro_number, line_date FROM silver.statement_line "
+        "WHERE statement_id = ?",
         [statement_id],
     )
     cols = [c[0] for c in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
+    lines = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    # select_lines() (Fred Beans/Downeast Toyota reprint/fallback-code
+    # dedup, see its own docstring) expects an "original_invoice_number"
+    # key -- silver.statement_line only has "invoice_number", which is
+    # already the raw/unnormalized value for both these vendors (neither
+    # has a row in vendor_normalization_rule), so aliasing it in both
+    # directions is safe: nothing here strips or reconstructs it. A
+    # vendor with no row in vendor_line_selection_rule passes through
+    # select_lines() completely unchanged.
+    for line in lines:
+        line["original_invoice_number"] = line["invoice_number"]
+    return lines
 
 
-def _fetch_netsuite_transactions(cur, entity_ids: list, table: str) -> dict:
-    """Returns {tranid: total} from bronze.<table> (netsuite_vendorbill or
-    netsuite_vendorcredit -- same shape, tranid/entity/total/voided).
-    Excludes voided rows and any tranid with more than one differing
-    non-voided total among these entities (ambiguous -- treated as
-    unresolved rather than guessing which one to use)."""
+def _apply_line_selection(vendor_id: str, lines: list, rules: dict) -> list:
+    """select_lines() needs vendor_id (to look up its dedup rule) which
+    _fetch_lines() doesn't have -- kept as a separate step, called right
+    after _fetch_lines(), rather than threading vendor_id through it.
+    `rules` is the already-loaded vendor_line_selection_rule table (see
+    run_fabric_matching(), which also uses it to decide whether this
+    vendor needs shape-based matching at all) -- passed in rather than
+    reloaded here."""
+    lines = select_lines(vendor_id, lines, rules)
+    for line in lines:
+        line["invoice_number"] = line["original_invoice_number"]
+    return lines
+
+
+def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
+    """Returns {tranid: [total, total, ...]} -- EVERY non-voided total for
+    each tranid among these entities, not collapsed into a single value.
+    A tranid with more than one differing non-voided total used to be
+    treated as unresolved ambiguity and excluded outright -- confirmed
+    live 2026-09-18 that this was too conservative for at least Fred
+    Beans: many CM-prefixed credits have multiple legitimate non-voided
+    NetSuite rows sharing a tranid, and one of them frequently ties out
+    exactly with the statement amount. _best_candidate() below checks for
+    that exact tie-out first; only when NONE of the candidates tie out
+    does it fall back to the single closest one, surfaced as a reviewable
+    near-miss (Amount Mismatch) rather than a blanket "unresolved.\""""
     if not entity_ids:
         return {}
     placeholders = ",".join("?" * len(entity_ids))
@@ -116,20 +150,69 @@ def _fetch_netsuite_transactions(cur, entity_ids: list, table: str) -> dict:
         f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
         entity_ids,
     )
+    # Keyed lowercase -- confirmed live 2026-09-18 that NetSuite's own
+    # tranid casing is inconsistent even within one vendor (NYE: a
+    # stripped TOW invoice ties out to an uppercase tranid, e.g.
+    # "433845T", while a stripped CHW/GCW invoice ties out to a lowercase
+    # one, e.g. "253431c") -- there is no single stored-case transform
+    # that resolves both; comparing case-insensitively at match time does,
+    # without needing a per-prefix normalization rule. The lookup side
+    # (shape["invoice_number"].lower()) is lowercased to match.
     by_tranid = {}
-    ambiguous = set()
     for tranid, total in cur.fetchall():
         try:
             total_f = float(total)
         except (TypeError, ValueError):
             continue
-        if tranid in by_tranid and by_tranid[tranid] != total_f:
-            ambiguous.add(tranid)
-        by_tranid[tranid] = total_f
-    for tranid in ambiguous:
-        logger.warning("Multiple differing NetSuite %s totals for tranid=%s -- excluding from matching", table, tranid)
-        del by_tranid[tranid]
+        by_tranid.setdefault(tranid.lower(), []).append(total_f)
     return by_tranid
+
+
+def _best_candidate(candidates: list, target_amount) -> tuple:
+    """Returns (chosen_total, is_exact_match). An exact tie-out (within
+    EXACT_AMOUNT_EPSILON) against ANY candidate wins outright, regardless
+    of how many other non-tying candidates share the same tranid.
+    Otherwise the single closest-by-amount candidate is returned as a
+    near-miss for human review, not a match. Returns (None, False) if
+    there are no candidates at all for this tranid."""
+    if not candidates:
+        return None, False
+    if target_amount is None:
+        return candidates[0], False
+    for total in candidates:
+        if abs(total - target_amount) <= EXACT_AMOUNT_EPSILON:
+            return total, True
+    closest = min(candidates, key=lambda t: abs(t - target_amount))
+    return closest, False
+
+
+def _line_target(line: dict) -> tuple:
+    """Per-line equivalent of _shape_target(), used for vendors that don't
+    have a vendor_line_selection_rule row (i.e. every vendor except Fred
+    Beans/Downeast Toyota -- see run_fabric_matching()). Where
+    _shape_target() decides a NetSuite table for a whole GROUP of lines
+    sharing an invoice_number and refuses to guess when a charge+credit
+    pair doesn't net to exactly zero, this checks each line entirely on
+    its own -- confirmed live 2026-09-18 that grouping was actively wrong
+    for at least NYE: a $168.59 charge + an unrelated $39.02 credit on the
+    same invoice_number (not a reversal of each other -- NetSuite has no
+    record of the $39.02 at all) made the whole shape "ineligible" and
+    permanently unmatchable, even though the charge line alone ties out
+    to NetSuite exactly. Per the user 2026-09-18: keep this simpler
+    per-line approach as the default for every vendor; the shape-based
+    A/B/C rules (and their net-to-zero requirement) stay reserved for
+    Fred Beans/Downeast, whose select_lines() dedup already collapses
+    reprint/fallback-code duplicates into single deliberate lines before
+    shape-building ever needs to reconcile a pair against each other."""
+    line_type = line.get("line_type")
+    if line_type == "CHARGE":
+        return line.get("charge_amount"), "netsuite_vendorbill"
+    if line_type == "CREDIT":
+        amt = line.get("charge_amount")
+        return (abs(amt) if amt is not None else None), "netsuite_vendorcredit"
+    if line_type == "PAYMENT":
+        return line.get("payment_amount"), "netsuite_vendorcredit"
+    return None, None
 
 
 def _build_invoice_shapes(lines: list) -> dict:
@@ -230,6 +313,31 @@ def run_fabric_matching(statement_id: str) -> dict:
         wh_cur.execute("DELETE FROM silver.recon_summary WHERE statement_id = ?", [statement_id])
 
         lines = _fetch_lines(wh_cur, statement_id)
+
+        # select_lines() dedup applies to any vendor with a
+        # vendor_line_selection_rule row -- today that's Fred Beans/
+        # Downeast (transaction_code_priority: reprints get summed by
+        # fallback code) and Quirk/NYE/Hoselton (keep_earliest: reprints
+        # get discarded, only the first-dated charge line survives; added
+        # 2026-09-18, confirmed live against real NetSuite data).
+        #
+        # Shape-based A/B/C matching (grouping every line sharing an
+        # invoice_number, requiring a charge+credit pair to net to exactly
+        # zero before even attempting a NetSuite lookup) is a SEPARATE,
+        # narrower decision from "needs dedup" -- it stays reserved for
+        # transaction_code_priority vendors specifically (Fred Beans/
+        # Downeast), whose CM-prefixed credits can legitimately be a full
+        # reversal of a charge. Quirk/NYE/Hoselton (keep_earliest) use the
+        # simpler per-line direct query (_line_target()) instead --
+        # confirmed live 2026-09-18 that shape-grouping was actively wrong
+        # for a vendor without that reversal pattern (see _line_target()'s
+        # docstring for the NYE case that motivated this).
+        selection_rules = _load_line_selection_rules()
+        vendor_rules = selection_rules.get(vendor_id)
+        if vendor_rules:
+            lines = _apply_line_selection(vendor_id, lines, selection_rules)
+        vendor_uses_shapes = bool(vendor_rules) and (vendor_rules.get("charge") or {}).get("rule_type") == "transaction_code_priority"
+
         entity_ids = resolve_entity_ids(vendor_id, vendor_name)
 
         matched_count = 0
@@ -238,45 +346,64 @@ def run_fabric_matching(statement_id: str) -> dict:
         erp_total = 0.0
 
         if not entity_ids:
-            shapes = _build_invoice_shapes(lines)
-            for shape in shapes.values():
-                stmt_amount = shape["charge_amt"] if shape["charge_line_count"] else shape["credit_amt"]
+            if vendor_uses_shapes:
+                items = list(_build_invoice_shapes(lines).values())
+            else:
+                items = [l for l in lines if l.get("invoice_number")]
+            for item in items:
+                if vendor_uses_shapes:
+                    stmt_amount = item["charge_amt"] if item["charge_line_count"] else item["credit_amt"]
+                else:
+                    stmt_amount, _ = _line_target(item)
                 _write_exception(
-                    wh_cur, statement_id, vendor_id, shop, shop_owner, shape["invoice_number"],
-                    shape["ro_number"], stmt_amount, None, "Vendor Not Resolved in NetSuite", now,
+                    wh_cur, statement_id, vendor_id, shop, shop_owner, item["invoice_number"],
+                    item["ro_number"], stmt_amount, None, "Vendor Not Resolved in NetSuite", now,
                 )
                 exception_count += 1
                 statement_total += stmt_amount or 0.0
         else:
             lh_conn = get_lakehouse_connection()
             lh_cur = lh_conn.cursor()
-            bills = _fetch_netsuite_transactions(lh_cur, entity_ids, "netsuite_vendorbill")
-            credits = _fetch_netsuite_transactions(lh_cur, entity_ids, "netsuite_vendorcredit")
+            bills = _fetch_netsuite_candidates(lh_cur, entity_ids, "netsuite_vendorbill")
+            credits = _fetch_netsuite_candidates(lh_cur, entity_ids, "netsuite_vendorcredit")
             netsuite_by_table = {"netsuite_vendorbill": bills, "netsuite_vendorcredit": credits}
 
-            shapes = _build_invoice_shapes(lines)
-            for shape in shapes.values():
-                stmt_amount, table = _shape_target(shape)
+            if vendor_uses_shapes:
+                items = [(shape, _shape_target(shape)) for shape in _build_invoice_shapes(lines).values()]
+            else:
+                items = [
+                    (l, _line_target(l)) for l in lines if l.get("invoice_number")
+                ]
+
+            for item, (stmt_amount, table) in items:
+                inv = item["invoice_number"]
+                ro = item["ro_number"]
                 statement_total += stmt_amount or 0.0
-                netsuite_total = netsuite_by_table.get(table, {}).get(shape["invoice_number"]) if table else None
+                candidates = netsuite_by_table.get(table, {}).get(inv.lower(), []) if table else []
+                netsuite_total, is_exact = _best_candidate(candidates, stmt_amount)
 
                 if netsuite_total is None:
                     _write_exception(
-                        wh_cur, statement_id, vendor_id, shop, shop_owner, shape["invoice_number"],
-                        shape["ro_number"], stmt_amount, None, "Not Found in NetSuite", now,
+                        wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                        ro, stmt_amount, None, "Not Found in NetSuite", now,
                     )
                     exception_count += 1
-                elif _amounts_tie_out(stmt_amount, netsuite_total):
+                elif is_exact:
                     _write_match(
-                        wh_cur, statement_id, vendor_id, shop, shape["invoice_number"],
-                        shape["ro_number"], stmt_amount, netsuite_total, now,
+                        wh_cur, statement_id, vendor_id, shop, inv,
+                        ro, stmt_amount, netsuite_total, now,
                     )
                     matched_count += 1
                     erp_total += netsuite_total
                 else:
+                    # No candidate for this tranid tied out exactly --
+                    # netsuite_total here is the single CLOSEST candidate
+                    # (see _best_candidate()), surfaced so the UI can show
+                    # what the nearest real NetSuite record actually was,
+                    # not just "not found."
                     _write_exception(
-                        wh_cur, statement_id, vendor_id, shop, shop_owner, shape["invoice_number"],
-                        shape["ro_number"], stmt_amount, netsuite_total, "Amount Mismatch", now,
+                        wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                        ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
                     )
                     exception_count += 1
                     erp_total += netsuite_total
@@ -317,7 +444,7 @@ def fetch_netsuite_record_for_invoice(vendor_id: str, vendor_name: str, invoice_
     web/routers/exceptions.py) -- a display-only lookup, not part of the
     matching run itself. Checks bronze.netsuite_vendorbill first
     (tranid = invoice_number, scoped to this vendor's resolved
-    entity_ids -- same resolution _fetch_netsuite_transactions() uses
+    entity_ids -- same resolution _fetch_netsuite_candidates() uses
     during matching); if nothing there, falls back to
     bronze.netsuite_vendorcredit. Returns the row as a plain dict (every
     raw column, unmodified -- no code-to-label translation, since this

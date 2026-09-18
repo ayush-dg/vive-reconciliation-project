@@ -12,18 +12,18 @@
 
 The mapping sheet contains:
 
-| vendor_id | raw_field_name   | canonical_field_name | target_type |
-| --------- | ---------------- | -------------------- | ----------- |
-| keystone  | Invoice #        | invoice_number       | string      |
-| keystone  | Remaining Amount | amount_remaining     | decimal     |
-| keystone  | Reference #      | invoice_number_ref   | string      |
+| vendor_id | raw_field_name   | canonical_field_name    | target_type |
+| --------- | ---------------- | ------------------------ | ----------- |
+| keystone  | Invoice #        | original_invoice_number | string      |
+| keystone  | Remaining Amount | amount_remaining        | decimal     |
+| keystone  | Reference #      | invoice_number_ref      | string      |
 
 dbt can therefore transform:
 
 ```text
 Bronze                         Silver
 ------                         ------
-Invoice #        ───────────→  invoice_number
+Invoice #        ───────────→  original_invoice_number
 Remaining Amount ───────────→  amount_remaining
 Reference #      ───────────→  invoice_number_ref
 ```

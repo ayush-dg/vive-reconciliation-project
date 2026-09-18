@@ -178,13 +178,25 @@ def classify_match(stmt_invoice: dict, erp_candidates: list, tolerance_pct: floa
                     "exception_reason": None,
                     "exception_erp_amount": None,
                 }
-        # Invoice matches but amount doesn't
+        # Invoice matches but amount doesn't -- surface the CLOSEST
+        # candidate by amount (not just the first in list order) so a
+        # human reviewing the exception sees the most plausible real
+        # match, not an arbitrary one. Falls back to the first candidate
+        # only when stmt_amount itself is missing, since there's nothing
+        # to measure distance against in that case.
+        if stmt_amount is not None:
+            closest = min(
+                candidates,
+                key=lambda e: abs((e.get("outstanding_amount") or 0) - stmt_amount),
+            )
+        else:
+            closest = candidates[0]
         return {
             "match_status": "EXCEPTION",
             "match_level": None,
             "matched_erp": None,
             "exception_reason": "Amount Mismatch",
-            "exception_erp_amount": candidates[0].get("outstanding_amount"),
+            "exception_erp_amount": closest.get("outstanding_amount"),
         }
 
     # NOTE: there is deliberately no "fuzzy prefix" level here. An earlier

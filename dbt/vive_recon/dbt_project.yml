@@ -33,6 +33,37 @@ models:
       # doesn't duplicate rows, matching the app's existing
       # DELETE-then-INSERT idempotency pattern for Bronze/Silver writes.
       # No +schema override -- profiles.yml's default `schema: silver`
-      # already targets the right place. Setting +schema: silver here too
-      # triggers dbt's default generate_schema_name macro, which
-      # concatenates default + custom into "silver_silver".
+      # already targets the right place.
+      #
+      # statement.sql/statement_line.sql source from research_schema.
+      # raw_statement (the dict-dump bronze) + unnested_statement_lines/
+      # _fields, not from bronze.bronze_<vendor_id>_raw -- migrated
+      # 2026-09-18 from the old per-vendor-typed-bronze design (see their
+      # own docstrings for the full history and the schema-parity notes
+      # vs. the old bronze-driven version). This used to be developed and
+      # validated in a separate silver_silver/ test schema before the
+      # 2026-09-18 cutover; that scaffolding (models/silver_silver/,
+      # src/matching/silver_silver_matching.py) was retired 2026-09-19
+      # once production matching (src/matching/fabric_matching.py) had
+      # everything it validated ported over -- see git history if any of
+      # that context is needed again.
+
+seeds:
+  vive_recon:
+    vendor_normalization_rule:
+      # dbt's column-type inference guesses from CSV values -- every row's
+      # effective_end is blank, so it inferred `int` instead of `date`,
+      # confirmed 2026-09-17 to break a real date comparison
+      # ("date is incompatible with int") the moment a query does
+      # `effective_end >= some_date`. Declared explicitly instead of
+      # relying on inference for exactly the columns that are all-NULL
+      # today but need a real type for when they're populated.
+      +column_types:
+        effective_start: date
+        effective_end: date
+        is_active: bit
+    vendor_line_selection_rule:
+      +column_types:
+        effective_start: date
+        effective_end: date
+        is_active: bit
