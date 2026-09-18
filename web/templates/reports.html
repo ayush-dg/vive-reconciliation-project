@@ -15,48 +15,91 @@
 
 {% block content %}
 {% if runs %}
-<div class="reports-layout">
-  <div class="panel" style="margin-bottom:0">
-    <div class="panel-head">
-      <div>
-        <h2>Generated reports</h2>
-        <div class="sub">Every completed reconciliation run, most recent first</div>
-      </div>
-    </div>
-    <div>
-      {% for run in runs %}
-      <div class="report-row">
-        <div class="report-icon"{% if run.exception_count == 0 %} style="background:var(--success-tint);color:var(--success)"{% endif %}>
-          <svg class="icon"><use href="#{{ 'i-check-circle' if run.exception_count == 0 else 'i-file' }}"/></svg>
-        </div>
-        <div class="report-main">
-          <div class="report-title">{{ run.vendor_name }} — {{ run.statement_period | period_label }}</div>
-          <div class="report-meta">{{ run.total_invoice_count }} invoices · {{ run.matched_count }} matched · {{ run.exception_count }} exception{{ "s" if run.exception_count != 1 }} · generated {{ run.reconciliation_timestamp | friendly_dt }}</div>
-        </div>
-        <div class="report-actions">
-          {% if run.exception_count > 0 %}
-          <a href="/exceptions/{{ run.vendor_name | urlname }}" class="chip-btn"><svg class="icon"><use href="#i-alert"/></svg>Review</a>
-          {% endif %}
-          <a href="/reports/{{ run.statement_id }}" class="chip-btn"><svg class="icon"><use href="#i-file"/></svg>View</a>
-        </div>
-      </div>
-      {% endfor %}
+{% set passed_runs = runs | selectattr('exception_count', 'equalto', 0) | list %}
+{% set total_runs = runs | length %}
+{% set pct = ((passed_runs | length / total_runs) * 100) | round | int if total_runs else 0 %}
+
+<div class="report-hero">
+  <div class="report-donut" style="--pct:{{ pct }}">
+    <div class="report-donut-hole">
+      <div class="report-donut-pct">{{ pct }}%</div>
+      <div class="report-donut-label">Reconciled</div>
     </div>
   </div>
-
-  <div class="panel summary-card" style="margin-bottom:0">
-    <div class="eyebrow" style="margin-bottom:14px">Match rate by vendor</div>
-    {% for vendor_name, vendor_runs in runs | groupby('vendor_name') %}
-    {% set total_inv = vendor_runs | sum(attribute='total_invoice_count') %}
-    {% set total_matched = vendor_runs | sum(attribute='matched_count') %}
-    {% set rate = ((total_matched / total_inv) * 100) if total_inv else 0 %}
-    <div class="summary-bar-row">
-      <div class="summary-bar-label"><span class="v-name">{{ vendor_name }}</span><span class="v-pct">{{ "%.1f"|format(rate) }}%</span></div>
-      <div class="summary-bar-track"><div class="summary-bar-fill{{ ' warn' if rate < 90 else '' }}" style="width:{{ rate }}%"></div></div>
+  <div class="report-hero-stats">
+    <div>
+      <div class="report-hero-stat-num">{{ total_runs }}</div>
+      <div class="report-hero-stat-label">Statements reconciled</div>
     </div>
-    {% endfor %}
+    <div class="report-hero-divider"></div>
+    <div>
+      <div class="report-hero-stat-num success">{{ passed_runs | length }}</div>
+      <div class="report-hero-stat-label">Fully matched</div>
+    </div>
+    <div class="report-hero-divider"></div>
+    <div>
+      <div class="report-hero-stat-num warning">{{ total_runs - (passed_runs | length) }}</div>
+      <div class="report-hero-stat-label">Has exceptions</div>
+    </div>
   </div>
 </div>
+
+<div class="filter-chips">
+  <button type="button" class="filter-chip active" data-filter="all">All</button>
+  <button type="button" class="filter-chip" data-filter="reconciled">Reconciled</button>
+  <button type="button" class="filter-chip" data-filter="exceptions">Has exceptions</button>
+</div>
+
+<div class="report-card-grid" id="report-card-grid">
+  {% for run in runs %}
+  {% set has_exceptions = run.exception_count > 0 %}
+  {% set match_pct = ((run.matched_count / run.total_invoice_count) * 100) if run.total_invoice_count else 0 %}
+  <div class="report-card{{ ' has-exceptions' if has_exceptions }}" data-status="{{ 'exceptions' if has_exceptions else 'reconciled' }}">
+    <div class="report-card-head">
+      <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-x-circle' if has_exceptions else 'i-check-circle' }}"/></svg></div>
+      <div>
+        <div class="report-card-title">{{ run.vendor_name }}</div>
+        <div class="report-card-sub">{{ run.statement_period | period_label }}</div>
+      </div>
+    </div>
+
+    <div class="summary-bar-track"><div class="summary-bar-fill{{ ' warn' if has_exceptions }}" style="width:{{ match_pct }}%"></div></div>
+
+    <div class="report-card-meta">
+      <span>Matched <b>{{ run.matched_count }}</b> / {{ run.total_invoice_count }} invoices</span>
+      <span>{{ run.statement_total | money }}</span>
+    </div>
+
+    <div class="report-card-footer">
+      <span>{{ run.reconciliation_timestamp | friendly_dt }}</span>
+      <div class="report-card-actions">
+        {% if has_exceptions %}
+        <a href="/exceptions/{{ run.vendor_name | urlname }}">Review →</a>
+        {% endif %}
+        <a href="/reports/{{ run.statement_id }}">View →</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<script>
+(function () {
+  var chips = document.querySelectorAll(".filter-chip");
+  var cards = document.querySelectorAll("#report-card-grid .report-card");
+  chips.forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      chips.forEach(function (c) { c.classList.remove("active"); });
+      chip.classList.add("active");
+      var filter = chip.dataset.filter;
+      cards.forEach(function (card) {
+        card.style.display = (filter === "all" || card.dataset.status === filter) ? "" : "none";
+      });
+    });
+  });
+})();
+</script>
+
 {% else %}
 <div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
 {% endif %}

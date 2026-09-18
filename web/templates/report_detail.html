@@ -24,9 +24,9 @@
     <div class="kpi-sub">difference {{ summary.difference | money_signed }}</div>
   </div>
   <div class="kpi">
-    <div class="kpi-label">Matched</div>
-    <div class="kpi-value green">{{ summary.matched_count }}</div>
-    <div class="kpi-sub">{{ summary.match_percentage }}% match rate</div>
+    <div class="kpi-label">Reconciled</div>
+    <div class="kpi-value green">{{ summary.match_percentage }}%</div>
+    <div class="kpi-sub">{{ summary.matched_count }}/{{ summary.total_invoice_count }}</div>
   </div>
   <div class="kpi">
     <div class="kpi-label">Exceptions</div>

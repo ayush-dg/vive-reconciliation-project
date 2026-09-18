@@ -20,11 +20,17 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.lakehouse.connection import execute_query, execute_sql, execute_query_fabric, execute_sql_fabric
-# recon_query/recon_sql: Fabric Warehouse (silver.recon_*), used only by the
-# Exceptions page functions below -- see migrations/013_add_recon_tables.sql's
-# history (started on the local backend, moved to Fabric 2026-08-26 per the
-# user). Home dashboard/Reports/Upload/Batches still use execute_query/
-# execute_sql (gold_* / local backend) -- deliberately not touched.
+# recon_query/recon_sql: Fabric Warehouse (silver.recon_*) -- see
+# migrations/013_add_recon_tables.sql's history (started on the local
+# backend, moved to Fabric 2026-08-26 per the user). Used by the Exceptions
+# page, the Home page's "Reconciliation runs" panel (get_recent_recon_runs()),
+# and now Reports (get_all_runs()/get_statement_report(), switched
+# 2026-09-18 -- Reports was the one page still reading the old
+# gold_reconciliation_summary/gold_matched_invoices/gold_exceptions tables,
+# which the real NetSuite matching flow (src/matching/fabric_matching.py)
+# never writes to, so it stayed empty regardless of whether reconciliation
+# actually ran). Upload/Batches still use execute_query/execute_sql
+# (gold_*/local backend) -- not touched by this change.
 from src.lakehouse.fabric_sql import execute_warehouse_query as recon_query, execute_warehouse_sql as recon_sql
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
@@ -1608,25 +1614,77 @@ def get_recent_completed_batches(limit: int = 3) -> list:
 # Reports
 # ---------------------------------------------------------------------------
 
+def _backfill_statement_periods(rows: list) -> list:
+    """silver.recon_summary.statement_period is always NULL -- the
+    Fabric-native Bronze/Silver the NetSuite matching flow reads
+    (silver.statement) has no statement-level period field yet (see
+    src/matching/fabric_matching.py:_fetch_statement()'s comment). The
+    real value already exists on the local backend:
+    document_intake_log.statement_period, extracted straight from the PDF
+    at intake time (notebooks/01_document_intake.py), independent of
+    which matching flow ran afterward. Batched by statement_id rather
+    than one lookup per row -- same N+1 concern get_vendor_summaries()'s
+    reason_breakdown batching documents, just against the cheaper local
+    backend instead of Fabric."""
+    missing_ids = [r["statement_id"] for r in rows if not r.get("statement_period")]
+    if not missing_ids:
+        return rows
+    placeholders = ", ".join("?" for _ in missing_ids)
+    intake_rows = execute_query(
+        f"SELECT statement_id, statement_period FROM document_intake_log WHERE statement_id IN ({placeholders})",
+        missing_ids,
+    )
+    period_by_statement = {
+        r["statement_id"]: r["statement_period"] for r in intake_rows if r["statement_period"]
+    }
+    for row in rows:
+        if not row.get("statement_period"):
+            row["statement_period"] = period_by_statement.get(row["statement_id"])
+    return rows
+
+
 def get_all_runs() -> list:
-    rows = execute_query(
+    """Reads silver.recon_summary (Fabric Warehouse) -- the real NetSuite
+    matching flow's output (src/matching/fabric_matching.py), same table
+    get_recent_recon_runs() (Home page) and the Exceptions page already
+    read. Trusts recon_summary's own stored matched_count/exception_count
+    rather than re-deriving live counts per row, same reasoning as
+    get_recent_recon_runs(). No is_latest_version filter here (unlike
+    that function) -- Reports is meant to show every completed run, not
+    just the current version per vendor+period."""
+    rows = recon_query(
         """
         SELECT statement_id, vendor_name, statement_period, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
-        FROM gold_reconciliation_summary
+        FROM silver.recon_summary
         ORDER BY reconciliation_timestamp DESC
         """
     )
-    return _with_live_exception_counts(rows)
+    return _backfill_statement_periods(rows)
 
 
 def get_statement_report(statement_id: str) -> dict:
-    summary_rows = execute_query(
-        "SELECT * FROM gold_reconciliation_summary WHERE statement_id = ? LIMIT 1",
+    """summary/matched/exceptions now read silver.recon_matched_invoices/
+    recon_summary/recon_exceptions (Fabric Warehouse) instead of the old
+    gold_* tables -- see the recon_query import comment above. Three
+    fields report_detail.html references -- summary.erp_version and
+    matched/exceptions' charges/credits/amount_due -- don't exist in the
+    recon_* schema (confirmed via live INFORMATION_SCHEMA.COLUMNS,
+    2026-09-18). Unlike a SQL NULL, a genuinely absent dict key renders as
+    Jinja's Undefined, which the template's `is not none` guards don't
+    catch (Undefined is not None) -- feeding it into the `money` filter's
+    float() raised UndefinedError instead of falling back to "—". Set
+    explicitly to None below so the existing template guards work the
+    same way they did against gold_*'s real (nullable) columns."""
+    summary_rows = recon_query(
+        "SELECT TOP 1 * FROM silver.recon_summary WHERE statement_id = ?",
         [statement_id],
     )
     summary = summary_rows[0] if summary_rows else None
+    if summary is not None:
+        summary.setdefault("erp_version", None)
+        _backfill_statement_periods([summary])
 
     # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure SQL
     # -- see get_vendor_name_for_statement()'s comment above for why.
@@ -1649,25 +1707,32 @@ def get_statement_report(statement_id: str) -> dict:
             shop_list = []
         intake["shop_display"] = ", ".join(shop_list) if shop_list else None
 
-    matched = execute_query(
+    matched = recon_query(
         """
-        SELECT invoice_number, ro_number, statement_amount, erp_amount, match_level,
-               charges, credits, amount_due, transaction_code
-        FROM gold_matched_invoices
+        SELECT invoice_number, ro_number, statement_amount, erp_amount, match_level
+        FROM silver.recon_matched_invoices
         WHERE statement_id = ?
         ORDER BY invoice_number
         """,
         [statement_id],
     )
+    for row in matched:
+        row.setdefault("charges", None)
+        row.setdefault("credits", None)
+        row.setdefault("amount_due", None)
 
-    exceptions = execute_query(
+    exceptions = recon_query(
         """
-        SELECT * FROM gold_exceptions
+        SELECT * FROM silver.recon_exceptions
         WHERE statement_id = ?
         ORDER BY exception_status, exception_reason, invoice_number
         """,
         [statement_id],
     )
+    for row in exceptions:
+        row.setdefault("charges", None)
+        row.setdefault("credits", None)
+        row.setdefault("amount_due", None)
 
     return {
         "summary": summary,
