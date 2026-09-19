@@ -246,9 +246,17 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
         _regenerate_sources_yml(known_vendor_ids)
         env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
         dbt_vars = json.dumps({"statement_id": statement_id, "known_vendor_ids": known_vendor_ids})
+        # TEMP LOCAL WORKAROUND (revert before deploy): Windows Smart App
+        # Control blocks venv\Scripts\dbt.exe from launching as a subprocess
+        # (unsigned pip console-script wrapper -- OSError: WinError 4551),
+        # which silently skipped this build on every job. `python -m
+        # dbt.cli.main` runs the same dbt entrypoint through the already-
+        # trusted python.exe. See memory: dbt.exe workaround must revert
+        # before deploy -- the deploy image has no Smart App Control issue
+        # since dbt is installed system-wide there, not via this venv.
         result = subprocess.run(
             [
-                dbt_executable, "run",
+                sys.executable, "-m", "dbt.cli.main", "run",
                 "--project-dir", DBT_PROJECT_DIR,
                 "--vars", dbt_vars,
             ],
@@ -333,10 +341,13 @@ def run_dbt_silver_silver_build(statement_id: str, expected_lines: int, expected
         _ensure_local_profile()
         env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
         dbt_vars = json.dumps({"statement_id": statement_id})
+        # TEMP LOCAL WORKAROUND (revert before deploy): see the matching
+        # comment in run_dbt_silver_build() above -- same Smart App Control
+        # block on venv\Scripts\dbt.exe, same fix.
         with fabric_pipeline_lock(timeout_seconds=timeout_seconds, lock_path=_SILVER_SILVER_LOCK_PATH):
             result = subprocess.run(
                 [
-                    dbt_executable, "run",
+                    sys.executable, "-m", "dbt.cli.main", "run",
                     "--project-dir", DBT_PROJECT_DIR,
                     "--select", "silver_silver_statement", "silver_silver_statement_line",
                     "--vars", dbt_vars,

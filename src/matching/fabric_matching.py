@@ -466,27 +466,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                 candidates = netsuite_by_table.get(table, {}).get(inv.lower(), []) if table else []
                 netsuite_total, is_exact = _best_candidate(candidates, stmt_amount)
 
-                candidate_count = 0
-                if table == "netsuite_vendorbill":
-                    netsuite_total = bills.get(shape["invoice_number"])
-                elif table == "netsuite_vendorcredit":
-                    netsuite_total, candidate_count = _match_credit(
-                        shape["invoice_number"], stmt_amount, credit_candidates
-                    )
-                else:
-                    netsuite_total = None
-
-                if candidate_count >= 2 and netsuite_total is None:
-                    # 2+ NetSuite credit records share this invoice_number as
-                    # a substring and none of them ties out cleanly -- a
-                    # genuine ambiguity (see _match_credit()), not a plain
-                    # not-found.
-                    _write_exception(
-                        wh_cur, statement_id, vendor_id, shop, shop_owner, shape["invoice_number"],
-                        shape["ro_number"], stmt_amount, None, "Possible Duplicate in NetSuite", now,
-                    )
-                    exception_count += 1
-                elif netsuite_total is None:
+                if netsuite_total is None:
                     _write_exception(
                         wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, None, "Not Found in NetSuite", now,

@@ -71,6 +71,7 @@ sources:
       - name: bronze_faulkner_infiniti_of_willow_grove_raw
       - name: bronze_fenix_ne_raw
       - name: bronze_fette_ford_inc__raw
+      - name: bronze_fred_beans__rockland__2__raw
       - name: bronze_fred_beans_parts_raw
       - name: bronze_gates_gmc___nissan_raw
       - name: bronze_goodwin_s_chevrolet_mazda_raw
@@ -128,6 +129,7 @@ sources:
       - name: bronze_raps_auto_parts_supply_inc_raw
       - name: bronze_ray_s_towing_service_raw
       - name: bronze_reynolds_and_reynolds_inc__raw
+      - name: bronze_rh_long_motor_sales_raw
       - name: bronze_rh_long_motor_sales_inc_raw
       - name: bronze_rivian_llc_raw
       - name: bronze_roadside_rescue_and_transport_inc__raw
