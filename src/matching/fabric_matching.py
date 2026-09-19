@@ -242,6 +242,36 @@ def _line_target(line: dict) -> tuple:
     return None, None
 
 
+def _match_credit(invoice_number: str, statement_amount, credit_candidates: list) -> tuple:
+    """Searches credit_candidates for tranids CONTAINING invoice_number as
+    a substring (see _fetch_netsuite_credit_candidates() for why this
+    isn't an exact match). Returns (netsuite_total_or_None,
+    candidate_count).
+
+    candidate_count > 1 with netsuite_total is None means a genuine
+    ambiguity for the caller to flag ("Possible Duplicate"), not something
+    to silently resolve -- 2+ real NetSuite records can share a base
+    tranid (e.g. a credit memo split across multiple apply-against-bill
+    records, or an unrelated base/suffix pair), and guessing which one is
+    right risks a false match on a coincidental tranid collision under an
+    unrelated entity. If exactly one of several candidates ties out to
+    the statement amount, that candidate is returned (an unambiguous
+    answer even though other candidates exist); otherwise None is
+    returned so the caller reports "Possible Duplicate" rather than an
+    amount mismatch it can't actually attribute to one record."""
+    if not invoice_number or statement_amount is None:
+        return None, 0
+    matches = [total for tranid, total in credit_candidates if invoice_number in tranid]
+    if not matches:
+        return None, 0
+    if len(matches) == 1:
+        return matches[0], 1
+    exact = [t for t in matches if _amounts_tie_out(statement_amount, t)]
+    if len(exact) == 1:
+        return exact[0], len(matches)
+    return None, len(matches)
+
+
 def _build_invoice_shapes(lines: list) -> dict:
     """Groups statement lines by invoice_number. charge_amount already
     carries the sign (positive for CHARGE lines, negative for CREDIT lines
