@@ -1643,15 +1643,50 @@ def _backfill_statement_periods(rows: list) -> list:
     return rows
 
 
+def _with_live_recon_exception_counts(rows: list) -> list:
+    """Fabric-side equivalent of _with_live_exception_counts() -- same
+    staleness problem (silver.recon_summary.exception_count is written
+    once by src/matching/fabric_matching.py and never updated again, so
+    an EXTRACTION_INCOMPLETE row raised by intake afterward, or an
+    exception resolved since, never shows up here), just against
+    silver.recon_exceptions via recon_query() instead of gold_exceptions
+    via execute_query(). Batched by statement_id rather than one
+    recon_query() call per row -- same N+1/Fabric-round-trip concern
+    get_vendor_summaries()'s reason_breakdown batching documents."""
+    if not rows:
+        return rows
+    statement_ids = [r["statement_id"] for r in rows]
+    placeholders = ", ".join("?" for _ in statement_ids)
+    count_rows = recon_query(
+        f"""
+        SELECT statement_id, COUNT(*) AS c
+        FROM silver.recon_exceptions
+        WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+        GROUP BY statement_id
+        """,
+        statement_ids,
+    )
+    count_by_statement = {r["statement_id"]: r["c"] for r in count_rows}
+    for row in rows:
+        count = count_by_statement.get(row["statement_id"], 0)
+        row["exception_count"] = count
+        row["overall_status"] = "RECONCILED" if count == 0 else "EXCEPTIONS_PRESENT"
+    return rows
+
+
 def get_all_runs() -> list:
     """Reads silver.recon_summary (Fabric Warehouse) -- the real NetSuite
     matching flow's output (src/matching/fabric_matching.py), same table
     get_recent_recon_runs() (Home page) and the Exceptions page already
-    read. Trusts recon_summary's own stored matched_count/exception_count
-    rather than re-deriving live counts per row, same reasoning as
-    get_recent_recon_runs(). No is_latest_version filter here (unlike
-    that function) -- Reports is meant to show every completed run, not
-    just the current version per vendor+period."""
+    read. Unlike get_recent_recon_runs(), DOES re-derive live
+    exception_count/overall_status per row (see
+    _with_live_recon_exception_counts()) -- Reports is a lower-traffic
+    page than Home, and showing a stale RECONCILED status here after the
+    fact (the same bug _with_live_exception_counts() exists to fix on the
+    old gold_* flow) is worse than one extra batched Fabric round trip.
+    No is_latest_version filter here (unlike that function) -- Reports is
+    meant to show every completed run, not just the current version per
+    vendor+period."""
     rows = recon_query(
         """
         SELECT statement_id, vendor_name, statement_period, total_invoice_count,
@@ -1661,6 +1696,7 @@ def get_all_runs() -> list:
         ORDER BY reconciliation_timestamp DESC
         """
     )
+    rows = _with_live_recon_exception_counts(rows)
     return _backfill_statement_periods(rows)
 
 
