@@ -47,10 +47,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 DBT_PROJECT_DIR = os.path.join(PROJECT_ROOT, "dbt", "vive_recon")
 DBT_PROFILES_DIR = os.path.join(PROJECT_ROOT, "dbt")
 _LOCK_PATH = os.path.join(DBT_PROFILES_DIR, ".fabric_pipeline.lock")
+_SILVER_SILVER_LOCK_PATH = os.path.join(DBT_PROFILES_DIR, ".silver_silver_pipeline.lock")
 
 
 @contextlib.contextmanager
-def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5):
+def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5,
+                          lock_path: str = None):
     """Cross-process exclusive lock for the whole "touches shared Fabric/dbt
     state" portion of one statement's pipeline -- see
     scripts/run_full_pipeline.py's caller, which wraps both
@@ -83,29 +85,41 @@ def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5)
     holding the lock is killed without cleaning up (a crash, a container
     restart mid-run), a lock file older than this is assumed abandoned and
     is removed so the pipeline doesn't hang forever.
+
+    lock_path defaults to the shared dbt/Bronze/matching lock (_LOCK_PATH)
+    -- pass a different path to get an independent lock guarding some other
+    shared resource without contending with (or queuing behind) this one.
+    See src/lakehouse/research_raw.py, whose raw-dump write needs its own
+    lock (protecting concurrent writers to research_schema.raw_statement
+    from each other) but has no reason to wait behind unrelated Bronze/dbt/
+    matching work, especially in RESEARCH_MODE_EXTRACTION_ONLY where none
+    of that even runs -- confirmed 2026-09-15: sharing the one lock across
+    a large batch caused later jobs to queue past the 300s timeout and
+    silently lose their raw-dump write.
     """
+    path = lock_path or _LOCK_PATH
     deadline = time.time() + timeout_seconds
     while True:
         try:
-            fd = os.open(_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(fd, str(os.getpid()).encode())
             os.close(fd)
             break
         except FileExistsError:
             try:
-                if time.time() - os.path.getmtime(_LOCK_PATH) > timeout_seconds:
-                    os.remove(_LOCK_PATH)
+                if time.time() - os.path.getmtime(path) > timeout_seconds:
+                    os.remove(path)
                     continue
             except OSError:
                 pass
             if time.time() > deadline:
-                raise TimeoutError(f"Could not acquire {_LOCK_PATH} within {timeout_seconds}s")
+                raise TimeoutError(f"Could not acquire {path} within {timeout_seconds}s")
             time.sleep(poll_interval)
     try:
         yield
     finally:
         try:
-            os.remove(_LOCK_PATH)
+            os.remove(path)
         except OSError:
             pass
 
@@ -262,3 +276,93 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
         logger.exception("dbt run failed to start for statement_id=%s", statement_id)
         print(f"    Fabric Silver build reason: dbt run failed to start -- {type(e).__name__}: {e}")
         return False
+
+
+def run_dbt_silver_silver_build(statement_id: str, expected_lines: int, expected_fields: int,
+                                 timeout_seconds: int = 300) -> bool:
+    """Best-effort dbt run for silver_silver_statement +
+    silver_silver_statement_line (dbt/vive_recon/models/silver_silver/),
+    which read research_schema.raw_statement/unnested_statement_lines/
+    unnested_statement_fields -- all written by
+    src.lakehouse.research_unnest.write_unnested_from_invoices() and
+    src.lakehouse.research_raw.write_raw_statement() just before this is
+    called.
+
+    Polls src.lakehouse.research_unnest.wait_for_visibility() first --
+    confirmed 2026-09-18 that running dbt immediately after those writes
+    can silently see 0 rows (the SQL analytics endpoint's propagation lag
+    applies to every table here, not just raw_payload's width problem).
+    Skips the dbt run entirely (returns False, logged) rather than risk
+    running it against data that isn't visible yet -- better a delayed
+    build than one that silently no-ops.
+
+    Called from notebooks/01_document_intake.py right after
+    write_raw_statement() and write_unnested_from_invoices(), NOT
+    alongside run_dbt_silver_build() in scripts/run_full_pipeline.py --
+    that call site is skipped entirely under RESEARCH_MODE_EXTRACTION_ONLY,
+    but the raw dump/unnest this reads runs unconditionally regardless of
+    that flag.
+
+    Runs under its own lock (_SILVER_SILVER_LOCK_PATH), not the shared
+    fabric_pipeline_lock() run_dbt_silver_build()/matching use -- this is
+    a separate, additive test path with nothing to race against there.
+    Returns True on success, False otherwise (missing config, missing dbt
+    executable, staging data never became visible, non-zero exit, or
+    timeout) -- never raises."""
+    if not _fabric_configured():
+        logger.debug("Fabric not configured -- skipping silver_silver dbt build")
+        print("    silver_silver dbt build reason: _fabric_configured() returned False (missing FABRIC_* env var)")
+        return False
+
+    dbt_executable = os.getenv("DBT_EXECUTABLE_PATH") or _default_dbt_executable()
+    if not os.path.exists(dbt_executable):
+        logger.warning(
+            "dbt executable not found at %s -- skipping silver_silver build",
+            dbt_executable,
+        )
+        print(f"    silver_silver dbt build reason: dbt executable not found at {dbt_executable}")
+        return False
+
+    from src.lakehouse.research_unnest import wait_for_visibility
+    if not wait_for_visibility(statement_id, expected_lines, expected_fields):
+        logger.warning("silver_silver staging data never became visible for statement_id=%s -- skipping dbt build", statement_id)
+        print(f"    silver_silver dbt build reason: staging data not visible via SQL endpoint within timeout")
+        return False
+
+    try:
+        _ensure_local_profile()
+        env = {**os.environ, "DBT_PROFILES_DIR": DBT_PROFILES_DIR}
+        dbt_vars = json.dumps({"statement_id": statement_id})
+        with fabric_pipeline_lock(timeout_seconds=timeout_seconds, lock_path=_SILVER_SILVER_LOCK_PATH):
+            result = subprocess.run(
+                [
+                    dbt_executable, "run",
+                    "--project-dir", DBT_PROJECT_DIR,
+                    "--select", "silver_silver_statement", "silver_silver_statement_line",
+                    "--vars", dbt_vars,
+                ],
+                cwd=DBT_PROJECT_DIR,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        if result.returncode != 0:
+            logger.error(
+                "silver_silver dbt run failed for statement_id=%s (exit %d):\n%s",
+                statement_id, result.returncode, result.stdout[-4000:],
+            )
+            last_line = (result.stdout or "").strip().splitlines()[-1:] or ["(no output)"]
+            print(f"    silver_silver dbt build reason: dbt run exited {result.returncode} -- {last_line[0][:300]}")
+            return False
+        return True
+
+    except subprocess.TimeoutExpired:
+        logger.error("silver_silver dbt run timed out after %ds for statement_id=%s", timeout_seconds, statement_id)
+        print(f"    silver_silver dbt build reason: dbt run timed out after {timeout_seconds}s")
+        return False
+    except Exception as e:
+        logger.exception("silver_silver dbt run failed to start for statement_id=%s", statement_id)
+        print(f"    silver_silver dbt build reason: dbt run failed to start -- {type(e).__name__}: {e}")
+        return False
+
