@@ -1248,6 +1248,61 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         else:
             print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
 
+        # Raw research dump + silver_silver build (2026-09-20 fix) -- same
+        # bug class as the Fabric Bronze copy and intake-log/Blob archival
+        # fixes above: write_raw_statement()/write_unnested_from_invoices()/
+        # run_dbt_silver_silver_build() were only ever called on the fresh-
+        # extraction path below, so a cache-hit re-upload's statement_id
+        # never got a research_schema.raw_statement row -- silver_silver
+        # (and, in turn, run_full_pipeline.py's Fabric matching, which reads
+        # what that build produces) then silently skipped it entirely
+        # ("no_silver_statement"), the same silent-gap shape the Fabric
+        # Bronze copy fix above already documents, just one step further
+        # down the new dict-dump pipeline. Confirmed via two live runs:
+        # cache-hit statements never appeared in silver.recon_summary at
+        # all, while a fresh-extraction statement for the same vendor
+        # completed matching normally.
+        #
+        # Reconstructs each invoice's {"_raw_row", "line_confidence", "shop"}
+        # from the CACHED statement's own bronze_vendor_statement_raw rows
+        # (raw_ai_response/extraction_confidence/raw_shop_name -- the exact
+        # columns write_to_bronze() populated them from originally, see that
+        # function's INSERT) rather than re-extracting, matching every other
+        # cache-hit step in this branch ("recompute nothing, write
+        # everything a fresh run would write"). Written under THIS
+        # statement_id, not cached_statement_id -- Fabric needs a row keyed
+        # to the statement this call is actually processing.
+        if not research_only:
+            cached_bronze_rows = execute_query(
+                """
+                SELECT raw_ai_response, extraction_confidence, raw_shop_name
+                FROM bronze_vendor_statement_raw
+                WHERE statement_id = ?
+                """,
+                [cached_statement_id],
+            )
+            cache_invoices_for_raw_dump = [
+                {
+                    "_raw_row": json.loads(row["raw_ai_response"]) if row.get("raw_ai_response") else None,
+                    "line_confidence": row.get("extraction_confidence"),
+                    "shop": row.get("raw_shop_name"),
+                }
+                for row in cached_bronze_rows
+            ]
+            cache_provider_used = cached.get("extraction_method", "unknown")
+            write_raw_statement(
+                cache_invoices_for_raw_dump, cache_vendor_id, statement_id,
+                os.path.basename(pdf_path), cache_provider_used,
+                vendor_display_name=display_name(cache_vendor_name),
+                version_number=version_info["version_number"],
+            )
+            from src.lakehouse.research_unnest import write_unnested_from_invoices
+            from src.lakehouse.fabric_dbt_runner import run_dbt_silver_silver_build
+            cache_lines_written, cache_fields_written = write_unnested_from_invoices(
+                cache_invoices_for_raw_dump, statement_id
+            )
+            run_dbt_silver_silver_build(statement_id, cache_lines_written, cache_fields_written)
+
         return {
             "statement_id": statement_id,
             "cache_hit": True,
