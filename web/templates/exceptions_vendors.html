@@ -15,15 +15,36 @@
 
 {% block content %}
 {% if vendors %}
-<div class="vendor-grid">
+<div class="filter-chips">
+  <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
+    <option value="">All vendors</option>
+    {% for vname in vendor_options %}
+    <option value="{{ vname }}">{{ vname }}</option>
+    {% endfor %}
+  </select>
+  <select id="shop-filter" class="filter-chip" style="cursor:pointer">
+    <option value="">All shops</option>
+    {% for sname in shop_options %}
+    <option value="{{ sname }}">{{ sname }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<div class="vendor-grid" id="exception-run-grid">
   {% for v in vendors %}
-  <a href="/exceptions/{{ v.url_name }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}">
+  {% set detail_href = "/reports/" + v.statement_id if v.exception_count == 0 and v.statement_id else "/exceptions/" + v.url_name + (("?statement_id=" + v.statement_id) if v.statement_id else "") %}
+  <a href="{{ detail_href }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}"
+     data-vendor="{{ v.vendor_display_name }}" data-shop="{{ v.shop or '' }}">
     <div class="vendor-card-head">
       <div class="vendor-card-id">
         <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--matched-tint);color:var(--matched)"{% endif %}>{{ v.vendor_display_name | initials }}</div>
         <div>
-          <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ v.vendor_display_name }}</div>
-          <div class="vendor-card-meta">{{ v.statement_period | period_label }} · {{ v.total_invoice_count }} invoices · {{ v.statement_total | money_short }}</div>
+          {%- set name_parts = [v.vendor_display_name] -%}
+          {%- if v.shop %}{% set _ = name_parts.append(v.shop) %}{% endif -%}
+          {%- if v.billing_location %}{% set _ = name_parts.append(v.billing_location) %}{% endif -%}
+          {%- if v.statement_period %}{% set _ = name_parts.append(v.statement_period | period_label) %}{% endif -%}
+          <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ name_parts | join(" — ") }}</div>
+          <div class="vendor-card-meta">{{ v.total_invoice_count }} invoices · {{ v.statement_total | money_short }}</div>
         </div>
       </div>
       {% if v.exception_count > 0 %}
@@ -55,6 +76,28 @@
   </a>
   {% endfor %}
 </div>
+
+<script>
+(function () {
+  var vendorFilter = document.getElementById("vendor-filter");
+  var shopFilter = document.getElementById("shop-filter");
+  var cards = document.querySelectorAll("#exception-run-grid .vendor-card");
+
+  function applyFilters() {
+    var vendor = vendorFilter.value;
+    var shop = shopFilter.value;
+    cards.forEach(function (card) {
+      var matchesVendor = !vendor || card.dataset.vendor === vendor;
+      var matchesShop = !shop || card.dataset.shop === shop;
+      card.style.display = (matchesVendor && matchesShop) ? "" : "none";
+    });
+  }
+
+  vendorFilter.addEventListener("change", applyFilters);
+  shopFilter.addEventListener("change", applyFilters);
+})();
+</script>
+
 {% else %}
 <div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
 {% endif %}

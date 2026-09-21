@@ -112,7 +112,7 @@
       {% set reason_css = reason_badge.get(selected.exception_reason, {}).css or 'grey' %}
       {% set diff_value = (selected.statement_amount or 0) - (selected.erp_amount if selected.erp_amount is not none else 0) %}
       <div class="field-box">
-        <div class="fb-label">ERP amount</div>
+        <div class="fb-label">NetSuite amount</div>
         {% if selected.erp_amount is not none %}
         <div class="fb-value">{{ selected.erp_amount | money }}</div>
         {% else %}
@@ -134,9 +134,9 @@
     <div class="sec-label">Why this is an exception</div>
     <div class="why-box why-box--{{ reason_badge.get(selected.exception_reason, {}).css or 'grey' }}">
       {% if selected.exception_reason == 'Invoice Missing' %}
-      Invoice #{{ selected.invoice_number }} appears on the {{ vendor_display_name }} vendor statement but was not found in the ERP. It may not have been posted yet, or may have been submitted under a different invoice number.
+      Invoice #{{ selected.invoice_number }} appears on the {{ vendor_display_name }} vendor statement but was not found in NetSuite. It may not have been posted yet, or may have been submitted under a different invoice number.
       {% elif selected.exception_reason == 'Amount Mismatch' %}
-      Invoice #{{ selected.invoice_number }} was found in the ERP, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
+      Invoice #{{ selected.invoice_number }} was found in NetSuite, but the amount does not match the vendor statement ({{ selected.statement_amount | money }} vs {{ selected.erp_amount | money }}).
       {% elif selected.exception_reason == 'EXTRACTION_INCOMPLETE' %}
       {{ selected.ai_explanation }}
       {% else %}
@@ -188,7 +188,6 @@
       <div class="action-cluster">
         <button class="btn btn-accept" type="submit" name="action" value="ACCEPTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> Accept</button>
         <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-x-circle"/></svg> Dispute with vendor</button>
-        <button class="btn btn-writeoff" type="submit" name="action" value="WRITE_OFF">− Write off</button>
       </div>
     </div>
     </form>

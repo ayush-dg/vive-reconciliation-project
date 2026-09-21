@@ -41,23 +41,31 @@ BULK_APPROVE_THRESHOLD = 0.99
 
 @router.get("/exceptions")
 def exceptions_vendors(request: Request, user: str = Depends(require_login)):
-    # get_vendor_summaries() already attaches "aging" per vendor via a
-    # batched query (see queries.py's _attach_aging_summaries()) -- this
-    # used to call get_exception_aging_summary() once per vendor here
-    # instead, one more Fabric round-trip per vendor on top of the ones
-    # inside get_vendor_summaries() itself. See 2026-09-02 investigation.
-    vendors = queries.get_vendor_summaries()
-    for v in vendors:
+    # get_exception_runs() -- one card per statement RUN (every PDF ever
+    # reconciled), not one per vendor -- see its docstring. Already
+    # attaches "aging"/"reason_breakdown" via batched queries the same way
+    # get_vendor_summaries() used to for the old vendor-rollup version.
+    runs = queries.get_exception_runs()
+    for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
 
-    vendors_with_ex = [v for v in vendors if v["exception_count"] > 0]
-    total_open = sum(v["exception_count"] for v in vendors_with_ex)
+    runs_with_ex = [v for v in runs if v["exception_count"] > 0]
+    total_open = sum(v["exception_count"] for v in runs_with_ex)
+
+    # Filter dropdown options -- distinct vendor/shop values actually
+    # present, so the two <select>s never offer a choice with zero cards
+    # behind it. Sorted, blanks/None excluded (a run can genuinely have no
+    # shop yet -- see fabric_matching.py's header["shop_name_raw"]).
+    vendor_options = sorted({v["vendor_display_name"] for v in runs if v.get("vendor_display_name")})
+    shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
 
     ctx = {
         "active_page": "exceptions",
-        "vendors": vendors,
+        "vendors": runs,
+        "vendor_options": vendor_options,
+        "shop_options": shop_options,
         "total_open": total_open,
-        "vendor_count_with_ex": len(vendors_with_ex),
+        "vendor_count_with_ex": len(runs_with_ex),
         "reason_badge": REASON_BADGE,
         **sidebar_context(request),
     }
@@ -66,9 +74,16 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
 
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
-                       filter: str = "all", selected: str = None):
+                       filter: str = "all", selected: str = None, statement_id: str = None):
     vendor_name = unquote(vendor_name)
-    statement = queries.get_vendor_latest_statement(vendor_name)
+
+    # A specific run's card (see get_exception_runs()) links here with its
+    # own statement_id -- look that exact run up instead of falling back
+    # to "the vendor's latest", or an older run's card would always open
+    # whatever the vendor's newest run happens to be instead of itself.
+    statement = queries.get_statement_by_id(statement_id) if statement_id else None
+    if not statement and not statement_id:
+        statement = queries.get_vendor_latest_statement(vendor_name)
 
     # Vendors with OPEN gold_exceptions rows but no gold_reconciliation_summary
     # row at all (e.g. a flagged review-queue row raised before this

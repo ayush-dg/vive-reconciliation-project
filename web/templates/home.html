@@ -28,7 +28,7 @@
     <div class="stat-sub">across {{ kpis.vendor_count }} vendor{{ "s" if kpis.vendor_count != 1 }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Auto-reconciled</div>
+    <div class="stat-label">Reconciled</div>
     <div class="stat-num matched">{{ "{:,}".format(kpis.auto_reconciled) }}</div>
     <div class="stat-sub">{{ kpis.match_rate }}% of invoices</div>
   </div>
@@ -41,11 +41,6 @@
     <div class="stat-label">Statement total</div>
     <div class="stat-num">{{ kpis.statement_total | money_short }}</div>
     <div class="stat-sub">this period</div>
-  </div>
-  <div class="stat-card{{ ' stat-card--flagged' if (validation_kpis.mismatches + validation_kpis.total_not_found) > 0 }}">
-    <div class="stat-label">Arithmetic check</div>
-    <div class="stat-num">{{ "{:,}".format(validation_kpis.total_checked) }}</div>
-    <div class="stat-sub">{{ "{:,}".format(validation_kpis.matches) }} matched · {{ "{:,}".format(validation_kpis.mismatches + validation_kpis.total_not_found) }} flagged</div>
   </div>
 </div>
 
@@ -62,7 +57,7 @@
       <h2>Active jobs</h2>
       <div class="sub">Statements still processing, or that need attention</div>
     </div>
-    <a href="/jobs/history" class="link-arrow">Job history <svg class="icon"><use href="#i-arrow-right"/></svg></a>
+    <a href="/jobs/history" class="link-arrow">Upload history <svg class="icon"><use href="#i-arrow-right"/></svg></a>
   </div>
   {% if active_jobs %}
   <table class="table">

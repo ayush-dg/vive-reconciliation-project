@@ -105,51 +105,6 @@ def get_kpis() -> dict:
     }
 
 
-def get_validation_kpis() -> dict:
-    """Arithmetic Validation Gate results (document_intake_log.validation_status/
-    validation_difference -- src/validation/arithmetic_gate.py), scoped to
-    "latest version of this vendor+period" using silver_reconciliation_standard's
-    own is_latest_version, NOT gold_reconciliation_summary's copy of it.
-    Silver is the actual source of truth resolve_version_info() writes at
-    intake time (notebooks/01_document_intake.py) -- it's populated on
-    every run regardless of whether ERP matching (and therefore Gold) ever
-    runs afterward, so scoping through Gold would silently hide every
-    statement with no NetSuite voucher data to match against yet. Scoping
-    through Silver instead means every extracted statement's arithmetic
-    check shows up here, matched or not.
-
-    DISTINCT in the subquery because Silver has one row per invoice line,
-    not one per statement -- an unguarded join would fan out and multiply
-    the count.
-
-    total_checked counts every row the gate actually ran on (validation_status
-    IS NOT NULL) -- total_not_found is a real gate outcome (ran, found no
-    printed total to compare), not the same as a NULL row that predates this
-    migration or was never intake-logged."""
-    totals = execute_query(
-        """
-        SELECT
-            COUNT(*) AS total_checked,
-            SUM(CASE WHEN d.validation_status = 'matches' THEN 1 ELSE 0 END) AS matches,
-            SUM(CASE WHEN d.validation_status = 'mismatch' THEN 1 ELSE 0 END) AS mismatches,
-            SUM(CASE WHEN d.validation_status = 'total_not_found' THEN 1 ELSE 0 END) AS total_not_found
-        FROM document_intake_log d
-        INNER JOIN (
-            SELECT DISTINCT statement_id
-            FROM silver_reconciliation_standard
-            WHERE is_latest_version = 1 AND record_source = 'VENDOR_STATEMENT'
-        ) latest ON d.statement_id = latest.statement_id
-        WHERE d.validation_status IS NOT NULL
-        """
-    )[0]
-    return {
-        "total_checked": totals["total_checked"] or 0,
-        "matches": totals["matches"] or 0,
-        "mismatches": totals["mismatches"] or 0,
-        "total_not_found": totals["total_not_found"] or 0,
-    }
-
-
 def get_kpi_debug_state() -> dict:
     """TEMPORARY diagnostic (added 2026-08-20 to investigate the Total
     invoices/Statement total KPI cards showing 156 instead of the expected
@@ -453,6 +408,91 @@ def get_vendor_summaries() -> list:
     return sorted(vendors, key=lambda v: v["vendor_name"] or "")
 
 
+def get_exception_runs() -> list:
+    """One row per statement RUN (every PDF ever reconciled), not one per
+    vendor -- see get_vendor_summaries() for the older vendor-rollup
+    version this sits alongside (still used internally by
+    bulk_approve_exceptions()/get_high_confidence_exception_count(), which
+    are genuinely vendor-wide operations, not per-run). This is what the
+    Exceptions overview page itself renders now, per the user 2026-09-21:
+    one card per upload, in vendor/shop/location/period order, so a vendor
+    with several shops (or several periods) shows all of them instead of
+    only its single most-recently-reconciled run.
+
+    No is_latest_version filter -- deliberately shows every run, not just
+    the current version per vendor+period (unlike get_vendor_summaries()),
+    since browsing period-wise is the point.
+
+    shop comes straight off silver.recon_summary (already written per-run
+    by fabric_matching.py's _write_summary()). billing_location AND
+    statement_period do NOT reliably live there -- silver.statement (and
+    therefore recon_summary) has no statement_period column at all yet
+    (see _fetch_statement()'s own comment -- a dbt-model gap, confirmed
+    live: always NULL), and billing_location was never written there
+    either. Both are intake-time fields on document_intake_log instead
+    (confirmed live: reliably populated there, e.g. asTech's
+    statement_period='2026-08', billing_location='Manchester, New
+    Hampshire') -- joined in via a second batched query, same
+    N+1-avoidance pattern as the reason_breakdown/aging batching below."""
+    runs = recon_query(
+        """
+        SELECT statement_id, vendor_name, shop, total_invoice_count,
+               matched_count, exception_count, statement_total, overall_status,
+               reconciliation_timestamp
+        FROM silver.recon_summary
+        ORDER BY reconciliation_timestamp DESC
+        """
+    )
+
+    if runs:
+        statement_ids = [r["statement_id"] for r in runs]
+        placeholders = ", ".join("?" for _ in statement_ids)
+        reason_rows = recon_query(
+            f"""
+            SELECT statement_id, exception_reason, COUNT(*) AS c
+            FROM silver.recon_exceptions
+            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
+            GROUP BY statement_id, exception_reason
+            """,
+            statement_ids,
+        )
+        reasons_by_statement = {}
+        for r in reason_rows:
+            reasons_by_statement.setdefault(r["statement_id"], []).append(r)
+
+        # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure
+        # SQL -- see get_vendor_name_for_statement()'s comment for why.
+        intake_rows = execute_query(
+            f"""
+            SELECT statement_id, billing_location, statement_period
+            FROM document_intake_log
+            WHERE statement_id IN ({placeholders})
+            """,
+            statement_ids,
+        )
+        intake_by_statement = {r["statement_id"]: r for r in intake_rows}
+
+        for run in runs:
+            rows_for_run = reasons_by_statement.get(run["statement_id"], [])
+            run["reason_breakdown"] = {
+                REASON_LABELS.get(r["exception_reason"], r["exception_reason"]): r["c"]
+                for r in rows_for_run
+            }
+            run["exception_count"] = sum(r["c"] for r in rows_for_run)
+            intake_row = intake_by_statement.get(run["statement_id"])
+            run["billing_location"] = intake_row["billing_location"] if intake_row else None
+            run["statement_period"] = intake_row["statement_period"] if intake_row else None
+
+    runs.extend(_get_exceptions_only_vendors())
+    _attach_aging_summaries(runs)
+    for run in runs:
+        run["vendor_display_name"] = vendor_display_name(run["vendor_name"])
+        run.setdefault("billing_location", None)
+        run.setdefault("shop", None)
+        run.setdefault("statement_period", None)
+    return runs
+
+
 def _attach_aging_summaries(vendors: list) -> None:
     """Batched equivalent of calling get_exception_aging_summary(vendor_name)
     once per vendor (mutates each vendor dict in place, adding "aging") --
@@ -577,6 +617,24 @@ def _vendor_name_from_source_file(source_file: str) -> str:
 # ---------------------------------------------------------------------------
 # Exceptions — review (per vendor)
 # ---------------------------------------------------------------------------
+
+def get_statement_by_id(statement_id: str):
+    """Statement-shaped lookup for one specific run, same return shape as
+    get_vendor_latest_statement() -- used by the review route when a
+    get_exception_runs() card (a specific run, not just "the vendor's
+    latest") is clicked, so an older run's "Review exceptions" link opens
+    that run, not whichever one happens to be the vendor's newest."""
+    rows = recon_query(
+        """
+        SELECT TOP 1 statement_id, vendor_name, statement_period, total_invoice_count,
+               matched_count, exception_count, statement_total, overall_status
+        FROM silver.recon_summary
+        WHERE statement_id = ?
+        """,
+        [statement_id],
+    )
+    return rows[0] if rows else None
+
 
 def get_vendor_latest_statement(vendor_name: str):
     # is_latest_version = 1 (migrations/011_add_version_tracking.sql) so a
@@ -1918,3 +1976,33 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
         # case: review-queue items are usually raised before a statement
         # ever reaches a full pipeline run).
         _recompute_summary_counts(item["statement_id"])
+
+
+# ---------------------------------------------------------------------------
+# Validation — Arithmetic Validation Gate (printed total vs. extracted sum)
+# ---------------------------------------------------------------------------
+
+def get_validation_report() -> list:
+    """Every intake attempt's Arithmetic Validation Gate result
+    (document_intake_log.validation_status/validation_difference --
+    src/validation/arithmetic_gate.py). No is_latest_version scoping --
+    shows every intake attempt ever logged, including superseded
+    reprocessing of the same statement, per the user 2026-09-21.
+
+    Pass/Fail is a strict binary: only validation_status == 'matches' is
+    Pass. 'total_not_found' (no printed total on the PDF to compare
+    against) counts as Fail here too, same as a genuine 'mismatch' --
+    also per the user 2026-09-21."""
+    rows = execute_query(
+        """
+        SELECT statement_id, source_file, vendor_name, statement_period,
+               statement_total_as_printed, validation_status, validation_difference,
+               ingestion_timestamp
+        FROM document_intake_log
+        WHERE validation_status IS NOT NULL
+        ORDER BY ingestion_timestamp DESC
+        """
+    )
+    for row in rows:
+        row["passed"] = row["validation_status"] == "matches"
+    return rows

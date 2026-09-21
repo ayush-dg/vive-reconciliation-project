@@ -20,7 +20,6 @@ def home(request: Request, user: str = Depends(require_login)):
     ctx = {
         "active_page": "home",
         "kpis": queries.get_kpis(),
-        "validation_kpis": queries.get_validation_kpis(),
         "active_jobs": queries.get_active_jobs(),
         # Re-enabled 2026-08-26 -- wired to the NEW NetSuite matching flow's
         # results (silver.recon_summary, Fabric), not

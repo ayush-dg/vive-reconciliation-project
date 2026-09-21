@@ -1,13 +1,14 @@
 {% extends "base.html" %}
-{% block title %}VIVE Collision — Sync Outlook{% endblock %}
+{% block title %}VIVE Collision — Statement Intake — Sync{% endblock %}
 
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
-    <div class="eyebrow">Mailbox</div>
-    <h1>Sync Outlook</h1>
+    <div class="eyebrow">Statement Intake</div>
+    <h1>Sync PDFs from Outlook & Blob </h1>
   </div>
 </div>
+{% include "_intake_tabs.html" %}
 {% endblock %}
 
 {% block content %}
@@ -29,7 +30,7 @@
       {% endif %}
       <form method="post" action="/mailbox-sync/to-blob">
         <div class="form-actions">
-          <button class="btn-primary" style="width:auto;flex:1" type="submit">Sync to Blob</button>
+          <button class="btn-primary" style="width:auto;flex:1" type="submit" title="Sync to Blob">Check email for new statements</button>
         </div>
       </form>
     </div>
@@ -46,7 +47,7 @@
       {% endif %}
       <form method="post" action="/mailbox-sync/to-webapp">
         <div class="form-actions">
-          <button class="btn-primary" style="width:auto;flex:1" type="submit">Sync to Webapp</button>
+          <button class="btn-primary" style="width:auto;flex:1" type="submit" title="Sync to Webapp">Send new statements for processing</button>
         </div>
       </form>
     </div>
