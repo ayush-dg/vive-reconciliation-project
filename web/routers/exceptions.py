@@ -52,18 +52,22 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
     runs_with_ex = [v for v in runs if v["exception_count"] > 0]
     total_open = sum(v["exception_count"] for v in runs_with_ex)
 
-    # Filter dropdown options -- distinct vendor/shop values actually
-    # present, so the two <select>s never offer a choice with zero cards
-    # behind it. Sorted, blanks/None excluded (a run can genuinely have no
-    # shop yet -- see fabric_matching.py's header["shop_name_raw"]).
+    # Filter dropdown options -- distinct vendor/shop/location values
+    # actually present, so the <select>s never offer a choice with zero
+    # cards behind it. Sorted, blanks/None excluded (a run can genuinely
+    # have no shop yet -- see fabric_matching.py's header["shop_name_raw"] --
+    # or no billing_location, e.g. anything routed through Foundry/Claude
+    # Sonnet extraction rather than pdfplumber -- see get_exception_runs()).
     vendor_options = sorted({v["vendor_display_name"] for v in runs if v.get("vendor_display_name")})
     shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
+    location_options = sorted({v["billing_location"] for v in runs if v.get("billing_location")})
 
     ctx = {
         "active_page": "exceptions",
         "vendors": runs,
         "vendor_options": vendor_options,
         "shop_options": shop_options,
+        "location_options": location_options,
         "total_open": total_open,
         "vendor_count_with_ex": len(runs_with_ex),
         "reason_badge": REASON_BADGE,

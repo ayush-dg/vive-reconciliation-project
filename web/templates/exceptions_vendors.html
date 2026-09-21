@@ -28,23 +28,31 @@
     <option value="{{ sname }}">{{ sname }}</option>
     {% endfor %}
   </select>
+  <select id="location-filter" class="filter-chip" style="cursor:pointer">
+    <option value="">All locations</option>
+    {% for lname in location_options %}
+    <option value="{{ lname }}">{{ lname }}</option>
+    {% endfor %}
+  </select>
 </div>
 
 <div class="vendor-grid" id="exception-run-grid">
   {% for v in vendors %}
   {% set detail_href = "/reports/" + v.statement_id if v.exception_count == 0 and v.statement_id else "/exceptions/" + v.url_name + (("?statement_id=" + v.statement_id) if v.statement_id else "") %}
   <a href="{{ detail_href }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}"
-     data-vendor="{{ v.vendor_display_name }}" data-shop="{{ v.shop or '' }}">
+     data-vendor="{{ v.vendor_display_name }}" data-shop="{{ v.shop or '' }}" data-location="{{ v.billing_location or '' }}">
     <div class="vendor-card-head">
       <div class="vendor-card-id">
         <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--matched-tint);color:var(--matched)"{% endif %}>{{ v.vendor_display_name | initials }}</div>
-        <div>
-          {%- set name_parts = [v.vendor_display_name] -%}
-          {%- if v.shop %}{% set _ = name_parts.append(v.shop) %}{% endif -%}
-          {%- if v.billing_location %}{% set _ = name_parts.append(v.billing_location) %}{% endif -%}
-          {%- if v.statement_period %}{% set _ = name_parts.append(v.statement_period | period_label) %}{% endif -%}
-          <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ name_parts | join(" — ") }}</div>
-          <div class="vendor-card-meta">{{ v.total_invoice_count }} invoices · {{ v.statement_total | money_short }}</div>
+        <div class="vendor-card-title-block">
+          <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ v.vendor_display_name }}</div>
+          {% if v.shop %}<div class="vendor-card-shop" title="{{ v.shop }}">{{ v.shop }}</div>{% endif %}
+          {%- set meta_parts = [] -%}
+          {%- if v.billing_location %}{% set _ = meta_parts.append(v.billing_location) %}{% endif -%}
+          {%- if v.statement_period %}{% set _ = meta_parts.append(v.statement_period | period_label) %}{% endif -%}
+          {%- set _ = meta_parts.append(v.total_invoice_count ~ " invoices") -%}
+          {%- set _ = meta_parts.append(v.statement_total | money_short) -%}
+          <div class="vendor-card-meta">{{ meta_parts | join(" · ") }}</div>
         </div>
       </div>
       {% if v.exception_count > 0 %}
@@ -81,20 +89,24 @@
 (function () {
   var vendorFilter = document.getElementById("vendor-filter");
   var shopFilter = document.getElementById("shop-filter");
+  var locationFilter = document.getElementById("location-filter");
   var cards = document.querySelectorAll("#exception-run-grid .vendor-card");
 
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
+    var location = locationFilter.value;
     cards.forEach(function (card) {
       var matchesVendor = !vendor || card.dataset.vendor === vendor;
       var matchesShop = !shop || card.dataset.shop === shop;
-      card.style.display = (matchesVendor && matchesShop) ? "" : "none";
+      var matchesLocation = !location || card.dataset.location === location;
+      card.style.display = (matchesVendor && matchesShop && matchesLocation) ? "" : "none";
     });
   }
 
   vendorFilter.addEventListener("change", applyFilters);
   shopFilter.addEventListener("change", applyFilters);
+  locationFilter.addEventListener("change", applyFilters);
 })();
 </script>
 
