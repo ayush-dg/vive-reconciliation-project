@@ -179,7 +179,15 @@ def get_recent_recon_runs(limit: int = 10) -> list:
     counts per row (unlike get_recent_runs()'s _with_live_exception_counts())
     -- an extra Fabric round trip per row on top of the ones this already
     costs would make the Home page even slower for a value that's already
-    kept fresh by resolve_exception()'s _recompute_summary_counts() call."""
+    kept fresh by resolve_exception()'s _recompute_summary_counts() call.
+
+    statement_period is selected from recon_summary above but NOT trusted --
+    silver.statement (and therefore recon_summary) has no statement_period
+    column at all yet, a dbt-model gap (see get_exception_runs()'s
+    docstring, same issue found on the Exceptions page) -- confirmed
+    always NULL live. document_intake_log's own statement_period is
+    reliably populated instead, so it overrides recon_summary's here,
+    batched in one query alongside the existing per-row job_id lookup."""
     rows = recon_query(
         f"""
         SELECT TOP {int(limit)} statement_id, vendor_name, statement_period,
@@ -190,6 +198,18 @@ def get_recent_recon_runs(limit: int = 10) -> list:
         ORDER BY reconciliation_timestamp DESC
         """
     )
+    if rows:
+        statement_ids = [r["statement_id"] for r in rows]
+        placeholders = ", ".join("?" for _ in statement_ids)
+        intake_rows = execute_query(
+            f"SELECT statement_id, statement_period FROM document_intake_log "
+            f"WHERE statement_id IN ({placeholders})",
+            statement_ids,
+        )
+        period_by_statement = {r["statement_id"]: r["statement_period"] for r in intake_rows}
+        for row in rows:
+            row["statement_period"] = period_by_statement.get(row["statement_id"]) or row["statement_period"]
+
     for row in rows:
         job_rows = execute_query(
             "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
