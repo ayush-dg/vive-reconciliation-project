@@ -12,7 +12,7 @@ from urllib.parse import quote, unquote
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
-from web.deps import render, require_login, sidebar_context
+from web.deps import render, require_login, sidebar_context, smart_title
 from web import queries
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
@@ -48,6 +48,19 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
     runs = queries.get_exception_runs()
     for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
+        # Display-only casing normalization -- vendor_name (the canonical
+        # identifier used for routing/lookups above) is left untouched;
+        # only the human-facing display fields are reshaped, so every
+        # vendor/shop/location renders in consistent Title Case
+        # regardless of how that vendor's own PDF happened to print it
+        # (ALL CAPS, all lowercase, etc.) -- confirmed 2026-09-21 this
+        # varied wildly card to card. Applied here (not in the query
+        # layer) so it also normalizes the filter dropdown options and
+        # data-* attributes built from these same fields below, keeping
+        # filtering and display in sync.
+        v["vendor_display_name"] = smart_title(v.get("vendor_display_name"))
+        v["shop"] = smart_title(v.get("shop"))
+        v["billing_location"] = smart_title(v.get("billing_location"))
 
     runs_with_ex = [v for v in runs if v["exception_count"] > 0]
     total_open = sum(v["exception_count"] for v in runs_with_ex)

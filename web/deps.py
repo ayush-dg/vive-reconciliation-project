@@ -7,6 +7,7 @@ context (open exceptions count, shown as the nav-dot on "Exceptions").
 """
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -91,6 +92,57 @@ def initials(name):
     return name[:2].upper()
 
 
+_US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN",
+    "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV",
+    "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN",
+    "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC", "PR", "VI", "GU",
+}
+
+
+def smart_title(value):
+    """Normalizes a vendor/shop/location string to proper title case --
+    display-only, never touches stored data. Source text is printed
+    however each vendor's own PDF happened to print it (some ALL CAPS,
+    some all lowercase, rarely already proper case), which looks
+    inconsistent side by side on a card grid.
+
+    Plain str.title() mishandles apostrophes (OLIVER'S -> "Oliver'S", not
+    "Oliver's") since it treats the character after an apostrophe as a
+    new word boundary -- tracked here explicitly instead: capitalize the
+    first letter after start-of-string or whitespace/hyphen/slash/
+    parens/comma, but never after an apostrophe.
+
+    A standalone 2-letter token matching a real US state code (e.g. the
+    "RI" in "North Kingstown, RI") is kept fully uppercase rather than
+    title-cased to "Ri" -- title-casing a state abbreviation reads as a
+    mistake to anyone who recognizes postal codes, the opposite of the
+    "look professional" goal this exists for."""
+    if not value:
+        return value
+    result = []
+    capitalize_next = True
+    for ch in value:
+        if ch.isalpha():
+            result.append(ch.upper() if capitalize_next else ch.lower())
+            capitalize_next = False
+        else:
+            result.append(ch)
+            capitalize_next = ch != "'"
+    titled = "".join(result)
+    # Second pass, on the already-title-cased string: a standalone
+    # 2-letter token (word boundary on both sides, so this never touches
+    # a 2-letter substring inside a longer word) that's a real state code
+    # gets uppercased back -- done as a separate pass rather than folded
+    # into the loop above, since the loop processes one character at a
+    # time with no lookahead to know a 2-letter word is coming.
+    return re.sub(
+        r"\b[A-Za-z]{2}\b",
+        lambda m: m.group(0).upper() if m.group(0).upper() in _US_STATE_CODES else m.group(0),
+        titled,
+    )
+
+
 _DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y")
 
 
@@ -173,3 +225,4 @@ templates.env.filters["friendly_dt"] = friendly_dt
 templates.env.filters["friendly_date"] = friendly_date
 templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname
+templates.env.filters["smart_title"] = smart_title
