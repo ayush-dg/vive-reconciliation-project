@@ -71,7 +71,6 @@ from src.validation.arithmetic_gate import compute_arithmetic_validation
 from src.validation.date_utils import normalize_statement_month
 from src.validation.location_lookup import resolve_billing_location
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
-from src.lakehouse.fabric_bronze import write_bronze_fabric
 from src.lakehouse.research_raw import write_raw_statement
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
@@ -1118,10 +1117,9 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
         research_only = _research_mode_extraction_only()
         if research_only:
-            print(f"  [RESEARCH MODE] Extraction-only -- skipping Silver/Fabric Bronze copy for this cache hit.")
+            print(f"  [RESEARCH MODE] Extraction-only -- skipping Silver copy for this cache hit.")
             silver_count = 0
             incomplete_count = 0
-            fabric_bronze_count = 0
         else:
             print(f"  Re-running Silver normalization...")
             silver_count = normalize_to_silver(cached_statement_id, statement_id, vendor_id, version_info)
@@ -1131,30 +1129,6 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
                 os.path.basename(pdf_path), statement_period
             )
             print(f"  Copied {incomplete_count} EXTRACTION_INCOMPLETE exception(s) forward from the cached run.")
-
-        # Additive Fabric Lakehouse copy (2026-09-03 fix) -- without this, a
-        # cache-hit re-upload's statement_id never gets Fabric Bronze rows
-        # at all (write_bronze_fabric() is only called on the fresh-
-        # extraction path below), so the unconditional dbt Silver build /
-        # NetSuite matching scripts/run_full_pipeline.py runs right after
-        # this returns silently find nothing for it -- the statement never
-        # appears in silver.recon_summary/recon_exceptions, with no error
-        # surfaced anywhere. Uses cache_vendor_id (the cached run's REAL
-        # vendor_id), not the filename-derived vendor_id local var, so this
-        # targets the correct bronze.bronze_<vendor_id>_raw table -- same
-        # reasoning as normalize_to_silver()'s vendor_id use above already
-        # doesn't apply here (it intentionally still uses the outer
-        # vendor_id/statement_period for the NEW statement's own local
-        # Silver identity), but the Fabric copy is reading an existing
-        # vendor-specific table by name, so it must match the table the
-        # cached rows actually live in. Silent no-op on any failure or if
-        # Fabric isn't configured -- same contract as write_bronze_fabric().
-        if not research_only:
-            from src.lakehouse.fabric_bronze import copy_bronze_fabric_for_cache_hit
-            fabric_bronze_count = copy_bronze_fabric_for_cache_hit(
-                cached_statement_id, statement_id, cache_vendor_id, version_info
-            )
-            print(f"  Fabric Bronze: {fabric_bronze_count} rows copied for {statement_id}.")
 
         # document_intake_log + Blob Storage archival (2026-09-05 fix) --
         # previously ONLY done in the Cache MISS branch below, so every
@@ -1254,7 +1228,6 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             "bronze_count": bronze_count,
             "silver_count": silver_count,
             "extraction_incomplete_count": incomplete_count,
-            "fabric_bronze_count": fabric_bronze_count,
         }
 
     print(f"  Cache MISS — proceeding with extraction.")
@@ -1427,19 +1400,6 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             pdf_path, statement_period, vendor_id, version_info
         )
         print(f"  Bronze rows written: {bronze_count}")
-
-        # Additive Fabric Lakehouse write (new Bronze/Silver dbt pipeline,
-        # dbt/) -- never instead of the write above. Same inputs, one more
-        # place a copy of the data lands: bronze.bronze_<vendor_id>_raw,
-        # written generically for any vendor_id (extraction already normalizes
-        # every vendor into this shape -- see fabric_bronze.py's docstring).
-        # Silently a no-op when Fabric isn't configured (FABRIC_CLIENT_ID/etc
-        # unset in .env) -- the common case for local dev/tests -- and never
-        # raises, so a Fabric-side failure can't break this pipeline.
-        write_bronze_fabric(
-            valid_invoices, schema_result, statement_id,
-            pdf_path, statement_period, vendor_id, version_info
-        )
 
         # Write invalid to review queue
         if invalid_invoices:
