@@ -1,9 +1,10 @@
 """Writes a raw, pre-mapping dump of one extracted PDF to a single shared
-Fabric Lakehouse table, research_schema.raw_statement -- separate from and
-additive to the real bronze.bronze_<vendor_id>_raw tables fabric_bronze.py
-writes. Nothing downstream reads this table; it exists purely so a human
-can inspect what extraction actually produced before any column-mapping/
-validation logic touched it.
+Fabric Lakehouse table, bronze.raw_statement -- moved here from
+research_schema.raw_statement 2026-09-21 (see git history for the
+migration script) now that it's this pipeline's actual Bronze layer, not a
+side research artifact. It exists so a human can inspect what extraction
+actually produced before any column-mapping/validation logic touched it,
+and is what dbt/vive_recon/models/silver/statement*.sql read from.
 
 One row per PDF/statement, not per line -- raw_payload is a JSON array
 holding every extracted line's own raw (pre-mapping) row. Each invoice
@@ -34,10 +35,10 @@ from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
 
 logger = logging.getLogger(__name__)
 
-TABLE_URI_SCHEMA = "research_schema"
+TABLE_URI_SCHEMA = "bronze"
 TABLE_NAME = "raw_statement"
 _LOCK_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "dbt", ".research_raw_pipeline.lock"
+    os.path.dirname(__file__), "..", "..", "dbt", ".bronze_raw_pipeline.lock"
 )
 
 
@@ -109,7 +110,7 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
                          vendor_display_name: str = None,
                          version_number: int = None) -> int:
     """Appends exactly one row for this PDF/statement to
-    research_schema.raw_statement -- raw_payload is a JSON array of every
+    bronze.raw_statement -- raw_payload is a JSON array of every
     line's raw (pre-mapping) row, each wrapped as {"_raw_row": ...,
     "_extraction_confidence": ..., "_shop_name": ...} rather than the bare
     _raw_row dict -- _extraction_confidence/_shop_name come from each
@@ -189,14 +190,14 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
 
 
 def read_raw_statement(statement_id: str) -> dict:
-    """Reads one row of research_schema.raw_statement DIRECTLY from the
+    """Reads one row of bronze.raw_statement DIRECTLY from the
     Delta Lake files (via the deltalake package), NOT through the Fabric
     SQL analytics endpoint -- confirmed 2026-09-17 that the SQL endpoint
     silently truncates this table's raw_payload column at 8000 characters
     (LEN() via T-SQL returned 8000 for a row whose real value, read this
     same way, was 17847 chars). Any statement with more than a modest
     number of invoice lines exceeds that, so anything needing raw_payload
-    -- currently src/lakehouse/research_unnest.py's rebuild-from-storage
+    -- currently src/lakehouse/bronze_unnest.py's rebuild-from-storage
     path -- reads it only through this function, never via OPENJSON/T-SQL.
 
     Returns None if Fabric isn't configured, the table can't be read, or

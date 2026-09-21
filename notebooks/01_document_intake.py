@@ -71,7 +71,7 @@ from src.validation.arithmetic_gate import compute_arithmetic_validation
 from src.validation.date_utils import normalize_statement_month
 from src.validation.location_lookup import resolve_billing_location
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
-from src.lakehouse.research_raw import write_raw_statement
+from src.lakehouse.bronze_raw import write_raw_statement
 from src.matching.engine import score_exception_confidence
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
@@ -82,7 +82,7 @@ from src.storage.blob_client import BlobStorageClient
 def _research_mode_extraction_only() -> bool:
     """True when RESEARCH_MODE_EXTRACTION_ONLY=true is set (local .env
     only -- never set in the deployed App Service's settings). When on,
-    run_intake() still extracts and writes the raw research_schema.raw_statement
+    run_intake() still extracts and writes the raw bronze.raw_statement
     dump, but skips Bronze/Silver (and, in run_full_pipeline.py, the Fabric
     Silver build / NetSuite matching / Gold matching / report generation
     that depend on them). document_intake_log and Blob Storage archival
@@ -1316,11 +1316,11 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     version_info = resolve_version_info(vendor_id, statement_period)
     print(f"  Version: {version_info['version_number']} (previous: {version_info['previous_statement_id'] or 'none'})")
 
-    # Raw research dump (research_schema.raw_statement) -- unconditional,
+    # Raw research dump (bronze.raw_statement) -- unconditional,
     # separate from and additive to the real Bronze writes below. Captures
     # every extracted row exactly as the extractor produced it, before
     # validation/skip logic runs, regardless of RESEARCH_MODE_EXTRACTION_ONLY.
-    # See src/lakehouse/research_raw.py's docstring.
+    # See src/lakehouse/bronze_raw.py's docstring.
     research_only = _research_mode_extraction_only()
     write_raw_statement(
         invoices, vendor_id, statement_id,
@@ -1335,7 +1335,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # reads run unconditionally.
     #
     # Two steps, not one Python pivot -- see
-    # src/lakehouse/research_unnest.py's docstring for the full history:
+    # src/lakehouse/bronze_unnest.py's docstring for the full history:
     # (1) write_unnested_from_invoices() explodes raw_payload into two
     # narrow Lakehouse tables directly from this same in-memory `invoices`
     # list (no read-back -- reading back what was just written raced its
@@ -1346,7 +1346,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # pivot/normalization models -- the same class of read-after-write
     # race exists here too (confirmed 2026-09-18), just one step removed
     # since dbt, not this Python code, is what reads it back.
-    from src.lakehouse.research_unnest import write_unnested_from_invoices
+    from src.lakehouse.bronze_unnest import write_unnested_from_invoices
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_silver_build
     lines_written, fields_written = write_unnested_from_invoices(invoices, statement_id)
     run_dbt_silver_silver_build(statement_id, lines_written, fields_written)

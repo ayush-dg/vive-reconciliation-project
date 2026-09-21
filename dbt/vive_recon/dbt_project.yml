@@ -35,9 +35,9 @@ models:
       # No +schema override -- profiles.yml's default `schema: silver`
       # already targets the right place.
       #
-      # statement.sql/statement_line.sql source from research_schema.
-      # raw_statement (the dict-dump bronze) + unnested_statement_lines/
-      # _fields, not from bronze.bronze_<vendor_id>_raw -- migrated
+      # statement.sql/statement_line.sql source from bronze.raw_statement
+      # (the dict-dump) + unnested_statement_lines/_fields, not from the
+      # old per-vendor bronze.bronze_<vendor_id>_raw tables -- migrated
       # 2026-09-18 from the old per-vendor-typed-bronze design (see their
       # own docstrings for the full history and the schema-parity notes
       # vs. the old bronze-driven version). This used to be developed and

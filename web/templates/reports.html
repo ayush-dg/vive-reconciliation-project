@@ -15,9 +15,11 @@
 
 {% block content %}
 {% if runs %}
-{% set passed_runs = runs | selectattr('exception_count', 'equalto', 0) | list %}
 {% set total_runs = runs | length %}
-{% set pct = ((passed_runs | length / total_runs) * 100) | round | int if total_runs else 0 %}
+{% set total_lines = runs | sum(attribute='total_invoice_count') %}
+{% set matched_lines = runs | sum(attribute='matched_count') %}
+{% set exception_lines = runs | sum(attribute='exception_count') %}
+{% set pct = ((matched_lines / total_lines) * 100) | round | int if total_lines else 0 %}
 
 <div class="report-hero">
   <div class="report-donut" style="--pct:{{ pct }}">
@@ -33,13 +35,13 @@
     </div>
     <div class="report-hero-divider"></div>
     <div>
-      <div class="report-hero-stat-num success">{{ passed_runs | length }}</div>
-      <div class="report-hero-stat-label">Fully matched</div>
+      <div class="report-hero-stat-num success">{{ matched_lines }}</div>
+      <div class="report-hero-stat-label">Invoices matched</div>
     </div>
     <div class="report-hero-divider"></div>
     <div>
-      <div class="report-hero-stat-num warning">{{ total_runs - (passed_runs | length) }}</div>
-      <div class="report-hero-stat-label">Has exceptions</div>
+      <div class="report-hero-stat-num warning">{{ exception_lines }}</div>
+      <div class="report-hero-stat-label">Invoices with exceptions</div>
     </div>
   </div>
 </div>

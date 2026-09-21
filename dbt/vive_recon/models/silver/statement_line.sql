@@ -1,5 +1,5 @@
 -- Migrated 2026-09-18 to source from the dict-dump bronze
--- (research_schema.raw_statement + unnested_statement_lines/_fields)
+-- (bronze.raw_statement + unnested_statement_lines/_fields)
 -- instead of the per-vendor bronze.bronze_<vendor_id>_raw tables. This is
 -- the exact same pivot/normalization logic validated live against real
 -- NetSuite data for all 13 vendors during the silver_silver test phase
@@ -34,7 +34,7 @@ with header_ranked as (
     select
         statement_id, vendor_id,
         row_number() over (partition by statement_id order by ingestion_timestamp desc) as rn
-    from {{ source('research', 'raw_statement') }}
+    from {{ source('bronze', 'raw_statement') }}
     {% if target_statement_id is not none %}
     where statement_id = '{{ target_statement_id }}'
     {% endif %}
@@ -59,7 +59,7 @@ mapped_fields as (
         f.raw_field_value,
         m.canonical_field_name,
         coalesce(m.mapping_priority, 1) as mapping_priority
-    from {{ source('research', 'unnested_statement_fields') }} f
+    from {{ source('bronze', 'unnested_statement_fields') }} f
     inner join header h on h.statement_id = f.statement_id
     left join {{ ref('vendor_field_mapping') }} m
         on m.vendor_id = h.vendor_id
@@ -162,7 +162,7 @@ vnr as (
 lines as (
 
     select statement_id, line_number, extraction_confidence, shop_name
-    from {{ source('research', 'unnested_statement_lines') }}
+    from {{ source('bronze', 'unnested_statement_lines') }}
 
 )
 

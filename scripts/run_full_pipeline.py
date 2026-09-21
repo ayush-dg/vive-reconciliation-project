@@ -91,7 +91,7 @@ def main():
 
     # RESEARCH_MODE_EXTRACTION_ONLY (local .env only -- see
     # notebooks/01_document_intake.py's _research_mode_extraction_only()):
-    # intake already wrote the raw research_schema.raw_statement dump and
+    # intake already wrote the raw bronze.raw_statement dump and
     # deliberately left bronze_count/silver_count at 0 -- stop here rather
     # than let the bronze_count==0 check below misreport this as "no
     # invoices extracted" and rather than run Fabric Silver/matching/Gold/
@@ -101,7 +101,7 @@ def main():
         print(f"  RESEARCH MODE — extraction-only, stopping after intake")
         print(f"  Statement ID: {statement_id}")
         print(f"  Total invoices extracted: {intake_result.get('total_invoices', intake_result.get('bronze_count', 0))}")
-        print(f"  Raw dump: research_schema.raw_statement (Fabric Lakehouse)")
+        print(f"  Raw dump: bronze.raw_statement (Fabric Lakehouse)")
         print(f"  Bronze/Silver/matching/report: skipped (RESEARCH_MODE_EXTRACTION_ONLY=true)")
         print(f"{'#'*65}\n")
         return

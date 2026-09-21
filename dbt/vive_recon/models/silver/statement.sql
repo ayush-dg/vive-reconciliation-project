@@ -1,9 +1,9 @@
 -- Migrated 2026-09-18 to source from the dict-dump bronze
--- (research_schema.raw_statement) instead of the per-vendor
+-- (bronze.raw_statement) instead of the per-vendor
 -- bronze.bronze_<vendor_id>_raw tables -- see this migration's plan for
 -- why: those per-vendor typed tables required a hand-maintained mapping
 -- CSV row per raw field per vendor with no visibility into what
--- extraction actually produced, whereas research_schema.raw_statement
+-- extraction actually produced, whereas bronze.raw_statement
 -- captures every extracted field verbatim and vendor_field_mapping.csv
 -- (silver.vendor_field_mapping) does the pivot generically. Same output
 -- schema/column set as the prior bronze-driven model -- nothing
@@ -28,14 +28,14 @@ with header_ranked as (
     -- than one row per statement_id (re-runs, manual rebuilds) --
     -- row_number() picks the latest by ingestion_timestamp, same "latest
     -- wins" semantics used throughout this pipeline (see
-    -- src/lakehouse/research_raw.py:read_raw_statement()).
+    -- src/lakehouse/bronze_raw.py:read_raw_statement()).
     select
         statement_id,
         vendor_id,
         vendor_display_name,
         ingestion_timestamp,
         row_number() over (partition by statement_id order by ingestion_timestamp desc) as rn
-    from {{ source('research', 'raw_statement') }}
+    from {{ source('bronze', 'raw_statement') }}
     {% if target_statement_id is not none %}
     where statement_id = '{{ target_statement_id }}'
     {% endif %}
@@ -53,7 +53,7 @@ header as (
 shop_names as (
 
     select statement_id, min(shop_name) as shop_name_raw
-    from {{ source('research', 'unnested_statement_lines') }}
+    from {{ source('bronze', 'unnested_statement_lines') }}
     group by statement_id
 
 )
@@ -71,7 +71,7 @@ select
     cast(null as decimal(18, 2))         as total_amount_due,
     'USD'                                 as currency,
     cast(null as varchar(100))           as source_document_id,
-    'research_schema.raw_statement'      as source_bronze_table,
+    'bronze.raw_statement'      as source_bronze_table,
     cast(null as decimal(5, 2))          as extraction_confidence,
     cast(getdate() as datetime2(6))      as ingested_at,
     'pipeline'                            as ingested_by,

@@ -1,22 +1,28 @@
-# Hand-maintained (unlike models/bronze/sources.yml, which
-# fabric_dbt_runner.py regenerates per-run) -- these three tables are
-# fixed, not one-per-vendor, so there's nothing to discover dynamically.
+# Hand-maintained -- these three tables are fixed, not one-per-vendor, so
+# there's nothing to discover dynamically. The old models/bronze/sources.yml
+# (auto-regenerated per-vendor bronze_<id>_raw declarations) was deleted
+# 2026-09-21 once nothing generated or read it anymore (see
+# src/lakehouse/fabric_dbt_runner.py's docstring) -- this is now the only
+# bronze source in the project, freeing up the "bronze" source name.
 #
 # raw_statement's own header columns (vendor_id, vendor_display_name,
 # source_file_name, version_number, ingestion_timestamp, invoice_count,
 # extraction_engine) are read directly here -- only its raw_payload column
-# is off-limits to SQL (see src/lakehouse/research_unnest.py's docstring).
+# is off-limits to SQL (see src/lakehouse/bronze_unnest.py's docstring).
 # unnested_statement_lines/_fields are written by that module.
 #
 # Moved here from models/silver_silver/sources.yml 2026-09-19 when the
-# silver_silver test schema/models were retired -- production
-# statement.sql/statement_line.sql have sourced from this dict-dump bronze
-# since the 2026-09-18 migration (see their own docstrings).
+# silver_silver test schema/models were retired. Schema changed from
+# research_schema to bronze 2026-09-21 -- these tables (and their writers,
+# src/lakehouse/bronze_raw.py + bronze_unnest.py) are this pipeline's
+# actual Bronze layer, not a side research artifact; research_schema no
+# longer holds anything this project reads. See git history for the
+# one-time Delta copy script used to physically relocate the data.
 version: 2
 sources:
-  - name: research
+  - name: bronze
     database: "{{ env_var('FABRIC_LAKEHOUSE_NAME') }}"
-    schema: research_schema
+    schema: bronze
     tables:
       - name: raw_statement
       - name: unnested_statement_lines

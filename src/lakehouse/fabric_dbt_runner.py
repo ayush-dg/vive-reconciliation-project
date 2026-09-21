@@ -16,9 +16,9 @@ reason, falling back to a venv/-relative guess only if PATH lookup finds
 nothing (e.g. a venv activated without also being the active Python's own
 install). DBT_EXECUTABLE_PATH still lets a deployment override both.
 
-statement.sql/statement_line.sql source from research_schema.raw_statement/
+statement.sql/statement_line.sql source from bronze.raw_statement/
 unnested_statement_lines (the dict-dump pipeline, see src/lakehouse/
-research_raw.py) instead of the old per-vendor bronze.bronze_<vendor_id>_raw
+bronze_raw.py) instead of the old per-vendor bronze.bronze_<vendor_id>_raw
 tables -- there's no longer a per-vendor table list for this module to
 discover or keep in sync anywhere. The per-vendor Bronze write itself
 (fabric_bronze.py's write_bronze_fabric()) was removed from
@@ -81,8 +81,8 @@ def fabric_pipeline_lock(timeout_seconds: int = 300, poll_interval: float = 0.5,
     lock_path defaults to the shared dbt/Bronze/matching lock (_LOCK_PATH)
     -- pass a different path to get an independent lock guarding some other
     shared resource without contending with (or queuing behind) this one.
-    See src/lakehouse/research_raw.py, whose raw-dump write needs its own
-    lock (protecting concurrent writers to research_schema.raw_statement
+    See src/lakehouse/bronze_raw.py, whose raw-dump write needs its own
+    lock (protecting concurrent writers to bronze.raw_statement
     from each other) but has no reason to wait behind unrelated Bronze/dbt/
     matching work, especially in RESEARCH_MODE_EXTRACTION_ONLY where none
     of that even runs -- confirmed 2026-09-15: sharing the one lock across
@@ -213,13 +213,13 @@ def run_dbt_silver_silver_build(statement_id: str, expected_lines: int, expected
                                  timeout_seconds: int = 300) -> bool:
     """Best-effort dbt run for silver_silver_statement +
     silver_silver_statement_line (dbt/vive_recon/models/silver_silver/),
-    which read research_schema.raw_statement/unnested_statement_lines/
+    which read bronze.raw_statement/unnested_statement_lines/
     unnested_statement_fields -- all written by
-    src.lakehouse.research_unnest.write_unnested_from_invoices() and
-    src.lakehouse.research_raw.write_raw_statement() just before this is
+    src.lakehouse.bronze_unnest.write_unnested_from_invoices() and
+    src.lakehouse.bronze_raw.write_raw_statement() just before this is
     called.
 
-    Polls src.lakehouse.research_unnest.wait_for_visibility() first --
+    Polls src.lakehouse.bronze_unnest.wait_for_visibility() first --
     confirmed 2026-09-18 that running dbt immediately after those writes
     can silently see 0 rows (the SQL analytics endpoint's propagation lag
     applies to every table here, not just raw_payload's width problem).
@@ -254,7 +254,7 @@ def run_dbt_silver_silver_build(statement_id: str, expected_lines: int, expected
         print(f"    silver_silver dbt build reason: dbt executable not found at {dbt_executable}")
         return False
 
-    from src.lakehouse.research_unnest import wait_for_visibility
+    from src.lakehouse.bronze_unnest import wait_for_visibility
     if not wait_for_visibility(statement_id, expected_lines, expected_fields):
         logger.warning("silver_silver staging data never became visible for statement_id=%s -- skipping dbt build", statement_id)
         print(f"    silver_silver dbt build reason: staging data not visible via SQL endpoint within timeout")

@@ -546,7 +546,7 @@ class PythonLibraryExtractionEngine:
             # but the closest available "before mapping" snapshot for the
             # pdfplumber path). Mirrors claude_sonnet_client.py's _raw_row
             # on the AI path; consumed only by
-            # src/lakehouse/research_raw.py's raw-dump writer.
+            # src/lakehouse/bronze_raw.py's raw-dump writer.
             invoice["_raw_row"] = item
 
             invoices.append(invoice)

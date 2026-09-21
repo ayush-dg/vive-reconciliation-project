@@ -1,9 +1,10 @@
 """Writes two narrow, typed Delta tables in the Fabric Lakehouse that
-together bridge research_schema.raw_statement (one big JSON blob per
-statement) and dbt:
-  - research_schema.unnested_statement_lines: one row per LINE
+together bridge bronze.raw_statement (one big JSON blob per statement) and
+dbt -- moved here from research_schema 2026-09-21, see git history for the
+migration script:
+  - bronze.unnested_statement_lines: one row per LINE
     (statement_id, line_number, extraction_confidence, shop_name)
-  - research_schema.unnested_statement_fields: one row per LINE-FIELD
+  - bronze.unnested_statement_fields: one row per LINE-FIELD
     (statement_id, line_number, raw_field_name, raw_field_value)
 
 Why two tables, not one: confirmed 2026-09-18 that write latency to
@@ -46,9 +47,9 @@ per-row pyodbc inserts (silver_silver's old approach) get noticeably slow
 past a few hundred rows and won't hold up at real volume (200+
 statements).
 
-Same auth/connection mechanics as research_raw.py (reused, not
+Same auth/connection mechanics as bronze_raw.py (reused, not
 reinvented): ClientSecretCredential + write_deltalake against OneLake.
-Uses its OWN lock file, not research_raw.py's or fabric_dbt_runner.py's
+Uses its OWN lock file, not bronze_raw.py's or fabric_dbt_runner.py's
 shared one -- this write has nothing to race against those for. Best-
 effort: never raises into the caller. Missing Fabric config is a silent
 no-op, matching every other write in this pipeline.
@@ -58,15 +59,15 @@ import logging
 import os
 
 from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
-from src.lakehouse.research_raw import read_raw_statement
+from src.lakehouse.bronze_raw import read_raw_statement
 
 logger = logging.getLogger(__name__)
 
-TABLE_URI_SCHEMA = "research_schema"
+TABLE_URI_SCHEMA = "bronze"
 LINES_TABLE_NAME = "unnested_statement_lines"
 FIELDS_TABLE_NAME = "unnested_statement_fields"
 _LOCK_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "dbt", ".research_unnest_pipeline.lock"
+    os.path.dirname(__file__), "..", "..", "dbt", ".bronze_unnest_pipeline.lock"
 )
 
 
@@ -100,7 +101,7 @@ def _storage_options() -> dict:
 
 def _explode(wrapped_lines: list, statement_id: str):
     """Given a list already in the {"_raw_row": ..., "_extraction_confidence":
-    ..., "_shop_name": ...} shape (see research_raw.py's write_raw_statement()
+    ..., "_shop_name": ...} shape (see bronze_raw.py's write_raw_statement()
     docstring for where that shape comes from), returns (line_rows,
     field_rows) -- deliberately NO statement-level columns (vendor_id etc.)
     on either; see this module's docstring for why. A line missing
@@ -233,11 +234,11 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
         try:
             conn = get_lakehouse_connection()
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM research_schema.raw_statement WHERE statement_id = ?", [statement_id])
+            cur.execute("SELECT COUNT(*) FROM bronze.raw_statement WHERE statement_id = ?", [statement_id])
             raw_ok = cur.fetchone()[0] >= 1
-            cur.execute("SELECT COUNT(*) FROM research_schema.unnested_statement_lines WHERE statement_id = ?", [statement_id])
+            cur.execute("SELECT COUNT(*) FROM bronze.unnested_statement_lines WHERE statement_id = ?", [statement_id])
             lines_ok = cur.fetchone()[0] >= expected_lines
-            cur.execute("SELECT COUNT(*) FROM research_schema.unnested_statement_fields WHERE statement_id = ?", [statement_id])
+            cur.execute("SELECT COUNT(*) FROM bronze.unnested_statement_fields WHERE statement_id = ?", [statement_id])
             fields_ok = cur.fetchone()[0] >= expected_fields
             if raw_ok and lines_ok and fields_ok:
                 return True
@@ -251,13 +252,13 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
 
 def write_unnested_from_storage(statement_id: str) -> tuple:
     """Rebuild utility, NOT used by the automatic pipeline path -- reads
-    research_schema.raw_statement back out (direct Delta read, see
+    bronze.raw_statement back out (direct Delta read, see
     read_raw_statement()'s docstring) and explodes it the same way. Useful
     for backfilling or rebuilding a statement without re-running
     extraction. Returns (0, 0) if the statement can't be read."""
     raw_statement = read_raw_statement(statement_id)
     if not raw_statement:
-        logger.warning("No research_schema.raw_statement row found for statement_id=%s", statement_id)
+        logger.warning("No bronze.raw_statement row found for statement_id=%s", statement_id)
         return (0, 0)
 
     try:
