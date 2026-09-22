@@ -194,7 +194,11 @@
     </div>
     </form>
     {% else %}
+    {% if total and resolved == total %}
     <div class="empty-state">🎉 All exceptions resolved for {{ vendor_display_name }}.</div>
+    {% else %}
+    <div class="empty-state">No exceptions match this filter — {{ total - resolved }} still open in another filter.</div>
+    {% endif %}
     {% endif %}
   </div>
 </div>

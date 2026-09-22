@@ -763,8 +763,15 @@ def get_exceptions_only_vendor(vendor_name: str):
 
 
 _REASON_FILTER_SQL = {
-    "missing": "Invoice Missing",
-    "mismatch": "Amount Mismatch",
+    # "Invoice Missing" is the old/legacy gold_exceptions reason string;
+    # the current Fabric-based matching engine (src/matching/fabric_matching.py)
+    # produces "Not Found in NetSuite" for the same case instead -- confirmed
+    # live 2026-09-22 that every current exception uses the new string, so
+    # the "Missing" filter tab matching only the old one found 0 rows even
+    # though real missing-invoice exceptions existed. Both are matched here
+    # so any old data still using the legacy string keeps working too.
+    "missing": ["Invoice Missing", "Not Found in NetSuite"],
+    "mismatch": ["Amount Mismatch"],
 }
 
 
@@ -819,14 +826,15 @@ def _with_aging_fields(rows: list) -> list:
 
 
 def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
-    reason = _REASON_FILTER_SQL.get(reason_filter)
-    if reason:
+    reasons = _REASON_FILTER_SQL.get(reason_filter)
+    if reasons:
+        placeholders = ", ".join("?" for _ in reasons)
         return _with_aging_fields(recon_query(
-            _OPEN_EXCEPTIONS_SELECT + """
-            WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
+            _OPEN_EXCEPTIONS_SELECT + f"""
+            WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN' AND ge.exception_reason IN ({placeholders})
             ORDER BY ge.invoice_number
             """,
-            [statement_id, reason],
+            [statement_id, *reasons],
         ))
     return _with_aging_fields(recon_query(
         _OPEN_EXCEPTIONS_SELECT + """
@@ -876,14 +884,15 @@ _ORPHAN_EXCEPTIONS_WHERE = """
 
 
 def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None) -> list:
-    reason = _REASON_FILTER_SQL.get(reason_filter)
-    if reason:
+    reasons = _REASON_FILTER_SQL.get(reason_filter)
+    if reasons:
+        placeholders = ", ".join("?" for _ in reasons)
         return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
-            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason = ?
+            WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason IN ({placeholders})
             ORDER BY ge.invoice_number
             """,
-            [source_file, reason],
+            [source_file, *reasons],
         ))
     return _with_aging_fields(recon_query(
         _OPEN_EXCEPTIONS_SELECT + f"""
