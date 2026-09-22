@@ -12,7 +12,7 @@ from urllib.parse import quote, unquote
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
-from web.deps import render, require_login, sidebar_context, smart_title
+from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
@@ -61,6 +61,28 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
         v["vendor_display_name"] = smart_title(v.get("vendor_display_name"))
         v["shop"] = smart_title(v.get("shop"))
         v["billing_location"] = smart_title(v.get("billing_location"))
+
+    # Location canonicalization -- billing_location has no alias system
+    # the way vendor_name does (config/vendor_aliases.json), so the exact
+    # same place extracted as "Springfield, MA" on one statement and
+    # "Springfield MA" on another (confirmed live 2026-09-22) would
+    # otherwise show up as two separate filter options and two different
+    # card labels. Groups every run's already-smart_title'd billing_location
+    # by location_group_key() (case/comma/whitespace-insensitive) and
+    # reassigns all of them to one canonical display string per group --
+    # done here (not in the query layer) so the filter dropdown options and
+    # each card's data-location attribute (built from these same values
+    # below) stay in sync, same reasoning as the vendor/shop normalization
+    # above.
+    canonical_location_by_key = {}
+    for v in runs:
+        key = location_group_key(v.get("billing_location"))
+        if key and key not in canonical_location_by_key:
+            canonical_location_by_key[key] = v["billing_location"]
+    for v in runs:
+        key = location_group_key(v.get("billing_location"))
+        if key:
+            v["billing_location"] = canonical_location_by_key[key]
 
     runs_with_ex = [v for v in runs if v["exception_count"] > 0]
     total_open = sum(v["exception_count"] for v in runs_with_ex)

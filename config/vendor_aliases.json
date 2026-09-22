@@ -41,7 +41,8 @@
     "RH LONG MOTOR SALES INC"
   ],
   "DOWNEAST_TOYOTA": [
-    "Downeast Toyota"
+    "Downeast Toyota",
+    "Down East Toyota"
   ],
   "NYE_AUTOMOTIVE_GROUP": [
     "NYE AUTOMOTIVE GROUP",
@@ -64,9 +65,6 @@
   "BERLIN_CITY_AUTO_GROUP": [
     "Berlin City Auto Group"
   ],
-  "EMPIRE_AUTO_PARTS": [
-    "Empire Auto Parts"
-  ],
   "FENIX_NE": [
     "Fenix NE",
     "Fenix Parts"
@@ -86,13 +84,5 @@
   "HOSELTON_TOYOTA": [
     "Hoselton Imports Inc. dba Hoselton Toyota",
     "Hoselton Toyota"
-  ],
-  "NYE_AUTOMOTIVE_GROUP": [
-    "NYE Automotive Group",
-    "NYE AUTOMOTIVE GROUP"
-  ],
-  "QUIRK_AUTO_GROUP": [
-    "Quirk Auto Group",
-    "QUIRK AUTO GROUP"
   ]
 }

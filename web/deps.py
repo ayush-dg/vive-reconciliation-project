@@ -143,6 +143,27 @@ def smart_title(value):
     )
 
 
+def location_group_key(value):
+    """Canonicalization key for grouping billing_location strings that
+    refer to the same place but were extracted with different punctuation/
+    spacing -- e.g. "Springfield, MA" vs "Springfield MA" vs "SPRINGFIELD,
+    MA" (confirmed live 2026-09-22: the same location showing up as
+    multiple separate entries in the Exceptions page's location filter,
+    since billing_location has no alias/normalization system the way
+    vendor_name does via config/vendor_aliases.json -- see
+    web/routers/exceptions.py's grouping pass that uses this).
+
+    Deliberately looser than smart_title() (which is display-only and
+    preserves punctuation): uppercases, drops commas/periods entirely, and
+    collapses whitespace, so "Springfield, MA" and "Springfield MA" land
+    on the identical key while still being sorted/deduped consistently."""
+    if not value:
+        return value
+    collapsed = re.sub(r"[,\.]", "", value).strip()
+    collapsed = re.sub(r"\s+", " ", collapsed)
+    return collapsed.upper()
+
+
 _DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%m-%d-%Y", "%B %d, %Y", "%b %d, %Y")
 
 
