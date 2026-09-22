@@ -79,19 +79,27 @@ _CURRENT_STATEMENT_IDS = """
 
 
 def get_kpis() -> dict:
-    totals = execute_query(
-        f"""
+    """Reads silver.recon_summary (Fabric Warehouse) -- NOT
+    gold_reconciliation_summary (Azure SQL), which this used before
+    2026-09-22. gold_reconciliation_summary only gets written by the old
+    Phase 2 matching path (src/matching/engine.py's run_matching()), which
+    requires real voucher/ERP data loaded in Azure SQL -- confirmed live
+    that basically no vendor has that loaded, so gold_reconciliation_summary
+    has stopped getting new rows entirely and this card was showing all
+    zeros despite real, current reconciliation results sitting in
+    silver.recon_summary (what Exceptions/Validation already read)."""
+    totals = recon_query(
+        """
         SELECT
             COALESCE(SUM(s.total_invoice_count), 0) AS total_invoices,
             COALESCE(SUM(s.matched_count), 0) AS auto_reconciled,
             COALESCE(SUM(s.statement_total), 0) AS statement_total,
             COUNT(DISTINCT s.vendor_name) AS vendor_count
-        FROM gold_reconciliation_summary s
-        INNER JOIN ({_CURRENT_STATEMENT_IDS}) live ON s.statement_id = live.statement_id
+        FROM silver.recon_summary s
         WHERE s.is_latest_version = 1
         """
     )[0]
-    open_exceptions = get_open_exceptions_count()
+    open_exceptions = get_open_recon_exceptions_count()
     total_invoices = totals["total_invoices"] or 0
     auto_reconciled = totals["auto_reconciled"] or 0
     return {
@@ -202,13 +210,22 @@ def get_recent_recon_runs(limit: int = 10) -> list:
         statement_ids = [r["statement_id"] for r in rows]
         placeholders = ", ".join("?" for _ in statement_ids)
         intake_rows = execute_query(
-            f"SELECT statement_id, statement_period FROM document_intake_log "
+            f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
             f"WHERE statement_id IN ({placeholders})",
             statement_ids,
         )
-        period_by_statement = {r["statement_id"]: r["statement_period"] for r in intake_rows}
+        intake_by_statement = {r["statement_id"]: r for r in intake_rows}
         for row in rows:
-            row["statement_period"] = period_by_statement.get(row["statement_id"]) or row["statement_period"]
+            intake_row = intake_by_statement.get(row["statement_id"])
+            row["statement_period"] = (intake_row["statement_period"] if intake_row else None) or row["statement_period"]
+            # shop_or_entity is a JSON list (see write_intake_log()) -- same
+            # parse pattern as get_exception_runs()'s shop fix (2026-09-21):
+            # silver.recon_summary/statement have no populated shop field.
+            try:
+                shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
+            except (TypeError, ValueError):
+                shop_list = []
+            row["shop"] = ", ".join(shop_list) if shop_list else None
 
     for row in rows:
         job_rows = execute_query(
@@ -456,7 +473,7 @@ def get_exception_runs() -> list:
     N+1-avoidance pattern as the reason_breakdown/aging batching below."""
     runs = recon_query(
         """
-        SELECT statement_id, vendor_name, shop, total_invoice_count,
+        SELECT statement_id, vendor_name, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
         FROM silver.recon_summary
@@ -482,9 +499,16 @@ def get_exception_runs() -> list:
 
         # TEMPORARY (2026-08-29): document_intake_log pointed back at Azure
         # SQL -- see get_vendor_name_for_statement()'s comment for why.
+        # shop_or_entity added 2026-09-21: silver.recon_summary.shop is
+        # never populated (it's sourced from silver.statement.shop_name_raw,
+        # itself from bronze.unnested_statement_lines.shop_name -- confirmed
+        # live, always NULL across every vendor/statement, since extraction
+        # has no per-line "shop" field on most vendor PDFs). document_intake_log's
+        # shop_or_entity IS reliably populated at intake time -- same JSON-list
+        # column, same parse pattern get_statement_report() already uses.
         intake_rows = execute_query(
             f"""
-            SELECT statement_id, billing_location, statement_period
+            SELECT statement_id, billing_location, statement_period, shop_or_entity
             FROM document_intake_log
             WHERE statement_id IN ({placeholders})
             """,
@@ -502,6 +526,11 @@ def get_exception_runs() -> list:
             intake_row = intake_by_statement.get(run["statement_id"])
             run["billing_location"] = intake_row["billing_location"] if intake_row else None
             run["statement_period"] = intake_row["statement_period"] if intake_row else None
+            try:
+                shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
+            except (TypeError, ValueError):
+                shop_list = []
+            run["shop"] = ", ".join(shop_list) if shop_list else None
 
     runs.extend(_get_exceptions_only_vendors())
     _attach_aging_summaries(runs)
@@ -2026,3 +2055,66 @@ def get_validation_report() -> list:
     for row in rows:
         row["passed"] = row["validation_status"] == "matches"
     return rows
+
+
+def get_extraction_validation_detail(statement_id: str) -> dict:
+    """Arithmetic-only detail for one intake attempt -- deliberately just
+    the printed total, the extracted line items, and their sum, with NO
+    reconciliation/NetSuite data (matched invoices, exceptions, ERP total).
+    Separate from get_statement_report() (which is all reconciliation, no
+    arithmetic-gate breakdown) per the user 2026-09-21: Validation checks
+    that extraction itself is internally consistent (does the PDF's own
+    printed total match what was actually extracted?), a question that's
+    fully answered before matching ever runs, so recon data doesn't belong
+    on this page.
+
+    computed_total is derived as printed - validation_difference rather
+    than re-summed here, so it's guaranteed to be the exact figure
+    src/validation/arithmetic_gate.py computed at intake time (netting
+    credits/reversals per its own docstring) -- naively re-summing
+    silver.statement_line.charge_amount here would NOT reproduce that
+    same figure in every case (credit-netting, dedup of matched reversal
+    pairs) and would silently disagree with the pass/fail verdict shown.
+
+    lines are for display only (line_number order, whatever silver.statement_line
+    has for this statement_id) -- not re-summed against computed_total for
+    the same reason."""
+    intake_rows = execute_query(
+        """
+        SELECT statement_id, source_file, vendor_name, statement_period,
+               statement_total_as_printed, validation_status, validation_difference,
+               ingestion_timestamp
+        FROM document_intake_log
+        WHERE statement_id = ?
+        """,
+        [statement_id],
+    )
+    intake = intake_rows[0] if intake_rows else None
+    if intake is None:
+        return {"intake": None, "computed_total": None, "lines": []}
+
+    intake["passed"] = intake["validation_status"] == "matches"
+    printed = intake["statement_total_as_printed"]
+    difference = intake["validation_difference"]
+    computed_total = (
+        round(printed - difference, 2)
+        if printed is not None and difference is not None
+        else None
+    )
+
+    lines = recon_query(
+        """
+        SELECT line_number, invoice_number, line_date, description_raw,
+               charge_amount, payment_amount
+        FROM silver.statement_line
+        WHERE statement_id = ?
+        ORDER BY line_number
+        """,
+        [statement_id],
+    )
+
+    return {
+        "intake": intake,
+        "computed_total": computed_total,
+        "lines": lines,
+    }

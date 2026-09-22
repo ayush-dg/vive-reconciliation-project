@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}VIVE Collision — Validation{% endblock %}
+
+{% block topbar %}
+<div class="topbar">
+  <div class="breadcrumb">
+    <a href="/validation">← Validation</a>
+    <span>/</span>
+    <span style="color:var(--text);font-weight:500">{{ intake.vendor_name if intake else statement_id }} — {{ intake.statement_period | period_label if intake else "" }}</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if intake %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">PDF printed total</div>
+    <div class="kpi-value">{{ intake.statement_total_as_printed | money if intake.statement_total_as_printed is not none else "—" }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Extracted amount sum</div>
+    <div class="kpi-value">{{ computed_total | money if computed_total is not none else "—" }}</div>
+    <div class="kpi-sub">{{ lines | length }} line{{ "s" if lines | length != 1 }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Difference</div>
+    <div class="kpi-value{{ ' green' if intake.passed else ' amber' }}">{{ intake.validation_difference | money_signed if intake.validation_difference is not none else "—" }}</div>
+    <div class="kpi-sub">
+      {% if intake.passed %}
+      <span class="badge success">✓ Matches</span>
+      {% else %}
+      <span class="badge warning">⚠ {{ intake.validation_status | replace("_", " ") | title if intake.validation_status else "Mismatch" }}</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="section-header">
+  <div class="section-title">Statement details</div>
+</div>
+<table class="table" style="margin-bottom:28px">
+  <tbody>
+    <tr><td style="color:var(--text-secondary);width:220px">Statement ID</td><td>{{ statement_id }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Source file</td><td>{{ intake.source_file }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Vendor</td><td>{{ intake.vendor_name or "—" }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Statement period</td><td>{{ intake.statement_period | period_label }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Checked</td><td>{{ intake.ingestion_timestamp | friendly_dt }}</td></tr>
+  </tbody>
+</table>
+
+<div class="section-header">
+  <div class="section-title">Extracted amounts ({{ lines | length }})</div>
+</div>
+{% if lines %}
+<table class="table">
+  <thead>
+    <tr><th>Line</th><th>Invoice</th><th>Date</th><th>Description</th><th>Charge amount</th><th>Payment amount</th></tr>
+  </thead>
+  <tbody>
+    {% for line in lines %}
+    <tr>
+      <td style="color:var(--text-secondary)">{{ line.line_number }}</td>
+      <td>{{ line.invoice_number or "—" }}</td>
+      <td style="color:var(--text-secondary)">{{ line.line_date | friendly_date }}</td>
+      <td style="color:var(--text-secondary)">{{ line.description_raw or "—" }}</td>
+      <td class="num">{{ line.charge_amount | money if line.charge_amount is not none else "—" }}</td>
+      <td class="num">{{ line.payment_amount | money if line.payment_amount is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">No extracted line items found for this statement.</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">No intake record found for this statement.</div>
+{% endif %}
+{% endblock %}

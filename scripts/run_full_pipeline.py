@@ -119,7 +119,11 @@ def main():
     # runs concurrently across the worker pool.
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
     with fabric_pipeline_lock():
-        if run_dbt_silver_build(statement_id):
+        if run_dbt_silver_build(
+            statement_id,
+            expected_lines=intake_result.get("unnested_lines_written"),
+            expected_fields=intake_result.get("unnested_fields_written"),
+        ):
             print(f"    Fabric Silver build: OK")
 
             # NetSuite matching -- additive, only meaningful once Silver exists

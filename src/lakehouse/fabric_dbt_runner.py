@@ -145,10 +145,25 @@ def _ensure_local_profile() -> None:
         shutil.copyfile(example_path, profile_path)
 
 
-def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
+def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300,
+                          expected_lines: int = None, expected_fields: int = None) -> bool:
     """Runs `dbt run --vars '{"statement_id": "..."}'` scoped to one
     statement. Returns True on success, False otherwise (missing config,
-    missing dbt executable, non-zero exit, or timeout) -- never raises.
+    missing dbt executable, staging data never became visible, non-zero
+    exit, or timeout) -- never raises.
+
+    expected_lines/expected_fields (the counts scripts/run_full_pipeline.py's
+    caller just wrote to bronze.unnested_statement_lines/_fields): when both
+    given, polls wait_for_visibility() first -- the same read-after-write
+    race confirmed real 2026-09-18 (see that function's own docstring) and
+    already guarded against on the (now-dead) silver_silver path, just never
+    wired into this, the actual pipeline's own dbt trigger, until now. A
+    dbt run triggered immediately after a fresh Bronze write can otherwise
+    silently see 0 rows for this statement_id and "succeed" having written
+    nothing -- exit 0, no error, but silver.statement/statement_line end up
+    empty and matching then reports "no_silver_statement". Left optional
+    (None skips the wait, original behavior) so any other/future caller
+    that doesn't have these counts handy isn't forced to supply them.
     """
     if not _fabric_configured():
         logger.debug("Fabric not configured -- skipping dbt Silver build")
@@ -164,6 +179,16 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300) -> bool:
         )
         print(f"    Fabric Silver build reason: dbt executable not found at {dbt_executable}")
         return False
+
+    if expected_lines is not None and expected_fields is not None:
+        from src.lakehouse.bronze_unnest import wait_for_visibility
+        if not wait_for_visibility(statement_id, expected_lines, expected_fields):
+            logger.warning(
+                "Bronze staging data never became visible for statement_id=%s -- skipping Silver build",
+                statement_id,
+            )
+            print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
+            return False
 
     try:
         _ensure_local_profile()

@@ -191,16 +191,33 @@ def exceptions_bulk_approve(vendor_name: str, request: Request, user: str = Depe
     return {"approved": approved}
 
 
+def _filter_redirect_suffix(filter: str, statement_id: str = None) -> str:
+    """Builds the query string a post-action redirect back to
+    /exceptions/{vendor_name} needs to stay on the same statement/filter
+    the user was reviewing -- dropping statement_id here (as this used to)
+    silently bounces the redirect to get_vendor_latest_statement()'s "the
+    vendor's latest run" instead, which can be a completely different
+    statement_id than the one just acted on (confirmed live 2026-09-22:
+    Rh Long Motor Sales has 7 separate runs)."""
+    params = []
+    if filter and filter != "all":
+        params.append(f"filter={filter}")
+    if statement_id:
+        params.append(f"statement_id={statement_id}")
+    return f"?{'&'.join(params)}" if params else ""
+
+
 @router.post("/exceptions/{vendor_name}/escalate")
 def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(require_login),
-                         exception_id: str = Form(...), filter: str = Form("all")):
+                         exception_id: str = Form(...), filter: str = Form("all"),
+                         statement_id: str = Form("")):
     """Flags a single exception ESCALATED (see queries.escalate_exception())
-    and redirects back to the same vendor/filter. Registered ahead of the
-    {vendor_name:path} POST action route below for the same greedy-path-
-    converter reason as exceptions_bulk_approve() above."""
+    and redirects back to the same vendor/filter/statement. Registered
+    ahead of the {vendor_name:path} POST action route below for the same
+    greedy-path-converter reason as exceptions_bulk_approve() above."""
     vendor_name = unquote(vendor_name)
     queries.escalate_exception(exception_id, escalated_by=user)
-    suffix = f"?filter={filter}" if filter and filter != "all" else ""
+    suffix = _filter_redirect_suffix(filter, statement_id)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
 
 
@@ -221,5 +238,5 @@ def exceptions_action(vendor_name: str, request: Request, user: str = Depends(re
         notes=note or None,
         disposed_by=user,
     )
-    suffix = f"?filter={filter}" if filter and filter != "all" else ""
+    suffix = _filter_redirect_suffix(filter, statement_id)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
