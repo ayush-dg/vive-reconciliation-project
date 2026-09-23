@@ -117,6 +117,10 @@ def main():
     # subprocess, not a thread). Every job's Fabric-touching work is
     # serialized process-wide; extraction above is unaffected and still
     # runs concurrently across the worker pool.
+    # Note: this statement's bronze.raw_statement row was already promoted
+    # out of staging into the real table back in Phase 1 (see
+    # notebooks/01_document_intake.py, right after write_raw_statement())
+    # -- see src/lakehouse/bronze_raw.py's 2026-09-23 fix note for why.
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
     with fabric_pipeline_lock():
         if run_dbt_silver_build(

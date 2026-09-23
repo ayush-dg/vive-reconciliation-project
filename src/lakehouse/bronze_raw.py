@@ -25,6 +25,37 @@ run, so there's no reason to queue behind them. Confirmed 2026-09-15:
 sharing that lock across a 336-PDF batch made later jobs queue past its
 300s timeout and silently lose their raw-dump write. Best-effort: never
 raises into the caller. Missing Fabric config is a silent no-op.
+
+2026-09-23 fix -- root-caused a NEW "Lock request time out period
+exceeded" failure in production (small batches, not just large ones)
+back to exactly this lock split. Before Sept 19 there was one
+per-vendor Bronze table per job, so two jobs' Bronze/Silver work never
+touched the same physical table and the two-lock split above was safe.
+The Sept 19 migration (e0ed4b2) collapsed all vendors onto this single
+shared bronze.raw_statement table, so this module's write and
+fabric_dbt_runner.run_dbt_silver_build()'s dbt read/MERGE now hit the
+SAME table -- but under two locks that don't coordinate with each other,
+so a write here can run concurrently with a Silver scan/MERGE against
+that table under fabric_pipeline_lock() and collide at the SQL engine.
+
+Fix: don't touch bronze.raw_statement directly here at all anymore.
+write_raw_statement() now lands its row in bronze.raw_statement_staging
+instead -- a separate table nothing else reads, so this write stays
+exactly as fast/uncontended as before and the 2026-09-15 fix above still
+holds (no reason to queue behind Bronze/dbt/matching work). The new
+promote_staged_raw_statement() then moves just this statement's staged
+row(s) into the real bronze.raw_statement table and deletes them from
+staging -- but it must be called by the SAME caller that already holds
+fabric_pipeline_lock() around run_dbt_silver_build(), immediately before
+that call (see scripts/run_full_pipeline.py), and does NOT acquire any
+lock itself (fabric_pipeline_lock() is not reentrant -- acquiring it
+again from inside an already-held lock in the same process would just
+spin against its own lock file). That puts the actual shared-table
+touch and the dbt read that depends on it under one lock, atomically,
+while keeping the promote step itself tiny (one statement's row(s), a
+delta append + delete) so it adds only a brief hold time to the existing
+lock queue -- not a second copy of the whole raw-dump-write-for-every-
+job-in-the-batch problem the 2026-09-15 split was fixing.
 """
 import json
 import logging
@@ -37,6 +68,10 @@ logger = logging.getLogger(__name__)
 
 TABLE_URI_SCHEMA = "bronze"
 TABLE_NAME = "raw_statement"
+# Staging table write_raw_statement() actually writes to (see 2026-09-23
+# fix note above) -- promote_staged_raw_statement() moves rows from here
+# into TABLE_NAME under fabric_pipeline_lock().
+STAGING_TABLE_NAME = "raw_statement_staging"
 _LOCK_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "dbt", ".bronze_raw_pipeline.lock"
 )
@@ -58,6 +93,15 @@ def _table_uri() -> str:
     return (
         f"abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/"
         f"{lakehouse_id}/Tables/{TABLE_URI_SCHEMA}/{TABLE_NAME}"
+    )
+
+
+def _staging_table_uri() -> str:
+    workspace_id = os.environ["FABRIC_WORKSPACE_ID"]
+    lakehouse_id = os.environ["FABRIC_LAKEHOUSE_ID"]
+    return (
+        f"abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/"
+        f"{lakehouse_id}/Tables/{TABLE_URI_SCHEMA}/{STAGING_TABLE_NAME}"
     )
 
 
@@ -129,7 +173,13 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
     resolved by the caller (resolve_version_info()) before this is called.
 
     Returns 1 if written, 0 if Fabric isn't configured, there's nothing to
-    write, or the write failed (all non-fatal to the caller)."""
+    write, or the write failed (all non-fatal to the caller).
+
+    Writes to bronze.raw_statement_staging, NOT bronze.raw_statement
+    itself -- see this module's 2026-09-23 fix note. Call
+    promote_staged_raw_statement(statement_id) under fabric_pipeline_lock()
+    (immediately before run_dbt_silver_build()) to move this statement's
+    row into the real table before Silver reads it."""
     if not invoices:
         return 0
     if not _fabric_configured():
@@ -172,7 +222,7 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
         df["invoice_count"] = pd.to_numeric(df["invoice_count"], errors="coerce")
         df["version_number"] = pd.to_numeric(df["version_number"], errors="coerce")
 
-        table_uri = _table_uri()
+        table_uri = _staging_table_uri()
         with fabric_pipeline_lock(lock_path=_LOCK_PATH):
             write_deltalake(
                 table_uri, df, mode="append", schema_mode="merge",
@@ -187,6 +237,62 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
             vendor_id, statement_id,
         )
         return 0
+
+
+def promote_staged_raw_statement(statement_id: str) -> bool:
+    """Moves this statement's row(s) from bronze.raw_statement_staging
+    (written by write_raw_statement() above) into the real
+    bronze.raw_statement table, then deletes them from staging.
+
+    Caller MUST already hold fabric_pipeline_lock() (the same lock
+    run_dbt_silver_build()/run_fabric_matching() use) when calling this --
+    see scripts/run_full_pipeline.py, which calls this first thing inside
+    its existing `with fabric_pipeline_lock():` block, before
+    run_dbt_silver_build(). This function does NOT acquire any lock of its
+    own: fabric_pipeline_lock() is a plain exclusive-file-create lock, not
+    reentrant, so acquiring it again from the same process while already
+    held would just spin against itself until the stale-lock timeout.
+
+    This is the actual fix for the 2026-09-23 Fabric lock-timeout
+    regression (see this module's docstring): it puts the one write that
+    touches the shared bronze.raw_statement table on the SAME lock, in the
+    SAME critical section, as the dbt Silver read that depends on it, so
+    the two can never run concurrently against each other again. Kept
+    deliberately tiny (this one statement's row(s), not a whole batch) so
+    it only adds a brief hold time to the existing lock queue.
+
+    Returns True if a row was promoted, False if Fabric isn't configured,
+    nothing was staged for this statement_id (e.g. write_raw_statement()
+    was never called, or itself no-op'd), or the promote failed
+    (non-fatal, never raises -- same philosophy as the rest of this
+    module)."""
+    if not _fabric_configured():
+        return False
+    try:
+        from deltalake import DeltaTable, write_deltalake
+
+        dt = DeltaTable(_staging_table_uri(), storage_options=_storage_options())
+        df = dt.to_pandas()
+        matches = df[df["statement_id"] == statement_id]
+        if matches.empty:
+            return False
+
+        write_deltalake(
+            _table_uri(), matches, mode="append", schema_mode="merge",
+            storage_options=_storage_options(),
+        )
+
+        escaped_id = statement_id.replace("'", "''")
+        dt.delete(predicate=f"statement_id = '{escaped_id}'")
+
+        return True
+
+    except Exception:
+        logger.exception(
+            "Promoting staged raw-statement failed for statement_id=%s (non-fatal)",
+            statement_id,
+        )
+        return False
 
 
 def read_raw_statement(statement_id: str) -> dict:
