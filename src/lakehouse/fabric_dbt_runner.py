@@ -182,10 +182,11 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300,
 
     if expected_lines is not None and expected_fields is not None:
         from src.lakehouse.bronze_unnest import wait_for_visibility
+        _wait_start = time.time()
         if not wait_for_visibility(statement_id, expected_lines, expected_fields):
             logger.warning(
-                "Bronze staging data never became visible for statement_id=%s -- skipping Silver build",
-                statement_id,
+                "Bronze staging data never became visible for statement_id=%s after %.1fs -- skipping Silver build",
+                statement_id, time.time() - _wait_start,
             )
             print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
             return False
@@ -272,8 +273,12 @@ def run_dbt_silver_silver_build(statement_id: str, expected_lines: int, expected
         return False
 
     from src.lakehouse.bronze_unnest import wait_for_visibility
+    _wait_start = time.time()
     if not wait_for_visibility(statement_id, expected_lines, expected_fields):
-        logger.warning("silver_silver staging data never became visible for statement_id=%s -- skipping dbt build", statement_id)
+        logger.warning(
+            "silver_silver staging data never became visible for statement_id=%s after %.1fs -- skipping dbt build",
+            statement_id, time.time() - _wait_start,
+        )
         print(f"    silver_silver dbt build reason: staging data not visible via SQL endpoint within timeout")
         return False
 
