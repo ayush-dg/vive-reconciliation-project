@@ -16,7 +16,14 @@ fabric_matching.py's DELETE-then-INSERT per statement_id instead, same
 idempotency pattern as write_to_bronze().
 
 Safe to re-run: every CREATE TABLE is guarded by a check against
-sys.tables, same pattern as scripts/create_fabric_sqldb_schema.py.
+sys.tables, same pattern as scripts/create_fabric_sqldb_schema.py. That
+guard only checks table existence, not column existence -- it will NOT
+retroactively add a column to an already-existing table. original_invoice_number
+(added 2026-09-21 to both recon_matched_invoices/recon_exceptions, so the UI
+can show the raw statement invoice number alongside the normalized one it
+was matched against) was applied to the live Fabric Warehouse via a
+one-off ALTER TABLE, not by re-running this script -- it's only in the DDL
+below for a genuinely fresh environment.
 
 Usage: venv/Scripts/python.exe scripts/create_fabric_recon_schema.py
 """
@@ -38,6 +45,7 @@ TABLES = {
             vendor_id VARCHAR(100),
             shop VARCHAR(200),
             invoice_number VARCHAR(100),
+            original_invoice_number VARCHAR(100),
             ro_number VARCHAR(100),
             statement_amount DECIMAL(18,2),
             erp_amount DECIMAL(18,2),
@@ -53,6 +61,7 @@ TABLES = {
             vendor_id VARCHAR(100),
             shop VARCHAR(200),
             invoice_number VARCHAR(100),
+            original_invoice_number VARCHAR(100),
             ro_number VARCHAR(100),
             statement_amount DECIMAL(18,2),
             erp_amount DECIMAL(18,2),
