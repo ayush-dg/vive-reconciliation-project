@@ -25,7 +25,7 @@
 -- select_lines() needs it to dedup Fred Beans/Downeast Toyota's
 -- reprint/fallback-code rows, and there is no other column it could be
 -- read from.
-{{ config(unique_key='statement_line_id') }}
+{{ config(unique_key='statement_line_id', on_schema_change='append_new_columns') }}
 
 {% set target_statement_id = var('statement_id', none) %}
 
@@ -175,6 +175,12 @@ select
     {{ apply_vendor_normalization('w.original_invoice_number', 'w.line_type') }} as invoice_number,
     w.invoice_number_ref,
     w.original_invoice_number                            as document_number,
+    -- Same raw value as document_number, just under the name the recon_matched_invoices/
+    -- recon_exceptions.original_invoice_number column also uses (added 2026-09-21, see
+    -- src/matching/fabric_matching.py's _fetch_lines()) -- kept as an additional column
+    -- rather than renaming document_number, so nothing already reading document_number
+    -- (e.g. _fetch_lines()'s SQL, web/queries.py) has to change.
+    w.original_invoice_number                            as original_invoice_number,
     w.work_order_number,
     w.ro_number,
     case when w.ro_number is not null then 'extraction' else null end as ro_number_source,
