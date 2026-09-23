@@ -356,6 +356,14 @@ COLUMNS = {
         ("claim_token", "ALTER TABLE jobs ADD claim_token NVARCHAR(255)"),
         ("batch_id", "ALTER TABLE jobs ADD batch_id NVARCHAR(36)"),
         ("source_blob_path", "ALTER TABLE jobs ADD source_blob_path NVARCHAR(MAX)"),
+        # migrations/014_add_document_hash_to_jobs.sql (the SQLite side of
+        # this same change) -- web/queries.py's update_job_status() writes
+        # this at job-completion time; missing here meant every fresh
+        # Azure SQL build via this script (e.g. a new prod database) threw
+        # "Invalid column name 'document_hash'" on the first completed job,
+        # even though the underlying extraction/matching had already
+        # succeeded -- confirmed 2026-09-23 against the prod database.
+        ("document_hash", "ALTER TABLE jobs ADD document_hash NVARCHAR(MAX)"),
     ],
     "bronze_vendor_statement_raw": [
         # Python-library extraction path (see

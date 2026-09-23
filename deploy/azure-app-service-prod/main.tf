@@ -8,14 +8,22 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+# Dedicated, shorter suffix for the mailbox storage account -- "vivecollisionprod"
+# (17 chars) + "mbx" (3) + this leaves only 4 chars of budget under the
+# storage account's 24-char hard limit, too tight to share the 6-char
+# suffix everything else uses.
+resource "random_string" "storage_suffix" {
+  length  = 4
+  special = false
+  upper   = false
+}
+
 locals {
   suffix = random_string.suffix.result
 
-  # ACR and storage account names must be globally-unique, lowercase
-  # alphanumeric only (no hyphens) -- name_prefix allows hyphens for
-  # readability elsewhere (SQL server, plan), so strip them here.
-  # "vivecollision-prod" -> "vivecollisionprod" (17 chars) + 6-char suffix
-  # = 23 chars, under the storage account's 24-char hard limit.
+  # ACR names are globally-unique, lowercase alphanumeric only (no
+  # hyphens) -- name_prefix allows hyphens for readability elsewhere (SQL
+  # server, plan), so strip them here.
   alnum_prefix = replace(var.name_prefix, "-", "")
 }
 
@@ -30,23 +38,6 @@ resource "azurerm_container_registry" "acr" {
   location            = var.app_service_location
   sku                 = "Basic"
   admin_enabled       = true
-}
-
-# --- Blob storage: archival container used by src/storage/blob_client.py ---
-# Main archival storage only -- dropzone auto-intake storage is out of
-# scope for this pass, can be added later.
-resource "azurerm_storage_account" "storage" {
-  name                     = "${local.alnum_prefix}${local.suffix}"
-  resource_group_name      = data.azurerm_resource_group.this.name
-  location                 = var.storage_location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-}
-
-resource "azurerm_storage_container" "vendor_statements" {
-  name                  = "vendor-statements"
-  storage_account_id    = azurerm_storage_account.storage.id
-  container_access_type = "private"
 }
 
 # --- Azure SQL Database: backing store for src/lakehouse/connection.py,
@@ -104,7 +95,7 @@ resource "azurerm_mssql_firewall_rule" "allow_client" {
 # package container, and holds the 'raw' container the function writes
 # PDFs into (azure-functions/mailbox-sync/function_app.py). ---
 resource "azurerm_storage_account" "mailbox" {
-  name                            = "${local.alnum_prefix}2${local.suffix}"
+  name                            = "${local.alnum_prefix}mbx${random_string.storage_suffix.result}"
   resource_group_name             = data.azurerm_resource_group.this.name
   location                        = var.mailbox_storage_location
   account_tier                    = "Standard"
@@ -241,7 +232,11 @@ resource "azurerm_linux_web_app" "app" {
     AZURE_CLAUDE_SONNET_DEPLOYMENT = var.claude_sonnet_deployment_name
     AZURE_CLAUDE_DEPLOYMENT        = var.claude_haiku_deployment_name
 
-    AZURE_BLOB_CONNECTION_STRING = azurerm_storage_account.storage.primary_connection_string
+    # No archival storage account for prod (removed 2026-09-23, not
+    # needed) -- src/storage/blob_client.py's PDF archival step is
+    # best-effort/non-fatal when AZURE_BLOB_CONNECTION_STRING is unset
+    # ("Warning: PDF was not archived to Blob Storage -- continuing
+    # without it"), so this is a safe, deliberate gap, not a bug.
 
     # Wired to the mailbox-sync Function App provisioned above --
     # web/routers/mailbox_sync.py's "Sync Outlook Now" button calls this.

@@ -55,12 +55,6 @@ variable "sql_location" {
   default     = "westus2"
 }
 
-variable "storage_location" {
-  description = "Region for the archival storage account."
-  type        = string
-  default     = "westus2"
-}
-
 variable "mailbox_storage_location" {
   description = "Region for the mailbox-sync storage account (AzureWebJobsStorage + deployment package container + 'raw' target container). West US, matching the existing viveinsightstatements account and the vive-mailbox-sync Function App itself."
   type        = string
