@@ -246,6 +246,28 @@ class BlobStorageClient:
             print(f"[blob_client] Failed to set extraction outcome for {blob_name}: {e}")
             return False
 
+    def get_blob_last_modified(self, blob_name: str):
+        """
+        Returns blob_name's last-modified timestamp (a tz-aware datetime),
+        or None if it doesn't exist, config is missing, or any other
+        failure -- never raises. Used by the Home page's "Last Sync"
+        freshness display (web/routers/dashboard.py) to read
+        watermark/mailbox.json's own last-write time as a proxy for when
+        the mailbox-sync Function last ran, without needing to parse its
+        JSON contents.
+        """
+        if not self.connection_string:
+            return None
+        try:
+            from azure.storage.blob import BlobServiceClient
+
+            service_client = BlobServiceClient.from_connection_string(self.connection_string)
+            blob_client = service_client.get_blob_client(container=self.container_name, blob=blob_name)
+            return blob_client.get_blob_properties().last_modified
+        except Exception as e:
+            print(f"[blob_client] Failed to get last-modified for {blob_name}: {e}")
+            return None
+
     def download_blob_by_name(self, blob_name: str, dest_path: str) -> bool:
         """
         Downloads blob_name (as returned by list_pdf_blobs(), not a full

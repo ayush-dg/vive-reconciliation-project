@@ -62,11 +62,15 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  // Home page: while any job is still PENDING/PROCESSING/FAILED, reload
+  // Home page: while any job is still PENDING/PROCESSING, reload
   // periodically so statuses (and the reconciliation runs table, once a
   // job completes) stay current. GET /jobs is the source of truth for
   // whether there's still anything worth refreshing for — once it comes
   // back empty, this stops rescheduling itself and the page goes quiet.
+  // FAILED is a terminal state (queries.get_active_jobs() no longer
+  // includes it, see queries.get_failed_jobs()) -- a job that flips from
+  // PROCESSING straight to FAILED is still caught by the reload already
+  // scheduled from the prior in-flight check.
   if (document.body.dataset.page === "home") {
     fetch("/jobs")
       .then(function (r) { return r.json(); })

@@ -69,6 +69,18 @@ def get_warehouse_connection():
     return _connect(os.environ["FABRIC_WAREHOUSE_NAME"])
 
 
+def execute_lakehouse_query(sql, params=None) -> list:
+    """Fabric-Lakehouse-backed equivalent of execute_warehouse_query() --
+    same signature, same return shape (list of dicts). A fresh connection
+    per call (no pooling) -- these are low-frequency admin/UI reads, not a
+    hot path."""
+    conn = get_lakehouse_connection()
+    cur = conn.cursor()
+    cur.execute(sql, params or [])
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
 def execute_warehouse_query(sql, params=None) -> list:
     """Fabric-Warehouse-backed equivalent of
     src.lakehouse.connection.execute_query() -- same signature, same

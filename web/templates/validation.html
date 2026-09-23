@@ -48,15 +48,29 @@
   <button type="button" class="filter-chip active" data-filter="all">All</button>
   <button type="button" class="filter-chip" data-filter="pass">Passed</button>
   <button type="button" class="filter-chip" data-filter="fail">Failed</button>
+  <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
+    <option value="">All vendors</option>
+    {% for vname in vendor_options %}
+    <option value="{{ vname }}">{{ vname }}</option>
+    {% endfor %}
+  </select>
+  <select id="shop-filter" class="filter-chip" style="cursor:pointer">
+    <option value="">All shops</option>
+    {% for sname in shop_options %}
+    <option value="{{ sname }}">{{ sname }}</option>
+    {% endfor %}
+  </select>
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
   {% for run in runs %}
-  <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}">
+  <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}"
+       data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}">
     <div class="report-card-head">
       <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-check-circle' if run.passed else 'i-x-circle' }}"/></svg></div>
       <div>
-        <div class="report-card-title">{{ run.vendor_name or run.source_file }}</div>
+        <div class="report-card-title">{{ run.vendor_display_name or run.source_file }}</div>
+        {% if run.shop %}<div class="report-card-sub" style="font-weight:600;color:var(--text)">{{ run.shop }}</div>{% endif %}
         <div class="report-card-sub">{{ run.source_file }}</div>
       </div>
     </div>
@@ -78,18 +92,33 @@
 
 <script>
 (function () {
-  var chips = document.querySelectorAll(".filter-chip");
+  var statusChips = document.querySelectorAll(".filter-chip[data-filter]");
+  var vendorFilter = document.getElementById("vendor-filter");
+  var shopFilter = document.getElementById("shop-filter");
   var cards = document.querySelectorAll("#validation-card-grid .report-card");
-  chips.forEach(function (chip) {
+  var currentStatus = "all";
+
+  function applyFilters() {
+    var vendor = vendorFilter.value;
+    var shop = shopFilter.value;
+    cards.forEach(function (card) {
+      var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
+      var matchesVendor = !vendor || card.dataset.vendor === vendor;
+      var matchesShop = !shop || card.dataset.shop === shop;
+      card.style.display = (matchesStatus && matchesVendor && matchesShop) ? "" : "none";
+    });
+  }
+
+  statusChips.forEach(function (chip) {
     chip.addEventListener("click", function () {
-      chips.forEach(function (c) { c.classList.remove("active"); });
+      statusChips.forEach(function (c) { c.classList.remove("active"); });
       chip.classList.add("active");
-      var filter = chip.dataset.filter;
-      cards.forEach(function (card) {
-        card.style.display = (filter === "all" || card.dataset.status === filter) ? "" : "none";
-      });
+      currentStatus = chip.dataset.filter;
+      applyFilters();
     });
   });
+  vendorFilter.addEventListener("change", applyFilters);
+  shopFilter.addEventListener("change", applyFilters);
 })();
 </script>
 

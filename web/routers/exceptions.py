@@ -16,6 +16,7 @@ from web.deps import render, require_login, sidebar_context, smart_title, locati
 from web import queries
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
+from src.matching.netsuite_status_codes import decode_netsuite_status
 
 router = APIRouter()
 
@@ -172,6 +173,14 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         netsuite_record = fetch_netsuite_record_for_invoice(
             selected_exc.get("vendor_id"), vendor_name, selected_exc.get("invoice_number")
         )
+        if netsuite_record:
+            # Display-only decode of NetSuite's internal status code (e.g.
+            # vendor bill "A"/"B") into its actual business meaning -- see
+            # netsuite_status_codes.py. Falls back to the raw code when
+            # unmapped, so nothing is ever hidden, just possibly undecoded.
+            netsuite_record["status_label"] = decode_netsuite_status(
+                netsuite_record.get("_source_table"), netsuite_record.get("status")
+            ) or netsuite_record.get("status")
 
     ctx = {
         "active_page": "exceptions",

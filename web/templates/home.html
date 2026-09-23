@@ -7,6 +7,8 @@
     <h1>Home</h1>
   </div>
   <div class="topbar-actions">
+    <span class="badge badge-neutral" title="Most recent successful NetSuite ingestion run"><svg class="icon"><use href="#i-refresh"/></svg>NetSuite: {{ netsuite_last_sync | friendly_dt if netsuite_last_sync else "never synced" }}</span>
+    <span class="badge badge-neutral" title="Last time Outlook mail was pulled into blob storage"><svg class="icon"><use href="#i-refresh"/></svg>Outlook: {{ outlook_last_sync | friendly_dt if outlook_last_sync else "never synced" }}</span>
     <button class="icon-btn"><svg class="icon"><use href="#i-search"/></svg></button>
     <button class="icon-btn"><svg class="icon"><use href="#i-bell"/></svg></button>
   </div>
@@ -53,54 +55,92 @@
 <div class="panel">
   <div class="panel-head">
     <div>
-      <h2>Active jobs</h2>
+      <h2>Jobs</h2>
       <div class="sub">Statements still processing, or that need attention</div>
     </div>
     <a href="/jobs/history" class="link-arrow">Upload history <svg class="icon"><use href="#i-arrow-right"/></svg></a>
   </div>
-  {% if active_jobs %}
-  <table class="table">
-    <thead>
-      <tr>
-        <th>File</th>
-        <th>Status</th>
-        <th>Submitted</th>
-        <th>Details</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for job in active_jobs %}
-      <tr>
-        <td style="font-weight:500">{{ job.pdf_filename }}</td>
-        <td>
-          {% if job.status == 'PENDING' %}
-          <span class="badge badge-neutral">Pending</span>
-          {% elif job.status == 'PROCESSING' %}
-          <span class="badge badge-warning">Processing…</span>
-          {% elif job.status == 'FAILED' %}
-          <span class="badge badge-danger">Failed</span>
-          {% endif %}
-        </td>
-        <td style="color:var(--text-muted)">{{ job.submitted_at | friendly_dt }}</td>
-        <td style="color:var(--danger);font-size:12px">{{ job.error_message | friendly_error }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <table class="table">
-    <thead>
-      <tr>
-        <th>File</th>
-        <th>Status</th>
-        <th>Submitted</th>
-        <th>Details</th>
-      </tr>
-    </thead>
-  </table>
-  <div class="empty-state">No active jobs — upload a statement to get started.</div>
-  {% endif %}
+
+  <div style="padding:16px 20px 0">
+    <div class="toggle-seg" style="margin-bottom:14px">
+      <button type="button" class="active" data-jobs-tab="active">Active ({{ active_jobs | length }})</button>
+      <button type="button" data-jobs-tab="failed">Failed ({{ failed_jobs | length }})</button>
+    </div>
+  </div>
+
+  <div data-jobs-panel="active">
+    {% if active_jobs %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Status</th>
+          <th>Submitted</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in active_jobs %}
+        <tr>
+          <td style="font-weight:500">{{ job.pdf_filename }}</td>
+          <td>
+            {% if job.status == 'PENDING' %}
+            <span class="badge badge-neutral">Pending</span>
+            {% elif job.status == 'PROCESSING' %}
+            <span class="badge badge-warning">Processing…</span>
+            {% endif %}
+          </td>
+          <td style="color:var(--text-muted)">{{ job.submitted_at | friendly_dt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No active jobs — upload a statement to get started.</div>
+    {% endif %}
+  </div>
+
+  <div data-jobs-panel="failed" hidden>
+    {% if failed_jobs %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Status</th>
+          <th>Submitted</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in failed_jobs %}
+        <tr>
+          <td style="font-weight:500">{{ job.pdf_filename }}</td>
+          <td><span class="badge badge-danger">Failed</span></td>
+          <td style="color:var(--text-muted)">{{ job.submitted_at | friendly_dt }}</td>
+          <td style="color:var(--danger);font-size:12px">{{ job.error_message | friendly_error }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No failed jobs.</div>
+    {% endif %}
+  </div>
 </div>
+
+<script>
+(function () {
+  var tabButtons = document.querySelectorAll("[data-jobs-tab]");
+  tabButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      tabButtons.forEach(function (b) { b.classList.remove("active"); });
+      btn.classList.add("active");
+      document.querySelectorAll("[data-jobs-panel]").forEach(function (panel) {
+        panel.hidden = panel.getAttribute("data-jobs-panel") !== btn.getAttribute("data-jobs-tab");
+      });
+    });
+  });
+})();
+</script>
 
 {% if recent_batches %}
 <div class="panel">

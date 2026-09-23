@@ -31,7 +31,11 @@ from src.lakehouse.connection import execute_query, execute_sql, execute_query_f
 # never writes to, so it stayed empty regardless of whether reconciliation
 # actually ran). Upload/Batches still use execute_query/execute_sql
 # (gold_*/local backend) -- not touched by this change.
-from src.lakehouse.fabric_sql import execute_warehouse_query as recon_query, execute_warehouse_sql as recon_sql
+from src.lakehouse.fabric_sql import (
+    execute_warehouse_query as recon_query,
+    execute_warehouse_sql as recon_sql,
+    execute_lakehouse_query,
+)
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import display_name as vendor_display_name
@@ -235,6 +239,48 @@ def get_recent_recon_runs(limit: int = 10) -> list:
         row["job_id"] = job_rows[0]["job_id"] if job_rows else None
         row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
     return rows
+
+
+def get_last_netsuite_sync():
+    """Home page's "Last Sync" freshness label for NetSuite. Reads
+    pipeline.pipeline_manifest (Fabric Lakehouse) -- every ingestion
+    pipeline run (NetSuite and CCC ONE both write here) records one row
+    per run with its own written_at -- and takes the most recent
+    successful NetSuite run's timestamp. Returns None on any failure
+    (Fabric not configured, network/auth error, or no successful run
+    found yet) -- this is a freshness display, not load-bearing, so it
+    must never break the Home page itself."""
+    try:
+        rows = execute_lakehouse_query(
+            """
+            SELECT TOP 1 written_at
+            FROM pipeline.pipeline_manifest
+            WHERE source = 'netsuite' AND status = 'SUCCESS'
+            ORDER BY written_at DESC
+            """
+        )
+        return rows[0]["written_at"] if rows else None
+    except Exception:
+        return None
+
+
+def get_last_outlook_sync():
+    """Home page's "Last Sync" freshness label for Outlook. Reads the
+    mailbox-sync Function's own watermark file's last-write time
+    (watermark/mailbox.json in the mailbox container -- see
+    azure-functions/mailbox-sync/function_app.py's write_watermark(),
+    advanced once per run right after each new message is written) as a
+    proxy for when "Sync to Blob" (web/routers/mailbox_sync.py) last
+    actually pulled new mail, rather than parsing the watermark JSON's
+    own message-received timestamp. Returns None on any failure -- same
+    reasoning as get_last_netsuite_sync()."""
+    from src.storage.blob_client import BlobStorageClient
+
+    client = BlobStorageClient(
+        container_name="raw",
+        connection_string_env_var="AZURE_BLOB_MAILBOX_CONNECTION_STRING",
+    )
+    return client.get_blob_last_modified("watermark/mailbox.json")
 
 
 def get_open_exceptions_count() -> int:
@@ -1290,14 +1336,28 @@ def update_job_status(job_id: str, status: str, started_at: str = None,
 
 
 def get_active_jobs() -> list:
-    """Jobs still relevant to surface on the dashboard: not yet finished
-    (PENDING/PROCESSING), or finished with an error nobody's addressed yet
-    (FAILED). COMPLETED jobs drop out of this list — their result is
-    already visible as a normal reconciliation run."""
+    """Home page's "Active" jobs tab: not yet finished (PENDING/PROCESSING).
+    FAILED jobs have their own tab (get_failed_jobs()) so a pile of old
+    failures doesn't bury what's actually still in flight. COMPLETED jobs
+    drop out of both — their result is already visible as a normal
+    reconciliation run."""
     return execute_query(
         """
         SELECT * FROM jobs
-        WHERE status IN ('PENDING', 'PROCESSING', 'FAILED')
+        WHERE status IN ('PENDING', 'PROCESSING')
+        ORDER BY submitted_at DESC
+        """
+    )
+
+
+def get_failed_jobs() -> list:
+    """Home page's "Failed" jobs tab — jobs that finished with an error
+    nobody's addressed yet. Split out from get_active_jobs() so failures
+    are reviewable on their own instead of mixed in with in-flight jobs."""
+    return execute_query(
+        """
+        SELECT * FROM jobs
+        WHERE status = 'FAILED'
         ORDER BY submitted_at DESC
         """
     )
@@ -2055,7 +2115,7 @@ def get_validation_report() -> list:
         """
         SELECT statement_id, source_file, vendor_name, statement_period,
                statement_total_as_printed, validation_status, validation_difference,
-               ingestion_timestamp
+               ingestion_timestamp, shop_or_entity
         FROM document_intake_log
         WHERE validation_status IS NOT NULL
         ORDER BY ingestion_timestamp DESC
@@ -2063,6 +2123,15 @@ def get_validation_report() -> list:
     )
     for row in rows:
         row["passed"] = row["validation_status"] == "matches"
+        # shop_or_entity is a JSON list (see write_intake_log()) -- same
+        # parse pattern as get_recent_recon_runs()'s/get_exception_runs()'s
+        # own shop fix, since document_intake_log stores it this way
+        # rather than as a plain column.
+        try:
+            shop_list = json.loads(row["shop_or_entity"]) if row.get("shop_or_entity") else []
+        except (TypeError, ValueError):
+            shop_list = []
+        row["shop"] = ", ".join(shop_list) if shop_list else None
     return rows
 
 
