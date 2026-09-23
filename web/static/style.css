@@ -67,11 +67,13 @@
   --text-secondary: var(--text-muted);
 }
 
-/* Dark mode — follows the OS-level setting only (no in-app toggle). Its own
+/* Dark mode — DISABLED 2026-09-23 (defaulting to light mode only for now).
+   Was: follows the OS-level setting only (no in-app toggle). Its own
    steps re-stepped against the dark ground, not brightened light values.
    --accent/--exception/--exception-tint/--text-secondary are var()
-   references in :root above, so they follow automatically once --navy-2/
-   --navy-tint/--text-muted are redefined here — no need to repeat them. */
+   references in :root above, so they followed automatically once --navy-2/
+   --navy-tint/--text-muted were redefined here — no need to repeat them.
+   Re-enable by uncommenting the block below.
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #070D16;
@@ -120,6 +122,7 @@
     --accent-hover: #6BA5F5;
   }
 }
+*/
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 

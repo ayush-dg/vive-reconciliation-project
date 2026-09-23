@@ -5,25 +5,19 @@
     "Repairify, Inc. dba asTech"
   ],
   "FRED_BEANS_PARTS": [
-    "FRED BEANS PARTS",
     "Fred Beans Parts",
-    "Fred Beans Parts, Inc.",
-    "FRED BEANS PARTS, Inc."
+    "Fred Beans Parts, Inc."
   ],
   "KEYSTONE_AUTOMOTIVE_INDUSTRIES": [
     "Keystone Automotive Industries"
   ],
   "QUIRK_AUTO_GROUP": [
     "Quirk Auto Dealerships",
-    "Quirk Auto Group",
-    "QUIRK AUTO GROUP"
+    "Quirk Auto Group"
   ],
   "EMPIRE_AUTO_PARTS": [
     "Empire Auto Parts, NJ",
     "Empire Auto Parts"
-  ],
-  "BOWSER_PONTIAC_SUBARU": [
-    "Bowser Pontiac Subaru, Inc."
   ],
   "KSI_TRADING_CORP": [
     "KSI TRADING CORP"
@@ -35,21 +29,22 @@
     "A06447D7 A0C9 4Ad8 Ac8A B40F5E7A855A  Nucar Cherryhill 0826",
     "DCD Automotive Holdings (Nucar)",
     "nucar",
-    "DCD BH, INC. DBA NUCAR HONDA OF NORWOOD"
+    "DCD BH, INC. DBA NUCAR HONDA OF NORWOOD",
+    "DCD PARTS DISTRIBUTION LLC"
   ],
   "RH_LONG_MOTOR_SALES": [
     "RH LONG MOTOR SALES INC"
   ],
   "DOWNEAST_TOYOTA": [
-    "Downeast Toyota"
+    "Downeast Toyota",
+    "Down East Toyota"
   ],
   "NYE_AUTOMOTIVE_GROUP": [
-    "NYE AUTOMOTIVE GROUP",
-    "Nye Automotive Group",
     "NYE Automotive Group"
   ],
   "HOSELTON": [
     "HOSELTON IMPORTS Inc.",
+    "Hoselton Toyota",
     "HOSELTON IMPORTS Inc. Dba. HOSELTON TOYOTA"
   ],
   "BOWSER": [
@@ -63,9 +58,6 @@
   ],
   "BERLIN_CITY_AUTO_GROUP": [
     "Berlin City Auto Group"
-  ],
-  "EMPIRE_AUTO_PARTS": [
-    "Empire Auto Parts"
   ],
   "FENIX_NE": [
     "Fenix NE",
@@ -82,17 +74,5 @@
   "A_NEW_AGE_AUTO_GLASS": [
     "A New Age Auto Glass",
     "A New Age Auto Glass, INC."
-  ],
-  "HOSELTON_TOYOTA": [
-    "Hoselton Imports Inc. dba Hoselton Toyota",
-    "Hoselton Toyota"
-  ],
-  "NYE_AUTOMOTIVE_GROUP": [
-    "NYE Automotive Group",
-    "NYE AUTOMOTIVE GROUP"
-  ],
-  "QUIRK_AUTO_GROUP": [
-    "Quirk Auto Group",
-    "QUIRK AUTO GROUP"
   ]
 }

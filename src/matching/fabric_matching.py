@@ -79,6 +79,7 @@ run down to a handful of round trips.
 """
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -122,9 +123,9 @@ def _fetch_statement(cur, statement_id: str):
 
 def _fetch_lines(cur, statement_id: str) -> list:
     cur.execute(
-        "SELECT statement_line_id, invoice_number, transaction_code, line_type, "
-        "charge_amount, payment_amount, ro_number, line_date FROM silver.statement_line "
-        "WHERE statement_id = ?",
+        "SELECT statement_line_id, invoice_number, document_number, invoice_number_ref, "
+        "transaction_code, line_type, charge_amount, payment_amount, po_number, ro_number, line_date "
+        "FROM silver.statement_line WHERE statement_id = ?",
         [statement_id],
     )
     cols = [c[0] for c in cur.description]
@@ -137,10 +138,53 @@ def _fetch_lines(cur, statement_id: str) -> list:
     # has a row in vendor_normalization_rule), so aliasing it in both
     # directions is safe: nothing here strips or reconstructs it. A
     # vendor with no row in vendor_line_selection_rule passes through
-    # select_lines() completely unchanged.
+    # select_lines() completely unchanged. NOTE: this is a DIFFERENT
+    # field from "document_number" fetched above -- for a vendor WITH a
+    # normalization rule (Nucar/Quirk/NYE/Hoselton), invoice_number here
+    # is already stripped/reconstructed, so "original_invoice_number"
+    # is not actually the raw value for them (harmless today: select_lines()
+    # only reads it for these two vendors, where it happens to be correct).
+    # "document_number" is always the true pre-normalization raw value for
+    # every vendor -- used to populate recon_matched_invoices/
+    # recon_exceptions' original_invoice_number column (added 2026-09-21
+    # so the UI can show both the raw statement value and the normalized
+    # one it was matched against, instead of only the latter).
     for line in lines:
         line["original_invoice_number"] = line["invoice_number"]
     return lines
+
+
+def _drop_payment_closing_lines(lines: list) -> list:
+    """Universal, vendor-agnostic pre-filter (runs for every vendor,
+    before any vendor_line_selection_rule dedup): drops a PAYMENT-typed
+    line whose invoice_number ALSO has a CHARGE line on this same
+    statement. Confirmed live 2026-09-21 on Bowser's STMT-700EB5D9
+    (no vendor_line_selection_rule row at all -- Bowser isn't configured
+    for dedup): invoices like 73964 have a CHARGE line (2052.30, dated
+    06-29) and a PAYMENT line (2052.30, dated 07-29, same invoice_number)
+    -- the PAYMENT line is the statement's own display of that charge
+    being paid down, not a second NetSuite transaction, but with no dedup
+    rule configured it was checked on its own against netsuite_vendorcredit
+    for tranid '73964', found nothing, and got written up as a spurious
+    'Not Found' exception right alongside the CHARGE line's correct match.
+    Same underlying shape as Nucar's transaction_code=5 rows and
+    Downeast's payment reprints -- this generalizes it as the default for
+    every vendor, not a per-vendor config row, since nothing about it is
+    vendor-specific: a payment posting for an invoice that's ALSO charged
+    on the same statement is never a distinct NetSuite record anywhere.
+    Deliberately keyed on "same invoice_number as a CHARGE line," not "is
+    PAYMENT-typed" alone -- confirmed against Bowser's OTHER statement
+    (STMT-266FED49) that this must NOT be a blanket PAYMENT exclusion:
+    its PAYMENT lines are CM-prefixed (e.g. CM75914) with no bare '75914'
+    CHARGE line anywhere on that statement -- genuine distinct credits,
+    same convention as Fred Beans, and must still be checked."""
+    charge_invoice_numbers = {
+        l["invoice_number"] for l in lines if l.get("line_type") == "CHARGE"
+    }
+    return [
+        l for l in lines
+        if not (l.get("line_type") == "PAYMENT" and l.get("invoice_number") in charge_invoice_numbers)
+    ]
 
 
 def _apply_line_selection(vendor_id: str, lines: list, rules: dict) -> list:
@@ -235,17 +279,63 @@ def _line_target(line: dict) -> tuple:
     if line_type == "CHARGE":
         return line.get("charge_amount"), "netsuite_vendorbill"
     if line_type == "CREDIT":
+        # Falls back to payment_amount -- confirmed live 2026-09-21 for
+        # Fred Beans: select_lines() reclassifies a CM-prefixed line as
+        # CREDIT based on its invoice_number prefix regardless of which
+        # mapped column the value landed in (the vendor's own "credits"
+        # column maps to payment_amount, not charge_amount -- see
+        # vendor_field_mapping.csv), so charge_amount is often None on a
+        # line that IS a real credit. Looking at charge_amount alone
+        # silently produced a None statement_amount, which _best_candidate()
+        # then treated as an automatic non-exact match against whatever
+        # candidate happened to be first -- a false "Amount Mismatch" on
+        # 23 of Fred Beans' real exceptions, not a genuine discrepancy.
         amt = line.get("charge_amount")
+        if amt is None:
+            amt = line.get("payment_amount")
         return (abs(amt) if amt is not None else None), "netsuite_vendorcredit"
     if line_type == "PAYMENT":
         return line.get("payment_amount"), "netsuite_vendorcredit"
     return None, None
 
 
+def _fetch_netsuite_credit_candidates(cur, entity_ids: list) -> list:
+    """Returns [(tranid_lower, total), ...] -- every non-voided
+    netsuite_vendorcredit row for these entities, as a flat list (not the
+    dict-keyed-by-exact-tranid shape _fetch_netsuite_candidates() returns)
+    since _match_credit() needs to scan every tranid for substring
+    containment, not do an exact-key lookup. tranid is lowercased for a
+    case-insensitive substring check -- same rationale as
+    _fetch_netsuite_candidates()'s lowercasing (confirmed live elsewhere
+    that NetSuite's own tranid casing is inconsistent)."""
+    if not entity_ids:
+        return []
+    placeholders = ",".join("?" * len(entity_ids))
+    cur.execute(
+        f"SELECT tranid, total FROM bronze.netsuite_vendorcredit "
+        f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
+        entity_ids,
+    )
+    candidates = []
+    for tranid, total in cur.fetchall():
+        try:
+            total_f = float(total)
+        except (TypeError, ValueError):
+            continue
+        candidates.append((tranid.lower(), total_f))
+    return candidates
+
+
 def _match_credit(invoice_number: str, statement_amount, credit_candidates: list) -> tuple:
     """Searches credit_candidates for tranids CONTAINING invoice_number as
     a substring (see _fetch_netsuite_credit_candidates() for why this
-    isn't an exact match). Returns (netsuite_total_or_None,
+    isn't an exact match -- Keystone specifically, confirmed live
+    2026-09-22: the SAME vendor reconstructs its credit tranid differently
+    per statement/location -- Z1451096 -> CMZ1451096 (no dash), TS247490
+    -> CM-TS247490 (dash), ME288615 -> ME288615 (no CM at all) -- with no
+    way to know in advance which convention a given location uses.
+    invoice_number is expected pre-lowercased by the caller, matching
+    credit_candidates' tranids. Returns (netsuite_total_or_None,
     candidate_count).
 
     candidate_count > 1 with netsuite_total is None means a genuine
@@ -273,15 +363,21 @@ def _match_credit(invoice_number: str, statement_amount, credit_candidates: list
 
 
 def _build_invoice_shapes(lines: list) -> dict:
-    """Groups statement lines by invoice_number. charge_amount already
+    """Groups statement lines by invoice_number. charge_amount usually
     carries the sign (positive for CHARGE lines, negative for CREDIT lines
     -- see dbt/vive_recon/models/silver/statement_line.sql), so credit
-    magnitude is abs(charge_amount) on a CREDIT-typed line. A PAYMENT line
-    with no invoice_number (e.g. a payment-received memo with no document
-    reference) is dropped here (`if not inv: continue`) -- only PAYMENT
-    lines that DO reference a real invoice_number reach a shape, which in
-    every real case checked so far means "credit memo", not "payment
-    notice" -- see the module docstring's Rule B."""
+    magnitude is normally abs(charge_amount) on a CREDIT-typed line --
+    but falls back to payment_amount when charge_amount is None
+    (confirmed live 2026-09-21: select_lines() can reclassify a line as
+    CREDIT based on its invoice_number prefix -- e.g. Fred Beans' CM-
+    prefix -- independent of which mapped column the vendor's own
+    "credits" field landed in; Fred Beans' maps to payment_amount, not
+    charge_amount). A PAYMENT line with no invoice_number (e.g. a
+    payment-received memo with no document reference) is dropped here
+    (`if not inv: continue`) -- only PAYMENT lines that DO reference a
+    real invoice_number reach a shape, which in every real case checked
+    so far means "credit memo", not "payment notice" -- see the module
+    docstring's Rule B."""
     shapes = {}
     for line in lines:
         inv = line["invoice_number"]
@@ -291,21 +387,57 @@ def _build_invoice_shapes(lines: list) -> dict:
             "invoice_number": inv, "lines": [], "charge_line_count": 0,
             "credit_line_count": 0, "payment_line_count": 0,
             "charge_amt": None, "credit_amt": None, "payment_amt": None,
-            "ro_number": None, "line_date": None,
+            "ro_number": None, "line_date": None, "document_number": None,
         })
         shape["lines"].append(line)
         shape["ro_number"] = shape["ro_number"] or line.get("ro_number")
         shape["line_date"] = shape["line_date"] or line.get("line_date")
+        shape["document_number"] = shape["document_number"] or line.get("document_number")
         if line["line_type"] == "CHARGE":
             shape["charge_line_count"] += 1
             shape["charge_amt"] = line["charge_amount"]
         elif line["line_type"] == "CREDIT":
             shape["credit_line_count"] += 1
-            shape["credit_amt"] = abs(line["charge_amount"]) if line["charge_amount"] is not None else None
+            # Falls back to payment_amount -- see _line_target()'s comment
+            # for the exact live-confirmed case (Fred Beans CM-prefixed
+            # credits whose value lives in payment_amount, not
+            # charge_amount, after select_lines() reclassifies them).
+            credit_amt = line["charge_amount"] if line["charge_amount"] is not None else line["payment_amount"]
+            shape["credit_amt"] = abs(credit_amt) if credit_amt is not None else None
         elif line["line_type"] == "PAYMENT":
             shape["payment_line_count"] += 1
             shape["payment_amt"] = line["payment_amount"]
     return shapes
+
+
+_ORDINAL_REF_RE = re.compile(r"\*(\d+)$")
+
+
+def _apply_ordinal_suffix(invoice_number: str, invoice_number_ref) -> str:
+    """Nucar's 'Lees' layout (Reynolds and Reynolds template) can show
+    MULTIPLE separate real credit memos against the same base invoice on
+    one statement -- e.g. CVW6283886 had two genuinely distinct $75
+    credits, whose REFERENCE column values were 'CMCVW6283886' and
+    'CMCVW6283886*1'. Both reconstruct to the identical invoice_number
+    (CM6283886) under the vendor_normalization_rule CM{invoice} template,
+    which only ever looks at the base document_number -- confirmed live
+    2026-09-21 that NetSuite itself posts these as two SEPARATE tranids,
+    'CM6283886' and 'CM6283886-1' (bronze.netsuite_vendorcredit), not one
+    tranid with two applications. Without this, both statement lines would
+    be checked against the SAME 'cm6283886' candidate list -- happened to
+    still tie out on STMT-F4C7C745 only because both real credits were
+    coincidentally $75 each; a statement where the ordinal credits differ
+    in amount would silently mismatch. A '*N' suffix on invoice_number_ref
+    (the raw REFERENCE column) is the statement's own way of marking "the
+    Nth additional credit for this invoice" -- appending '-N' to the
+    already-normalized invoice_number reproduces NetSuite's own tranid
+    exactly. No-op (returns invoice_number unchanged) when invoice_number_ref
+    doesn't end in '*<digits>' -- every other vendor's invoice_number_ref
+    values are unaffected."""
+    match = _ORDINAL_REF_RE.search(invoice_number_ref or "")
+    if not match:
+        return invoice_number
+    return f"{invoice_number}-{match.group(1)}"
 
 
 def _amounts_tie_out(a: float, b: float) -> bool:
@@ -359,7 +491,15 @@ def _shape_target(shape: dict) -> tuple:
         return earliest_charge["charge_amount"], "netsuite_vendorbill"
     earliest_credit = _earliest_of_type(shape["lines"], "CREDIT")
     if earliest_credit is not None:
+        # Same payment_amount fallback as shape["credit_amt"] above --
+        # Downeast's "credits" column maps to payment_amount, not
+        # charge_amount (confirmed 2026-09-21: TEST-PREPROD-3E3DBFC6 was
+        # returning null statement_amount for CM-prefixed invoices that
+        # land here via Rule D, because this branch only ever read
+        # charge_amount).
         charge_amount = earliest_credit["charge_amount"]
+        if charge_amount is None:
+            charge_amount = earliest_credit["payment_amount"]
         credit_amt = abs(charge_amount) if charge_amount is not None else None
         return credit_amt, "netsuite_vendorcredit"
 
@@ -397,6 +537,7 @@ def run_fabric_matching(statement_id: str) -> dict:
         wh_cur.execute("DELETE FROM silver.recon_summary WHERE statement_id = ?", [statement_id])
 
         lines = _fetch_lines(wh_cur, statement_id)
+        lines = _drop_payment_closing_lines(lines)
 
         # select_lines() dedup applies to any vendor with a
         # vendor_line_selection_rule row -- today that's Fred Beans/
@@ -442,6 +583,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                 _write_exception(
                     wh_cur, statement_id, vendor_id, shop, shop_owner, item["invoice_number"],
                     item["ro_number"], stmt_amount, None, "Vendor Not Resolved in NetSuite", now,
+                    original_invoice_number=item.get("document_number"),
                 )
                 exception_count += 1
                 statement_total += stmt_amount or 0.0
@@ -451,6 +593,25 @@ def run_fabric_matching(statement_id: str) -> dict:
             bills = _fetch_netsuite_candidates(lh_cur, entity_ids, "netsuite_vendorbill")
             credits = _fetch_netsuite_candidates(lh_cur, entity_ids, "netsuite_vendorcredit")
             netsuite_by_table = {"netsuite_vendorbill": bills, "netsuite_vendorcredit": credits}
+
+            # Keystone-only, confirmed live 2026-09-22: the same vendor
+            # reconstructs its credit tranid differently per statement/
+            # location with no way to predict which convention a given
+            # one uses (Z1451096 -> CMZ1451096, TS247490 -> CM-TS247490,
+            # ME288615 -> ME288615 verbatim, and there are more Keystone
+            # locations than these three known ones). Rather than
+            # enumerating every location's convention as a config row,
+            # fuzzy substring matching (_match_credit()) finds the right
+            # tranid without needing to know the convention in advance --
+            # every one of the three known cases is a substring of its
+            # own correct tranid already. Scoped to this vendor only:
+            # every other vendor's credit matching is already validated
+            # with exact/case-insensitive matching this session, and nothing
+            # else has shown Keystone's "many unpredictable conventions"
+            # problem.
+            keystone_credit_candidates = None
+            if vendor_id == "KEYSTONE_AUTOMOTIVE_INDUSTRIES":
+                keystone_credit_candidates = _fetch_netsuite_credit_candidates(lh_cur, entity_ids)
 
             if vendor_uses_shapes:
                 items = [(shape, _shape_target(shape)) for shape in _build_invoice_shapes(lines).values()]
@@ -462,20 +623,74 @@ def run_fabric_matching(statement_id: str) -> dict:
             for item, (stmt_amount, table) in items:
                 inv = item["invoice_number"]
                 ro = item["ro_number"]
+                orig_inv = item.get("document_number")
                 statement_total += stmt_amount or 0.0
+
+                if table == "netsuite_vendorcredit":
+                    inv = _apply_ordinal_suffix(inv, item.get("invoice_number_ref"))
+
+                if table == "netsuite_vendorcredit" and keystone_credit_candidates is not None:
+                    netsuite_total, candidate_count = _match_credit(
+                        inv.lower(), stmt_amount, keystone_credit_candidates
+                    )
+                    if netsuite_total is None:
+                        reason = "Possible Duplicate in NetSuite" if candidate_count > 1 else "Not Found in NetSuite"
+                        _write_exception(
+                            wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                            ro, stmt_amount, None, reason, now,
+                            original_invoice_number=orig_inv,
+                        )
+                        exception_count += 1
+                    elif _amounts_tie_out(stmt_amount, netsuite_total):
+                        _write_match(
+                            wh_cur, statement_id, vendor_id, shop, inv,
+                            ro, stmt_amount, netsuite_total, now,
+                            original_invoice_number=orig_inv,
+                        )
+                        matched_count += 1
+                        erp_total += netsuite_total
+                    else:
+                        _write_exception(
+                            wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                            ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
+                            original_invoice_number=orig_inv,
+                        )
+                        exception_count += 1
+                        erp_total += netsuite_total
+                    continue
+
                 candidates = netsuite_by_table.get(table, {}).get(inv.lower(), []) if table else []
                 netsuite_total, is_exact = _best_candidate(candidates, stmt_amount)
+
+                if netsuite_total is None and table == "netsuite_vendorcredit":
+                    # RH Long-confirmed 2026-09-22: its own standalone-credit
+                    # tranid convention isn't consistent even across its own
+                    # accounts -- Hudson posts 'CM<invoice>' (CM491604 exact),
+                    # Holyoke posts the raw invoice with no prefix at all
+                    # (488643 exact). Rather than guess which convention a
+                    # given account uses ahead of time (see
+                    # vendor_line_selection.py's
+                    # _reclassify_payment_rows_by_po_reference()), try the raw
+                    # tranid first (above) and only retry with a 'CM' prefix
+                    # here if that missed -- exact-string-keyed either way, so
+                    # this can't produce a false match for any other vendor.
+                    cm_candidates = netsuite_by_table.get(table, {}).get(f"cm{inv.lower()}", [])
+                    cm_total, cm_is_exact = _best_candidate(cm_candidates, stmt_amount)
+                    if cm_total is not None:
+                        netsuite_total, is_exact = cm_total, cm_is_exact
 
                 if netsuite_total is None:
                     _write_exception(
                         wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, None, "Not Found in NetSuite", now,
+                        original_invoice_number=orig_inv,
                     )
                     exception_count += 1
                 elif is_exact:
                     _write_match(
                         wh_cur, statement_id, vendor_id, shop, inv,
                         ro, stmt_amount, netsuite_total, now,
+                        original_invoice_number=orig_inv,
                     )
                     matched_count += 1
                     erp_total += netsuite_total
@@ -488,6 +703,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                     _write_exception(
                         wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
+                        original_invoice_number=orig_inv,
                     )
                     exception_count += 1
                     erp_total += netsuite_total
@@ -573,31 +789,31 @@ def fetch_netsuite_record_for_invoice(vendor_id: str, vendor_name: str, invoice_
 
 
 def _write_match(cur, statement_id, vendor_id, shop, invoice_number, ro_number,
-                  stmt_amount, erp_amount, now):
+                  stmt_amount, erp_amount, now, original_invoice_number=None):
     cur.execute(
         """
         INSERT INTO silver.recon_matched_invoices (
-            match_id, vendor_id, shop, invoice_number, ro_number,
+            match_id, vendor_id, shop, invoice_number, original_invoice_number, ro_number,
             statement_amount, erp_amount, match_level, match_status,
             statement_id, match_timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [str(uuid.uuid4()), vendor_id, shop, invoice_number, ro_number,
+        [str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
          stmt_amount, erp_amount, 1, "MATCHED", statement_id, now],
     )
 
 
 def _write_exception(cur, statement_id, vendor_id, shop, shop_owner, invoice_number,
-                      ro_number, stmt_amount, erp_amount, reason, now):
+                      ro_number, stmt_amount, erp_amount, reason, now, original_invoice_number=None):
     cur.execute(
         """
         INSERT INTO silver.recon_exceptions (
-            exception_id, vendor_id, shop, invoice_number, ro_number,
+            exception_id, vendor_id, shop, invoice_number, original_invoice_number, ro_number,
             statement_amount, erp_amount, match_status, exception_reason,
             exception_status, statement_id, date_raised, shop_owner
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [str(uuid.uuid4()), vendor_id, shop, invoice_number, ro_number,
+        [str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
          stmt_amount, erp_amount, "EXCEPTION", reason, "OPEN", statement_id, now, shop_owner],
     )
 
