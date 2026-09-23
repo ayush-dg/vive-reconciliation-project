@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .env
 *.env
+.env.local
+.env.prod
+.env.dev
 dbt/profiles.yml
 dbt/.user.yml
 dbt/.fabric_pipeline.lock

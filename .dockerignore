@@ -72,6 +72,8 @@ docker-compose.yml
 deploy/**
 !deploy/azure-app-service-demo/
 !deploy/azure-app-service-demo/container-start.sh
+!deploy/azure-app-service-prod/
+!deploy/azure-app-service-prod/container-start.sh
 deploy.zip
 
 # Ad-hoc local output/backups, not build inputs

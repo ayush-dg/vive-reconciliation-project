@@ -1,0 +1,45 @@
+output "acr_login_server" {
+  value = azurerm_container_registry.acr.login_server
+}
+
+output "acr_name" {
+  value = azurerm_container_registry.acr.name
+}
+
+output "webapp_name" {
+  value = azurerm_linux_web_app.app.name
+}
+
+output "webapp_url" {
+  value = "https://${azurerm_linux_web_app.app.default_hostname}"
+}
+
+output "sql_server_fqdn" {
+  value = azurerm_mssql_server.sql.fully_qualified_domain_name
+}
+
+output "sql_database_name" {
+  value = azurerm_mssql_database.sql.name
+}
+
+output "sql_admin_username" {
+  value = azurerm_mssql_server.sql.administrator_login
+}
+
+# Sensitive -- retrieve with: terraform output -raw sql_admin_password
+output "sql_admin_password" {
+  value     = random_password.sql_admin.result
+  sensitive = true
+}
+
+output "mailbox_storage_account_name" {
+  value = azurerm_storage_account.mailbox.name
+}
+
+output "mailbox_sync_function_name" {
+  value = azurerm_function_app_flex_consumption.mailbox_sync.name
+}
+
+output "mailbox_sync_function_url" {
+  value = "https://${azurerm_function_app_flex_consumption.mailbox_sync.default_hostname}/api/sync"
+}
