@@ -111,35 +111,45 @@ def main():
     # -- Phase 2 (Matching) below still runs against the existing
     # Silver/Gold tables regardless. See src/lakehouse/fabric_dbt_runner.py.
     #
-    # Both this and NetSuite matching below run under one cross-process
-    # lock (fabric_pipeline_lock() -- see its own docstring for why a plain
+    # wait_for_visibility() runs BEFORE the lock, not inside it (moved
+    # 2026-09-24) -- it's a read-only poll against the Lakehouse SQL
+    # endpoint, touching none of the shared dbt/Fabric state the lock
+    # protects, so serializing it too just queued concurrent jobs' waits
+    # behind each other on top of the genuinely-racy part. Only the dbt
+    # run + NetSuite matching below need fabric_pipeline_lock() (a real
+    # cross-process mutex -- see its own docstring for why a plain
     # threading.Lock() doesn't work: each job's pipeline is a separate
-    # subprocess, not a thread). Every job's Fabric-touching work is
-    # serialized process-wide; extraction above is unaffected and still
-    # runs concurrently across the worker pool.
-    from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
-    with fabric_pipeline_lock():
-        if run_dbt_silver_build(
-            statement_id,
-            expected_lines=intake_result.get("unnested_lines_written"),
-            expected_fields=intake_result.get("unnested_fields_written"),
-        ):
-            print(f"    Fabric Silver build: OK")
+    # subprocess, not a thread). Extraction above is unaffected either
+    # way and still runs concurrently across the worker pool.
+    expected_lines = intake_result.get("unnested_lines_written")
+    expected_fields = intake_result.get("unnested_fields_written")
+    visibility_confirmed = True
+    if expected_lines is not None and expected_fields is not None:
+        from src.lakehouse.bronze_unnest import wait_for_visibility
+        visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)
+        if not visibility_confirmed:
+            print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
 
-            # NetSuite matching -- additive, only meaningful once Silver exists
-            # for this statement, so nested under the build succeeding. Writes
-            # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
-            # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
-            # same as everything else here.
-            from src.matching.fabric_matching import run_fabric_matching
-            match_result = run_fabric_matching(statement_id)
-            if "error" in match_result or match_result.get("skipped"):
-                print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+    from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
+    if visibility_confirmed:
+        with fabric_pipeline_lock():
+            if run_dbt_silver_build(statement_id):
+                print(f"    Fabric Silver build: OK")
+
+                # NetSuite matching -- additive, only meaningful once Silver exists
+                # for this statement, so nested under the build succeeding. Writes
+                # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
+                # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
+                # same as everything else here.
+                from src.matching.fabric_matching import run_fabric_matching
+                match_result = run_fabric_matching(statement_id)
+                if "error" in match_result or match_result.get("skipped"):
+                    print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+                else:
+                    print(f"    NetSuite matching: {match_result['matched']} matched, "
+                          f"{match_result['exceptions']} exceptions")
             else:
-                print(f"    NetSuite matching: {match_result['matched']} matched, "
-                      f"{match_result['exceptions']} exceptions")
-        else:
-            print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+                print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
 
     if intake_result.get("bronze_count", 0) == 0:
         print(f"\n{'#'*65}")

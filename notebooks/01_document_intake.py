@@ -1512,8 +1512,9 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         "invalid_count": len(invalid_invoices),
         "skipped_count": skipped_count,
         "routing": routing,
-        # For run_dbt_silver_build()'s wait_for_visibility() call in
-        # run_full_pipeline.py -- the exact counts write_unnested_from_invoices()
+        # For run_full_pipeline.py's wait_for_visibility() call (runs before
+        # fabric_pipeline_lock(), see that call site) -- the exact counts
+        # write_unnested_from_invoices()
         # (Step 3 above) just wrote to bronze.unnested_statement_lines/_fields,
         # so dbt doesn't run against a read-after-write gap (confirmed real
         # 2026-09-18, see wait_for_visibility()'s own docstring).
