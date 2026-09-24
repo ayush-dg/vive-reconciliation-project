@@ -111,16 +111,27 @@ def main():
     # -- Phase 2 (Matching) below still runs against the existing
     # Silver/Gold tables regardless. See src/lakehouse/fabric_dbt_runner.py.
     #
-    # wait_for_visibility() runs BEFORE the lock, not inside it (moved
-    # 2026-09-24) -- it's a read-only poll against the Lakehouse SQL
-    # endpoint, touching none of the shared dbt/Fabric state the lock
-    # protects, so serializing it too just queued concurrent jobs' waits
-    # behind each other on top of the genuinely-racy part. Only the dbt
-    # run + NetSuite matching below need fabric_pipeline_lock() (a real
-    # cross-process mutex -- see its own docstring for why a plain
-    # threading.Lock() doesn't work: each job's pipeline is a separate
-    # subprocess, not a thread). Extraction above is unaffected either
-    # way and still runs concurrently across the worker pool.
+    # wait_for_visibility() below runs BEFORE fabric_pipeline_lock() is
+    # acquired, not inside it (moved 2026-09-24) -- it's a read-only poll
+    # against the Lakehouse SQL endpoint, touching none of the shared
+    # dbt/Fabric state the lock protects, so serializing it too just
+    # queued concurrent jobs' waits behind each other on top of the
+    # genuinely-racy part. Only the dbt run + NetSuite matching below need
+    # fabric_pipeline_lock() (a real cross-process mutex -- see its own
+    # docstring for why a plain threading.Lock() doesn't work: each job's
+    # pipeline is a separate subprocess, not a thread). Extraction above
+    # is unaffected either way and still runs concurrently across the
+    # worker pool.
+    #
+    # Note: this statement's bronze.raw_statement row was already promoted
+    # out of staging into the real table back in Phase 1 (see
+    # notebooks/01_document_intake.py, right after write_raw_statement())
+    # -- see src/lakehouse/bronze_raw.py's 2026-09-23 fix note for why.
+    # That promotion (its own separate, brief fabric_pipeline_lock() hold)
+    # is what keeps the Bronze write from colliding with dbt's read of the
+    # same table; the wait below is a separate, unrelated concern -- it
+    # confirms the Lakehouse SQL endpoint has caught up with that already-
+    # promoted row before dbt queries it, not a lock/collision issue at all.
     expected_lines = intake_result.get("unnested_lines_written")
     expected_fields = intake_result.get("unnested_fields_written")
     visibility_confirmed = True

@@ -1328,6 +1328,24 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         vendor_display_name=display_name(vendor_name),
         version_number=version_info["version_number"],
     )
+    # Promote this statement's row from bronze.raw_statement_staging (just
+    # written above) into the real, shared bronze.raw_statement table --
+    # under fabric_pipeline_lock(), the SAME lock run_dbt_silver_build()/
+    # run_fabric_matching() use in scripts/run_full_pipeline.py, so the
+    # touch on the shared table and any concurrent dbt Silver read of it
+    # can never race. Done here (immediately after the write, not deferred
+    # to run_full_pipeline.py's later lock block) because
+    # run_dbt_silver_silver_build() right below reads this same table for
+    # this same statement_id and needs the row to already be there. See
+    # src/lakehouse/bronze_raw.py's 2026-09-23 fix note and
+    # promote_staged_raw_statement()'s docstring for the full rationale --
+    # kept deliberately tiny (this one statement's row) so it only adds a
+    # brief hold time to the lock, not a repeat of the 2026-09-15 batch
+    # queuing regression.
+    from src.lakehouse.bronze_raw import promote_staged_raw_statement
+    from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
+    with fabric_pipeline_lock():
+        promote_staged_raw_statement(statement_id)
     # silver_silver build -- additive, mapping-driven bronze->silver test
     # flow. Called from here, not alongside run_dbt_silver_build() in
     # run_full_pipeline.py, because that call site is skipped entirely

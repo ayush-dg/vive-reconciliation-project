@@ -237,8 +237,11 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
     from src.lakehouse.fabric_sql import get_lakehouse_connection
     import time
 
-    deadline = time.time() + timeout_seconds
+    start = time.time()
+    deadline = start + timeout_seconds
+    poll_count = 0
     while True:
+        poll_count += 1
         try:
             conn = get_lakehouse_connection()
             cur = conn.cursor()
@@ -249,11 +252,21 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
             cur.execute("SELECT COUNT(*) FROM bronze.unnested_statement_fields WHERE statement_id = ?", [statement_id])
             fields_ok = cur.fetchone()[0] >= expected_fields
             if raw_ok and lines_ok and fields_ok:
+                elapsed = time.time() - start
+                logger.info(
+                    "statement_id=%s became visible after %.1fs (%d polls)",
+                    statement_id, elapsed, poll_count,
+                )
                 return True
         except Exception:
             logger.debug("wait_for_visibility query failed for statement_id=%s (treated as not-yet-visible)", statement_id, exc_info=True)
 
         if time.time() >= deadline:
+            elapsed = time.time() - start
+            logger.warning(
+                "statement_id=%s did not become visible after %.1fs (%d polls, timeout=%ds)",
+                statement_id, elapsed, poll_count, timeout_seconds,
+            )
             return False
         time.sleep(poll_interval)
 
