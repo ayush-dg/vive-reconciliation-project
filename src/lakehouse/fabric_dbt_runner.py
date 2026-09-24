@@ -146,7 +146,8 @@ def _ensure_local_profile() -> None:
 
 
 def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300,
-                          expected_lines: int = None, expected_fields: int = None) -> bool:
+                          expected_lines: int = None, expected_fields: int = None,
+                          skip_wait: bool = False) -> bool:
     """Runs `dbt run --vars '{"statement_id": "..."}'` scoped to one
     statement. Returns True on success, False otherwise (missing config,
     missing dbt executable, staging data never became visible, non-zero
@@ -154,16 +155,42 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300,
 
     expected_lines/expected_fields (the counts scripts/run_full_pipeline.py's
     caller just wrote to bronze.unnested_statement_lines/_fields): when both
-    given, polls wait_for_visibility() first -- the same read-after-write
-    race confirmed real 2026-09-18 (see that function's own docstring) and
-    already guarded against on the (now-dead) silver_silver path, just never
-    wired into this, the actual pipeline's own dbt trigger, until now. A
-    dbt run triggered immediately after a fresh Bronze write can otherwise
-    silently see 0 rows for this statement_id and "succeed" having written
-    nothing -- exit 0, no error, but silver.statement/statement_line end up
-    empty and matching then reports "no_silver_statement". Left optional
-    (None skips the wait, original behavior) so any other/future caller
-    that doesn't have these counts handy isn't forced to supply them.
+    given AND skip_wait is False, polls wait_for_visibility() first -- the
+    same read-after-write race confirmed real 2026-09-18 (see that
+    function's own docstring) and already guarded against on the (now-dead)
+    silver_silver path, just never wired into this, the actual pipeline's
+    own dbt trigger, until now. A dbt run triggered immediately after a
+    fresh Bronze write can otherwise silently see 0 rows for this
+    statement_id and "succeed" having written nothing -- exit 0, no error,
+    but silver.statement/statement_line end up empty and matching then
+    reports "no_silver_statement". Left optional (None skips the wait,
+    original behavior) so any other/future caller that doesn't have these
+    counts handy isn't forced to supply them.
+
+    skip_wait (2026-09-24): set True when the CALLER has already confirmed
+    visibility itself before acquiring fabric_pipeline_lock() -- see
+    scripts/run_full_pipeline.py, which now calls wait_for_visibility()
+    ahead of the lock rather than this function calling it from inside the
+    lock. wait_for_visibility() is a read-only poll (SELECT COUNT(*)
+    against bronze.raw_statement/unnested_statement_lines/_fields) with no
+    write, no shared-file mutation, and no dbt-project-directory
+    interaction -- it isn't part of what fabric_pipeline_lock() (see its
+    own docstring, commit 1fc5c1a) actually protects: that lock exists for
+    _regenerate_sources_yml()'s shared-file rewrite, `dbt run`'s shared
+    target/ compiled-artifacts state, and run_fabric_matching()'s own
+    Fabric connections colliding with another job's. None of those are
+    touched by the wait. Moving it outside the lock mirrors the pattern
+    run_dbt_silver_silver_build() below already uses for its own wait, and
+    lets concurrent jobs' waits overlap instead of serializing behind each
+    other -- confirmed via a real 6-file concurrent production test
+    2026-09-24: ~536.6s total batch time with waits overlapping, vs. an
+    estimated ~704s under the old fully-serialized behavior using the same
+    measured per-file wait/dbt costs (~24% reduction), zero new errors, and
+    the dbt run itself still correctly serialized (no overlapping dbt-run
+    windows observed). This parameter exists so run_dbt_silver_build()
+    remains independently usable (its own default behavior, waiting
+    internally, is unchanged) while letting run_full_pipeline.py opt into
+    the non-serializing order.
     """
     if not _fabric_configured():
         logger.debug("Fabric not configured -- skipping dbt Silver build")
@@ -180,7 +207,7 @@ def run_dbt_silver_build(statement_id: str, timeout_seconds: int = 300,
         print(f"    Fabric Silver build reason: dbt executable not found at {dbt_executable}")
         return False
 
-    if expected_lines is not None and expected_fields is not None:
+    if not skip_wait and expected_lines is not None and expected_fields is not None:
         from src.lakehouse.bronze_unnest import wait_for_visibility
         if not wait_for_visibility(statement_id, expected_lines, expected_fields):
             logger.warning(

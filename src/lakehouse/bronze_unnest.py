@@ -222,15 +222,27 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
     counts, False if timeout_seconds elapses first (caller should treat
     False as "skip this dbt run" -- better than triggering it against
     data that isn't there yet). Never raises: a transient query failure
-    during polling is treated the same as "not visible yet.\""""
+    during polling is treated the same as "not visible yet."
+
+    Logs elapsed time and poll count on both success and timeout (INFO/
+    WARNING) -- added 2026-09-24 alongside moving the caller's wait_for_
+    visibility() call outside fabric_pipeline_lock() (see
+    run_dbt_silver_build()'s skip_wait docstring and
+    scripts/run_full_pipeline.py's call site). Previously this returned
+    silently either way, which made it impossible to see from logs alone
+    how much of a job's time this step actually cost -- worth knowing now
+    that waits can run concurrently across jobs instead of serializing."""
     if expected_lines <= 0 and expected_fields <= 0:
         return False
 
     from src.lakehouse.fabric_sql import get_lakehouse_connection
     import time
 
-    deadline = time.time() + timeout_seconds
+    _start = time.time()
+    _poll_count = 0
+    deadline = _start + timeout_seconds
     while True:
+        _poll_count += 1
         try:
             conn = get_lakehouse_connection()
             cur = conn.cursor()
@@ -241,11 +253,19 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
             cur.execute("SELECT COUNT(*) FROM bronze.unnested_statement_fields WHERE statement_id = ?", [statement_id])
             fields_ok = cur.fetchone()[0] >= expected_fields
             if raw_ok and lines_ok and fields_ok:
+                logger.info(
+                    "statement_id=%s became visible after %.1fs (%d polls)",
+                    statement_id, time.time() - _start, _poll_count,
+                )
                 return True
         except Exception:
             logger.debug("wait_for_visibility query failed for statement_id=%s (treated as not-yet-visible)", statement_id, exc_info=True)
 
         if time.time() >= deadline:
+            logger.warning(
+                "statement_id=%s did not become visible after %.1fs (%d polls, timeout=%ds)",
+                statement_id, time.time() - _start, _poll_count, timeout_seconds,
+            )
             return False
         time.sleep(poll_interval)
 

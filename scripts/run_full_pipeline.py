@@ -111,18 +111,46 @@ def main():
     # -- Phase 2 (Matching) below still runs against the existing
     # Silver/Gold tables regardless. See src/lakehouse/fabric_dbt_runner.py.
     #
-    # Both this and NetSuite matching below run under one cross-process
-    # lock (fabric_pipeline_lock() -- see its own docstring for why a plain
+    # The dbt run + NetSuite matching below run under one cross-process lock
+    # (fabric_pipeline_lock() -- see its own docstring for why a plain
     # threading.Lock() doesn't work: each job's pipeline is a separate
     # subprocess, not a thread). Every job's Fabric-touching work is
     # serialized process-wide; extraction above is unaffected and still
     # runs concurrently across the worker pool.
+    #
+    # wait_for_visibility() is called HERE, BEFORE the lock, not inside
+    # run_dbt_silver_build() (2026-09-24) -- it's a read-only poll with no
+    # write, no shared-file mutation, and no dbt-project-directory
+    # interaction, so it isn't part of what fabric_pipeline_lock() actually
+    # protects (see run_dbt_silver_build()'s skip_wait docstring, and
+    # fabric_pipeline_lock()'s own docstring / commit 1fc5c1a, for exactly
+    # what that lock guards: sources.yml/target/ mutation during dbt run,
+    # and matching's own Fabric connections colliding -- neither applies to
+    # this poll). Doing the wait out here lets concurrent jobs' waits
+    # overlap instead of each one serializing behind the last, while the
+    # dbt run + matching -- the genuinely racy part -- stay locked exactly
+    # as before. Confirmed via a real 6-file concurrent production test
+    # 2026-09-24: waits measurably overlapped (multiple jobs' visibility
+    # polls resolved within the same second of each other), zero new
+    # errors, dbt runs still correctly serialized, ~24% reduction in total
+    # batch time (~536.6s measured vs. ~704s estimated under the old
+    # fully-serialized order, using the same real per-file measurements).
+    _expected_lines = intake_result.get("unnested_lines_written")
+    _expected_fields = intake_result.get("unnested_fields_written")
+    _visible = True
+    if _expected_lines is not None and _expected_fields is not None:
+        from src.lakehouse.bronze_unnest import wait_for_visibility
+        _visible = wait_for_visibility(statement_id, _expected_lines, _expected_fields)
+        if not _visible:
+            print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
+
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
     with fabric_pipeline_lock():
-        if run_dbt_silver_build(
+        if _visible and run_dbt_silver_build(
             statement_id,
-            expected_lines=intake_result.get("unnested_lines_written"),
-            expected_fields=intake_result.get("unnested_fields_written"),
+            expected_lines=_expected_lines,
+            expected_fields=_expected_fields,
+            skip_wait=True,
         ):
             print(f"    Fabric Silver build: OK")
 
