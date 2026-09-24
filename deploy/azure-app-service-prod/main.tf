@@ -226,6 +226,11 @@ resource "azurerm_linux_web_app" "app" {
     AZURE_SQL_USERNAME = azurerm_mssql_server.sql.administrator_login
     AZURE_SQL_PASSWORD = random_password.sql_admin.result
 
+    # TEMPORARY (see variable's own description) -- faster extraction at
+    # the cost of the read-after-write race wait_for_visibility() guards
+    # against. Flip skip_fabric_visibility_wait back to false to restore.
+    SKIP_FABRIC_VISIBILITY_WAIT = var.skip_fabric_visibility_wait ? "true" : "false"
+
     # Existing Claude key/endpoint reused -- no new Foundry account here.
     AZURE_CLAUDE_API_KEY           = var.claude_api_key
     AZURE_CLAUDE_ENDPOINT          = var.claude_endpoint

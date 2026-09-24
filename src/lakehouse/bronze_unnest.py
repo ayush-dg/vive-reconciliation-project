@@ -223,6 +223,14 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
     False as "skip this dbt run" -- better than triggering it against
     data that isn't there yet). Never raises: a transient query failure
     during polling is treated the same as "not visible yet.\""""
+    # TEMPORARY (2026-09-23): skip the wait entirely for faster extraction,
+    # at the cost of reintroducing the exact read-after-write race this
+    # function exists to guard against (a dbt run just after this could
+    # silently see 0 rows and build nothing). Unset/remove this to restore
+    # the real wait.
+    if os.getenv("SKIP_FABRIC_VISIBILITY_WAIT", "").strip().lower() == "true":
+        return True
+
     if expected_lines <= 0 and expected_fields <= 0:
         return False
 

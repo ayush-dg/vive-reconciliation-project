@@ -62,8 +62,21 @@ seeds:
         effective_start: date
         effective_end: date
         is_active: bit
+        # prefix_pattern is blank for most rows (only CVW/ISW/MAW-style
+        # rows added 2026-09-21 populate it) -- same blank-column
+        # mis-inference as effective_end above, guessed `int` instead of
+        # a string, confirmed 2026-09-23 against a fresh Fabric Warehouse
+        # ("Conversion failed ... converting 'CVW' to data type int").
+        prefix_pattern: varchar(20)
     vendor_line_selection_rule:
       +column_types:
         effective_start: date
         effective_end: date
         is_active: bit
+        # primary_code widened to a pipe-separated list (e.g.
+        # "60 35|65 35|66 35", 2026-09-23, see vendor_line_selection_rule.csv's
+        # own note) -- longer than what inference guessed from the
+        # mostly-short/empty values in other rows, confirmed 2026-09-23
+        # against a fresh Fabric Warehouse ("String or binary data would
+        # be truncated").
+        primary_code: varchar(50)

@@ -43,6 +43,12 @@ variable "app_service_sku" {
   default     = "B1"
 }
 
+variable "skip_fabric_visibility_wait" {
+  description = "TEMPORARY (2026-09-23): when true, sets SKIP_FABRIC_VISIBILITY_WAIT=true so src/lakehouse/bronze_unnest.py's wait_for_visibility() short-circuits -- faster extraction, but reintroduces the read-after-write race that function exists to guard against (a dbt run right after a Bronze write can silently see 0 rows). Flip back to false to restore the real wait."
+  type        = bool
+  default     = false
+}
+
 variable "app_service_location" {
   description = "Region for the App Service Plan and Web App. West US 2, matching vivecollision-plan."
   type        = string
