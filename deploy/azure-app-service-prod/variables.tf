@@ -49,6 +49,19 @@ variable "skip_fabric_visibility_wait" {
   default     = false
 }
 
+variable "admin_email" {
+  description = "Email for the first admin login (scripts/create_admin.py). Passed through to the web app's own app settings (ADMIN_EMAIL) so the credential lives in Azure config, not hardcoded in git -- see that script's 2026-09-24 fix note. Not read by the running app itself at request time, only by create_admin.py when run manually (locally, or via az webapp ssh/Kudu exec against this App Service, which picks these up automatically from the container's own environment)."
+  type        = string
+  default     = ""
+}
+
+variable "admin_password" {
+  description = "Password for the first admin login (scripts/create_admin.py) -- see admin_email's description for the same rationale/usage."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "app_service_location" {
   description = "Region for the App Service Plan and Web App. West US 2, matching vivecollision-plan."
   type        = string
@@ -74,9 +87,15 @@ variable "function_plan_location" {
 }
 
 variable "docker_image_tag" {
-  description = "Tag of the vive-reconciliation image in ACR to deploy."
+  description = "Tag of the vive-reconciliation image in ACR to deploy. Ignored if docker_image_digest is set."
   type        = string
   default     = "latest"
+}
+
+variable "docker_image_digest" {
+  description = "Optional specific image digest (e.g. \"sha256:b17c7314...\", from `az acr repository show-manifests`) to pin the deployed image to, instead of the mutable docker_image_tag. Takes precedence over docker_image_tag when non-empty. Exists so a rollback (or any pin to a known-good build) is a tracked Terraform change, not an out-of-band `az webapp config container set` that the next unrelated apply would silently revert -- confirmed real 2026-09-24: an admin-credential app_settings change alone reverted a manual image rollback back to :latest, since Terraform treats the whole app_settings/site_config as one unit. Clear back to \"\" to resume tracking docker_image_tag (normally \"latest\")."
+  type        = string
+  default     = ""
 }
 
 variable "sql_admin_client_ip" {

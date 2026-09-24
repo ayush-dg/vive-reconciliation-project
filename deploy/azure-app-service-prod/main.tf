@@ -209,7 +209,10 @@ resource "azurerm_linux_web_app" "app" {
     app_command_line = "sh /app/deploy/azure-app-service-prod/container-start.sh"
 
     application_stack {
-      docker_image_name        = "vive-reconciliation:${var.docker_image_tag}"
+      # Pinned to a specific digest when docker_image_digest is set (see
+      # its own variable description for why) -- otherwise tracks
+      # docker_image_tag (normally "latest").
+      docker_image_name        = var.docker_image_digest != "" ? "vive-reconciliation@${var.docker_image_digest}" : "vive-reconciliation:${var.docker_image_tag}"
       docker_registry_url      = "https://${azurerm_container_registry.acr.login_server}"
       docker_registry_username = azurerm_container_registry.acr.admin_username
       docker_registry_password = azurerm_container_registry.acr.admin_password
@@ -225,6 +228,15 @@ resource "azurerm_linux_web_app" "app" {
     AZURE_SQL_DATABASE = azurerm_mssql_database.sql.name
     AZURE_SQL_USERNAME = azurerm_mssql_server.sql.administrator_login
     AZURE_SQL_PASSWORD = random_password.sql_admin.result
+
+    # For scripts/create_admin.py -- not read by the running app itself,
+    # only picked up when that script is run manually against this App
+    # Service (locally with these values passed explicitly, or from
+    # inside the container via az webapp ssh/Kudu exec, where app
+    # settings are already real environment variables). Lives here so the
+    # credential is in Azure config, never hardcoded in git.
+    ADMIN_EMAIL    = var.admin_email
+    ADMIN_PASSWORD = var.admin_password
 
     # TEMPORARY (see variable's own description) -- faster extraction at
     # the cost of the read-after-write race wait_for_visibility() guards
