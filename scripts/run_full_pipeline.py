@@ -111,17 +111,30 @@ def main():
     # -- Phase 2 (Matching) below still runs against the existing
     # Silver/Gold tables regardless. See src/lakehouse/fabric_dbt_runner.py.
     #
-    # wait_for_visibility() below runs BEFORE fabric_pipeline_lock() is
-    # acquired, not inside it (moved 2026-09-24) -- it's a read-only poll
-    # against the Lakehouse SQL endpoint, touching none of the shared
-    # dbt/Fabric state the lock protects, so serializing it too just
-    # queued concurrent jobs' waits behind each other on top of the
-    # genuinely-racy part. Only the dbt run + NetSuite matching below need
-    # fabric_pipeline_lock() (a real cross-process mutex -- see its own
-    # docstring for why a plain threading.Lock() doesn't work: each job's
-    # pipeline is a separate subprocess, not a thread). Extraction above
-    # is unaffected either way and still runs concurrently across the
-    # worker pool.
+    # The dbt run + NetSuite matching below run under one cross-process lock
+    # (fabric_pipeline_lock() -- see its own docstring for why a plain
+    # threading.Lock() doesn't work: each job's pipeline is a separate
+    # subprocess, not a thread). Every job's Fabric-touching work is
+    # serialized process-wide; extraction above is unaffected and still
+    # runs concurrently across the worker pool.
+    #
+    # wait_for_visibility() is called HERE, BEFORE the lock, not inside
+    # run_dbt_silver_build() (2026-09-24) -- it's a read-only poll with no
+    # write, no shared-file mutation, and no dbt-project-directory
+    # interaction, so it isn't part of what fabric_pipeline_lock() actually
+    # protects (see run_dbt_silver_build()'s skip_wait docstring, and
+    # fabric_pipeline_lock()'s own docstring / commit 1fc5c1a, for exactly
+    # what that lock guards: sources.yml/target/ mutation during dbt run,
+    # and matching's own Fabric connections colliding -- neither applies to
+    # this poll). Doing the wait out here lets concurrent jobs' waits
+    # overlap instead of each one serializing behind the last, while the
+    # dbt run + matching -- the genuinely racy part -- stay locked exactly
+    # as before. Confirmed via a real 6-file concurrent production test
+    # 2026-09-24: waits measurably overlapped (multiple jobs' visibility
+    # polls resolved within the same second of each other), zero new
+    # errors, dbt runs still correctly serialized, ~24% reduction in total
+    # batch time (~536.6s measured vs. ~704s estimated under the old
+    # fully-serialized order, using the same real per-file measurements).
     #
     # Note: this statement's bronze.raw_statement row was already promoted
     # out of staging into the real table back in Phase 1 (see
@@ -132,35 +145,39 @@ def main():
     # same table; the wait below is a separate, unrelated concern -- it
     # confirms the Lakehouse SQL endpoint has caught up with that already-
     # promoted row before dbt queries it, not a lock/collision issue at all.
-    expected_lines = intake_result.get("unnested_lines_written")
-    expected_fields = intake_result.get("unnested_fields_written")
-    visibility_confirmed = True
-    if expected_lines is not None and expected_fields is not None:
+    _expected_lines = intake_result.get("unnested_lines_written")
+    _expected_fields = intake_result.get("unnested_fields_written")
+    _visible = True
+    if _expected_lines is not None and _expected_fields is not None:
         from src.lakehouse.bronze_unnest import wait_for_visibility
-        visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)
-        if not visibility_confirmed:
+        _visible = wait_for_visibility(statement_id, _expected_lines, _expected_fields)
+        if not _visible:
             print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
 
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
-    if visibility_confirmed:
-        with fabric_pipeline_lock():
-            if run_dbt_silver_build(statement_id):
-                print(f"    Fabric Silver build: OK")
+    with fabric_pipeline_lock():
+        if _visible and run_dbt_silver_build(
+            statement_id,
+            expected_lines=_expected_lines,
+            expected_fields=_expected_fields,
+            skip_wait=True,
+        ):
+            print(f"    Fabric Silver build: OK")
 
-                # NetSuite matching -- additive, only meaningful once Silver exists
-                # for this statement, so nested under the build succeeding. Writes
-                # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
-                # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
-                # same as everything else here.
-                from src.matching.fabric_matching import run_fabric_matching
-                match_result = run_fabric_matching(statement_id)
-                if "error" in match_result or match_result.get("skipped"):
-                    print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
-                else:
-                    print(f"    NetSuite matching: {match_result['matched']} matched, "
-                          f"{match_result['exceptions']} exceptions")
+            # NetSuite matching -- additive, only meaningful once Silver exists
+            # for this statement, so nested under the build succeeding. Writes
+            # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
+            # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
+            # same as everything else here.
+            from src.matching.fabric_matching import run_fabric_matching
+            match_result = run_fabric_matching(statement_id)
+            if "error" in match_result or match_result.get("skipped"):
+                print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
             else:
-                print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+                print(f"    NetSuite matching: {match_result['matched']} matched, "
+                      f"{match_result['exceptions']} exceptions")
+        else:
+            print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
 
     if intake_result.get("bronze_count", 0) == 0:
         print(f"\n{'#'*65}")
