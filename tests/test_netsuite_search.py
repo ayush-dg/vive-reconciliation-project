@@ -27,6 +27,7 @@ from src.matching import netsuite_search
 from src.matching.netsuite_search import (
     BILL_TABLE,
     CREDIT_TABLE,
+    MIN_INVOICE_SEARCH_CHARS,
     amount_bounds,
     build_conditions,
     escape_like,
@@ -174,8 +175,9 @@ class TestEscapeLike(unittest.TestCase):
 
 
 class TestGuardrail(unittest.TestCase):
-    """No vendor and no amount would scan all 1.37M bill rows and return
-    an arbitrary slice -- refused before any query is issued."""
+    """No vendor, no amount and no usable invoice fragment would scan all
+    1.37M bill rows and return an arbitrary slice -- refused before any
+    query is issued."""
 
     ENV = {
         "FABRIC_TENANT_ID": "t", "FABRIC_CLIENT_ID": "c",
@@ -183,10 +185,16 @@ class TestGuardrail(unittest.TestCase):
         "FABRIC_LAKEHOUSE_NAME": "lh",
     }
 
-    def test_no_vendor_and_no_amount_runs_no_query(self):
+    def _run(self, **kwargs):
+        """Runs a search with the Fabric call mocked out, and reports
+        whether a query was actually issued."""
         with mock.patch.dict(os.environ, self.ENV), \
-             mock.patch.object(netsuite_search, "execute_lakehouse_query") as q:
-            result = search_open_ap(entity_ids=None, amount=None)
+             mock.patch.object(netsuite_search, "execute_lakehouse_query", return_value=[]) as q:
+            result = search_open_ap(**kwargs)
+        return result, q
+
+    def test_no_vendor_no_amount_no_invoice_runs_no_query(self):
+        result, q = self._run(entity_ids=None, amount=None)
         q.assert_not_called()
         self.assertTrue(result["needs_filter"])
         self.assertFalse(result["error"])
@@ -195,30 +203,86 @@ class TestGuardrail(unittest.TestCase):
     def test_amount_with_any_tolerance_still_counts_as_no_amount(self):
         """"Any amount" removes the amount predicate entirely, so it does
         not satisfy the guardrail on its own."""
-        with mock.patch.dict(os.environ, self.ENV), \
-             mock.patch.object(netsuite_search, "execute_lakehouse_query") as q:
-            result = search_open_ap(amount=195.65, amount_tolerance="any")
+        result, q = self._run(amount=195.65, amount_tolerance="any")
         q.assert_not_called()
         self.assertTrue(result["needs_filter"])
 
     def test_amount_alone_is_enough_to_run(self):
-        with mock.patch.dict(os.environ, self.ENV), \
-             mock.patch.object(netsuite_search, "execute_lakehouse_query", return_value=[]) as q:
-            result = search_open_ap(amount=195.65)
+        result, q = self._run(amount=195.65)
         self.assertTrue(q.called)
         self.assertFalse(result["needs_filter"])
 
     def test_vendor_alone_is_enough_to_run(self):
-        with mock.patch.dict(os.environ, self.ENV), \
-             mock.patch.object(netsuite_search, "execute_lakehouse_query", return_value=[]) as q:
-            result = search_open_ap(entity_ids=["12203"])
+        result, q = self._run(entity_ids=["12203"])
         self.assertTrue(q.called)
         self.assertFalse(result["needs_filter"])
 
+
+class TestInvoiceOnlyGuardrail(unittest.TestCase):
+    """A long-enough invoice fragment narrows a search on its own: hunting
+    a specific number with no vendor and no amount is exactly the "was
+    this booked under some other vendor?" case the panel exists for.
+    Confirmed live that a real 8-character number answers in ~2.8s.
+    """
+
+    ENV = TestGuardrail.ENV
+    _run = TestGuardrail._run
+
+    def test_four_char_invoice_alone_is_enough_to_run(self):
+        result, q = self._run(entity_ids=None, amount=None,
+                              amount_tolerance="any", invoice_contains="900C")
+        self.assertTrue(q.called)
+        self.assertFalse(result["needs_filter"])
+
+    def test_three_char_invoice_alone_is_refused(self):
+        """The 3-vs-4 boundary: "900" matches a large fraction of 1.37M
+        tranids, which is the unscoped scan the guardrail prevents."""
+        result, q = self._run(entity_ids=None, amount=None,
+                              amount_tolerance="any", invoice_contains="900")
+        q.assert_not_called()
+        self.assertTrue(result["needs_filter"])
+
+    def test_boundary_is_exactly_min_invoice_search_chars(self):
+        """Pinned against the constant rather than the literal 4, so the
+        threshold and its tests cannot drift apart."""
+        just_under = "x" * (MIN_INVOICE_SEARCH_CHARS - 1)
+        just_over = "x" * MIN_INVOICE_SEARCH_CHARS
+        _, q_under = self._run(amount_tolerance="any", invoice_contains=just_under)
+        q_under.assert_not_called()
+        _, q_over = self._run(amount_tolerance="any", invoice_contains=just_over)
+        self.assertTrue(q_over.called)
+
+    def test_whitespace_does_not_count_toward_the_minimum(self):
+        """"  90  " is two real characters padded to six -- it must not
+        pass on the strength of its spaces."""
+        result, q = self._run(amount_tolerance="any", invoice_contains="  90  ")
+        q.assert_not_called()
+        self.assertTrue(result["needs_filter"])
+
+    def test_long_invoice_still_runs_with_include_paid(self):
+        """The case that actually answers the demo question: the invoice
+        is in NetSuite but already Paid In Full, so it is only reachable
+        with include_paid on."""
+        result, q = self._run(entity_ids=None, amount=None, amount_tolerance="any",
+                              invoice_contains="900CC752", include_paid=True)
+        self.assertTrue(q.called)
+        self.assertFalse(result["needs_filter"])
+
+    def test_short_invoice_with_a_vendor_is_fine(self):
+        """The length rule only governs whether the fragment can stand
+        ALONE -- with a vendor scoping the search, any length is fine."""
+        result, q = self._run(entity_ids=["12203"], amount_tolerance="any",
+                              invoice_contains="90")
+        self.assertTrue(q.called)
+        self.assertFalse(result["needs_filter"])
+
+    def test_refusal_message_names_the_invoice_option(self):
+        result, _ = self._run(amount_tolerance="any", invoice_contains="90")
+        self.assertIn(str(MIN_INVOICE_SEARCH_CHARS), result["message"])
+        self.assertIn("invoice", result["message"].lower())
+
     def test_unknown_tolerance_is_rejected_without_querying(self):
-        with mock.patch.dict(os.environ, self.ENV), \
-             mock.patch.object(netsuite_search, "execute_lakehouse_query") as q:
-            result = search_open_ap(entity_ids=["1"], amount_tolerance="nonsense")
+        result, q = self._run(entity_ids=["1"], amount_tolerance="nonsense")
         q.assert_not_called()
         self.assertTrue(result["error"])
 

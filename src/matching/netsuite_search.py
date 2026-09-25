@@ -255,11 +255,33 @@ def _trandate_sort_key(row):
     return date.min
 
 
-def _needs_narrowing(entity_ids, bounds) -> bool:
-    """A search with neither a vendor nor an amount would scan all 1.37M
-    bill rows and return a meaningless slice of them. Refused before any
-    query runs."""
-    return not entity_ids and not bounds
+# An invoice fragment this long or longer is selective enough to stand on
+# its own as the only filter. Shorter than this it is not: "12" matches a
+# large fraction of 1.37M tranids, which is the unscoped scan the
+# guardrail exists to prevent. Counted on non-space characters so a
+# padded "  12  " can't pass by virtue of its whitespace.
+MIN_INVOICE_SEARCH_CHARS = 4
+
+
+def _is_selective_invoice(invoice_contains) -> bool:
+    """True when invoice_contains is specific enough to be the ONLY
+    filter on a search."""
+    if not invoice_contains:
+        return False
+    return len("".join(str(invoice_contains).split())) >= MIN_INVOICE_SEARCH_CHARS
+
+
+def _needs_narrowing(entity_ids, bounds, invoice_contains=None) -> bool:
+    """A search with no vendor, no amount and no usable invoice fragment
+    would scan all 1.37M bill rows and return a meaningless slice of
+    them. Refused before any query runs.
+
+    A long-enough invoice fragment counts as narrowing on its own: an AP
+    user hunting a specific number ("was this booked anywhere at all?")
+    legitimately has neither a vendor nor an amount to offer, and that is
+    exactly the "entered under a different vendor" case this panel
+    exists for."""
+    return not entity_ids and not bounds and not _is_selective_invoice(invoice_contains)
 
 
 def _empty_result(**extra) -> dict:
@@ -285,10 +307,14 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
         return _empty_result(error=True, message="NetSuite search is not configured.")
 
     bounds = amount_bounds(amount, amount_tolerance)
-    if _needs_narrowing(entity_ids, bounds):
+    if _needs_narrowing(entity_ids, bounds, invoice_contains):
         return _empty_result(
             needs_filter=True,
-            message="Add a vendor or an amount to search — searching all of NetSuite at once isn't possible.",
+            message=(
+                "Add a vendor, an amount, or at least "
+                f"{MIN_INVOICE_SEARCH_CHARS} characters of an invoice number — "
+                "searching all of NetSuite at once isn't possible."
+            ),
         )
 
     try:
