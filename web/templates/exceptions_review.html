@@ -82,7 +82,7 @@
     </div>
     <div class="detail-view-sub">
       <span>
-        Raised {{ selected.date_raised | friendly_date }}
+        Raised {{ selected.date_raised | friendly_dt }}
         {% if selected.days_open is not none %}
         <span class="badge {{ 'badge-aged' if selected.days_open >= 30 else 'badge-neutral' }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
         {% endif %}

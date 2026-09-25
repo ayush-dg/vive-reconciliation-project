@@ -8,8 +8,9 @@ context (open exceptions count, shown as the nav-dot on "Exceptions").
 
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
@@ -185,13 +186,29 @@ def friendly_date(value):
         return text
 
 
-IST = timezone(timedelta(hours=5, minutes=30))
+# America/New_York, NOT a fixed UTC-5 offset: Eastern observes DST, so a
+# fixed offset would render every timestamp an hour early for the ~8
+# months a year the zone is on EDT (UTC-4). ZoneInfo needs the tzdata
+# package on Windows dev machines (Linux uses the system tz database) --
+# see requirements.txt.
+EASTERN = ZoneInfo("America/New_York")
 
 
-def friendly_dt(iso_str):
+def friendly_dt(iso_str, now=None):
     """All timestamps are stored as UTC (see queries.py/resolve_exception
-    etc., which write datetime.now(timezone.utc).isoformat()) — this
-    converts to IST for display, since that's the app's audience."""
+    etc., which write datetime.now(timezone.utc).isoformat()) -- this
+    converts to US Eastern for display, since VIVE's AP team (this app's
+    audience) works in that zone. The rendered string is suffixed " ET"
+    because the app is also viewed from India, where an unlabelled local
+    time would be read as IST.
+
+    Accepts either an ISO8601 string or a native datetime object (Azure
+    SQL/Fabric DATETIME2 columns come back already parsed -- see
+    queries._parse_datetime() for the same split). A naive value is
+    treated as UTC, matching how every writer in this app produces them.
+
+    now is injectable for deterministic tests only; production callers
+    (the Jinja filter) always pass a single argument and get real time."""
     if not iso_str:
         return "—"
     try:
@@ -200,11 +217,15 @@ def friendly_dt(iso_str):
         return str(iso_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    dt = dt.astimezone(IST)
-    now = datetime.now(timezone.utc).astimezone(IST)
+    dt = dt.astimezone(EASTERN)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now = now.astimezone(EASTERN)
     hour12 = dt.hour % 12 or 12
     ampm = "AM" if dt.hour < 12 else "PM"
-    time_part = f"{hour12}:{dt.minute:02d} {ampm}"
+    time_part = f"{hour12}:{dt.minute:02d} {ampm} ET"
     if dt.date() == now.date():
         return f"Today, {time_part}"
     return f"{dt.strftime('%b %d, %Y')}, {time_part}"
