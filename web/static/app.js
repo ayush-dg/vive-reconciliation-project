@@ -81,4 +81,41 @@ document.addEventListener("DOMContentLoaded", function () {
       })
       .catch(function () {});
   }
+
+  // Exceptions review page: the "Search NetSuite" open-AP panel. Fetches
+  // an HTML fragment from /netsuite-search and swaps it into the results
+  // div, so relaxing a filter never reloads the exception under review.
+  // The route deliberately sits OUTSIDE /exceptions/, which is a
+  // {vendor_name:path} catch-all that would otherwise swallow it.
+  const nsForm = document.getElementById("nsSearchForm");
+  if (nsForm) {
+    const nsResults = document.getElementById("nsSearchResults");
+
+    function runNetsuiteSearch() {
+      const params = new URLSearchParams({
+        vendor_id: nsForm.dataset.vendorId || "",
+        vendor_name: nsForm.dataset.vendorName || "",
+        use_vendor: document.getElementById("nsUseVendor").checked,
+        amount: document.getElementById("nsAmount").value,
+        tolerance: document.getElementById("nsTolerance").value,
+        invoice_contains: document.getElementById("nsInvoice").value,
+        include_paid: document.getElementById("nsIncludePaid").checked
+      });
+      nsResults.innerHTML = '<div class="empty-state">Searching…</div>';
+      fetch("/netsuite-search?" + params.toString())
+        .then(function (r) { return r.text(); })
+        .then(function (html) { nsResults.innerHTML = html; })
+        .catch(function () {
+          nsResults.innerHTML =
+            '<div class="empty-state">NetSuite search is unavailable right now.</div>';
+        });
+    }
+
+    document.getElementById("nsSearchBtn")
+      .addEventListener("click", runNetsuiteSearch);
+    // One automatic run on load with the filters pre-filled from the
+    // exception, so the panel opens on the tightest sensible search
+    // rather than an empty box the user has to prime themselves.
+    runNetsuiteSearch();
+  }
 });

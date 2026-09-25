@@ -1,0 +1,55 @@
+{# Results fragment for the exception review page's "Search NetSuite"
+   panel -- returned on its own by GET /netsuite-search and swapped into
+   #nsSearchResults, so searching never reloads the exception under
+   review. Rendered standalone: it extends nothing and must not assume
+   any variable beyond `result` (always present) and `last_sync`. #}
+
+{% if result.error %}
+<div class="empty-state">{{ result.message or "NetSuite search is unavailable right now." }}</div>
+
+{% elif result.needs_filter %}
+<div class="empty-state">{{ result.message }}</div>
+
+{% elif not result.rows %}
+<div class="empty-state">No NetSuite bills match these filters — try loosening one.</div>
+
+{% else %}
+<div class="ns-raw-count" style="margin-top:0;margin-bottom:8px">
+  NetSuite data as of {{ last_sync | friendly_dt if last_sync else "unknown" }}
+  · {{ result.row_count }} result{{ "s" if result.row_count != 1 }}
+</div>
+<table class="table">
+  <thead>
+    <tr>
+      <th>Type</th>
+      <th>Invoice #</th>
+      <th>Vendor</th>
+      <th class="num">Amount</th>
+      <th>Date</th>
+      <th>Status</th>
+      <th>RO #</th>
+      <th>Location (code)</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in result.rows %}
+    <tr>
+      <td><span class="badge {{ 'badge-neutral' if row.record_type == 'Bill' else 'badge-aged' }}">{{ row.record_type }}</span></td>
+      <td style="font-weight:600">{{ row.tranid or "—" }}</td>
+      <td>{{ row.vendor_name }}</td>
+      {# trandate is printed raw: it is NetSuite's own M/D/YYYY business
+         date, not a system timestamp, so it is neither timezone-converted
+         nor reformatted. #}
+      <td class="num">{{ row.total | money }}</td>
+      <td style="color:var(--text-secondary)">{{ row.trandate or "—" }}</td>
+      <td style="color:var(--text-secondary)">{{ row.status_label }}</td>
+      <td style="color:var(--text-secondary)">{{ row.ro_number or "—" }}</td>
+      <td style="color:var(--text-muted)">{{ row.location_code or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if result.truncated %}
+<div class="ns-raw-count">Showing first {{ result.row_count }} — narrow your filters.</div>
+{% endif %}
+{% endif %}

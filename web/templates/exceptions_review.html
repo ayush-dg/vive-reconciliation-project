@@ -181,6 +181,65 @@
     </div>
     {% endif %}
 
+    {# Open-AP search. Sits BELOW the NetSuite record preview above and is
+       independent of it: the preview only ever appears for Amount
+       Mismatch, while this panel also covers "Not Found in NetSuite" --
+       the case where hand-searching matters most, because the shop may
+       have booked the invoice under a different vendor or number. #}
+    {% if selected.exception_reason in searchable_reasons %}
+    <div class="sec-label">Search NetSuite</div>
+    <div class="ns-panel">
+      <div class="ns-raw-count" style="margin-top:0;margin-bottom:12px">
+        Can't find this invoice? Start with the filters below and loosen them —
+        shops sometimes enter an invoice under a different vendor or number.
+      </div>
+
+      <div id="nsSearchForm"
+           data-vendor-id="{{ selected.vendor_id or '' }}"
+           data-vendor-name="{{ vendor_name }}"
+           style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px">
+
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-secondary);padding-bottom:9px">
+          <input type="checkbox" id="nsUseVendor" checked>
+          <span>Vendor: <strong style="color:var(--text)">{{ vendor_display_name }}</strong></span>
+        </label>
+
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label class="fb-label" for="nsAmount">Amount</label>
+          <input type="text" id="nsAmount" value="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}"
+                 style="width:110px;padding:8px 10px;font-size:13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label class="fb-label" for="nsTolerance">Tolerance</label>
+          <select id="nsTolerance"
+                  style="padding:8px 10px;font-size:13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
+            <option value="exact" selected>Exact</option>
+            <option value="1_dollar">&plusmn; $1</option>
+            <option value="5_percent">&plusmn; 5%</option>
+            <option value="any">Any amount</option>
+          </select>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label class="fb-label" for="nsInvoice">Invoice # contains</label>
+          <input type="text" id="nsInvoice" value="" placeholder="any"
+                 style="width:150px;padding:8px 10px;font-size:13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
+        </div>
+
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text-secondary);padding-bottom:9px">
+          <input type="checkbox" id="nsIncludePaid">
+          <span>Include paid / closed</span>
+        </label>
+
+        <button type="button" class="btn btn-primary" id="nsSearchBtn"
+                style="width:auto;padding:9px 18px;font-size:13px;margin-bottom:1px">Search</button>
+      </div>
+
+      <div id="nsSearchResults"><div class="empty-state">Searching…</div></div>
+    </div>
+    {% endif %}
+
     <div class="note-field">
       <label>Add a note <span class="field-hint">(optional)</span></label>
       <textarea rows="4" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>

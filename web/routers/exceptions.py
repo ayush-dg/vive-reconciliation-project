@@ -5,6 +5,13 @@ Exceptions vendors overview (/exceptions) and per-vendor review
 (/exceptions/{vendor_name}). Actioning an exception writes a row to
 exception_dispositions and marks the gold_exceptions row RESOLVED, then
 redirects back to the same vendor so the next open exception is shown.
+
+Also hosts GET /netsuite-search, the review page's open-AP search panel
+(read-only -- see src/matching/netsuite_search.py). That route lives at
+the top level, NOT under /exceptions/, because
+/exceptions/{vendor_name:path} is a catch-all that would otherwise
+swallow it whole (a :path converter matches slashes too, so no sub-path
+under /exceptions/ is safe from it).
 """
 
 from urllib.parse import quote, unquote
@@ -16,9 +23,20 @@ from web.deps import render, require_login, sidebar_context, smart_title, locati
 from web import queries
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
+from src.matching.netsuite_search import TOLERANCES, search_open_ap
 from src.matching.netsuite_status_codes import decode_netsuite_status
+from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 
 router = APIRouter()
+
+# The exception reasons that mean "this line did not tie out to a
+# NetSuite record", which are exactly the cases worth hand-searching for.
+# "Invoice Missing" is the legacy gold_exceptions spelling of "Not Found
+# in NetSuite" -- both kept for the same reason queries._REASON_FILTER_SQL
+# keeps both. "Vendor Not Resolved in NetSuite" is deliberately absent:
+# with no entity ids there is no vendor filter to pre-fill, so the panel
+# would open unscoped and immediately hit the no-filter guardrail.
+SEARCHABLE_REASONS = ("Not Found in NetSuite", "Invoice Missing", "Amount Mismatch")
 
 REASON_BADGE = {
     "Invoice Missing": {"label": "Missing in ERP", "css": "exception"},
@@ -199,6 +217,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
+        "searchable_reasons": SEARCHABLE_REASONS,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
@@ -271,3 +290,59 @@ def exceptions_action(vendor_name: str, request: Request, user: str = Depends(re
     )
     suffix = _filter_redirect_suffix(filter, statement_id)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
+
+
+def _parse_amount(raw):
+    """Returns (amount, error_message). An empty box is a legitimate "no
+    amount filter", not an error -- only a non-empty unparseable value is."""
+    if raw is None or str(raw).strip() == "":
+        return None, None
+    try:
+        return float(str(raw).replace(",", "").replace("$", "").strip()), None
+    except ValueError:
+        return None, f"“{raw}” isn’t a number — enter an amount like 195.65."
+
+
+def _search_entity_ids(use_vendor: bool, vendor_id: str, vendor_name: str):
+    """Entity ids for the vendor filter, or None when the user has
+    toggled the vendor filter off (the "maybe it was booked under a
+    different vendor" case this panel exists for). Uses the same
+    resolution the matching engine uses, so "vendor on" here means
+    exactly what it meant at match time."""
+    if not use_vendor:
+        return None
+    return resolve_entity_ids(vendor_id or "", vendor_name or "")
+
+
+@router.get("/netsuite-search")
+def netsuite_search(request: Request, user: str = Depends(require_login),
+                    vendor_id: str = "", vendor_name: str = "",
+                    use_vendor: bool = True, amount: str = "",
+                    tolerance: str = "exact", invoice_contains: str = "",
+                    include_paid: bool = False):
+    """Open-AP search partial for the review page's panel. Read-only:
+    nothing here writes to NetSuite, Fabric or Azure SQL.
+
+    Returns an HTML fragment rather than a full page so the panel can
+    refresh its results without reloading the exception under review."""
+    parsed_amount, amount_error = _parse_amount(amount)
+    if amount_error:
+        return render(request, "_netsuite_search_results.html",
+                      {"result": {"rows": [], "row_count": 0, "truncated": False,
+                                  "error": True, "needs_filter": False,
+                                  "message": amount_error}})
+    if tolerance not in TOLERANCES:
+        return render(request, "_netsuite_search_results.html",
+                      {"result": {"rows": [], "row_count": 0, "truncated": False,
+                                  "error": True, "needs_filter": False,
+                                  "message": "Pick one of the listed amount tolerances."}})
+
+    result = search_open_ap(
+        entity_ids=_search_entity_ids(use_vendor, vendor_id, vendor_name),
+        amount=parsed_amount,
+        amount_tolerance=tolerance,
+        invoice_contains=invoice_contains,
+        include_paid=include_paid,
+    )
+    return render(request, "_netsuite_search_results.html",
+                  {"result": result, "last_sync": queries.get_last_netsuite_sync()})
