@@ -205,13 +205,13 @@
         </label>
 
         <div style="display:flex;flex-direction:column;gap:5px">
-          <label class="fb-label" for="nsAmount">Amount</label>
+          <label class="ns-search-label" for="nsAmount">Amount</label>
           <input type="text" id="nsAmount" value="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}"
                  style="width:110px;padding:8px 10px;font-size:13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
         </div>
 
         <div style="display:flex;flex-direction:column;gap:5px">
-          <label class="fb-label" for="nsTolerance">Tolerance</label>
+          <label class="ns-search-label" for="nsTolerance">Tolerance</label>
           <select id="nsTolerance"
                   style="padding:8px 10px;font-size:13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
             <option value="exact" selected>Exact</option>
@@ -222,8 +222,8 @@
         </div>
 
         <div style="display:flex;flex-direction:column;gap:5px">
-          <label class="fb-label" for="nsInvoice">Invoice # contains</label>
-          <input type="text" id="nsInvoice" value="" placeholder="any"
+          <label class="ns-search-label" for="nsInvoice">Invoice number (full or part)</label>
+          <input type="text" id="nsInvoice" value="" placeholder="e.g. 900CC752"
                  style="width:150px;padding:8px 10px;font-size:13px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)">
         </div>
 

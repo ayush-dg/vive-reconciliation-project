@@ -560,6 +560,13 @@ select {
 .ns-raw-row .ns-raw-key { color: var(--text-faint); }
 .ns-raw-row .ns-raw-val { color: var(--text); text-align: right; word-break: break-all; }
 .ns-raw-count { font-size: 11.5px; color: var(--text-faint); margin-top: 10px; }
+/* Typography copied from `.field-box .fb-label` above, which the Search
+   NetSuite panel's filter labels can't reuse: that rule is scoped to
+   `.field-box`, and these labels sit in the filter row, not in a field
+   box. Without this they fall back to the browser default (16px, normal
+   weight), which is why they rendered large and plain. No margin-bottom
+   -- the filter columns already space label from input with `gap: 5px`. */
+.ns-search-label { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-faint); font-weight: 600; }
 .note-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
 .note-field textarea {
   width: 100%; padding: 11px 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
