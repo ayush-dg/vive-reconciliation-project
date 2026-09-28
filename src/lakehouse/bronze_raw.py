@@ -125,7 +125,18 @@ def _refresh_sql_endpoint_metadata() -> None:
     batch was the main thing making each write slow enough to cause lock
     pile-up. Call this manually after a batch if you want the table visible
     right away; otherwise the SQL endpoint's own background sync catches up
-    within its usual window. Best-effort, non-fatal."""
+    within its usual window. Best-effort, non-fatal.
+
+    2026-09-28: called again once per PDF, from
+    notebooks/01_document_intake.py right after the Bronze writes and
+    outside every lock -- the "background sync catches up within its usual
+    window" assumption above stopped holding (measured 153-258s on dev,
+    2026-09-25). The refresh is synchronous and covers every table in the
+    Lakehouse, so its own duration scales with table count: ~2.4s on prod
+    (18 tables), 23-31s on dev (470) -- hence the 120s timeout; the old 30s
+    one timed out on dev while the refresh itself still completed."""
+    if not _fabric_configured() or not os.getenv("FABRIC_SQL_ENDPOINT_ID"):
+        return
     try:
         import requests
         from azure.identity import ClientSecretCredential
@@ -138,15 +149,20 @@ def _refresh_sql_endpoint_metadata() -> None:
         token = credential.get_token("https://api.fabric.microsoft.com/.default").token
         workspace_id = os.environ["FABRIC_WORKSPACE_ID"]
         sql_endpoint_id = os.environ["FABRIC_SQL_ENDPOINT_ID"]
-        requests.post(
+        response = requests.post(
             f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
             f"/sqlEndpoints/{sql_endpoint_id}/refreshMetadata",
             headers={"Authorization": f"Bearer {token}"},
             json={},
-            timeout=30,
+            timeout=120,
         )
+        if response.status_code >= 300:
+            logger.warning(
+                "SQL endpoint metadata refresh returned HTTP %s (non-fatal): %s",
+                response.status_code, response.text[:300],
+            )
     except Exception:
-        logger.exception("Research schema SQL endpoint metadata refresh failed (non-fatal)")
+        logger.exception("SQL endpoint metadata refresh failed (non-fatal)")
 
 
 def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,

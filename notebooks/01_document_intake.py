@@ -1339,9 +1339,9 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # run_fabric_matching() use in scripts/run_full_pipeline.py, so the
     # touch on the shared table and any concurrent dbt Silver read of it
     # can never race. Done here (immediately after the write, not deferred
-    # to run_full_pipeline.py's later lock block) because
-    # run_dbt_silver_silver_build() right below reads this same table for
-    # this same statement_id and needs the row to already be there. See
+    # to run_full_pipeline.py's later lock block) so the row is already
+    # in the real table before the SQL-endpoint refresh below and dbt's
+    # Silver read in run_full_pipeline.py. See
     # src/lakehouse/bronze_raw.py's 2026-09-23 fix note and
     # promote_staged_raw_statement()'s docstring for the full rationale --
     # kept deliberately tiny (this one statement's row) so it only adds a
@@ -1354,30 +1354,35 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         record_step("promote_lock_wait", time.monotonic() - promote_lock_requested)
         with timed_step("bronze_promote"):
             promote_staged_raw_statement(statement_id)
-    # silver_silver build -- additive, mapping-driven bronze->silver test
-    # flow. Called from here, not alongside run_dbt_silver_build() in
-    # run_full_pipeline.py, because that call site is skipped entirely
-    # under RESEARCH_MODE_EXTRACTION_ONLY, while the raw dump/unnest this
-    # reads run unconditionally.
+    # write_unnested_from_invoices() explodes raw_payload into two narrow
+    # Lakehouse tables directly from this same in-memory `invoices` list
+    # (no read-back -- reading back what was just written raced its own
+    # propagation through OneLake/the SQL endpoint on 4 of 5 test vendors
+    # in an earlier version of this pipeline). dbt's Silver build
+    # (scripts/run_full_pipeline.py) reads these plus raw_statement.
     #
-    # Two steps, not one Python pivot -- see
-    # src/lakehouse/bronze_unnest.py's docstring for the full history:
-    # (1) write_unnested_from_invoices() explodes raw_payload into two
-    # narrow Lakehouse tables directly from this same in-memory `invoices`
-    # list (no read-back -- reading back what was just written raced its
-    # own propagation through OneLake/the SQL endpoint on 4 of 5 test
-    # vendors in an earlier version of this pipeline, silently building
-    # off stale/missing data). (2) run_dbt_silver_silver_build() then
-    # polls for that data's visibility before running the real dbt
-    # pivot/normalization models -- the same class of read-after-write
-    # race exists here too (confirmed 2026-09-18), just one step removed
-    # since dbt, not this Python code, is what reads it back.
+    # The run_dbt_silver_silver_build() call that used to follow was
+    # removed 2026-09-28: it ran `dbt run --select silver_silver_*` for
+    # models that were never in this repo (retired 2026-09-19), so dbt
+    # always reported "Nothing to do" -- yet it still waited for SQL-endpoint
+    # visibility, queued on its own lock and started a full dbt process,
+    # measured at 63-243s per PDF on the dev App Service.
     from src.lakehouse.bronze_unnest import write_unnested_from_invoices
-    from src.lakehouse.fabric_dbt_runner import run_dbt_silver_silver_build
     with timed_step("bronze_unnested_write"):
         lines_written, fields_written = write_unnested_from_invoices(invoices, statement_id)
-    with timed_step("silver_silver_dbt"):
-        run_dbt_silver_silver_build(statement_id, lines_written, fields_written)
+
+    # Force the Lakehouse SQL analytics endpoint to pick up the three
+    # Bronze writes above now, instead of waiting for its background
+    # metadata sync -- which dbt's reads otherwise depend on (see
+    # wait_for_visibility() in run_full_pipeline.py). Until 2026-09-21 the
+    # old per-vendor Bronze write (fabric_bronze.py) made this call as a
+    # side effect; commit 705fad9 removed that code and the refresh with
+    # it, and every PDF has since waited on the background sync instead
+    # (measured 2026-09-25: 153-258s, past the 240s timeout; ~5s to
+    # visibility after a forced refresh). Once per PDF, outside any lock.
+    from src.lakehouse.bronze_raw import _refresh_sql_endpoint_metadata
+    with timed_step("sql_endpoint_refresh"):
+        _refresh_sql_endpoint_metadata()
     if research_only:
         print(f"  [RESEARCH MODE] Extraction-only -- Bronze/Silver will be skipped for this upload.")
 
