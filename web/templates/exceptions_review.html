@@ -231,8 +231,8 @@
 
 {% if selected and selected.exception_reason in searchable_reasons %}
 {# LOOK-ONLY modal. No <form>, no action, no method, nothing that posts.
-   "Copy to note" writes into the existing note textarea on the page and
-   submits nothing. #}
+   Selecting rows only drives the footer total; resolving an exception
+   stays with the page's own Accept/Dispute/Escalate forms. #}
 <dialog class="ns-modal" id="nsModal" aria-labelledby="nsModalTitle">
   <div class="ns-modal-head">
     <div>
@@ -315,7 +315,6 @@
   <div class="ns-modal-foot">
     <div class="ns-foot-left" id="nsFootSummary"></div>
     <div class="ns-foot-right">
-      <button type="button" class="btn" id="nsCopyNote" disabled>Copy to note</button>
       <button type="button" class="btn btn-primary ns-foot-close" id="nsModalDone">Close</button>
     </div>
   </div>

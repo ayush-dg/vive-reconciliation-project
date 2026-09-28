@@ -6,7 +6,7 @@
 <title>{% block title %}VIVE Collision{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="{{ static_url('style.css') }}">
 </head>
 <body data-page="{{ active_page }}">
 <svg width="0" height="0" style="position:absolute">
@@ -79,6 +79,6 @@
     {% endblock %}
   </div>
 </div>
-<script src="/static/app.js"></script>
+<script src="{{ static_url('app.js') }}"></script>
 </body>
 </html>

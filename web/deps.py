@@ -6,6 +6,7 @@ filters registered), the login-required dependency, and the sidebar
 context (open exceptions count, shown as the nav-dot on "Exceptions").
 """
 
+import hashlib
 import os
 import re
 from datetime import datetime, timezone
@@ -268,3 +269,55 @@ templates.env.filters["friendly_date"] = friendly_date
 templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname
 templates.env.filters["smart_title"] = smart_title
+
+# ---------------------------------------------------------------------------
+# Static asset cache busting
+# ---------------------------------------------------------------------------
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# path -> (mtime_seen, short_content_hash). Keyed on mtime so a file edited
+# while the server is running (local dev) picks up a new hash on the next
+# render, without re-hashing on every single request.
+_static_versions = {}
+
+
+def static_url(path: str) -> str:
+    """"style.css" -> "/static/style.css?v=<hash>".
+
+    Exists because Starlette's StaticFiles sends `etag`/`last-modified` but
+    NO `Cache-Control`. With no Cache-Control, RFC 9111 lets a browser
+    apply *heuristic* freshness (commonly 10% of the time since
+    Last-Modified) and serve the file from cache without revalidating at
+    all -- so a deploy that changes app.js/style.css can leave users on the
+    old copy for hours with no request hitting the server. Confirmed live
+    2026-09-28: the response carried etag + last-modified and no
+    Cache-Control, and the symptom was a dead button and unstyled text
+    against a server that was serving the correct files.
+
+    The version is a hash of the file's CONTENT, not a build number, so it
+    changes exactly when the file changes -- nothing to remember to bump at
+    release time, and identical content across a redeploy keeps the same
+    URL (so the cache still does its job).
+
+    Falls back to the bare path if the file can't be read: a missing hash
+    must never take the page down."""
+    full = os.path.join(STATIC_DIR, path)
+    try:
+        mtime = os.path.getmtime(full)
+    except OSError:
+        return f"/static/{path}"
+    cached = _static_versions.get(path)
+    if cached is None or cached[0] != mtime:
+        try:
+            with open(full, "rb") as handle:
+                digest = hashlib.md5(handle.read()).hexdigest()[:10]
+        except OSError:
+            return f"/static/{path}"
+        cached = (mtime, digest)
+        _static_versions[path] = cached
+    return f"/static/{path}?v={cached[1]}"
+
+
+templates.env.globals["static_url"] = static_url
+

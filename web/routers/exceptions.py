@@ -29,27 +29,14 @@ from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 
 router = APIRouter()
 
-# Every exception reason that means "this line did not tie out to a
-# NetSuite record" -- i.e. every case worth hand-searching. "Invoice
-# Missing" is the legacy gold_exceptions spelling of "Not Found in
-# NetSuite", kept for the same reason queries._REASON_FILTER_SQL keeps
-# both.
-#
-# "Vendor Not Resolved in NetSuite" IS included now (it was excluded
-# while this was an always-open inline panel, because with no entity ids
-# it would have opened unscoped straight onto the guardrail message).
-# In a modal the user opens deliberately, that case is the one most
-# worth searching -- the vendor couldn't be resolved, so a hand search
-# by invoice number is the only route left. The modal opens it with
-# vendor OFF and the invoice number pre-filled; see the defaults in
-# web/static/app.js.
-SEARCHABLE_REASONS = (
-    "Not Found in NetSuite",
-    "Invoice Missing",
-    "Amount Mismatch",
-    "Possible Duplicate in NetSuite",
-    "Vendor Not Resolved in NetSuite",
-)
+# The exception reasons that mean "this line did not tie out to a
+# NetSuite record", which are exactly the cases worth hand-searching for.
+# "Invoice Missing" is the legacy gold_exceptions spelling of "Not Found
+# in NetSuite" -- both kept for the same reason queries._REASON_FILTER_SQL
+# keeps both. "Vendor Not Resolved in NetSuite" is deliberately absent:
+# with no entity ids there is no vendor filter to pre-fill, so the search
+# would open unscoped and immediately hit the no-filter guardrail.
+SEARCHABLE_REASONS = ("Not Found in NetSuite", "Invoice Missing", "Amount Mismatch")
 
 REASON_BADGE = {
     "Invoice Missing": {"label": "Missing in ERP", "css": "exception"},

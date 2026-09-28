@@ -85,8 +85,8 @@ document.addEventListener("DOMContentLoaded", function () {
   // Exceptions review page: the "Find in NetSuite" modal. LOOK-ONLY --
   // it GETs an HTML fragment from /netsuite-search and swaps it into the
   // results area. Nothing here POSTs, resolves an exception, or changes
-  // any record; "Copy to note" only writes text into the note textarea
-  // that already exists on the page. The endpoint deliberately sits
+  // any record -- selecting rows only feeds the footer total. The
+  // endpoint deliberately sits
   // OUTSIDE /exceptions/, which is a {vendor_name:path} catch-all that
   // would otherwise swallow it.
   const nsFindBtn = document.getElementById("nsFindBtn");
@@ -96,7 +96,6 @@ document.addEventListener("DOMContentLoaded", function () {
     const nsResults = document.getElementById("nsResults");
     const nsInvoice = document.getElementById("nsInvoice");
     const nsFoot = document.getElementById("nsFootSummary");
-    const nsCopy = document.getElementById("nsCopyNote");
     const statementAmount = parseFloat(ctx.amount || "") || null;
 
     const TOLERANCE_LABELS = {
@@ -107,29 +106,17 @@ document.addEventListener("DOMContentLoaded", function () {
       any: "Any time", 30: "Last 30 days", 90: "Last 90 days", 365: "Last 12 months"
     };
 
-    // Per-reason opening defaults. The point is that the modal opens on a
-    // useful list rather than an empty box: for a "not found" the amount
-    // is the strongest signal, so we rank by it but do not filter on it;
-    // for a suspected duplicate the invoice number is, and paid bills
-    // must be included or the duplicate it is a duplicate OF is hidden.
+    // Opening defaults. The point is that the modal lands on a useful
+    // list rather than an empty box: the statement amount is the
+    // strongest signal for a line that did not tie out, so we RANK by it
+    // (sort_amount) while leaving the amount filter wide open -- filtering
+    // to the exact amount would show an empty list for exactly the
+    // exceptions this exists to research.
     function defaultState() {
-      const reason = ctx.reason || "";
-      const base = {
+      return {
         useVendor: true, tolerance: "any", includePaid: false,
         invoice: "", range: "any", dateFrom: "", dateTo: ""
       };
-      if (reason === "Possible Duplicate in NetSuite") {
-        return Object.assign(base, { invoice: ctx.invoice || "", includePaid: true });
-      }
-      if (reason === "Vendor Not Resolved in NetSuite") {
-        const inv = (ctx.invoice || "").replace(/\s/g, "");
-        return Object.assign(base, {
-          useVendor: false,
-          invoice: inv.length >= 4 ? ctx.invoice : "",
-          tolerance: statementAmount !== null ? "exact" : "any"
-        });
-      }
-      return base;
     }
 
     let state = defaultState();
@@ -216,7 +203,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     function updateFooter() {
       const rows = selectedRows();
-      nsCopy.disabled = rows.length === 0;
       if (rows.length === 0) { nsFoot.innerHTML = ""; return; }
       let total = 0;
       rows.forEach(function (r) { total += parseFloat(r.dataset.amount) || 0; });
@@ -336,20 +322,6 @@ document.addEventListener("DOMContentLoaded", function () {
       runSearch();
     });
     document.getElementById("nsReload").addEventListener("click", runSearch);
-
-    // --- copy to note (writes into the page's existing textarea only) --
-    nsCopy.addEventListener("click", function () {
-      const note = document.querySelector(".note-field textarea");
-      if (!note) return;
-      const lines = selectedRows().map(function (r) {
-        return "Found in NetSuite: " + r.dataset.summary;
-      });
-      if (!lines.length) return;
-      note.value = (note.value ? note.value.replace(/\s*$/, "") + "\n" : "") + lines.join("\n");
-      note.dispatchEvent(new Event("input", { bubbles: true }));
-      nsCopy.textContent = "Copied";
-      setTimeout(function () { nsCopy.textContent = "Copy to note"; }, 1500);
-    });
 
     // --- open / close -------------------------------------------------
     function openModal() {

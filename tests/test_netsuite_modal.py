@@ -30,15 +30,14 @@ from web.routers.exceptions import REASON_BADGE, SEARCHABLE_REASONS
 TEMPLATE = "exceptions_review.html"
 RESULTS_PARTIAL = "_netsuite_search_results.html"
 
-# Every reason the matching engine can write (src/matching/fabric_matching.py)
-# plus the legacy gold_exceptions spelling.
-ENGINE_REASONS = (
-    "Not Found in NetSuite",
-    "Amount Mismatch",
-    "Possible Duplicate in NetSuite",
-    "Vendor Not Resolved in NetSuite",
-    "Invoice Missing",
-)
+# The reasons the Find button offers. "Vendor Not Resolved in NetSuite"
+# and "Possible Duplicate in NetSuite" are deliberately NOT here -- see
+# SEARCHABLE_REASONS in web/routers/exceptions.py for why the former is
+# excluded (no entity ids to pre-fill, so it would open straight onto the
+# guardrail message).
+SEARCHABLE = ("Not Found in NetSuite", "Invoice Missing", "Amount Mismatch")
+NOT_SEARCHABLE = ("Possible Duplicate in NetSuite", "Vendor Not Resolved in NetSuite",
+                  "EXTRACTION_INCOMPLETE", "DUPLICATE_RECORD")
 
 
 def _render(reason, **overrides):
@@ -72,26 +71,22 @@ def _render(reason, **overrides):
 
 class TestFindButtonVisibility(unittest.TestCase):
 
-    def test_button_appears_for_every_engine_written_reason(self):
-        for reason in ENGINE_REASONS:
+    def test_button_appears_for_each_searchable_reason(self):
+        for reason in SEARCHABLE:
             with self.subTest(reason=reason):
                 html = _render(reason)
                 self.assertIn('id="nsFindBtn"', html)
                 self.assertIn("Find in NetSuite", html)
 
-    def test_every_engine_reason_is_in_searchable_reasons(self):
-        """Guards against the engine gaining a reason the modal forgets."""
-        for reason in ENGINE_REASONS:
-            self.assertIn(reason, SEARCHABLE_REASONS)
+    def test_searchable_reasons_is_exactly_these_three(self):
+        self.assertEqual(tuple(SEARCHABLE_REASONS), SEARCHABLE)
 
-    def test_button_absent_for_an_unrelated_reason(self):
-        html = _render("EXTRACTION_INCOMPLETE")
-        self.assertNotIn('id="nsFindBtn"', html)
-        self.assertNotIn('id="nsModal"', html)
-
-    def test_button_absent_for_duplicate_record(self):
-        html = _render("DUPLICATE_RECORD")
-        self.assertNotIn('id="nsFindBtn"', html)
+    def test_button_and_modal_absent_for_every_other_reason(self):
+        for reason in NOT_SEARCHABLE:
+            with self.subTest(reason=reason):
+                html = _render(reason)
+                self.assertNotIn('id="nsFindBtn"', html)
+                self.assertNotIn('id="nsModal"', html)
 
 
 class TestModalIsLookOnly(unittest.TestCase):
@@ -182,17 +177,19 @@ class TestModalMarkup(unittest.TestCase):
         html = _render("Not Found in NetSuite")
         for el_id in ("nsFindBtn", "nsModal", "nsModalClose", "nsModalDone",
                       "nsModalTitle", "nsResults", "nsInvoice", "nsFootSummary",
-                      "nsCopyNote", "nsChipVendor", "nsChipVendorValue",
+                      "nsChipVendor", "nsChipVendorValue",
                       "nsChipAmount", "nsChipAmountValue", "nsPopAmount",
                       "nsChipDate", "nsChipDateValue", "nsPopDate",
                       "nsChipStatus", "nsChipStatusValue", "nsDateFrom",
                       "nsDateTo", "nsDateApply", "nsReset", "nsReload"):
             self.assertEqual(html.count(f'id="{el_id}"'), 1, el_id)
 
-    def test_note_textarea_the_copy_button_targets_still_exists(self):
+    def test_modal_has_no_copy_or_export_control(self):
+        """Dropped deliberately: the modal reports, the reviewer writes
+        their own note."""
         html = _render("Not Found in NetSuite")
-        self.assertIn('class="note-field"', html)
-        self.assertIn("<textarea", html)
+        self.assertNotIn("nsCopyNote", html)
+        self.assertNotIn("Copy to note", html)
 
     def test_existing_netsuite_preview_is_untouched(self):
         """The separate Amount-Mismatch record preview must still render."""
