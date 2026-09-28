@@ -42,3 +42,6 @@ tsconfig.tsbuildinfo
 
 z_ss/
 reconciliation.db
+
+# Per-container compiled Silver SQL cache (src/lakehouse/silver_build.py)
+dbt/.compiled_silver/

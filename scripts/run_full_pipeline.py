@@ -57,6 +57,23 @@ def load_notebook(name, relative_path):
     return mod
 
 
+def _run_matching(statement_id):
+    """NetSuite matching -- additive, only meaningful once Silver exists
+    for this statement, so only called after the build succeeds. Writes
+    to recon_matched_invoices/recon_exceptions/recon_summary (NOT gold_* --
+    see migrations/013_add_recon_tables.sql). Best-effort, same as
+    everything else here."""
+    print(f"    Fabric Silver build: OK")
+    from src.matching.fabric_matching import run_fabric_matching
+    with timed_step("matching"):
+        match_result = run_fabric_matching(statement_id)
+    if "error" in match_result or match_result.get("skipped"):
+        print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+    else:
+        print(f"    NetSuite matching: {match_result['matched']} matched, "
+              f"{match_result['exceptions']} exceptions")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run the full reconciliation pipeline")
     parser.add_argument("--pdf", required=True, help="Path to vendor statement PDF")
@@ -147,28 +164,31 @@ def main():
             print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
 
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
+    from src.lakehouse.silver_build import build_silver_direct, silver_build_mode
     if visibility_confirmed:
-        lock_requested = time.monotonic()
-        with fabric_pipeline_lock():
-            record_step("lock_wait", time.monotonic() - lock_requested)
-            with timed_step("dbt_silver"):
-                silver_built = run_dbt_silver_build(statement_id)
-            if silver_built:
-                print(f"    Fabric Silver build: OK")
-
-                # NetSuite matching -- additive, only meaningful once Silver exists
-                # for this statement, so nested under the build succeeding. Writes
-                # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
-                # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
-                # same as everything else here.
-                from src.matching.fabric_matching import run_fabric_matching
-                with timed_step("matching"):
-                    match_result = run_fabric_matching(statement_id)
-                if "error" in match_result or match_result.get("skipped"):
-                    print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+        if silver_build_mode() == "dbt":
+            # Pre-2026-09-28 path: dbt run + matching serialized across
+            # jobs, since dbt-fabric's fixed-name __dbt_tmp relations and
+            # MERGE collide when two runs overlap.
+            lock_requested = time.monotonic()
+            with fabric_pipeline_lock():
+                record_step("lock_wait", time.monotonic() - lock_requested)
+                with timed_step("dbt_silver"):
+                    silver_built = run_dbt_silver_build(statement_id)
+                if silver_built:
+                    _run_matching(statement_id)
                 else:
-                    print(f"    NetSuite matching: {match_result['matched']} matched, "
-                          f"{match_result['exceptions']} exceptions")
+                    print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+        else:
+            # Default: append-only Silver build + matching, no shared lock --
+            # neither issues MERGE/UPDATE/DELETE on the shared tables for a
+            # new statement_id (see src/lakehouse/silver_build.py), so
+            # concurrent jobs run this part in parallel. A re-run of an
+            # existing statement_id takes the lock inside each step itself.
+            with timed_step("silver_build"):
+                silver_built = build_silver_direct(statement_id)
+            if silver_built:
+                _run_matching(statement_id)
             else:
                 print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
     record_step("fabric_pipeline_total", time.monotonic() - pipeline_started)

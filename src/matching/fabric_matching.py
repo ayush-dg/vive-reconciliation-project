@@ -532,9 +532,21 @@ def run_fabric_matching(statement_id: str) -> dict:
         # a matching rule) replaces its prior results rather than
         # duplicating them -- same DELETE-then-INSERT pattern
         # write_to_bronze() already uses for the existing pipeline.
-        wh_cur.execute("DELETE FROM silver.recon_matched_invoices WHERE statement_id = ?", [statement_id])
-        wh_cur.execute("DELETE FROM silver.recon_exceptions WHERE statement_id = ?", [statement_id])
-        wh_cur.execute("DELETE FROM silver.recon_summary WHERE statement_id = ?", [statement_id])
+        # 2026-09-28: DELETE only when this statement_id actually has
+        # prior results. Every upload normally gets a fresh statement_id,
+        # and concurrent DELETEs on these shared tables are what Fabric
+        # Warehouse flags as write-write conflicts -- skipping the no-op
+        # DELETE is what lets concurrent jobs run matching without
+        # fabric_pipeline_lock() (see scripts/run_full_pipeline.py).
+        if _has_prior_results(wh_cur, statement_id):
+            wh_cur.execute("DELETE FROM silver.recon_matched_invoices WHERE statement_id = ?", [statement_id])
+            wh_cur.execute("DELETE FROM silver.recon_exceptions WHERE statement_id = ?", [statement_id])
+            wh_cur.execute("DELETE FROM silver.recon_summary WHERE statement_id = ?", [statement_id])
+
+        # Rows are buffered here and written with batched INSERTs just
+        # before commit (_flush_writes()) -- one INSERT per row cost
+        # ~0.3s each, 36-77s per statement (measured 2026-09-28).
+        writes = _PendingWrites()
 
         lines = _fetch_lines(wh_cur, statement_id)
         lines = _drop_payment_closing_lines(lines)
@@ -581,7 +593,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                 else:
                     stmt_amount, _ = _line_target(item)
                 _write_exception(
-                    wh_cur, statement_id, vendor_id, shop, shop_owner, item["invoice_number"],
+                    writes, statement_id, vendor_id, shop, shop_owner, item["invoice_number"],
                     item["ro_number"], stmt_amount, None, "Vendor Not Resolved in NetSuite", now,
                     original_invoice_number=item.get("document_number"),
                 )
@@ -636,14 +648,14 @@ def run_fabric_matching(statement_id: str) -> dict:
                     if netsuite_total is None:
                         reason = "Possible Duplicate in NetSuite" if candidate_count > 1 else "Not Found in NetSuite"
                         _write_exception(
-                            wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                            writes, statement_id, vendor_id, shop, shop_owner, inv,
                             ro, stmt_amount, None, reason, now,
                             original_invoice_number=orig_inv,
                         )
                         exception_count += 1
                     elif _amounts_tie_out(stmt_amount, netsuite_total):
                         _write_match(
-                            wh_cur, statement_id, vendor_id, shop, inv,
+                            writes, statement_id, vendor_id, shop, inv,
                             ro, stmt_amount, netsuite_total, now,
                             original_invoice_number=orig_inv,
                         )
@@ -651,7 +663,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                         erp_total += netsuite_total
                     else:
                         _write_exception(
-                            wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                            writes, statement_id, vendor_id, shop, shop_owner, inv,
                             ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
                             original_invoice_number=orig_inv,
                         )
@@ -681,14 +693,14 @@ def run_fabric_matching(statement_id: str) -> dict:
 
                 if netsuite_total is None:
                     _write_exception(
-                        wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                        writes, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, None, "Not Found in NetSuite", now,
                         original_invoice_number=orig_inv,
                     )
                     exception_count += 1
                 elif is_exact:
                     _write_match(
-                        wh_cur, statement_id, vendor_id, shop, inv,
+                        writes, statement_id, vendor_id, shop, inv,
                         ro, stmt_amount, netsuite_total, now,
                         original_invoice_number=orig_inv,
                     )
@@ -701,7 +713,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                     # what the nearest real NetSuite record actually was,
                     # not just "not found."
                     _write_exception(
-                        wh_cur, statement_id, vendor_id, shop, shop_owner, inv,
+                        writes, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
                         original_invoice_number=orig_inv,
                     )
@@ -716,11 +728,12 @@ def run_fabric_matching(statement_id: str) -> dict:
             else "EXCEPTIONS_PRESENT"
         )
         _write_summary(
-            wh_cur, statement_id, vendor_id, vendor_name, shop, header.get("statement_period"),
+            writes, statement_id, vendor_id, vendor_name, shop, header.get("statement_period"),
             statement_total, erp_total, total_count, matched_count, exception_count,
             match_pct, overall_status, now,
         )
 
+        writes.flush(wh_cur)
         wh_conn.commit()
 
         return {
@@ -788,37 +801,70 @@ def fetch_netsuite_record_for_invoice(vendor_id: str, vendor_name: str, invoice_
         return None
 
 
-def _write_match(cur, statement_id, vendor_id, shop, invoice_number, ro_number,
+_MATCH_COLUMNS = [
+    "match_id", "vendor_id", "shop", "invoice_number", "original_invoice_number", "ro_number",
+    "statement_amount", "erp_amount", "match_level", "match_status",
+    "statement_id", "match_timestamp",
+]
+_EXCEPTION_COLUMNS = [
+    "exception_id", "vendor_id", "shop", "invoice_number", "original_invoice_number", "ro_number",
+    "statement_amount", "erp_amount", "match_status", "exception_reason",
+    "exception_status", "statement_id", "date_raised", "shop_owner",
+]
+_SUMMARY_COLUMNS = [
+    "summary_id", "vendor_id", "vendor_name", "shop", "statement_period", "statement_id",
+    "statement_total", "erp_total", "difference", "total_invoice_count", "matched_count",
+    "exception_count", "match_percentage", "overall_status", "reconciliation_timestamp",
+    "version_number", "is_latest_version",
+]
+
+
+class _PendingWrites:
+    """Rows for one run_fabric_matching() call, written in batched INSERTs
+    by flush() on the same cursor/transaction just before commit."""
+
+    def __init__(self):
+        self._rows = {
+            "silver.recon_matched_invoices": (_MATCH_COLUMNS, []),
+            "silver.recon_exceptions": (_EXCEPTION_COLUMNS, []),
+            "silver.recon_summary": (_SUMMARY_COLUMNS, []),
+        }
+
+    def add(self, table, row):
+        self._rows[table][1].append(row)
+
+    def flush(self, cur):
+        from src.lakehouse.fabric_sql import insert_rows
+
+        for table, (columns, rows) in self._rows.items():
+            insert_rows(cur, table, columns, rows)
+
+
+def _has_prior_results(cur, statement_id) -> bool:
+    for table in ("silver.recon_matched_invoices", "silver.recon_exceptions", "silver.recon_summary"):
+        cur.execute(f"SELECT TOP 1 1 FROM {table} WHERE statement_id = ?", [statement_id])
+        if cur.fetchone():
+            return True
+    return False
+
+
+def _write_match(writes, statement_id, vendor_id, shop, invoice_number, ro_number,
                   stmt_amount, erp_amount, now, original_invoice_number=None):
-    cur.execute(
-        """
-        INSERT INTO silver.recon_matched_invoices (
-            match_id, vendor_id, shop, invoice_number, original_invoice_number, ro_number,
-            statement_amount, erp_amount, match_level, match_status,
-            statement_id, match_timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
-         stmt_amount, erp_amount, 1, "MATCHED", statement_id, now],
-    )
+    writes.add("silver.recon_matched_invoices", [
+        str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
+        stmt_amount, erp_amount, 1, "MATCHED", statement_id, now,
+    ])
 
 
-def _write_exception(cur, statement_id, vendor_id, shop, shop_owner, invoice_number,
+def _write_exception(writes, statement_id, vendor_id, shop, shop_owner, invoice_number,
                       ro_number, stmt_amount, erp_amount, reason, now, original_invoice_number=None):
-    cur.execute(
-        """
-        INSERT INTO silver.recon_exceptions (
-            exception_id, vendor_id, shop, invoice_number, original_invoice_number, ro_number,
-            statement_amount, erp_amount, match_status, exception_reason,
-            exception_status, statement_id, date_raised, shop_owner
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
-         stmt_amount, erp_amount, "EXCEPTION", reason, "OPEN", statement_id, now, shop_owner],
-    )
+    writes.add("silver.recon_exceptions", [
+        str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
+        stmt_amount, erp_amount, "EXCEPTION", reason, "OPEN", statement_id, now, shop_owner,
+    ])
 
 
-def _write_summary(cur, statement_id, vendor_id, vendor_name, shop, statement_period,
+def _write_summary(writes, statement_id, vendor_id, vendor_name, shop, statement_period,
                     statement_total, erp_total, total_count, matched_count,
                     exception_count, match_pct, overall_status, now):
     # is_latest_version = 1 always -- there's no version-tracking equivalent
@@ -828,16 +874,8 @@ def _write_summary(cur, statement_id, vendor_id, vendor_name, shop, statement_pe
     # the UI's queries (web/queries.py) explicitly filter on
     # is_latest_version = 1 (matching the old gold_reconciliation_summary
     # convention) -- leaving this NULL would make the row invisible there.
-    cur.execute(
-        """
-        INSERT INTO silver.recon_summary (
-            summary_id, vendor_id, vendor_name, shop, statement_period, statement_id,
-            statement_total, erp_total, difference, total_invoice_count, matched_count,
-            exception_count, match_percentage, overall_status, reconciliation_timestamp,
-            version_number, is_latest_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [str(uuid.uuid4()), vendor_id, vendor_name, shop, statement_period, statement_id,
-         statement_total, erp_total, statement_total - erp_total, total_count, matched_count,
-         exception_count, match_pct, overall_status, now, 1, 1],
-    )
+    writes.add("silver.recon_summary", [
+        str(uuid.uuid4()), vendor_id, vendor_name, shop, statement_period, statement_id,
+        statement_total, erp_total, statement_total - erp_total, total_count, matched_count,
+        exception_count, match_pct, overall_status, now, 1, 1,
+    ])
