@@ -1327,7 +1327,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # See src/lakehouse/bronze_raw.py's docstring.
     research_only = _research_mode_extraction_only()
     with timed_step("bronze_raw_write"):
-        write_raw_statement(
+        raw_written = write_raw_statement(
             invoices, vendor_id, statement_id,
             os.path.basename(pdf_path), provider_used,
             vendor_display_name=display_name(vendor_name),
@@ -1353,7 +1353,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     with fabric_pipeline_lock():
         record_step("promote_lock_wait", time.monotonic() - promote_lock_requested)
         with timed_step("bronze_promote"):
-            promote_staged_raw_statement(statement_id)
+            raw_promoted = bool(raw_written) and promote_staged_raw_statement(statement_id)
     # write_unnested_from_invoices() explodes raw_payload into two narrow
     # Lakehouse tables directly from this same in-memory `invoices` list
     # (no read-back -- reading back what was just written raced its own
@@ -1553,6 +1553,11 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         # 2026-09-18, see wait_for_visibility()'s own docstring).
         "unnested_lines_written": lines_written,
         "unnested_fields_written": fields_written,
+        # False when this statement's bronze.raw_statement row didn't land
+        # (write or promote failed) -- run_full_pipeline.py then skips the
+        # Silver build straight away instead of polling wait_for_visibility()
+        # for its full timeout for a row that will never appear.
+        "raw_statement_ready": raw_promoted,
     }
 
 

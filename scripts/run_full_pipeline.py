@@ -156,7 +156,12 @@ def main():
     expected_lines = intake_result.get("unnested_lines_written")
     expected_fields = intake_result.get("unnested_fields_written")
     visibility_confirmed = True
-    if expected_lines is not None and expected_fields is not None:
+    if intake_result.get("raw_statement_ready") is False:
+        # The raw_statement Bronze row never landed (intake already printed
+        # why) -- nothing for Silver to build from, so don't wait for it.
+        visibility_confirmed = False
+        print("    Fabric Silver build reason: skipped -- raw_statement Bronze row was not written")
+    elif expected_lines is not None and expected_fields is not None:
         from src.lakehouse.bronze_unnest import wait_for_visibility
         with timed_step("visibility_wait"):
             visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)

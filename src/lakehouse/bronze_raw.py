@@ -238,20 +238,42 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
         df["invoice_count"] = pd.to_numeric(df["invoice_count"], errors="coerce")
         df["version_number"] = pd.to_numeric(df["version_number"], errors="coerce")
 
+        # Under the SHARED fabric_pipeline_lock(), not this module's own
+        # _LOCK_PATH (2026-09-28): promote_staged_raw_statement() DELETEs
+        # from this same staging table under the shared lock, and with the
+        # two on different locks another job's DELETE could commit while
+        # this append was in flight -- the append then never committed.
+        # Confirmed from the staging table's Delta history in a 16-PDF dev
+        # batch: 2 of 12 appends missing, each overlapping another job's
+        # staging DELETE, none of the 10 successes overlapping one. The
+        # write itself is a few seconds, so queuing it on the shared lock
+        # is cheap. One retry covers any other transient commit failure.
         table_uri = _staging_table_uri()
-        with fabric_pipeline_lock(lock_path=_LOCK_PATH):
-            write_deltalake(
-                table_uri, df, mode="append", schema_mode="merge",
-                storage_options=_storage_options(),
-            )
+        for attempt in (1, 2):
+            try:
+                with fabric_pipeline_lock():
+                    write_deltalake(
+                        table_uri, df, mode="append", schema_mode="merge",
+                        storage_options=_storage_options(),
+                    )
+                return 1
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                logger.warning("raw_statement staging write attempt 1 failed (%s: %s) -- retrying",
+                               type(e).__name__, e)
 
-        return 1
-
-    except Exception:
+    except Exception as e:
         logger.exception(
             "Research raw-statement write failed for vendor_id=%s statement_id=%s (non-fatal)",
             vendor_id, statement_id,
         )
+        # Surfaced in the App Service log (web/worker.py's FABRIC_STATUS_RE)
+        # -- this failure used to be invisible there, leaving the job to
+        # wait out wait_for_visibility()'s full timeout for a row that was
+        # never written.
+        print(f"    Fabric Silver build reason: raw_statement Bronze write failed -- "
+              f"{type(e).__name__}: {str(e)[:250]}")
         return 0
 
 
@@ -291,6 +313,7 @@ def promote_staged_raw_statement(statement_id: str) -> bool:
         df = dt.to_pandas()
         matches = df[df["statement_id"] == statement_id]
         if matches.empty:
+            print("    Fabric Silver build reason: no staged raw_statement row to promote")
             return False
 
         write_deltalake(
@@ -303,11 +326,13 @@ def promote_staged_raw_statement(statement_id: str) -> bool:
 
         return True
 
-    except Exception:
+    except Exception as e:
         logger.exception(
             "Promoting staged raw-statement failed for statement_id=%s (non-fatal)",
             statement_id,
         )
+        print(f"    Fabric Silver build reason: raw_statement promote failed -- "
+              f"{type(e).__name__}: {str(e)[:250]}")
         return False
 
 
