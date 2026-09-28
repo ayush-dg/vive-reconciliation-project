@@ -67,7 +67,15 @@ DEFAULT_LIMIT = 100
 # off a PDF and through a float, and an exact equality on a decimal cast
 # would drop a legitimate tie-out for a half-cent of representation
 # noise. Mirrors fabric_matching.EXACT_AMOUNT_EPSILON's reasoning.
-TOLERANCES = ("exact", "1_dollar", "5_percent", "any")
+TOLERANCES = ("exact", "up_to", "1_dollar", "5_percent", "any")
+
+# M/D/YYYY -- trandate/duedate are stored as unpadded US-format strings,
+# so every date comparison goes through TRY_CONVERT(..., 101). Confirmed
+# live 2026-09-28: 0 unconvertible non-null values across both tables
+# (1,373,553 bills + 240,175 credits), and the expression is accepted in
+# both WHERE and ORDER BY on the Lakehouse SQL endpoint.
+_DATE_STYLE = 101
+_DATE_EXPR = "TRY_CONVERT(date, {col}, 101)"
 
 # LIKE metacharacters for SQL Server. ']' is deliberately absent: it is
 # only special INSIDE a [...] set, and escaping the '[' that opens one
@@ -105,17 +113,27 @@ def amount_bounds(amount, tolerance: str):
     """Returns (low, high) for the target amount, or None when no amount
     filter applies. Compares on ABS(amount): a statement credit line
     carries a negative amount while NetSuite stores every total
-    positive."""
+    positive.
+
+    "up_to" is Ramp's "<= $199" shape -- an open-ended lower bound rather
+    than a window around the target, for "this invoice is somewhere at or
+    below the statement amount, possibly split across bills"."""
     if amount is None or tolerance == "any":
         return None
     target = abs(float(amount))
-    if tolerance == "1_dollar":
-        margin = 1.00
-    elif tolerance == "5_percent":
-        margin = target * 0.05
-    else:
-        margin = 0.01
+    if tolerance == "up_to":
+        return 0.0, round(target, 2)
+    margin = _TOLERANCE_MARGINS[tolerance](target)
     return round(target - margin, 2), round(target + margin, 2)
+
+
+# One entry per window-shaped tolerance. "any" has no window and "up_to"
+# is open-ended, so neither appears here -- both are handled above.
+_TOLERANCE_MARGINS = {
+    "exact": lambda target: 0.01,
+    "1_dollar": lambda target: 1.00,
+    "5_percent": lambda target: target * 0.05,
+}
 
 
 def _entity_condition(entity_ids) -> tuple:
@@ -132,6 +150,20 @@ def _invoice_condition(invoice_contains: str) -> tuple:
     return (f"LOWER(t.tranid) LIKE LOWER(?) ESCAPE '{_LIKE_ESCAPE}'", [pattern])
 
 
+def _date_condition(date_from, date_to) -> tuple:
+    """Inclusive trandate range. One more (fragment, params) pair, exactly
+    like every other filter -- both ends are optional and independent."""
+    fragments, params = [], []
+    expr = _DATE_EXPR.format(col="t.trandate")
+    if date_from:
+        fragments.append(f"{expr} >= ?")
+        params.append(date_from)
+    if date_to:
+        fragments.append(f"{expr} <= ?")
+        params.append(date_to)
+    return (" AND ".join(fragments), params)
+
+
 def _open_condition(table: str) -> tuple:
     """The "still open" predicate, which differs per table: bills carry a
     status code, credits carry a remaining-balance amount instead (see
@@ -142,7 +174,8 @@ def _open_condition(table: str) -> tuple:
 
 
 def build_conditions(table: str, entity_ids=None, bounds=None,
-                     invoice_contains=None, include_paid=False) -> list:
+                     invoice_contains=None, include_paid=False,
+                     date_from=None, date_to=None) -> list:
     """Assembles the WHERE clause as a list of (sql_fragment, params)
     pairs -- one pair per active filter, each independent of the others.
 
@@ -156,23 +189,53 @@ def build_conditions(table: str, entity_ids=None, bounds=None,
         conditions.append(_amount_condition(bounds))
     if invoice_contains and invoice_contains.strip():
         conditions.append(_invoice_condition(invoice_contains))
+    if date_from or date_to:
+        conditions.append(_date_condition(date_from, date_to))
     if not include_paid:
         conditions.append(_open_condition(table))
     return conditions
 
 
-def _select_for(table: str, conditions: list, limit: int) -> tuple:
+def build_order_by(sort_amount) -> tuple:
+    """Returns (order_by_sql, params) -- the ORDER BY that must be applied
+    IN SQL, before TOP.
+
+    This exists because of a real bug: the query used to be `SELECT TOP
+    100 ... WHERE ...` with NO ORDER BY, and the ranking was done in
+    Python on whatever 100 rows came back. With no ORDER BY, SQL Server
+    is free to return ANY 100 matching rows, so the ranking only ever
+    reordered an arbitrary sample. Confirmed live 2026-09-28 on a real
+    search (Keystone, vendor ON, amount ANY, open only): 4,247 rows match
+    but only 100 are returned, and 19 of the 20 genuinely-closest bills
+    were absent from that 100 -- the closest the UI could show was $3.29
+    away from the statement amount when a bill $0.03 away existed.
+
+    sort_amount is deliberately separate from the amount FILTER: the
+    modal ranks by closeness to the statement amount even when the user
+    has widened the amount filter to "any", which is the whole point of
+    being able to widen it."""
+    if sort_amount is not None:
+        return ("ABS(ABS(TRY_CAST(t.total AS DECIMAL(18,2))) - ?) ASC", [abs(float(sort_amount))])
+    return (f"{_DATE_EXPR.format(col='t.trandate')} DESC", [])
+
+
+def _select_for(table: str, conditions: list, limit: int, order_by: tuple) -> tuple:
     """Builds one table's SELECT. The only interpolated values are the
-    module's own table-name constants and placeholder counts -- every
-    user-supplied value travels as a bound parameter."""
+    module's own table-name constants, the ORDER BY expression this
+    module itself built, and placeholder counts -- every user-supplied
+    value travels as a bound parameter.
+
+    ORDER BY is applied here, in SQL, so TOP selects the best N rather
+    than an arbitrary N -- see build_order_by() for the bug this fixes."""
     where_sql = " AND ".join(fragment for fragment, _ in conditions)
     params = [p for _, values in conditions for p in values]
+    order_sql, order_params = order_by
     status_expr = "t.status" if table == BILL_TABLE else "NULL"
     unapplied_expr = "t.unapplied" if table == CREDIT_TABLE else "NULL"
     sql = f"""
         SELECT TOP {int(limit)}
             '{table}' AS source_table,
-            t.tranid, t.entity, t.total, t.trandate, t.transactionnumber,
+            t.tranid, t.entity, t.total, t.trandate, t.duedate, t.transactionnumber,
             t.custbody_cgh_ro, t.location,
             {status_expr} AS status_code,
             {unapplied_expr} AS unapplied_amount,
@@ -180,8 +243,11 @@ def _select_for(table: str, conditions: list, limit: int) -> tuple:
         FROM bronze.{table} t
         LEFT JOIN bronze.netsuite_vendor v ON v.id = t.entity
         WHERE {where_sql}
+        ORDER BY {order_sql}
     """
-    return sql, params
+    # ORDER BY parameters bind AFTER the WHERE ones -- pyodbc binds "?" by
+    # position, and the WHERE clause is emitted first.
+    return sql, params + order_params
 
 
 def _to_float(value):
@@ -211,16 +277,52 @@ def _shape_row(row: dict) -> dict:
     """One raw Lakehouse row -> one display row for the results table."""
     return {
         "record_type": "Bill" if row["source_table"] == BILL_TABLE else "Credit",
+        "is_credit": row["source_table"] == CREDIT_TABLE,
         "tranid": row.get("tranid"),
         "vendor_name": row.get("companyname") or row.get("entityid") or "—",
         "entity_id": row.get("entity"),
         "total": _to_float(row.get("total")),
         "trandate": row.get("trandate"),
+        "trandate_display": _display_date(row.get("trandate")),
+        # Credits almost never carry one -- confirmed live 2026-09-28:
+        # non-null on 74 of 240,175 credit rows (0.03%) vs essentially
+        # every bill. The template omits the "Due ..." clause when this
+        # is empty rather than printing a bare label.
+        "duedate": row.get("duedate"),
+        "duedate_display": _display_date(row.get("duedate")),
         "status_label": _status_label(row),
         "ro_number": row.get("custbody_cgh_ro"),
         "location_code": row.get("location"),
         "transaction_number": row.get("transactionnumber"),
     }
+
+
+def _parse_us_date(raw):
+    """Parses NetSuite's unpadded M/D/YYYY (or an ISO date) into a date,
+    or None. Display and sorting both go through this rather than string
+    comparison -- "9/3/2026" sorts before "10/1/2025" as a string."""
+    from datetime import datetime
+
+    if raw is None:
+        return None
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(str(raw).strip(), fmt).date()
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def _display_date(raw):
+    """"9/23/2026" -> "Sep 23, 2026". Falls back to the raw string when it
+    can't be parsed, so nothing is ever hidden from the user. This is a
+    NetSuite business date, not a system timestamp -- no timezone
+    conversion applies (see web/deps.py's friendly_date for the same
+    distinction)."""
+    parsed = _parse_us_date(raw)
+    if parsed is None:
+        return str(raw) if raw else ""
+    return parsed.strftime("%b %d, %Y").replace(" 0", " ")
 
 
 def _sort_key_by_amount(target: float):
@@ -233,26 +335,22 @@ def _sort_key_by_amount(target: float):
     return key
 
 
-def _sort_rows(rows: list, amount, bounds) -> list:
-    """By closeness to the target amount when one was given, otherwise
-    newest first. trandate is an unpadded M/D/YYYY string, so it is
-    sorted on a parsed date -- a string sort would put "9/3/2026" before
-    "10/1/2025"."""
-    if amount is not None and bounds:
-        return sorted(rows, key=_sort_key_by_amount(abs(float(amount))))
-    return sorted(rows, key=_trandate_sort_key, reverse=True)
-
-
 def _trandate_sort_key(row):
-    from datetime import date, datetime
+    from datetime import date
 
-    raw = row.get("trandate")
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(str(raw).strip(), fmt).date()
-        except (ValueError, TypeError):
-            continue
-    return date.min
+    return _parse_us_date(row.get("trandate")) or date.min
+
+
+def _sort_rows(rows: list, sort_amount) -> list:
+    """Re-applies the SQL ORDER BY across the MERGED bill+credit result.
+
+    The ordering that matters for correctness is the one in SQL (see
+    build_order_by) -- that decides WHICH rows come back. This second
+    pass only interleaves the two already-correct per-table lists, which
+    SQL can't do for us because they are two separate queries."""
+    if sort_amount is not None:
+        return sorted(rows, key=_sort_key_by_amount(abs(float(sort_amount))))
+    return sorted(rows, key=_trandate_sort_key, reverse=True)
 
 
 # An invoice fragment this long or longer is selective enough to stand on
@@ -291,12 +389,49 @@ def _empty_result(**extra) -> dict:
     return base
 
 
+def parse_iso_date(value, label: str):
+    """Returns (yyyy_mm_dd_or_None, error_message_or_None). An empty value
+    is a legitimate "no bound", not an error."""
+    from datetime import datetime
+
+    if value is None or str(value).strip() == "":
+        return None, None
+    text = str(value).strip()
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").date().isoformat(), None
+    except ValueError:
+        return None, f"{label} must look like 2026-09-28."
+
+
+def _validate_dates(date_from, date_to):
+    """Returns (from, to, error_message_or_None), including the
+    from-after-to case, which is a user mistake rather than a query that
+    should silently return nothing."""
+    parsed_from, err = parse_iso_date(date_from, "Date from")
+    if err:
+        return None, None, err
+    parsed_to, err = parse_iso_date(date_to, "Date to")
+    if err:
+        return None, None, err
+    if parsed_from and parsed_to and parsed_from > parsed_to:
+        return None, None, "The start date is after the end date."
+    return parsed_from, parsed_to, None
+
+
 def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
                    invoice_contains=None, include_paid=False,
+                   sort_amount=None, date_from=None, date_to=None,
                    limit=DEFAULT_LIMIT) -> dict:
     """Searches NetSuite bills and credits. Best-effort, like the rest of
     the Fabric code: never raises to the caller -- on failure it returns
     error=True and the UI shows "search unavailable".
+
+    `amount` + `amount_tolerance` FILTER; `sort_amount` only RANKS. They
+    are separate because the modal keeps ranking by closeness to the
+    statement amount even once the user widens the amount filter to
+    "any" -- which is exactly when good ranking matters most. Ranking is
+    therefore NOT narrowing, and sort_amount alone does not satisfy the
+    guardrail.
 
     Every filter is optional. Returns a dict with rows (display-shaped,
     see _shape_row), row_count, truncated, error, needs_filter, message.
@@ -305,6 +440,10 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
         return _empty_result(error=True, message=f"Unknown amount tolerance: {amount_tolerance}")
     if not _fabric_configured():
         return _empty_result(error=True, message="NetSuite search is not configured.")
+
+    parsed_from, parsed_to, date_error = _validate_dates(date_from, date_to)
+    if date_error:
+        return _empty_result(error=True, message=date_error)
 
     bounds = amount_bounds(amount, amount_tolerance)
     if _needs_narrowing(entity_ids, bounds, invoice_contains):
@@ -318,15 +457,18 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
         )
 
     try:
-        rows = _run_search(entity_ids, bounds, invoice_contains, include_paid, limit)
+        rows = _run_search(entity_ids, bounds, invoice_contains, include_paid,
+                           sort_amount, parsed_from, parsed_to, limit)
     except Exception:
         logger.exception(
-            "NetSuite open-AP search failed (entity_ids=%s amount=%s tolerance=%s invoice_contains=%r include_paid=%s)",
+            "NetSuite open-AP search failed (entity_ids=%s amount=%s tolerance=%s "
+            "invoice_contains=%r include_paid=%s sort_amount=%s date_from=%s date_to=%s)",
             entity_ids, amount, amount_tolerance, invoice_contains, include_paid,
+            sort_amount, parsed_from, parsed_to,
         )
         return _empty_result(error=True, message="NetSuite search is unavailable right now.")
 
-    ordered = _sort_rows(rows, amount, bounds)
+    ordered = _sort_rows(rows, sort_amount)
     truncated = len(ordered) > limit
     return _empty_result(
         rows=ordered[:limit],
@@ -335,23 +477,26 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
     )
 
 
-def _run_search(entity_ids, bounds, invoice_contains, include_paid, limit) -> list:
+def _run_search(entity_ids, bounds, invoice_contains, include_paid,
+                sort_amount, date_from, date_to, limit) -> list:
     """Queries both tables and returns the combined display rows.
 
     Two separate round-trips rather than a SQL UNION: the two tables have
     different open-ness predicates and different column sets, so a UNION
     would need the same NULL-padding done here anyway, and keeping them
     apart means a schema change to one table can't break the other's
-    query. Each side is capped at `limit`, so the combined set is capped
-    at 2x limit before sorting -- enough to sort meaningfully, and the
-    caller trims to `limit` after.
+    query. Each side is ordered and capped in SQL, so the combined set is
+    the best `limit` from each table; _sort_rows() then interleaves them
+    and the caller trims to `limit`.
     """
+    order_by = build_order_by(sort_amount)
     rows = []
     for table in (BILL_TABLE, CREDIT_TABLE):
         conditions = build_conditions(
             table, entity_ids=entity_ids, bounds=bounds,
             invoice_contains=invoice_contains, include_paid=include_paid,
+            date_from=date_from, date_to=date_to,
         )
-        sql, params = _select_for(table, conditions, limit)
+        sql, params = _select_for(table, conditions, limit, order_by)
         rows.extend(_shape_row(raw) for raw in execute_lakehouse_query(sql, params))
     return rows

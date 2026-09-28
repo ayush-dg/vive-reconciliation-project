@@ -29,14 +29,27 @@ from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 
 router = APIRouter()
 
-# The exception reasons that mean "this line did not tie out to a
-# NetSuite record", which are exactly the cases worth hand-searching for.
-# "Invoice Missing" is the legacy gold_exceptions spelling of "Not Found
-# in NetSuite" -- both kept for the same reason queries._REASON_FILTER_SQL
-# keeps both. "Vendor Not Resolved in NetSuite" is deliberately absent:
-# with no entity ids there is no vendor filter to pre-fill, so the panel
-# would open unscoped and immediately hit the no-filter guardrail.
-SEARCHABLE_REASONS = ("Not Found in NetSuite", "Invoice Missing", "Amount Mismatch")
+# Every exception reason that means "this line did not tie out to a
+# NetSuite record" -- i.e. every case worth hand-searching. "Invoice
+# Missing" is the legacy gold_exceptions spelling of "Not Found in
+# NetSuite", kept for the same reason queries._REASON_FILTER_SQL keeps
+# both.
+#
+# "Vendor Not Resolved in NetSuite" IS included now (it was excluded
+# while this was an always-open inline panel, because with no entity ids
+# it would have opened unscoped straight onto the guardrail message).
+# In a modal the user opens deliberately, that case is the one most
+# worth searching -- the vendor couldn't be resolved, so a hand search
+# by invoice number is the only route left. The modal opens it with
+# vendor OFF and the invoice number pre-filled; see the defaults in
+# web/static/app.js.
+SEARCHABLE_REASONS = (
+    "Not Found in NetSuite",
+    "Invoice Missing",
+    "Amount Mismatch",
+    "Possible Duplicate in NetSuite",
+    "Vendor Not Resolved in NetSuite",
+)
 
 REASON_BADGE = {
     "Invoice Missing": {"label": "Missing in ERP", "css": "exception"},
@@ -314,28 +327,41 @@ def _search_entity_ids(use_vendor: bool, vendor_id: str, vendor_name: str):
     return resolve_entity_ids(vendor_id or "", vendor_name or "")
 
 
+def _error_partial(request: Request, message: str):
+    """A results fragment carrying nothing but a friendly message, so a
+    bad input renders in place instead of 500-ing the modal."""
+    return render(request, "_netsuite_search_results.html",
+                  {"result": {"rows": [], "row_count": 0, "truncated": False,
+                              "error": True, "needs_filter": False,
+                              "message": message}})
+
+
 @router.get("/netsuite-search")
 def netsuite_search(request: Request, user: str = Depends(require_login),
                     vendor_id: str = "", vendor_name: str = "",
                     use_vendor: bool = True, amount: str = "",
                     tolerance: str = "exact", invoice_contains: str = "",
-                    include_paid: bool = False):
-    """Open-AP search partial for the review page's panel. Read-only:
-    nothing here writes to NetSuite, Fabric or Azure SQL.
+                    include_paid: bool = False, sort_amount: str = "",
+                    date_from: str = "", date_to: str = ""):
+    """Open-AP search partial for the "Find in NetSuite" modal.
 
-    Returns an HTML fragment rather than a full page so the panel can
-    refresh its results without reloading the exception under review."""
+    STRICTLY READ-ONLY: this issues SELECTs against the Fabric Lakehouse
+    and nothing else. It writes to NetSuite, Fabric and Azure SQL never,
+    resolves no exception, and has no POST counterpart -- closing an
+    exception stays with the existing Accept/Dispute/Escalate forms.
+
+    Returns an HTML fragment rather than a full page so changing a filter
+    re-renders only the results, not the exception under review."""
     parsed_amount, amount_error = _parse_amount(amount)
     if amount_error:
-        return render(request, "_netsuite_search_results.html",
-                      {"result": {"rows": [], "row_count": 0, "truncated": False,
-                                  "error": True, "needs_filter": False,
-                                  "message": amount_error}})
+        return _error_partial(request, amount_error)
+
+    parsed_sort, sort_error = _parse_amount(sort_amount)
+    if sort_error:
+        return _error_partial(request, sort_error)
+
     if tolerance not in TOLERANCES:
-        return render(request, "_netsuite_search_results.html",
-                      {"result": {"rows": [], "row_count": 0, "truncated": False,
-                                  "error": True, "needs_filter": False,
-                                  "message": "Pick one of the listed amount tolerances."}})
+        return _error_partial(request, "Pick one of the listed amount tolerances.")
 
     result = search_open_ap(
         entity_ids=_search_entity_ids(use_vendor, vendor_id, vendor_name),
@@ -343,6 +369,9 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
         amount_tolerance=tolerance,
         invoice_contains=invoice_contains,
         include_paid=include_paid,
+        sort_amount=parsed_sort,
+        date_from=date_from,
+        date_to=date_to,
     )
     return render(request, "_netsuite_search_results.html",
                   {"result": result, "last_sync": queries.get_last_netsuite_sync()})
