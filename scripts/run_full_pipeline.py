@@ -20,6 +20,7 @@ import argparse
 import importlib.util
 import os
 import sys
+import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -40,6 +41,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.ai.document_understanding_engine import CorruptedPDFError
+from src.pipeline_timing import record_step, timed_step
 
 
 def load_notebook(name, relative_path):
@@ -72,14 +74,16 @@ def main():
     print(f"{'#'*65}")
 
     # Phase 1: Document Intake
+    pipeline_started = time.monotonic()
     print(f"\n>>> PHASE 1: Document Intake")
     intake_mod = load_notebook("intake", "notebooks/01_document_intake.py")
     try:
-        intake_result = intake_mod.run_intake(
-            pdf_path=args.pdf,
-            statement_id=args.statement_id,
-            statement_period=args.period,
-        )
+        with timed_step("intake_total"):
+            intake_result = intake_mod.run_intake(
+                pdf_path=args.pdf,
+                statement_id=args.statement_id,
+                statement_period=args.period,
+            )
     except CorruptedPDFError as e:
         print(f"\n{'#'*65}")
         print(f"  PIPELINE FAILED — {e}")
@@ -137,14 +141,19 @@ def main():
     visibility_confirmed = True
     if expected_lines is not None and expected_fields is not None:
         from src.lakehouse.bronze_unnest import wait_for_visibility
-        visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)
+        with timed_step("visibility_wait"):
+            visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)
         if not visibility_confirmed:
             print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
 
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
     if visibility_confirmed:
+        lock_requested = time.monotonic()
         with fabric_pipeline_lock():
-            if run_dbt_silver_build(statement_id):
+            record_step("lock_wait", time.monotonic() - lock_requested)
+            with timed_step("dbt_silver"):
+                silver_built = run_dbt_silver_build(statement_id)
+            if silver_built:
                 print(f"    Fabric Silver build: OK")
 
                 # NetSuite matching -- additive, only meaningful once Silver exists
@@ -153,7 +162,8 @@ def main():
                 # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
                 # same as everything else here.
                 from src.matching.fabric_matching import run_fabric_matching
-                match_result = run_fabric_matching(statement_id)
+                with timed_step("matching"):
+                    match_result = run_fabric_matching(statement_id)
                 if "error" in match_result or match_result.get("skipped"):
                     print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
                 else:
@@ -161,6 +171,7 @@ def main():
                           f"{match_result['exceptions']} exceptions")
             else:
                 print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+    record_step("fabric_pipeline_total", time.monotonic() - pipeline_started)
 
     if intake_result.get("bronze_count", 0) == 0:
         print(f"\n{'#'*65}")

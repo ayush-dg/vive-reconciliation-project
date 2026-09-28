@@ -29,6 +29,7 @@ import json
 import os
 import re
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -73,6 +74,7 @@ from src.validation.location_lookup import resolve_billing_location
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.lakehouse.bronze_raw import write_raw_statement
 from src.matching.engine import score_exception_confidence
+from src.pipeline_timing import record_step, timed_step
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import resolve_vendor_id, display_name
@@ -1233,6 +1235,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     print(f"  Cache MISS — proceeding with extraction.")
 
     # Step 2: Extract PDF text
+    extraction_started = time.monotonic()
     print(f"\n[Step 2] Extracting PDF text with pdfplumber...")
     pdf_text, page_count = extract_pdf_text(pdf_path)
     print(f"  Extracted text from {page_count} pages ({len(pdf_text)} characters)")
@@ -1281,6 +1284,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     provider_used = schema_result.get("_provider_used", "unknown")
     invoices = schema_result.get("invoices", [])
+    record_step("extraction", time.monotonic() - extraction_started)
     print(f"  Provider used: {provider_used}")
     print(f"  Invoices found: {len(invoices)}")
     print(f"  Overall confidence: {schema_result.get('extraction_confidence', {}).get('overall', 'N/A')}")
@@ -1322,12 +1326,13 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # validation/skip logic runs, regardless of RESEARCH_MODE_EXTRACTION_ONLY.
     # See src/lakehouse/bronze_raw.py's docstring.
     research_only = _research_mode_extraction_only()
-    write_raw_statement(
-        invoices, vendor_id, statement_id,
-        os.path.basename(pdf_path), provider_used,
-        vendor_display_name=display_name(vendor_name),
-        version_number=version_info["version_number"],
-    )
+    with timed_step("bronze_raw_write"):
+        write_raw_statement(
+            invoices, vendor_id, statement_id,
+            os.path.basename(pdf_path), provider_used,
+            vendor_display_name=display_name(vendor_name),
+            version_number=version_info["version_number"],
+        )
     # Promote this statement's row from bronze.raw_statement_staging (just
     # written above) into the real, shared bronze.raw_statement table --
     # under fabric_pipeline_lock(), the SAME lock run_dbt_silver_build()/
@@ -1344,8 +1349,11 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # queuing regression.
     from src.lakehouse.bronze_raw import promote_staged_raw_statement
     from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
+    promote_lock_requested = time.monotonic()
     with fabric_pipeline_lock():
-        promote_staged_raw_statement(statement_id)
+        record_step("promote_lock_wait", time.monotonic() - promote_lock_requested)
+        with timed_step("bronze_promote"):
+            promote_staged_raw_statement(statement_id)
     # silver_silver build -- additive, mapping-driven bronze->silver test
     # flow. Called from here, not alongside run_dbt_silver_build() in
     # run_full_pipeline.py, because that call site is skipped entirely
@@ -1366,8 +1374,10 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # since dbt, not this Python code, is what reads it back.
     from src.lakehouse.bronze_unnest import write_unnested_from_invoices
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_silver_build
-    lines_written, fields_written = write_unnested_from_invoices(invoices, statement_id)
-    run_dbt_silver_silver_build(statement_id, lines_written, fields_written)
+    with timed_step("bronze_unnested_write"):
+        lines_written, fields_written = write_unnested_from_invoices(invoices, statement_id)
+    with timed_step("silver_silver_dbt"):
+        run_dbt_silver_silver_build(statement_id, lines_written, fields_written)
     if research_only:
         print(f"  [RESEARCH MODE] Extraction-only -- Bronze/Silver will be skipped for this upload.")
 

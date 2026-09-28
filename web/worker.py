@@ -57,9 +57,11 @@ DOCUMENT_HASH_RE = re.compile(r"Document Hash:\s*(\S+)")
 # silently hid every dbt/matching outcome (skip, error, or success) for
 # any job landing on the success path, making it impossible to tell
 # "matching genuinely didn't run" from "it ran and failed" from the
-# container logs alone.
+# container logs alone. "Step timing:" lines (src/pipeline_timing.py,
+# added 2026-09-28) ride the same path so per-step durations are visible
+# for every job, not just failures.
 FABRIC_STATUS_RE = re.compile(
-    r"^ {4}(Fabric Silver build:.*|Fabric Silver build reason:.*|NetSuite matching:.*)$",
+    r"^ {4}(Fabric Silver build:.*|Fabric Silver build reason:.*|NetSuite matching:.*|Step timing:.*)$",
     re.MULTILINE,
 )
 
