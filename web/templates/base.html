@@ -61,7 +61,7 @@
       <div class="profile-toggle" id="profile-toggle">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="user-avatar">{{ (user_name or user_email or "?") | initials }}</div>
-          <div><div style="font-size:12px;font-weight:600;color:#fff">{{ user_name or user_email or "Guest" }}</div><div style="font-size:11px;color:#999999">{{ user_email or "" }}</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:#fff">{{ user_name or user_email or "Guest" }}</div><div class="sidebar-user-email">{{ user_email or "" }}</div></div>
         </div>
         <div class="profile-dropdown" id="profile-dropdown">
           <div class="profile-dropdown-item disabled">My Profile</div>
