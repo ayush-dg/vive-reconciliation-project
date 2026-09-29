@@ -140,8 +140,14 @@ def parse_header_info(page1_words, page1_text):
         info["period_start"] = m.group(1)
         info["period_end"] = m.group(2)
 
-    customer_rows = [r for r in rows if 150 <= r[0]["top"] <= 180 and r[0]["x0"] < 300]
-    customer_lines = [row_text(r) for r in customer_rows]
+    # Filter by each WORD's x0, not the row's first word: the right-hand
+    # aging-table header ("Open Items Unalloc. Aged Amount" / "Items") sits
+    # ~1pt higher than the customer block on the same line, so group_rows()
+    # sorts it first and a first-word x0 < 300 check silently dropped the
+    # customer name/address lines on every Fenix statement (shop always
+    # blank in the UI, confirmed 2026-09-29).
+    customer_rows = [r for r in rows if 150 <= r[0]["top"] <= 180]
+    customer_lines = [row_text(left) for r in customer_rows if (left := [w for w in r if w["x0"] < 300])]
     if len(customer_lines) >= 3:
         info["customer_name"] = customer_lines[0]
         info["billing_address"] = customer_lines[1]
