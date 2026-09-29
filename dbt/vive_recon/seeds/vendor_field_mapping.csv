@@ -125,3 +125,14 @@ BLAISE_ALEXANDER,REFERENCE,invoice_number_ref,string,v1,1
 BLAISE_ALEXANDER,DESCRIPTION,description_raw,string,v1,1
 BLAISE_ALEXANDER,AMOUNT,charge_amount,decimal,v1,1
 BLAISE_ALEXANDER,AGE IN DAYS,age_in_days,integer,v1,1
+CLINTON_HONDA,DATE,line_date,date,v1,1
+CLINTON_HONDA,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+CLINTON_HONDA,PURCHASES,charge_amount,decimal,v1,1
+CLINTON_HONDA,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+CLINTON_HONDA,BALANCE,amount_remaining,decimal,v1,1
+RIVIAN_LLC,doc_date,line_date,date,v1,1
+RIVIAN_LLC,due_date,due_date,date,v1,1
+RIVIAN_LLC,invoice_number,original_invoice_number,string,v1,1
+RIVIAN_LLC,order_number,po_number,string,v1,1
+RIVIAN_LLC,invoice_amount,charge_amount,decimal,v1,1
+RIVIAN_LLC,balance,amount_remaining,decimal,v1,1
