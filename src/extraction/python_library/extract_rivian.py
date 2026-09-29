@@ -77,6 +77,11 @@ def parse_header_info(page1_text):
     m = re.search(r"Bill To\s*:\s*(.+)", page1_text)
     if m:
         info["bill_to"] = m.group(1).strip()
+        # adapter.py reads the shop from "customer_name" -- without it every
+        # Rivian statement showed a blank shop (2026-09-29). The part before
+        # ";" is the shop ("Parkway Auto Body - Nutley", "Evolve"); after it
+        # is the account's legal name ("Parkway", "Evolve OPCO LLC").
+        info["customer_name"] = info["bill_to"].split(";")[0].strip()
     m = re.search(r"Customer ID\s*:\s*(.+)", page1_text)
     if m:
         info["customer_id"] = m.group(1).strip()
