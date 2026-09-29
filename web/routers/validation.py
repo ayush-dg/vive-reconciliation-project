@@ -29,12 +29,16 @@ def validation_list(request: Request, user: str = Depends(require_login)):
 
     vendor_options = sorted({r["vendor_display_name"] for r in runs if r.get("vendor_display_name")})
     shop_options = sorted({r["shop"] for r in runs if r.get("shop")})
+    # Newest first -- statement_period is "YYYY-MM" (see deps.period_label),
+    # so a reverse string sort is a reverse date sort.
+    period_options = sorted({r["statement_period"] for r in runs if r.get("statement_period")}, reverse=True)
 
     ctx = {
         "active_page": "validation",
         "runs": runs,
         "vendor_options": vendor_options,
         "shop_options": shop_options,
+        "period_options": period_options,
         **sidebar_context(request),
     }
     return render(request, "validation.html", ctx)

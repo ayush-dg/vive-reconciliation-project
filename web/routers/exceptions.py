@@ -132,8 +132,12 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
 
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
-                       filter: str = "all", selected: str = None, statement_id: str = None):
+                       filter: str = "all", selected: str = None, statement_id: str = None,
+                       sort: str = None):
     vendor_name = unquote(vendor_name)
+    # Unrecognised values collapse to the default order here, so every
+    # link/redirect built from `sort` below carries only a known value.
+    sort = sort if sort in queries.EXCEPTION_SORTS else None
 
     # A specific run's card (see get_exception_runs()) links here with its
     # own statement_id -- look that exact run up instead of falling back
@@ -165,11 +169,11 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
 
     if exceptions_only:
         source_file = statement["source_file"]
-        open_list = queries.get_open_exceptions_for_source_file(source_file, None if filter == "all" else filter)
+        open_list = queries.get_open_exceptions_for_source_file(source_file, None if filter == "all" else filter, sort)
         total, resolved = queries.get_exception_counts_for_source_file(source_file)
     else:
         statement_id = statement["statement_id"]
-        open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter)
+        open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter, sort)
         total, resolved = queries.get_exception_counts(statement_id)
 
     selected_exc = None
@@ -213,6 +217,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "resolved": resolved,
         "progress_pct": progress_pct,
         "filter": filter,
+        "sort": sort or "",
         "reason_badge": REASON_BADGE,
         "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
@@ -241,33 +246,36 @@ def exceptions_bulk_approve(vendor_name: str, request: Request, user: str = Depe
     return {"approved": approved}
 
 
-def _filter_redirect_suffix(filter: str, statement_id: str = None) -> str:
+def _filter_redirect_suffix(filter: str, statement_id: str = None, sort: str = None) -> str:
     """Builds the query string a post-action redirect back to
     /exceptions/{vendor_name} needs to stay on the same statement/filter
     the user was reviewing -- dropping statement_id here (as this used to)
     silently bounces the redirect to get_vendor_latest_statement()'s "the
     vendor's latest run" instead, which can be a completely different
     statement_id than the one just acted on (confirmed live 2026-09-22:
-    Rh Long Motor Sales has 7 separate runs)."""
+    Rh Long Motor Sales has 7 separate runs). `sort` is kept for the same
+    reason -- acting on an exception should not reset the list's order."""
     params = []
     if filter and filter != "all":
         params.append(f"filter={filter}")
     if statement_id:
         params.append(f"statement_id={statement_id}")
+    if sort in queries.EXCEPTION_SORTS:
+        params.append(f"sort={sort}")
     return f"?{'&'.join(params)}" if params else ""
 
 
 @router.post("/exceptions/{vendor_name}/escalate")
 def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(require_login),
                          exception_id: str = Form(...), filter: str = Form("all"),
-                         statement_id: str = Form("")):
+                         statement_id: str = Form(""), sort: str = Form("")):
     """Flags a single exception ESCALATED (see queries.escalate_exception())
     and redirects back to the same vendor/filter/statement. Registered
     ahead of the {vendor_name:path} POST action route below for the same
     greedy-path-converter reason as exceptions_bulk_approve() above."""
     vendor_name = unquote(vendor_name)
     queries.escalate_exception(exception_id, escalated_by=user)
-    suffix = _filter_redirect_suffix(filter, statement_id)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
 
 
@@ -276,7 +284,7 @@ def exceptions_action(vendor_name: str, request: Request, user: str = Depends(re
                        exception_id: str = Form(...), statement_id: str = Form(...),
                        invoice_number: str = Form(...), reason_code: str = Form(...),
                        action: str = Form(...), note: str = Form(""),
-                       filter: str = Form("all")):
+                       filter: str = Form("all"), sort: str = Form("")):
     vendor_name = unquote(vendor_name)
     queries.resolve_exception(
         exception_id=exception_id,
@@ -288,7 +296,7 @@ def exceptions_action(vendor_name: str, request: Request, user: str = Depends(re
         notes=note or None,
         disposed_by=user,
     )
-    suffix = _filter_redirect_suffix(filter, statement_id)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
 
 

@@ -176,6 +176,118 @@ def get_recent_runs(limit: int = 10) -> list:
     return _with_live_exception_counts(rows)
 
 
+RECON_RUN_STATUS_FILTERS = ("all", "reconciled", "exceptions")
+
+
+def get_recon_runs_panel(status: str = "all", period: str = None, limit: int = 10) -> dict:
+    """Home page's "Reconciliation runs" panel with its status/period
+    filters -- returns {"runs", "total", "reconciled", "period_options"}.
+
+    Filtering has to happen BEFORE the row cap, not on the 10 already
+    fetched, and the period can't be a SQL WHERE at all: recon_summary's
+    own statement_period is always NULL (see get_recent_recon_runs()'s
+    docstring) and the real value lives in document_intake_log, on a
+    different database engine. So this reads every recon_summary run (a
+    few narrow columns) plus every intake period/shop in one query each,
+    filters and counts in Python, and only then caps at `limit` and does
+    the per-row job_id lookups for the rows actually shown.
+
+    "total"/"reconciled" (the panel's "N of M statements reconciled") count
+    every run matching the filters, not just the `limit` shown. They count
+    every silver.recon_summary row as-is, re-runs of the same PDF included
+    -- is_latest_version is 1 on every row this pipeline writes (see
+    fabric_matching.py's _write_summary()), and get_kpis() counts the same
+    way, so the two stay consistent. Deliberately no dedup here.
+
+    "period_options" are built from ALL runs, before either filter, so
+    picking a status never hides a period from the dropdown -- and only
+    periods that actually have a run appear in it."""
+    if status not in RECON_RUN_STATUS_FILTERS:
+        status = "all"
+    period = period or None
+
+    rows = recon_query(
+        """
+        SELECT statement_id, vendor_name, statement_period,
+               total_invoice_count, matched_count, exception_count,
+               overall_status, reconciliation_timestamp
+        FROM silver.recon_summary
+        WHERE is_latest_version = 1
+        ORDER BY reconciliation_timestamp DESC
+        """
+    )
+    _attach_intake_period_and_shop(rows)
+
+    period_options = sorted({r["statement_period"] for r in rows if r.get("statement_period")}, reverse=True)
+
+    filtered = rows
+    if status == "reconciled":
+        filtered = [r for r in filtered if (r.get("exception_count") or 0) == 0]
+    elif status == "exceptions":
+        filtered = [r for r in filtered if (r.get("exception_count") or 0) > 0]
+    if period:
+        filtered = [r for r in filtered if r.get("statement_period") == period]
+
+    reconciled = sum(1 for r in filtered if (r.get("exception_count") or 0) == 0)
+    shown = filtered[:int(limit)]
+    _attach_job_ids_and_display_names(shown)
+    return {
+        "runs": shown,
+        "total": len(filtered),
+        "reconciled": reconciled,
+        "period_options": period_options,
+    }
+
+
+def _attach_intake_period_and_shop(rows: list, statement_ids: list = None) -> None:
+    """Overrides each row's statement_period (and sets "shop") from
+    document_intake_log -- see get_recent_recon_runs()'s docstring for why
+    recon_summary's own statement_period isn't trusted. With statement_ids
+    given, reads just those; without, reads the whole log in one query
+    (no IN list, so no 2100-parameter cap to worry about). A statement_id
+    can have more than one intake row (reprocessing); a row with a period
+    wins over one without."""
+    if not rows:
+        return
+    if statement_ids:
+        placeholders = ", ".join("?" for _ in statement_ids)
+        intake_rows = execute_query(
+            f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
+            f"WHERE statement_id IN ({placeholders})",
+            statement_ids,
+        )
+    else:
+        intake_rows = execute_query(
+            "SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log"
+        )
+    intake_by_statement = {}
+    for r in intake_rows:
+        existing = intake_by_statement.get(r["statement_id"])
+        if existing is None or (not existing.get("statement_period") and r.get("statement_period")):
+            intake_by_statement[r["statement_id"]] = r
+    for row in rows:
+        intake_row = intake_by_statement.get(row["statement_id"])
+        row["statement_period"] = (intake_row["statement_period"] if intake_row else None) or row["statement_period"]
+        # shop_or_entity is a JSON list (see write_intake_log()) -- same
+        # parse pattern as get_exception_runs()'s shop fix (2026-09-21):
+        # silver.recon_summary/statement have no populated shop field.
+        try:
+            shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
+        except (TypeError, ValueError):
+            shop_list = []
+        row["shop"] = ", ".join(shop_list) if shop_list else None
+
+
+def _attach_job_ids_and_display_names(rows: list) -> None:
+    for row in rows:
+        job_rows = execute_query(
+            "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
+            [row["statement_id"]],
+        )
+        row["job_id"] = job_rows[0]["job_id"] if job_rows else None
+        row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
+
+
 def get_recent_recon_runs(limit: int = 10) -> list:
     """Home page's "Reconciliation runs" panel -- completed statements that
     have gone through the NetSuite matching flow (src/matching/fabric_matching.py),
@@ -211,33 +323,8 @@ def get_recent_recon_runs(limit: int = 10) -> list:
         """
     )
     if rows:
-        statement_ids = [r["statement_id"] for r in rows]
-        placeholders = ", ".join("?" for _ in statement_ids)
-        intake_rows = execute_query(
-            f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
-            f"WHERE statement_id IN ({placeholders})",
-            statement_ids,
-        )
-        intake_by_statement = {r["statement_id"]: r for r in intake_rows}
-        for row in rows:
-            intake_row = intake_by_statement.get(row["statement_id"])
-            row["statement_period"] = (intake_row["statement_period"] if intake_row else None) or row["statement_period"]
-            # shop_or_entity is a JSON list (see write_intake_log()) -- same
-            # parse pattern as get_exception_runs()'s shop fix (2026-09-21):
-            # silver.recon_summary/statement have no populated shop field.
-            try:
-                shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
-            except (TypeError, ValueError):
-                shop_list = []
-            row["shop"] = ", ".join(shop_list) if shop_list else None
-
-    for row in rows:
-        job_rows = execute_query(
-            "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
-            [row["statement_id"]],
-        )
-        row["job_id"] = job_rows[0]["job_id"] if job_rows else None
-        row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
+        _attach_intake_period_and_shop(rows, [r["statement_id"] for r in rows])
+    _attach_job_ids_and_display_names(rows)
     return rows
 
 
@@ -871,21 +958,39 @@ def _with_aging_fields(rows: list) -> list:
     return rows
 
 
-def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
+# Exceptions review list's sort chips (?sort=...). A fixed whitelist --
+# the URL value picks one of these clauses and is never interpolated
+# itself; anything unrecognised falls back to the original invoice-number
+# order. invoice_number is the tie-breaker so equal amounts/dates keep a
+# stable order between page loads. date_raised is DATETIME2 on Fabric, so
+# "oldest" orders chronologically, not as text. Credits (negative
+# statement_amount) land at the bottom of "amount".
+EXCEPTION_SORTS = {
+    "amount": "ge.statement_amount DESC, ge.invoice_number",
+    "oldest": "ge.date_raised ASC, ge.invoice_number",
+}
+_DEFAULT_EXCEPTION_ORDER_BY = "ge.invoice_number"
+
+
+def _exceptions_order_by(sort: str = None) -> str:
+    return EXCEPTION_SORTS.get(sort, _DEFAULT_EXCEPTION_ORDER_BY)
+
+def get_open_exceptions(statement_id: str, reason_filter: str = None, sort: str = None) -> list:
+    order_by = _exceptions_order_by(sort)
     reasons = _REASON_FILTER_SQL.get(reason_filter)
     if reasons:
         placeholders = ", ".join("?" for _ in reasons)
         return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
             WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN' AND ge.exception_reason IN ({placeholders})
-            ORDER BY ge.invoice_number
+            ORDER BY {order_by}
             """,
             [statement_id, *reasons],
         ))
     return _with_aging_fields(recon_query(
-        _OPEN_EXCEPTIONS_SELECT + """
+        _OPEN_EXCEPTIONS_SELECT + f"""
         WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN'
-        ORDER BY ge.invoice_number
+        ORDER BY {order_by}
         """,
         [statement_id],
     ))
@@ -929,21 +1034,23 @@ _ORPHAN_EXCEPTIONS_WHERE = """
 """
 
 
-def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None) -> list:
+def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None,
+                                        sort: str = None) -> list:
+    order_by = _exceptions_order_by(sort)
     reasons = _REASON_FILTER_SQL.get(reason_filter)
     if reasons:
         placeholders = ", ".join("?" for _ in reasons)
         return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
             WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason IN ({placeholders})
-            ORDER BY ge.invoice_number
+            ORDER BY {order_by}
             """,
             [source_file, *reasons],
         ))
     return _with_aging_fields(recon_query(
         _OPEN_EXCEPTIONS_SELECT + f"""
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
-        ORDER BY ge.invoice_number
+        ORDER BY {order_by}
         """,
         [source_file],
     ))

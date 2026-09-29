@@ -27,10 +27,20 @@
     <div class="detail-list-head">
       <h3>{{ exceptions | length }} exception{{ "s" if exceptions | length != 1 }}</h3>
       {% set stmt_qs = ("&statement_id=" + statement.statement_id) if statement and statement.statement_id else "" %}
+      {% set sort_qs = ("&sort=" + sort) if sort else "" %}
+      {% set selected_qs = ("&selected=" + selected.exception_id) if selected else "" %}
       <div class="filter-tabs">
-        <a href="/exceptions/{{ vendor_url_name }}?filter=all{{ stmt_qs }}" class="filter-tab {{ 'active' if filter == 'all' }}">All</a>
-        <a href="/exceptions/{{ vendor_url_name }}?filter=missing{{ stmt_qs }}" class="filter-tab {{ 'active' if filter == 'missing' }}">Missing</a>
-        <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch{{ stmt_qs }}" class="filter-tab {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=all{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'all' }}">All</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=missing{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'missing' }}">Missing</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+      </div>
+      {# Sort chips -- same .filter-tab pill as the reason tabs above. Keep
+         filter, statement_id and the selected exception; "Invoice #" is
+         the default order (no sort param). #}
+      <div class="filter-tabs" aria-label="Sort exceptions">
+        <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ selected_qs }}" class="filter-tab {{ 'active' if not sort }}">Invoice #</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ selected_qs }}&sort=amount" class="filter-tab {{ 'active' if sort == 'amount' }}">Largest amount</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ selected_qs }}&sort=oldest" class="filter-tab {{ 'active' if sort == 'oldest' }}">Oldest first</a>
       </div>
       <div class="resolve-track">
         <div class="progress-track"><div class="progress-fill" style="width:{{ progress_pct }}%"></div></div>
@@ -50,7 +60,7 @@
 
     <div class="list-scroll">
       {% for exc in exceptions %}
-      <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}&selected={{ exc.exception_id }}"
+      <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ sort_qs }}&selected={{ exc.exception_id }}"
          class="exception-row {{ 'active' if selected and selected.exception_id == exc.exception_id }}">
         <div class="exception-row-top">
           <div class="exception-row-main">
@@ -93,6 +103,7 @@
       <form method="post" action="/exceptions/{{ vendor_url_name }}/escalate" style="margin:0">
         <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
         <input type="hidden" name="filter" value="{{ filter }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="statement_id" value="{{ statement.statement_id if statement else '' }}">
         <button type="submit" class="btn-ghost"><svg class="icon" style="width:13px;height:13px"><use href="#i-flag"/></svg> Escalate</button>
       </form>
@@ -104,6 +115,7 @@
     <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
     <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
     <input type="hidden" name="filter" value="{{ filter }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
 
     <div class="sec-label" style="margin-top:6px">Invoice details</div>
     <div class="field-grid">

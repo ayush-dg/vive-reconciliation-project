@@ -60,12 +60,19 @@
     <option value="{{ sname }}">{{ sname }}</option>
     {% endfor %}
   </select>
+  <select id="period-filter" class="filter-chip" style="cursor:pointer">
+    <option value="">All periods</option>
+    {% for pval in period_options %}
+    <option value="{{ pval }}">{{ pval | period_label }}</option>
+    {% endfor %}
+  </select>
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
   {% for run in runs %}
   <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}"
-       data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}">
+       data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
+       data-period="{{ run.statement_period or '' }}">
     <div class="report-card-head">
       <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-check-circle' if run.passed else 'i-x-circle' }}"/></svg></div>
       <div>
@@ -95,17 +102,20 @@
   var statusChips = document.querySelectorAll(".filter-chip[data-filter]");
   var vendorFilter = document.getElementById("vendor-filter");
   var shopFilter = document.getElementById("shop-filter");
+  var periodFilter = document.getElementById("period-filter");
   var cards = document.querySelectorAll("#validation-card-grid .report-card");
   var currentStatus = "all";
 
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
+    var period = periodFilter.value;
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
       var matchesVendor = !vendor || card.dataset.vendor === vendor;
       var matchesShop = !shop || card.dataset.shop === shop;
-      card.style.display = (matchesStatus && matchesVendor && matchesShop) ? "" : "none";
+      var matchesPeriod = !period || card.dataset.period === period;
+      card.style.display = (matchesStatus && matchesVendor && matchesShop && matchesPeriod) ? "" : "none";
     });
   }
 
@@ -119,6 +129,7 @@
   });
   vendorFilter.addEventListener("change", applyFilters);
   shopFilter.addEventListener("change", applyFilters);
+  periodFilter.addEventListener("change", applyFilters);
 })();
 </script>
 
