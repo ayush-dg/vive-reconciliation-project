@@ -93,11 +93,11 @@
       <span>
         Raised {{ selected.date_raised | friendly_dt }}
         {% if selected.days_open is not none %}
-        <span class="badge {{ 'badge-aged' if selected.days_open >= 30 else 'badge-neutral' }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
+        <span class="badge {{ 'badge-aged' if selected.days_open >= 30 else 'badge-neutral' }}" style="margin-left:8px{{ '' if selected.days_open >= 30 else ';font-weight:500' }}">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
         {% endif %}
       </span>
       {% if selected.escalation_status == 'ESCALATED' %}
-      <span class="badge badge-danger"><svg class="icon" style="width:12px;height:12px"><use href="#i-flag"/></svg>Escalated {{ selected.days_since_escalated }} day{{ "s" if selected.days_since_escalated != 1 }} ago</span>
+      <span class="badge badge-neutral"><svg class="icon" style="width:12px;height:12px"><use href="#i-flag"/></svg>Escalated {{ selected.days_since_escalated }} day{{ "s" if selected.days_since_escalated != 1 }} ago</span>
       {% else %}
       <form method="post" action="/exceptions/{{ vendor_url_name }}/escalate" style="margin:0">
         <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
