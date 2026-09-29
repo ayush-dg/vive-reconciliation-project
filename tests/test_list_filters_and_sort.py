@@ -48,7 +48,8 @@ def _make_fabric_db():
         CREATE TABLE silver.recon_summary (
             statement_id TEXT, vendor_name TEXT, statement_period TEXT,
             total_invoice_count INTEGER, matched_count INTEGER, exception_count INTEGER,
-            overall_status TEXT, reconciliation_timestamp TEXT, is_latest_version INTEGER
+            overall_status TEXT, reconciliation_timestamp TEXT, is_latest_version INTEGER,
+            statement_total REAL
         )
         """
     )
@@ -101,7 +102,7 @@ class _BackendTestCase(unittest.TestCase):
 
     def _run(self, statement_id, *, exception_count, ts, period=None, shop=None, is_latest=1):
         self.fabric.execute(
-            "INSERT INTO silver.recon_summary VALUES (?, ?, NULL, 10, ?, ?, ?, ?, ?)",
+            "INSERT INTO silver.recon_summary VALUES (?, ?, NULL, 10, ?, ?, ?, ?, ?, 100.0)",
             [statement_id, "Keystone Automotive", 10 - exception_count, exception_count,
              "RECONCILED" if exception_count == 0 else "EXCEPTIONS_PRESENT", ts, is_latest],
         )
@@ -228,7 +229,8 @@ class TestExceptionSort(_BackendTestCase):
     def test_amount_sort_is_largest_first_with_credits_last(self):
         self.assertEqual(self._ids(queries.get_open_exceptions("STMT-1", sort="amount")), ["e2", "e1", "e3"])
 
-    def test_oldest_sort_is_date_raised_ascending(self):
+    def test_oldest_is_no_longer_a_sort_and_gives_default_order(self):
+        self.assertNotIn("oldest", queries.EXCEPTION_SORTS)
         self.assertEqual(self._ids(queries.get_open_exceptions("STMT-1", sort="oldest")), ["e3", "e1", "e2"])
 
     def test_sort_combines_with_reason_filter(self):
@@ -247,11 +249,9 @@ class TestExceptionSort(_BackendTestCase):
         self.assertEqual(self._ids(queries.get_open_exceptions_for_source_file("orphan.pdf")), ["o1", "o2"])
         self.assertEqual(self._ids(queries.get_open_exceptions_for_source_file("orphan.pdf", sort="amount")),
                          ["o2", "o1"])
-        self.assertEqual(self._ids(queries.get_open_exceptions_for_source_file("orphan.pdf", sort="oldest")),
-                         ["o2", "o1"])
         self.assertEqual(
             self._ids(queries.get_open_exceptions_for_source_file("orphan.pdf", reason_filter="missing",
-                                                                  sort="oldest")),
+                                                                  sort="amount")),
             ["o2", "o1"],
         )
 
@@ -268,6 +268,9 @@ class TestFilterRedirectSuffixKeepsSort(unittest.TestCase):
 
     def test_unknown_sort_is_dropped(self):
         self.assertEqual(_filter_redirect_suffix("all", None, "evil"), "")
+
+    def test_removed_oldest_sort_is_dropped(self):
+        self.assertEqual(_filter_redirect_suffix("all", "S1", "oldest"), "?statement_id=S1")
 
 
 def _render_review(**overrides):
@@ -309,16 +312,20 @@ class TestReviewPageCarriesSort(unittest.TestCase):
         base = "/exceptions/Keystone?filter=missing&statement_id=STMT-TEST&selected=exc-1"
         self.assertIn(f'href="{base}" class="filter-tab active">Invoice #', html)
         self.assertIn(f'href="{base}&sort=amount" class="filter-tab ">Largest amount', html)
-        self.assertIn(f'href="{base}&sort=oldest" class="filter-tab ">Oldest first', html)
+
+    def test_oldest_first_chip_is_gone(self):
+        html = _render_review(sort="")
+        self.assertNotIn("Oldest first", html)
+        self.assertNotIn("sort=oldest", html)
 
     def test_active_sort_chip_is_marked(self):
-        html = _render_review(sort="oldest")
-        self.assertIn('class="filter-tab active">Oldest first', html)
+        html = _render_review(sort="amount")
+        self.assertIn('class="filter-tab active">Largest amount', html)
         self.assertIn('class="filter-tab ">Invoice #', html)
 
     def test_both_post_forms_carry_sort(self):
-        html = _render_review(sort="oldest")
-        self.assertEqual(html.count('<input type="hidden" name="sort" value="oldest">'), 2)
+        html = _render_review(sort="amount")
+        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 2)
 
     def test_modal_still_has_no_form(self):
         html = _render_review()
@@ -366,9 +373,13 @@ class TestReviewRouteSortWiring(unittest.TestCase):
         self.client = _client(exceptions.router)
 
     def test_known_sort_reaches_the_query(self):
-        resp = self.client.get("/exceptions/Keystone?statement_id=S1&sort=oldest")
+        resp = self.client.get("/exceptions/Keystone?statement_id=S1&sort=amount")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(self.calls, ["oldest"])
+        self.assertEqual(self.calls, ["amount"])
+
+    def test_removed_oldest_sort_reaches_the_query_as_none(self):
+        self.client.get("/exceptions/Keystone?statement_id=S1&sort=oldest")
+        self.assertEqual(self.calls, [None])
 
     def test_unknown_sort_reaches_the_query_as_none(self):
         self.client.get("/exceptions/Keystone?statement_id=S1&sort=bogus")
@@ -384,9 +395,9 @@ class TestReviewRouteSortWiring(unittest.TestCase):
 
     def test_escalate_redirect_keeps_sort(self):
         resp = self.client.post("/exceptions/Keystone/escalate", data={
-            "exception_id": "e1", "statement_id": "S1", "filter": "all", "sort": "oldest",
+            "exception_id": "e1", "statement_id": "S1", "filter": "all", "sort": "amount",
         }, follow_redirects=False)
-        self.assertEqual(resp.headers["location"], "/exceptions/Keystone?statement_id=S1&sort=oldest")
+        self.assertEqual(resp.headers["location"], "/exceptions/Keystone?statement_id=S1&sort=amount")
 
 
 # ---------------------------------------------------------------------------
@@ -394,26 +405,29 @@ class TestReviewRouteSortWiring(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestHomeRoute(unittest.TestCase):
+    """Status/period wiring on Home. The time-window behaviour itself is
+    covered in tests/test_home_time_window.py."""
 
     def setUp(self):
-        self.panel_calls = []
+        self.calls = []
 
-        def get_recon_runs_panel(status="all", period=None, limit=10):
-            self.panel_calls.append((status, period, limit))
+        def get_home_dashboard(window=None, status="all", period=None, limit=10):
+            self.calls.append((window.range, status, period, limit))
             return {
+                "kpis": {"total_invoices": 5556, "auto_reconciled": 5179, "open_exceptions": 0,
+                         "statement_total": 0, "vendor_count": 3, "match_rate": 93.2},
                 "runs": [{"statement_id": "S1", "vendor_name": "Keystone", "vendor_display_name": "Keystone",
                           "shop": None, "statement_period": "2026-08", "total_invoice_count": 5,
                           "matched_count": 5, "exception_count": 0, "overall_status": "RECONCILED",
                           "reconciliation_timestamp": None, "job_id": None}],
                 "total": 12, "reconciled": 7, "period_options": ["2026-08", "2026-07"],
+                "statement_count": 12,
             }
 
         _patch_all(
             self,
-            get_recon_runs_panel=get_recon_runs_panel,
-            get_kpis=lambda: {"total_invoices": 5556, "auto_reconciled": 5179, "open_exceptions": 0,
-                              "statement_total": 0, "vendor_count": 3, "match_rate": 93.2,
-                              "pending_review_count": 0},
+            get_run_timestamps=lambda: [],
+            get_home_dashboard=get_home_dashboard,
             get_active_jobs=lambda: [], get_failed_jobs=lambda: [],
             get_recent_completed_batches=lambda limit=3: [],
             get_last_netsuite_sync=lambda: None, get_last_outlook_sync=lambda: None,
@@ -424,11 +438,11 @@ class TestHomeRoute(unittest.TestCase):
     def test_filters_are_passed_through(self):
         resp = self.client.get("/?status=exceptions&period=2026-07")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(self.panel_calls, [("exceptions", "2026-07", 10)])
+        self.assertEqual(self.calls, [("last", "exceptions", "2026-07", 10)])
 
     def test_bad_status_becomes_all(self):
         self.client.get("/?status=nope")
-        self.assertEqual(self.panel_calls, [("all", None, 10)])
+        self.assertEqual(self.calls, [("last", "all", None, 10)])
 
     def test_n_of_m_and_reconciled_card(self):
         html = self.client.get("/").text
@@ -439,7 +453,7 @@ class TestHomeRoute(unittest.TestCase):
 
     def test_status_chips_keep_period_and_dropdown_keeps_status(self):
         html = self.client.get("/?status=reconciled&period=2026-07").text.replace("&amp;", "&")
-        self.assertIn('href="/?status=all&period=2026-07" class="filter-chip "', html)
+        self.assertIn('href="/?period=2026-07" class="filter-chip "', html)
         self.assertIn('href="/?status=reconciled&period=2026-07" class="filter-chip active"', html)
         self.assertIn('<input type="hidden" name="status" value="reconciled">', html)
         self.assertIn('<option value="2026-07" selected>Jul 2026</option>', html)

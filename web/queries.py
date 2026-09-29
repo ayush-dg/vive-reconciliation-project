@@ -39,6 +39,7 @@ from src.lakehouse.fabric_sql import (
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import display_name as vendor_display_name
+from web.time_window import TimeWindow
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -179,44 +180,81 @@ def get_recent_runs(limit: int = 10) -> list:
 RECON_RUN_STATUS_FILTERS = ("all", "reconciled", "exceptions")
 
 
-def get_recon_runs_panel(status: str = "all", period: str = None, limit: int = 10) -> dict:
-    """Home page's "Reconciliation runs" panel with its status/period
-    filters -- returns {"runs", "total", "reconciled", "period_options"}.
+def get_run_timestamps() -> list:
+    """Every run's reconciliation_timestamp (one narrow column), for
+    web/time_window.py's "Last run" session and the Month dropdown's
+    options. Order is irrelevant -- time_window sorts."""
+    rows = recon_query(
+        "SELECT reconciliation_timestamp FROM silver.recon_summary WHERE is_latest_version = 1"
+    )
+    return [r["reconciliation_timestamp"] for r in rows if r.get("reconciliation_timestamp")]
 
-    Filtering has to happen BEFORE the row cap, not on the 10 already
-    fetched, and the period can't be a SQL WHERE at all: recon_summary's
-    own statement_period is always NULL (see get_recent_recon_runs()'s
-    docstring) and the real value lives in document_intake_log, on a
-    different database engine. So this reads every recon_summary run (a
-    few narrow columns) plus every intake period/shop in one query each,
-    filters and counts in Python, and only then caps at `limit` and does
-    the per-row job_id lookups for the rows actually shown.
 
-    "total"/"reconciled" (the panel's "N of M statements reconciled") count
-    every run matching the filters, not just the `limit` shown. They count
-    every silver.recon_summary row as-is, re-runs of the same PDF included
-    -- is_latest_version is 1 on every row this pipeline writes (see
-    fabric_matching.py's _write_summary()), and get_kpis() counts the same
-    way, so the two stay consistent. Deliberately no dedup here.
+def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: str = None,
+                       limit: int = 10) -> dict:
+    """Everything on Home that the time filter drives, from ONE
+    runs-in-window query, so the KPI cards, the "N of M statements
+    reconciled" line and the runs table always cover exactly the same set
+    of statement_ids. `window` (web/time_window.py) becomes one bound
+    [start, end) predicate on reconciliation_timestamp; None = all time.
 
-    "period_options" are built from ALL runs, before either filter, so
-    picking a status never hides a period from the dropdown -- and only
-    periods that actually have a run appear in it."""
+    Returns {"kpis", "runs", "total", "reconciled", "period_options",
+    "statement_count"}:
+
+    - "kpis": the four cards, summed from the window's rows only -- status
+      and period do NOT narrow them. open_exceptions is SUM(exception_count)
+      of those same rows rather than a separate live count of OPEN
+      silver.recon_exceptions rows, so the card always equals the table's
+      Exceptions column (_recompute_summary_counts() keeps exception_count
+      in step with the live OPEN rows; they matched exactly live,
+      2026-09-29). The sidebar's Exceptions dot stays unscoped
+      (get_open_recon_exceptions_count()).
+    - "total"/"reconciled": every run in the window matching status/period
+      (not just the `limit` shown). Counts every silver.recon_summary row
+      as-is, re-runs of the same PDF included -- is_latest_version is 1 on
+      every row this pipeline writes (see fabric_matching.py's
+      _write_summary()). Deliberately no dedup.
+    - "period_options": statement periods of the window's runs, built
+      before the status/period filters, so a status never hides a period.
+
+    Filtering has to happen BEFORE the row cap, and the statement period
+    cannot be a SQL WHERE at all: recon_summary's own statement_period is
+    always NULL (see get_recent_recon_runs()'s docstring) and the real
+    value lives in document_intake_log, on a different database engine. So
+    status/period are applied in Python, then the cap, then the per-row
+    job_id lookups for the rows actually shown."""
     if status not in RECON_RUN_STATUS_FILTERS:
         status = "all"
     period = period or None
+    window_sql, window_params = window.sql() if window else ("", [])
 
     rows = recon_query(
-        """
+        f"""
         SELECT statement_id, vendor_name, statement_period,
                total_invoice_count, matched_count, exception_count,
-               overall_status, reconciliation_timestamp
+               statement_total, overall_status, reconciliation_timestamp
         FROM silver.recon_summary
-        WHERE is_latest_version = 1
+        WHERE is_latest_version = 1{window_sql}
         ORDER BY reconciliation_timestamp DESC
-        """
+        """,
+        window_params,
     )
-    _attach_intake_period_and_shop(rows)
+
+    total_invoices = sum(r.get("total_invoice_count") or 0 for r in rows)
+    auto_reconciled = sum(r.get("matched_count") or 0 for r in rows)
+    kpis = {
+        "total_invoices": total_invoices,
+        "auto_reconciled": auto_reconciled,
+        "open_exceptions": sum(r.get("exception_count") or 0 for r in rows),
+        "statement_total": sum(float(r.get("statement_total") or 0) for r in rows),
+        "vendor_count": len({r["vendor_name"] for r in rows if r.get("vendor_name")}),
+        "match_rate": round((auto_reconciled / total_invoices) * 100, 1) if total_invoices else None,
+    }
+
+    # All time reads the whole intake log in one go; a bounded window
+    # looks up just its own statement_ids.
+    all_time = window is None or (window.start_utc is None and not window.empty)
+    _attach_intake_period_and_shop(rows, None if all_time else [r["statement_id"] for r in rows])
 
     period_options = sorted({r["statement_period"] for r in rows if r.get("statement_period")}, reverse=True)
 
@@ -232,30 +270,47 @@ def get_recon_runs_panel(status: str = "all", period: str = None, limit: int = 1
     shown = filtered[:int(limit)]
     _attach_job_ids_and_display_names(shown)
     return {
+        "kpis": kpis,
         "runs": shown,
         "total": len(filtered),
         "reconciled": reconciled,
         "period_options": period_options,
+        "statement_count": len(rows),
     }
+
+
+def get_recon_runs_panel(status: str = "all", period: str = None, limit: int = 10,
+                         window: TimeWindow = None) -> dict:
+    """The runs-panel slice of get_home_dashboard() -- {"runs", "total",
+    "reconciled", "period_options"}. window=None is all time."""
+    data = get_home_dashboard(window=window, status=status, period=period, limit=limit)
+    return {k: data[k] for k in ("runs", "total", "reconciled", "period_options")}
+
+
+# document_intake_log lookups by statement_id are chunked to stay well
+# under SQL Server's 2100-parameters-per-statement cap.
+_INTAKE_LOOKUP_CHUNK = 1000
 
 
 def _attach_intake_period_and_shop(rows: list, statement_ids: list = None) -> None:
     """Overrides each row's statement_period (and sets "shop") from
     document_intake_log -- see get_recent_recon_runs()'s docstring for why
     recon_summary's own statement_period isn't trusted. With statement_ids
-    given, reads just those; without, reads the whole log in one query
-    (no IN list, so no 2100-parameter cap to worry about). A statement_id
-    can have more than one intake row (reprocessing); a row with a period
-    wins over one without."""
+    given, reads just those (chunked); without, reads the whole log in one
+    query. A statement_id can have more than one intake row
+    (reprocessing); a row with a period wins over one without."""
     if not rows:
         return
     if statement_ids:
-        placeholders = ", ".join("?" for _ in statement_ids)
-        intake_rows = execute_query(
-            f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
-            f"WHERE statement_id IN ({placeholders})",
-            statement_ids,
-        )
+        intake_rows = []
+        for i in range(0, len(statement_ids), _INTAKE_LOOKUP_CHUNK):
+            chunk = statement_ids[i:i + _INTAKE_LOOKUP_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            intake_rows += execute_query(
+                f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
+                f"WHERE statement_id IN ({placeholders})",
+                chunk,
+            )
     else:
         intake_rows = execute_query(
             "SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log"
@@ -960,14 +1015,15 @@ def _with_aging_fields(rows: list) -> list:
 
 # Exceptions review list's sort chips (?sort=...). A fixed whitelist --
 # the URL value picks one of these clauses and is never interpolated
-# itself; anything unrecognised falls back to the original invoice-number
-# order. invoice_number is the tie-breaker so equal amounts/dates keep a
-# stable order between page loads. date_raised is DATETIME2 on Fabric, so
-# "oldest" orders chronologically, not as text. Credits (negative
-# statement_amount) land at the bottom of "amount".
+# itself; anything unrecognised (including the removed "oldest") falls
+# back to the original invoice-number order. invoice_number is the
+# tie-breaker so equal amounts keep a stable order between page loads.
+# Credits (negative statement_amount) land at the bottom of "amount".
+# No date_raised sort: every exception on a statement is raised in the
+# same matching run with the same timestamp, so it only ever repeated
+# invoice order (seen live 2026-09-29).
 EXCEPTION_SORTS = {
     "amount": "ge.statement_amount DESC, ge.invoice_number",
-    "oldest": "ge.date_raised ASC, ge.invoice_number",
 }
 _DEFAULT_EXCEPTION_ORDER_BY = "ge.invoice_number"
 

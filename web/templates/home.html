@@ -22,26 +22,53 @@
   </a>
 </div>
 
+{# Time window -- drives the four cards, the runs table and its "N of M"
+   line together (see queries.get_home_dashboard() / web/time_window.py).
+   Changing it clears the statement period but keeps the status. #}
+<div class="filter-chips" style="flex-wrap:wrap;align-items:center;margin-bottom:8px" id="time-window" aria-label="Time window">
+  {% for key, label, url in range_chips %}
+  <a href="{{ url }}" class="filter-chip {{ 'active' if window.range == key }}">{{ label }}</a>
+  {% endfor %}
+  <form method="get" action="/" style="display:contents">
+    <input type="hidden" name="range" value="date">
+    {% if run_status != 'all' %}<input type="hidden" name="status" value="{{ run_status }}">{% endif %}
+    <input type="date" name="date" id="window-date" class="filter-chip {{ 'active' if window.range == 'date' }}"
+           value="{{ window.date if window.range == 'date' else '' }}" onchange="if (this.value) this.form.submit()" aria-label="Pick a day">
+  </form>
+  <form method="get" action="/" style="display:contents">
+    <input type="hidden" name="range" value="month">
+    {% if run_status != 'all' %}<input type="hidden" name="status" value="{{ run_status }}">{% endif %}
+    <select name="month" id="window-month" class="filter-chip {{ 'active' if window.range == 'month' }}" style="cursor:pointer"
+            onchange="if (this.value) this.form.submit()" aria-label="Pick a month">
+      <option value="">Month…</option>
+      {% for m in month_options %}
+      <option value="{{ m }}" {{ 'selected' if window.range == 'month' and window.month == m }}>{{ m | period_label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px" id="window-label">{{ window_label }}</div>
+
 <div class="stat-grid">
   <div class="stat-card">
     <div class="stat-label">Total invoices</div>
     <div class="stat-num">{{ "{:,}".format(kpis.total_invoices) }}</div>
-    <div class="stat-sub">across {{ kpis.vendor_count }} vendor{{ "s" if kpis.vendor_count != 1 }}</div>
+    <div class="stat-sub">across {{ kpis.vendor_count }} vendor{{ "s" if kpis.vendor_count != 1 }} · {{ window_short }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Reconciled</div>
     <div class="stat-num matched">{{ "{:,}".format(kpis.auto_reconciled) }} <span style="font-size:0.5em;font-weight:500;color:var(--text-muted)">of {{ "{:,}".format(kpis.total_invoices) }}</span></div>
-    <div class="stat-sub">{{ kpis.match_rate }}% matched</div>
+    <div class="stat-sub">{{ kpis.match_rate if kpis.match_rate is not none else "—" }}% matched · {{ window_short }}</div>
   </div>
   <div class="stat-card{{ ' stat-card--flagged' if kpis.open_exceptions > 0 }}">
     <div class="stat-label">Open exceptions</div>
     <div class="stat-num exception">{{ "{:,}".format(kpis.open_exceptions) }}</div>
-    <div class="stat-sub">{{ "needs review" if kpis.open_exceptions > 0 else "none open" }}</div>
+    <div class="stat-sub">{{ "needs review" if kpis.open_exceptions > 0 else "none open" }} · {{ window_short }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Statement total</div>
     <div class="stat-num">{{ kpis.statement_total | money_short }}</div>
-    <div class="stat-sub">this period</div>
+    <div class="stat-sub">{{ window_short }}</div>
   </div>
 </div>
 
@@ -189,14 +216,17 @@
     <a href="/reports" class="link-arrow">View all reports <svg class="icon"><use href="#i-arrow-right"/></svg></a>
   </div>
 
-  {# Server-side filters (?status=...&period=...) -- applied before the
-     panel's 10-row cap, see queries.get_recon_runs_panel(). Status chips
-     keep the period; the period dropdown keeps the status. #}
-  {% set period_qs = ("&period=" + (run_period | urlencode)) if run_period else "" %}
+  {# Server-side filters (?status=...&period=...) within the time window
+     above -- applied before the panel's 10-row cap, see
+     queries.get_home_dashboard(). Status chips keep the window and the
+     period; the period dropdown keeps the window and the status. #}
   <form method="get" action="/" class="filter-chips" style="padding:16px 20px 0;flex-wrap:wrap" id="runs-filters">
-    <a href="/?status=all{{ period_qs }}" class="filter-chip {{ 'active' if run_status == 'all' }}">All</a>
-    <a href="/?status=reconciled{{ period_qs }}" class="filter-chip {{ 'active' if run_status == 'reconciled' }}">Reconciled</a>
-    <a href="/?status=exceptions{{ period_qs }}" class="filter-chip {{ 'active' if run_status == 'exceptions' }}">Exceptions</a>
+    <a href="{{ status_urls['all'] }}" class="filter-chip {{ 'active' if run_status == 'all' }}">All</a>
+    <a href="{{ status_urls['reconciled'] }}" class="filter-chip {{ 'active' if run_status == 'reconciled' }}">Reconciled</a>
+    <a href="{{ status_urls['exceptions'] }}" class="filter-chip {{ 'active' if run_status == 'exceptions' }}">Exceptions</a>
+    {% if window.range != 'last' %}<input type="hidden" name="range" value="{{ window.range }}">{% endif %}
+    {% if window.range == 'date' %}<input type="hidden" name="date" value="{{ window.date }}">{% endif %}
+    {% if window.range == 'month' %}<input type="hidden" name="month" value="{{ window.month }}">{% endif %}
     <input type="hidden" name="status" value="{{ run_status }}">
     <select name="period" id="runs-period-filter" class="filter-chip" style="cursor:pointer" onchange="this.form.submit()" aria-label="Statement period">
       <option value="">All periods</option>
@@ -268,10 +298,13 @@
       </tr>
     </thead>
   </table>
-  {% if run_status != 'all' or run_period %}
-  <div class="empty-state">No reconciliation runs match these filters. <a href="/" class="link">Clear filters</a></div>
-  {% else %}
+  {% if window_statement_count %}
+  {# The window has runs; status/period filtered them all out. #}
+  <div class="empty-state">No reconciliation runs match these filters. <a href="{{ clear_table_url }}" class="link">Clear filters</a></div>
+  {% elif window.range in ('last', 'all') %}
   <div class="empty-state">No reconciliation runs yet — upload a vendor statement to get started.</div>
+  {% else %}
+  <div class="empty-state">{{ window_empty_message }} <a href="{{ last_run_url }}" class="link">Last run</a> · <a href="{{ all_time_url }}" class="link">All time</a></div>
   {% endif %}
   {% endif %}
 </div>
