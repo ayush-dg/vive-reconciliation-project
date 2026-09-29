@@ -20,6 +20,7 @@ import argparse
 import importlib.util
 import os
 import sys
+import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -40,6 +41,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.ai.document_understanding_engine import CorruptedPDFError
+from src.pipeline_timing import record_step, timed_step
 
 
 def load_notebook(name, relative_path):
@@ -53,6 +55,23 @@ def load_notebook(name, relative_path):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def _run_matching(statement_id):
+    """NetSuite matching -- additive, only meaningful once Silver exists
+    for this statement, so only called after the build succeeds. Writes
+    to recon_matched_invoices/recon_exceptions/recon_summary (NOT gold_* --
+    see migrations/013_add_recon_tables.sql). Best-effort, same as
+    everything else here."""
+    print(f"    Fabric Silver build: OK")
+    from src.matching.fabric_matching import run_fabric_matching
+    with timed_step("matching"):
+        match_result = run_fabric_matching(statement_id)
+    if "error" in match_result or match_result.get("skipped"):
+        print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+    else:
+        print(f"    NetSuite matching: {match_result['matched']} matched, "
+              f"{match_result['exceptions']} exceptions")
 
 
 def main():
@@ -72,14 +91,16 @@ def main():
     print(f"{'#'*65}")
 
     # Phase 1: Document Intake
+    pipeline_started = time.monotonic()
     print(f"\n>>> PHASE 1: Document Intake")
     intake_mod = load_notebook("intake", "notebooks/01_document_intake.py")
     try:
-        intake_result = intake_mod.run_intake(
-            pdf_path=args.pdf,
-            statement_id=args.statement_id,
-            statement_period=args.period,
-        )
+        with timed_step("intake_total"):
+            intake_result = intake_mod.run_intake(
+                pdf_path=args.pdf,
+                statement_id=args.statement_id,
+                statement_period=args.period,
+            )
     except CorruptedPDFError as e:
         print(f"\n{'#'*65}")
         print(f"  PIPELINE FAILED — {e}")
@@ -135,32 +156,47 @@ def main():
     expected_lines = intake_result.get("unnested_lines_written")
     expected_fields = intake_result.get("unnested_fields_written")
     visibility_confirmed = True
-    if expected_lines is not None and expected_fields is not None:
+    if intake_result.get("raw_statement_ready") is False:
+        # The raw_statement Bronze row never landed (intake already printed
+        # why) -- nothing for Silver to build from, so don't wait for it.
+        visibility_confirmed = False
+        print("    Fabric Silver build reason: skipped -- raw_statement Bronze row was not written")
+    elif expected_lines is not None and expected_fields is not None:
         from src.lakehouse.bronze_unnest import wait_for_visibility
-        visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)
+        with timed_step("visibility_wait"):
+            visibility_confirmed = wait_for_visibility(statement_id, expected_lines, expected_fields)
         if not visibility_confirmed:
             print("    Fabric Silver build reason: staging data not visible via SQL endpoint within timeout")
 
     from src.lakehouse.fabric_dbt_runner import run_dbt_silver_build, fabric_pipeline_lock
+    from src.lakehouse.silver_build import build_silver_direct, silver_build_mode
     if visibility_confirmed:
-        with fabric_pipeline_lock():
-            if run_dbt_silver_build(statement_id):
-                print(f"    Fabric Silver build: OK")
-
-                # NetSuite matching -- additive, only meaningful once Silver exists
-                # for this statement, so nested under the build succeeding. Writes
-                # to recon_matched_invoices/recon_exceptions/recon_summary (NOT
-                # gold_* -- see migrations/013_add_recon_tables.sql). Best-effort,
-                # same as everything else here.
-                from src.matching.fabric_matching import run_fabric_matching
-                match_result = run_fabric_matching(statement_id)
-                if "error" in match_result or match_result.get("skipped"):
-                    print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+        if silver_build_mode() == "dbt":
+            # Pre-2026-09-28 path: dbt run + matching serialized across
+            # jobs, since dbt-fabric's fixed-name __dbt_tmp relations and
+            # MERGE collide when two runs overlap.
+            lock_requested = time.monotonic()
+            with fabric_pipeline_lock():
+                record_step("lock_wait", time.monotonic() - lock_requested)
+                with timed_step("dbt_silver"):
+                    silver_built = run_dbt_silver_build(statement_id)
+                if silver_built:
+                    _run_matching(statement_id)
                 else:
-                    print(f"    NetSuite matching: {match_result['matched']} matched, "
-                          f"{match_result['exceptions']} exceptions")
+                    print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+        else:
+            # Default: append-only Silver build + matching, no shared lock --
+            # neither issues MERGE/UPDATE/DELETE on the shared tables for a
+            # new statement_id (see src/lakehouse/silver_build.py), so
+            # concurrent jobs run this part in parallel. A re-run of an
+            # existing statement_id takes the lock inside each step itself.
+            with timed_step("silver_build"):
+                silver_built = build_silver_direct(statement_id)
+            if silver_built:
+                _run_matching(statement_id)
             else:
                 print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+    record_step("fabric_pipeline_total", time.monotonic() - pipeline_started)
 
     if intake_result.get("bronze_count", 0) == 0:
         print(f"\n{'#'*65}")

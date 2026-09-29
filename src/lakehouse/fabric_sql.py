@@ -103,3 +103,51 @@ def execute_warehouse_sql(sql, params=None) -> None:
     cur = conn.cursor()
     cur.execute(sql, params or [])
     conn.commit()
+
+
+# SQL Server caps one statement at 2100 parameters -- stay under it.
+_MAX_PARAMS_PER_INSERT = 2000
+
+
+def insert_rows(cur, table: str, columns: list, rows: list) -> int:
+    """Inserts rows (list of sequences, in `columns` order) into `table`
+    with as few multi-row INSERT statements as the parameter cap allows,
+    on the caller's cursor -- so they share the caller's transaction and
+    commit. Never row-by-row: a single-row INSERT costs ~0.25-0.35s
+    against this Warehouse (measured 2026-09-28), which is what made
+    matching take 36-77s per statement.
+
+    Plain INSERTs are also what lets concurrent jobs write the same table
+    safely: Fabric Warehouse raises write-write conflicts for concurrent
+    UPDATE/DELETE/MERGE on a table, not for appends.
+
+    String parameters are bound as nvarchar(max): pyodbc otherwise sends
+    any string over 4000 chars as legacy ntext, which Fabric's UTF-8
+    collation rejects. `table` and `columns` are interpolated as SQL
+    identifiers -- callers pass fixed names only, never user input."""
+    if not rows:
+        return 0
+
+    import pyodbc
+
+    rows_per_insert = max(1, _MAX_PARAMS_PER_INSERT // len(columns))
+    column_list = ", ".join(columns)
+    row_placeholder = "(" + ", ".join("?" for _ in columns) + ")"
+    try:
+        for start in range(0, len(rows), rows_per_insert):
+            chunk = rows[start:start + rows_per_insert]
+            params = [value for row in chunk for value in row]
+            cur.setinputsizes([
+                (pyodbc.SQL_WVARCHAR, 0, 0) if isinstance(p, str) else None
+                for p in params
+            ])
+            cur.execute(
+                f"INSERT INTO {table} ({column_list}) VALUES "
+                + ", ".join(row_placeholder for _ in chunk),
+                params,
+            )
+    finally:
+        # setinputsizes() sticks to the cursor -- clear it so the caller's
+        # next execute() on this same cursor binds normally.
+        cur.setinputsizes(None)
+    return len(rows)
