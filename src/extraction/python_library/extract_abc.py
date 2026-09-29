@@ -50,7 +50,7 @@ VENDOR_SIGNATURE = ["ABC Parts International"]
 ROW_TOLERANCE = 3.0
 
 DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
-MONEY_RE = re.compile(r"^-?\$[\d,]+\.\d{2}$")
+MONEY_RE = re.compile(r"^\(?-?\$[\d,]+\.\d{2}\)?$")
 SO_REF_RE = re.compile(r"^#\S+$")
 # A bare short continuation token (e.g. "T", "S", "6") that can follow an
 # already-appended "#..." reference line for the same row - excludes
@@ -93,11 +93,19 @@ def bucket_column(x0):
 
 
 def clean_money(raw):
-    """'$352.00' -> '352.00', '-' -> ''."""
+    """'$352.00' -> '352.00', '($131.00)' -> '-131.00', '-' -> ''.
+
+    Parentheses are accounting-style negatives -- seen 2026-09-29 in the
+    running Balance column of a statement whose balance dips below zero
+    (Statement_15488, account 03-MODERN: a $131.00 credit memo posted
+    before any invoice). Left unhandled, '(131.00)' reached
+    extract()'s float() and failed the whole statement."""
     s = raw.strip()
     if not s or s == "-":
         return ""
-    return s.replace("$", "").replace(",", "")
+    negative = s.startswith("(") and s.endswith(")")
+    s = s.strip("()").replace("$", "").replace(",", "")
+    return f"-{s}" if negative else s
 
 
 def group_rows(words):
