@@ -43,7 +43,7 @@
      data-vendor="{{ v.vendor_display_name }}" data-shop="{{ v.shop or '' }}" data-location="{{ v.billing_location or '' }}">
     <div class="vendor-card-head">
       <div class="vendor-card-id">
-        <div class="vendor-badge-lg">{{ v.vendor_display_name | initials }}</div>
+        <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--matched-tint);color:var(--matched)"{% endif %}>{{ v.vendor_display_name | initials }}</div>
         <div class="vendor-card-title-block">
           <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ v.vendor_display_name }}</div>
           {% if v.shop %}<div class="vendor-card-shop" title="{{ v.shop }}">{{ v.shop }}</div>{% endif %}
@@ -62,8 +62,8 @@
       {% endif %}
     </div>
     <div class="vendor-card-body">
-      <div class="vc-metric"><div class="num">{{ v.matched_count }}</div><div class="lbl">Matched</div></div>
-      <div class="vc-metric"><div class="num">{{ v.exception_count }}</div><div class="lbl">Exceptions</div></div>
+      <div class="vc-metric"><div class="num" style="color:var(--matched)">{{ v.matched_count }}</div><div class="lbl">Matched</div></div>
+      <div class="vc-metric"><div class="num"{% if v.exception_count > 0 %} style="color:var(--exception)"{% endif %}>{{ v.exception_count }}</div><div class="lbl">Exceptions</div></div>
     </div>
     {% if v.exception_count > 0 and v.aging %}
     <div class="aging-line{{ ' stale' if v.aging.days_open >= 30 else '' }}">Oldest exception: <b>{{ v.aging.days_open }} day{{ "s" if v.aging.days_open != 1 }}</b></div>

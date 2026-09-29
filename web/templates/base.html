@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}VIVE Collision{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ static_url('style.css') }}">
 </head>
 <body data-page="{{ active_page }}">
@@ -61,7 +61,7 @@
       <div class="profile-toggle" id="profile-toggle">
         <div style="display:flex;align-items:center;gap:10px">
           <div class="user-avatar">{{ (user_name or user_email or "?") | initials }}</div>
-          <div><div style="font-size:12px;font-weight:600;color:#fff">{{ user_name or user_email or "Guest" }}</div><div class="sidebar-user-email">{{ user_email or "" }}</div></div>
+          <div><div style="font-size:12px;font-weight:600;color:#fff">{{ user_name or user_email or "Guest" }}</div><div style="font-size:11px;color:#8FA3B8">{{ user_email or "" }}</div></div>
         </div>
         <div class="profile-dropdown" id="profile-dropdown">
           <div class="profile-dropdown-item disabled">My Profile</div>
