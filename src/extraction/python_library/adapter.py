@@ -80,6 +80,7 @@ _VENDOR_DISPLAY_NAMES = {
     "extract_abc": "ABC Parts International, Inc.",
     "extract_fenix": "Fenix NE",
     "extract_rivian": "Rivian, LLC",
+    "extract_allstar": "All Star Auto Lights, Inc.",
 }
 
 # Which summary key holds the statement's own printed grand total, per
@@ -101,6 +102,7 @@ _PRINTED_TOTAL_KEY = {
     "extract_abc": "amount_due_printed",
     "extract_fenix": "total_due_printed",
     "extract_rivian": "total_printed",
+    "extract_allstar": "amount_due_printed",
 }
 
 # Which summary key holds the statement date, per module -- these
@@ -122,6 +124,7 @@ _STATEMENT_DATE_KEY = {
     "extract_abc": "statement_date",
     "extract_fenix": "period_end",
     "extract_rivian": "statement_date_iso",
+    "extract_allstar": "statement_date",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -285,6 +288,22 @@ _FIELD_MAP = {
         # a single charge_field naturally carries it through as a negative
         # charge rather than needing a signed_field split.
         "charge_field": "invoice_amount", "credit_field": None,
+    },
+    "extract_allstar": {
+        "invoice_number": ("invoice_number",),
+        "date_field": "date", "due_date_field": "due_date",
+        "po_number_field": "po_number",
+        # "open_balance", not "invoice_amount" -- same reason as
+        # extract_wilberts above: the printed Amount Due reconciles against
+        # sum(open_balance), not invoice_amount minus pymt_credit. A Payment
+        # row's Open Balance is only its UNAPPLIED remainder (Nutley: a
+        # $2,743.00 payment with $1,343.00 still open), so netting the full
+        # payment double-counts the part already absorbed by invoices it
+        # paid off. Open Balance equals Invoice on every invoice row seen so
+        # far. This only drives the arithmetic gate and the extracted-data
+        # columns -- NetSuite matching reads invoice_amount (the original
+        # bill amount) via dbt/vive_recon/seeds/vendor_field_mapping.csv.
+        "charge_field": "open_balance", "credit_field": None,
     },
 }
 

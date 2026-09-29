@@ -54,7 +54,8 @@
   "BALD_HILL": [
     "Bald Hill Dodge Chrysler Jeep Kia",
     "Bald Hill Dodge Chrysler",
-    "Bald Hill Realty Co."
+    "Bald Hill Realty Co.",
+    "Bald Hill Dodge Chryler Jeep Kia"
   ],
   "BERLIN_CITY_AUTO_GROUP": [
     "Berlin City Auto Group"
@@ -78,5 +79,18 @@
   "HOSELTON_TOYOTA": [
     "Hoselton Imports Inc. dba Hoselton Toyota",
     "Hoselton Toyota"
+  ],
+  "ALL_STAR_AUTO_LIGHTS": [
+    "All Star Auto Lights, Inc.",
+    "All Star Auto Lights"
+  ],
+  "BLAISE_ALEXANDER": [
+    "Blaise Alexander",
+    "Blaise Alexander Family Dealerships",
+    "Alexander Nissan Inc.",
+    "Alexander Nissan",
+    "Blaise Alexander Nissan",
+    "Blaise Alexander Subaru",
+    "Blaise Alexander Hyundai Mazda"
   ]
 }

@@ -69,8 +69,16 @@ FIELDNAMES = ["page", "date", "type", "reference_number", "original_invoice_ref"
 
 
 def clean_money(raw):
+    """'1,325.00' -> '1325.00', blank -> None. None, NOT "" (changed
+    2026-09-29): a "" raw value reaches Silver as a non-null
+    charge_amount_raw, so dbt's sign-based line_type (see
+    models/silver/statement_line.sql's with_line_type CTE) typed every
+    Credit row -- blank Charged, amount in Paid -- as a CHARGE and matching
+    looked it up in netsuite_vendorbill instead of netsuite_vendorcredit,
+    where Fenix's credit tranids actually live (e.g. 3337667 -> vendorcredit
+    entity 112843, $100 exact)."""
     if not raw:
-        return ""
+        return None
     return raw.replace(",", "")
 
 
@@ -207,7 +215,7 @@ def extract(pdf_path):
                         # transaction data. Drop it rather than surfacing it
                         # as if it were a genuine description.
                         due_desc_words = []
-                    due = ""
+                    due = None
                     description_parts = []
                     if due_desc_words:
                         first = due_desc_words[0]["text"]
