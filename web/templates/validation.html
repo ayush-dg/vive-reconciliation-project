@@ -66,13 +66,25 @@
     <option value="{{ pval }}">{{ pval | period_label }}</option>
     {% endfor %}
   </select>
+  {# "Last run" -- same Outlook-sync definition as Home (see
+     web/routers/validation.py). An independent on/off toggle, not part
+     of the All/Passed/Failed group, so it can combine with any of them. #}
+  <button type="button" class="filter-chip" id="last-run-filter" aria-pressed="false">Last run</button>
+  {# Same hidden-input + showPicker() pattern as Home's calendar button,
+     but purely client-side here -- Validation's filters never touch the
+     server. Filters by the attempt's US Eastern calendar day. #}
+  <button type="button" class="icon-btn" id="validation-date-btn" aria-label="Pick a day" title="Pick a day">
+    <svg class="icon"><use href="#i-calendar"/></svg>
+  </button>
+  <input type="date" id="validation-date" class="ns-sr-only" aria-label="Pick a day">
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
   {% for run in runs %}
   <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}"
        data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
-       data-period="{{ run.statement_period or '' }}">
+       data-period="{{ run.statement_period or '' }}"
+       data-last-run="{{ '1' if run.is_last_run else '0' }}" data-day="{{ run.ingestion_timestamp | eastern_day }}">
     <div class="report-card-head">
       <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-check-circle' if run.passed else 'i-x-circle' }}"/></svg></div>
       <div>
@@ -103,19 +115,26 @@
   var vendorFilter = document.getElementById("vendor-filter");
   var shopFilter = document.getElementById("shop-filter");
   var periodFilter = document.getElementById("period-filter");
+  var lastRunChip = document.getElementById("last-run-filter");
+  var dateInput = document.getElementById("validation-date");
   var cards = document.querySelectorAll("#validation-card-grid .report-card");
   var currentStatus = "all";
+  var lastRunOnly = false;
 
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
     var period = periodFilter.value;
+    var day = dateInput.value;
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
       var matchesVendor = !vendor || card.dataset.vendor === vendor;
       var matchesShop = !shop || card.dataset.shop === shop;
       var matchesPeriod = !period || card.dataset.period === period;
-      card.style.display = (matchesStatus && matchesVendor && matchesShop && matchesPeriod) ? "" : "none";
+      var matchesLastRun = !lastRunOnly || card.dataset.lastRun === "1";
+      var matchesDay = !day || card.dataset.day === day;
+      card.style.display = (matchesStatus && matchesVendor && matchesShop && matchesPeriod
+        && matchesLastRun && matchesDay) ? "" : "none";
     });
   }
 
@@ -130,6 +149,17 @@
   vendorFilter.addEventListener("change", applyFilters);
   shopFilter.addEventListener("change", applyFilters);
   periodFilter.addEventListener("change", applyFilters);
+
+  lastRunChip.addEventListener("click", function () {
+    lastRunOnly = !lastRunOnly;
+    lastRunChip.classList.toggle("active", lastRunOnly);
+    lastRunChip.setAttribute("aria-pressed", lastRunOnly ? "true" : "false");
+    applyFilters();
+  });
+  document.getElementById("validation-date-btn").addEventListener("click", function () {
+    if (dateInput.showPicker) { dateInput.showPicker(); } else { dateInput.focus(); }
+  });
+  dateInput.addEventListener("change", applyFilters);
 })();
 </script>
 

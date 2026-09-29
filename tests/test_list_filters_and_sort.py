@@ -478,7 +478,8 @@ class TestValidationPeriodFilter(unittest.TestCase):
              "statement_total_as_printed": 10, "validation_status": "matches", "validation_difference": 0,
              "ingestion_timestamp": None, "shop": None, "passed": True},
         ]
-        _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs], **_SIDEBAR)
+        _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs],
+                   get_outlook_synced_jobs=lambda: [], **_SIDEBAR)
         self.html = _client(validation.router).get("/validation").text
 
     def test_dropdown_offers_only_periods_with_data_newest_first(self):
@@ -493,6 +494,59 @@ class TestValidationPeriodFilter(unittest.TestCase):
 
     def test_filter_script_checks_period(self):
         self.assertIn("card.dataset.period === period", self.html)
+
+    def test_hero_summary_stays_unfiltered(self):
+        self.assertIn('<div class="report-hero-stat-num">3</div>', self.html)
+
+
+class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
+    """Validation's "Last run" chip and calendar-day filter -- same
+    Outlook-sync definition as Home (web/time_window.py's
+    outlook_last_sync()), applied to intake attempts instead of
+    reconciliation runs. Purely client-side, like Validation's existing
+    filters -- see web/routers/validation.py."""
+
+    def setUp(self):
+        runs = [
+            {"statement_id": "A", "source_file": "a.pdf", "vendor_name": "Keystone", "statement_period": "2026-07",
+             "statement_total_as_printed": 10, "validation_status": "matches", "validation_difference": 0,
+             "ingestion_timestamp": "2026-09-29T15:00:00+00:00", "shop": None, "passed": True},  # 11 AM ET
+            {"statement_id": "B", "source_file": "b.pdf", "vendor_name": "Keystone", "statement_period": "2026-08",
+             "statement_total_as_printed": 10, "validation_status": "mismatch", "validation_difference": 1,
+             "ingestion_timestamp": "2026-09-28T04:30:00+00:00", "shop": None, "passed": False},  # 12:30 AM ET Sep 28
+            {"statement_id": "C", "source_file": "c.pdf", "vendor_name": "Keystone", "statement_period": None,
+             "statement_total_as_printed": 10, "validation_status": "matches", "validation_difference": 0,
+             "ingestion_timestamp": None, "shop": None, "passed": True},
+        ]
+        # One Outlook sync (gap < 10 min) that produced statement A only;
+        # B and C are NOT part of it (B predates it, C has no job at all).
+        outlook_jobs = [
+            {"submitted_at": "2026-09-29 15:02:00", "statement_id": "A"},
+            {"submitted_at": "2026-09-29 14:58:00", "statement_id": None},
+        ]
+        _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs],
+                   get_outlook_synced_jobs=lambda: outlook_jobs, **_SIDEBAR)
+        self.html = _client(validation.router).get("/validation").text
+
+    def test_last_run_chip_present_as_an_independent_toggle(self):
+        self.assertIn('id="last-run-filter"', self.html)
+        self.assertIn('aria-pressed="false"', self.html)
+        # Not part of the All/Passed/Failed data-filter group.
+        self.assertNotIn('data-filter="all">Last run', self.html)
+
+    def test_calendar_button_and_hidden_date_input(self):
+        self.assertIn('id="validation-date-btn"', self.html)
+        self.assertIn('<use href="#i-calendar"/>', self.html)
+        self.assertIn('id="validation-date" class="ns-sr-only"', self.html)
+
+    def test_cards_carry_last_run_and_day_attributes(self):
+        self.assertIn('data-last-run="1" data-day="2026-09-29"', self.html)  # A: in the sync, 11 AM ET Sep 29
+        self.assertIn('data-last-run="0" data-day="2026-09-28"', self.html)  # B: not in the sync, Sep 28 ET
+        self.assertIn('data-last-run="0" data-day=""', self.html)           # C: no ingestion_timestamp at all
+
+    def test_filter_script_checks_last_run_and_day(self):
+        self.assertIn('card.dataset.lastRun === "1"', self.html)
+        self.assertIn('card.dataset.day === day', self.html)
 
     def test_hero_summary_stays_unfiltered(self):
         self.assertIn('<div class="report-hero-stat-num">3</div>', self.html)

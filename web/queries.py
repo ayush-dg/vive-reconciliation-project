@@ -181,13 +181,35 @@ RECON_RUN_STATUS_FILTERS = ("all", "reconciled", "exceptions")
 
 
 def get_run_timestamps() -> list:
-    """Every run's reconciliation_timestamp (one narrow column), for
-    web/time_window.py's "Last run" session and the Month dropdown's
-    options. Order is irrelevant -- time_window sorts."""
+    """Every run's reconciliation_timestamp (one narrow column), for the
+    Home page's Month dropdown options (web/time_window.py's
+    month_options()). Unrelated to "Last run" since 2026-09-30 -- see
+    get_outlook_synced_jobs()."""
     rows = recon_query(
         "SELECT reconciliation_timestamp FROM silver.recon_summary WHERE is_latest_version = 1"
     )
     return [r["reconciliation_timestamp"] for r in rows if r.get("reconciliation_timestamp")]
+
+
+def get_outlook_synced_jobs() -> list:
+    """Every job queued by the mailbox-ingest "Sync to Webapp" flow
+    (web/routers/mailbox_sync.py's _queue_eligible_blobs()) -- the only
+    code path that ever sets source_blob_path; manual uploads
+    (web/routers/upload.py), the dropzone watcher and Event Grid
+    (web/worker.py / web/routers/intake_trigger.py, a different blob
+    container entirely) never do, so this WHERE alone is what makes
+    web/time_window.py's "Last run" (redefined 2026-09-30 as "the most
+    recent Outlook sync") never include anything but Outlook-sourced
+    statements.
+
+    One row per job: submitted_at (when "Sync to Webapp" queued it) and
+    statement_id (NULL until Silver/matching has produced one -- see
+    outlook_last_sync()'s "still processing" handling). Used by both the
+    Home page and Validation's own "Last run" filter, so the two stay
+    scoped to the exact same definition."""
+    return execute_query(
+        "SELECT submitted_at, statement_id FROM jobs WHERE source_blob_path IS NOT NULL ORDER BY submitted_at DESC"
+    )
 
 
 def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: str = None,
@@ -195,8 +217,12 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
     """Everything on Home that the time filter drives, from ONE
     runs-in-window query, so the KPI cards, the "N of M statements
     reconciled" line and the runs table always cover exactly the same set
-    of statement_ids. `window` (web/time_window.py) becomes one bound
-    [start, end) predicate on reconciliation_timestamp; None = all time.
+    of statement_ids. `window` (web/time_window.py) is either a bound
+    [start, end) predicate on reconciliation_timestamp (calendar ranges),
+    a `statement_ids` membership filter applied here in Python ("last",
+    redefined 2026-09-30 as the most recent Outlook sync -- see
+    window.sql()'s own docstring for why this can't be a SQL join), or
+    unbound (None/"all" = all time).
 
     Returns {"kpis", "runs", "total", "reconciled", "period_options",
     "statement_count"}:
@@ -239,6 +265,8 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
         """,
         window_params,
     )
+    if window is not None and window.statement_ids is not None:
+        rows = [r for r in rows if r.get("statement_id") in window.statement_ids]
 
     total_invoices = sum(r.get("total_invoice_count") or 0 for r in rows)
     auto_reconciled = sum(r.get("matched_count") or 0 for r in rows)
@@ -252,8 +280,9 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
     }
 
     # All time reads the whole intake log in one go; a bounded window
-    # looks up just its own statement_ids.
-    all_time = window is None or (window.start_utc is None and not window.empty)
+    # (calendar or "last"'s statement_ids) looks up just its own
+    # statement_ids.
+    all_time = window is None or (window.start_utc is None and window.statement_ids is None and not window.empty)
     _attach_intake_period_and_shop(rows, None if all_time else [r["statement_id"] for r in rows])
 
     period_options = sorted({r["statement_period"] for r in rows if r.get("statement_period")}, reverse=True)

@@ -232,6 +232,24 @@ def friendly_dt(iso_str, now=None):
     return f"{dt.strftime('%b %d, %Y')}, {time_part}"
 
 
+def eastern_day(iso_str) -> str:
+    """iso_str (a UTC timestamp, string or datetime -- see friendly_dt()'s
+    docstring for the accepted shapes) -> its US Eastern calendar day as
+    "YYYY-MM-DD", for grouping/filtering by day (Validation's calendar-date
+    filter, matched against a native <input type="date">'s own value)
+    rather than for display. Falsy/unparseable input returns "" (never
+    the literal string "None" landing in a data-* attribute)."""
+    if not iso_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(EASTERN).date().isoformat()
+
+
 def friendly_error(raw):
     """A failed job's error_message can be a full stdout+traceback dump up
     to 4000 characters (see worker.py's _run_job()) -- showing the first
@@ -265,6 +283,7 @@ templates.env.filters["money_short"] = money_short
 templates.env.filters["period_label"] = period_label
 templates.env.filters["initials"] = initials
 templates.env.filters["friendly_dt"] = friendly_dt
+templates.env.filters["eastern_day"] = eastern_day
 templates.env.filters["friendly_date"] = friendly_date
 templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname

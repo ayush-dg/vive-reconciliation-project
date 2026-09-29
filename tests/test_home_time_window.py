@@ -86,7 +86,7 @@ class TestResolveWindow(unittest.TestCase):
     NOW = datetime(2026, 9, 29, 13, 0, tzinfo=timezone.utc)  # 9:00 AM ET
 
     def test_default_is_last_run(self):
-        w = tw.resolve_window(timestamps=[U(2026, 9, 29, 12)], now=self.NOW)
+        w = tw.resolve_window(outlook_jobs=[{"submitted_at": U(2026, 9, 29, 12), "statement_id": "S1"}], now=self.NOW)
         self.assertEqual(w.range, "last")
 
     def test_date_alone_implies_range_date(self):
@@ -99,10 +99,11 @@ class TestResolveWindow(unittest.TestCase):
                          ("month", "2026-11", U(2026, 11, 1, 4), U(2026, 12, 1, 5)))
 
     def test_bad_values_fall_back_to_last(self):
+        jobs = [{"submitted_at": U(2026, 9, 29), "statement_id": "S1"}]
         for args in (("date", "2026-13-40", None), ("date", "", None), ("month", None, "2026-9x"),
                      ("month", None, None), ("bogus", None, None), (None, "not-a-date", None)):
             with self.subTest(args=args):
-                self.assertEqual(tw.resolve_window(*args, timestamps=[U(2026, 9, 29)]).range, "last")
+                self.assertEqual(tw.resolve_window(*args, outlook_jobs=jobs).range, "last")
 
     def test_today_uses_the_eastern_calendar_day(self):
         # 02:00Z on Sep 29 is still 10 PM on Sep 28 in New York.
@@ -123,41 +124,95 @@ class TestResolveWindow(unittest.TestCase):
                                    [U(2026, 9, 28, 4), U(2026, 9, 29, 4)]))
 
 
-class TestLastRunSession(unittest.TestCase):
+def _job(statement_id, submitted_at):
+    return {"statement_id": statement_id, "submitted_at": submitted_at}
 
-    def test_chains_back_while_gaps_are_within_two_hours(self):
-        ts = [U(2026, 9, 29, 12, 8), U(2026, 9, 29, 11, 0), U(2026, 9, 29, 9, 30), U(2026, 9, 29, 7, 36),
-              U(2026, 9, 28, 9, 31)]  # last gap ~22h breaks the chain
-        self.assertEqual(tw.last_run_bounds(ts), (U(2026, 9, 29, 7, 36), U(2026, 9, 29, 12, 8)))
 
-    def test_a_gap_over_two_hours_starts_a_new_session(self):
-        ts = [U(2026, 9, 29, 12, 8), U(2026, 9, 29, 7, 36)]  # 4h32m apart
-        self.assertEqual(tw.last_run_bounds(ts), (U(2026, 9, 29, 12, 8), U(2026, 9, 29, 12, 8)))
+class TestOutlookLastSync(unittest.TestCase):
+    """web/time_window.py's outlook_last_sync() -- pure grouping logic
+    over already-Outlook-scoped job dicts (queries.get_outlook_synced_jobs()
+    is what actually excludes manual/dropzone/Event-Grid jobs via
+    source_blob_path IS NOT NULL; see TestGetOutlookSyncedJobsQuery for
+    that part)."""
 
-    def test_gap_of_exactly_two_hours_still_chains(self):
-        ts = [U(2026, 9, 29, 12), U(2026, 9, 29, 10)]
-        self.assertEqual(tw.last_run_bounds(ts), (U(2026, 9, 29, 10), U(2026, 9, 29, 12)))
+    def test_chains_back_while_gaps_are_within_ten_minutes(self):
+        jobs = [_job("S4", U(2026, 9, 29, 12, 8)), _job("S3", U(2026, 9, 29, 12, 2)),
+                _job("S2", U(2026, 9, 29, 11, 54)), _job("S1", U(2026, 9, 29, 11, 50)),
+                _job("S0", U(2026, 9, 29, 11, 30))]  # last gap 20m breaks the chain
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual([j["statement_id"] for j in chain], ["S4", "S3", "S2", "S1"])
 
-    def test_gap_just_over_two_hours_breaks(self):
-        ts = [U(2026, 9, 29, 12), U(2026, 9, 29, 9, 59, 59)]
-        self.assertEqual(tw.last_run_bounds(ts), (U(2026, 9, 29, 12), U(2026, 9, 29, 12)))
+    def test_a_gap_over_ten_minutes_starts_a_new_sync(self):
+        jobs = [_job("S2", U(2026, 9, 29, 12, 8)), _job("S1", U(2026, 9, 29, 11, 50))]  # 18m apart
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual([j["statement_id"] for j in chain], ["S2"])
 
-    def test_order_and_input_types_do_not_matter(self):
-        ts = ["2026-09-29T10:30:00+00:00", U(2026, 9, 29, 12), "2026-09-29 11:15:00"]
-        self.assertEqual(tw.last_run_bounds(ts), (U(2026, 9, 29, 10, 30), U(2026, 9, 29, 12)))
+    def test_gap_of_exactly_ten_minutes_still_chains(self):
+        jobs = [_job("S2", U(2026, 9, 29, 12, 10)), _job("S1", U(2026, 9, 29, 12, 0))]
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual([j["statement_id"] for j in chain], ["S2", "S1"])
+
+    def test_gap_just_over_ten_minutes_breaks(self):
+        jobs = [_job("S2", U(2026, 9, 29, 12, 10, 1)), _job("S1", U(2026, 9, 29, 12, 0))]
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual([j["statement_id"] for j in chain], ["S2"])
+
+    def test_takes_the_newest_sync_only_ignoring_an_older_one(self):
+        jobs = [_job("N2", U(2026, 9, 29, 12, 8)), _job("N1", U(2026, 9, 29, 12, 3)),
+                _job("O2", U(2026, 9, 29, 8, 0)), _job("O1", U(2026, 9, 29, 7, 55))]
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual({j["statement_id"] for j in chain}, {"N1", "N2"})
+
+    def test_order_and_input_timestamp_types_do_not_matter(self):
+        jobs = [_job("S2", "2026-09-29T12:08:00+00:00"), _job("S1", "2026-09-29 12:03:00")]
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual([j["statement_id"] for j in chain], ["S2", "S1"])
 
     def test_threshold_is_the_named_constant(self):
-        self.assertEqual(tw.LAST_RUN_GAP, timedelta(hours=2))
+        self.assertEqual(tw.OUTLOOK_SYNC_GAP, timedelta(minutes=10))
 
-    def test_single_run(self):
-        w = tw.resolve_window("last", timestamps=[U(2026, 9, 29, 12, 8)])
-        self.assertEqual(w.start_utc, U(2026, 9, 29, 12, 8))
-        self.assertGreater(w.end_utc, U(2026, 9, 29, 12, 8))  # latest run is included
+    def test_a_job_with_no_statement_id_yet_still_counts_toward_the_chain(self):
+        # Still processing -- no statement_id, but it's still part of the
+        # sync (see the "still processing" label test below).
+        jobs = [_job(None, U(2026, 9, 29, 12, 8)), _job("S1", U(2026, 9, 29, 12, 3))]
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual(len(chain), 2)
 
-    def test_no_runs_gives_an_empty_window(self):
-        w = tw.resolve_window("last", timestamps=[])
+    def test_no_jobs_at_all_returns_none(self):
+        self.assertIsNone(tw.outlook_last_sync([]))
+
+    def test_a_sync_that_queued_zero_pdfs_is_simply_invisible(self):
+        # No job rows are ever created for an empty "Sync to Webapp" click
+        # (see mailbox_sync.py) -- there's nothing to special-case here;
+        # the next older non-empty sync just wins.
+        jobs = [_job("OLDER", U(2026, 9, 20, 9, 0))]
+        chain = tw.outlook_last_sync(jobs)
+        self.assertEqual([j["statement_id"] for j in chain], ["OLDER"])
+
+
+class TestResolveWindowLast(unittest.TestCase):
+
+    def test_single_job_with_a_statement(self):
+        w = tw.resolve_window("last", outlook_jobs=[_job("S1", U(2026, 9, 29, 12, 8))])
+        self.assertEqual((w.statement_ids, w.sync_time_utc, w.sync_job_count),
+                         (frozenset({"S1"}), U(2026, 9, 29, 12, 8), 1))
+        self.assertFalse(w.empty)
+
+    def test_statement_ids_excludes_jobs_still_processing(self):
+        jobs = [_job(None, U(2026, 9, 29, 12, 8)), _job("S1", U(2026, 9, 29, 12, 3))]
+        w = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual(w.statement_ids, frozenset({"S1"}))
+        self.assertEqual(w.sync_job_count, 2)  # still counts toward the total
+
+    def test_sql_is_a_python_side_membership_filter_not_a_predicate(self):
+        w = tw.resolve_window("last", outlook_jobs=[_job("S1", U(2026, 9, 29, 12, 8))])
+        self.assertEqual(w.sql(), ("", []))
+
+    def test_no_outlook_jobs_at_all_gives_an_empty_window(self):
+        w = tw.resolve_window("last", outlook_jobs=[])
         self.assertTrue(w.empty)
         self.assertEqual(w.sql(), (" AND 1 = 0", []))
+        self.assertIsNone(w.statement_ids)
 
 
 class TestMonthOptionsAndLabels(unittest.TestCase):
@@ -166,18 +221,29 @@ class TestMonthOptionsAndLabels(unittest.TestCase):
         ts = [U(2026, 10, 1, 2), U(2026, 9, 15), U(2026, 8, 3), U(2026, 9, 1)]  # Oct 1 02:00Z = Sep 30 ET
         self.assertEqual(tw.month_options(ts), ["2026-09", "2026-08"])
 
-    def test_last_run_label_same_day(self):
-        w = tw.resolve_window("last", timestamps=[U(2026, 9, 29, 7, 36), U(2026, 9, 29, 9, 30),
-                                                  U(2026, 9, 29, 11, 0), U(2026, 9, 29, 12, 8)])
-        self.assertEqual(tw.window_label(w, 47), "Last run · Sep 29, 3:36 AM – 8:08 AM ET · 47 statements")
+    def test_last_run_label_all_statements_matched(self):
+        # 15:50Z/15:55Z/16:02Z UTC = 11:50/11:55/12:02 ET (EDT, UTC-4 in
+        # September); gaps 5m/7m both chain.
+        jobs = [_job("A", U(2026, 9, 29, 15, 50)), _job("B", U(2026, 9, 29, 15, 55)),
+                _job("C", U(2026, 9, 29, 16, 2))]
+        w = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual(tw.window_label(w, 3), "Last Outlook sync · Sep 29, 12:02 PM ET · 3 statements")
 
-    def test_last_run_label_single_run(self):
-        w = tw.resolve_window("last", timestamps=[U(2026, 9, 29, 12, 8)])
-        self.assertEqual(tw.window_label(w, 1), "Last run · Sep 29, 8:08 AM ET · 1 statement")
+    def test_last_run_label_still_processing(self):
+        jobs = [_job(None, U(2026, 9, 29, 16, 2)), _job("A", U(2026, 9, 29, 16, 0)),
+                _job("B", U(2026, 9, 29, 15, 58))]
+        w = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual(tw.window_label(w, 2),
+                         "Last Outlook sync · Sep 29, 12:02 PM ET · 2 of 3 statements (1 still processing)")
 
-    def test_last_run_label_across_midnight(self):
-        w = tw.resolve_window("last", timestamps=[U(2026, 9, 29, 3, 30), U(2026, 9, 29, 5, 10)])
-        self.assertEqual(tw.window_title(w), "Last run · Sep 28, 11:30 PM – Sep 29, 1:10 AM ET")
+    def test_last_run_label_single_job(self):
+        # 16:08Z UTC = 12:08 PM ET.
+        w = tw.resolve_window("last", outlook_jobs=[_job("S1", U(2026, 9, 29, 16, 8))])
+        self.assertEqual(tw.window_label(w, 1), "Last Outlook sync · Sep 29, 12:08 PM ET · 1 statement")
+
+    def test_last_run_label_no_outlook_jobs_at_all(self):
+        w = tw.resolve_window("last", outlook_jobs=[])
+        self.assertEqual(tw.window_label(w, 0), "Last Outlook sync · no runs")
 
     def test_other_labels(self):
         now = datetime(2026, 9, 29, 13, tzinfo=timezone.utc)
@@ -228,7 +294,7 @@ class TestHomeDashboardQuery(unittest.TestCase):
         self.local = sqlite3.connect(":memory:", check_same_thread=False)
         self.local.row_factory = sqlite3.Row
         self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT)")
-        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT)")
+        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT)")
         for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):
             patcher = mock.patch(target, _query_fn(conn))
             patcher.start()
@@ -254,18 +320,64 @@ class TestHomeDashboardQuery(unittest.TestCase):
             self.local.execute("INSERT INTO document_intake_log VALUES (?, ?, NULL)", [sid, period])
 
     def _window(self, *args, **kwargs):
-        return tw.resolve_window(*args, timestamps=queries.get_run_timestamps(), **kwargs)
+        return tw.resolve_window(*args, timestamps=queries.get_run_timestamps(),
+                                 outlook_jobs=queries.get_outlook_synced_jobs(), **kwargs)
 
     def _ids(self, data):
         return [r["statement_id"] for r in data["runs"]]
 
-    def test_last_run_covers_only_the_latest_session(self):
-        data = queries.get_home_dashboard(self._window())
+    def _outlook_job(self, statement_id, submitted_at, source_blob_path="mailbox/2026/09/29/x__f.pdf"):
+        self.local.execute(
+            "INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
+            [statement_id, submitted_at, source_blob_path],
+        )
+
+    def test_last_run_covers_only_the_latest_outlook_sync(self):
+        # A1/A2/A3 queued by one "Sync to Webapp" click (gaps < 10 min);
+        # B1 by an earlier, separate click (well over 10 min before it).
+        self._outlook_job("A1", "2026-09-29 12:08:00")
+        self._outlook_job("A2", "2026-09-29 12:04:00")
+        self._outlook_job("A3", "2026-09-29 12:01:00")
+        self._outlook_job("B1", "2026-09-28 09:31:00")
+        data = queries.get_home_dashboard(self._window("last"))
         self.assertEqual(self._ids(data), ["A1", "A2", "A3"])
         self.assertEqual(data["statement_count"], 3)
 
+    def test_manual_dropzone_and_event_grid_jobs_are_excluded_from_last_run(self):
+        self._outlook_job("A1", "2026-09-29 12:08:00")
+        # Newer than A1, but none of these ever set source_blob_path --
+        # if any leaked in, it would wrongly become the sync's anchor.
+        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, NULL)",
+                           ["A2", "2026-09-29 13:00:00"])  # manual upload
+        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, NULL)",
+                           ["A3", "2026-09-29 13:05:00"])  # dropzone-watcher / event-grid shape
+        outlook_jobs = queries.get_outlook_synced_jobs()
+        self.assertEqual([j["statement_id"] for j in outlook_jobs], ["A1"])
+        data = queries.get_home_dashboard(self._window("last"))
+        self.assertEqual(self._ids(data), ["A1"])
+
+    def test_last_run_label_reflects_a_still_processing_job(self):
+        self._outlook_job("A1", "2026-09-29 12:08:00")
+        self._outlook_job("A2", "2026-09-29 12:05:00")
+        self._outlook_job(None, "2026-09-29 12:03:00")  # queued, not yet through Silver/matching
+        window = self._window("last")
+        data = queries.get_home_dashboard(window)
+        self.assertEqual(self._ids(data), ["A1", "A2"])
+        self.assertEqual(tw.window_label(window, data["statement_count"]),
+                         "Last Outlook sync · Sep 29, 8:08 AM ET · 2 of 3 statements (1 still processing)")
+
+    def test_no_outlook_jobs_gives_the_existing_empty_state(self):
+        window = self._window("last")  # jobs table has no rows at all
+        self.assertTrue(window.empty)
+        data = queries.get_home_dashboard(window)
+        self.assertEqual(data["statement_count"], 0)
+        self.assertEqual(data["runs"], [])
+
     def test_cards_table_and_n_of_m_cover_the_same_runs(self):
-        data = queries.get_home_dashboard(self._window())
+        # Any window works for this -- a calendar range (not "last", which
+        # is Outlook-based and tested on its own above) that covers
+        # exactly Session A (A1/A2/A3).
+        data = queries.get_home_dashboard(self._window("date", "2026-09-29"))
         k = data["kpis"]
         self.assertEqual((k["total_invoices"], k["auto_reconciled"], k["statement_total"], k["vendor_count"]),
                          (35, 29, 350.0, 2))
@@ -276,8 +388,8 @@ class TestHomeDashboardQuery(unittest.TestCase):
         self.assertEqual((data["reconciled"], data["total"]), (1, 3))
 
     def test_status_and_period_narrow_the_table_but_not_the_cards(self):
-        base = queries.get_home_dashboard(self._window())
-        data = queries.get_home_dashboard(self._window(), status="exceptions", period="2026-08")
+        base = queries.get_home_dashboard(self._window("date", "2026-09-29"))
+        data = queries.get_home_dashboard(self._window("date", "2026-09-29"), status="exceptions", period="2026-08")
         self.assertEqual(self._ids(data), ["A2"])
         self.assertEqual((data["reconciled"], data["total"]), (0, 1))
         self.assertEqual(data["kpis"], base["kpis"])
@@ -308,10 +420,10 @@ class TestHomeDashboardQuery(unittest.TestCase):
         self.assertEqual(data["kpis"], {"total_invoices": 0, "auto_reconciled": 0, "open_exceptions": 0,
                                         "statement_total": 0, "vendor_count": 0, "match_rate": None})
 
-    def test_no_runs_at_all(self):
+    def test_all_time_with_no_runs_at_all(self):
         self.fabric.execute("DELETE FROM silver.recon_summary")
-        w = self._window()
-        self.assertTrue(w.empty)
+        w = self._window("all")
+        self.assertFalse(w.empty)  # "all" is never empty by itself -- it's just an unbound query
         self.assertEqual(queries.get_home_dashboard(w)["statement_count"], 0)
 
     def test_month_options_from_run_timestamps(self):
@@ -333,7 +445,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
                       "statement_period": "2026-08", "total_invoice_count": 5, "matched_count": 5,
                       "exception_count": 0, "overall_status": "RECONCILED", "reconciliation_timestamp": None,
                       "job_id": None}],
-            "total": 47, "reconciled": 19, "period_options": ["2026-08"], "statement_count": 47,
+            "total": 47, "reconciled": 19, "period_options": ["2026-08"], "statement_count": 4,
         }
 
         def get_home_dashboard(window=None, status="all", period=None, limit=10):
@@ -343,6 +455,15 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         fns = {
             "get_run_timestamps": lambda: [U(2026, 9, 29, 7, 36), U(2026, 9, 29, 9, 30), U(2026, 9, 29, 11, 0),
                                            U(2026, 9, 29, 12, 8), U(2026, 8, 20, 12)],
+            # 4 jobs chained within OUTLOOK_SYNC_GAP -- one Outlook sync,
+            # newest at 12:08Z = 8:08 AM ET, matching self.result's
+            # statement_count of 4 (see window_label()'s "X of Y" branch).
+            "get_outlook_synced_jobs": lambda: [
+                {"submitted_at": U(2026, 9, 29, 12, 8), "statement_id": "S1"},
+                {"submitted_at": U(2026, 9, 29, 12, 4), "statement_id": "S2"},
+                {"submitted_at": U(2026, 9, 29, 12, 1), "statement_id": "S3"},
+                {"submitted_at": U(2026, 9, 29, 11, 58), "statement_id": "S4"},
+            ],
             "get_home_dashboard": get_home_dashboard,
             "get_active_jobs": lambda: [], "get_failed_jobs": lambda: [],
             "get_recent_completed_batches": lambda limit=3: [],
@@ -370,7 +491,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
     def test_default_is_last_run_with_label(self):
         html = self._get("/")
         self.assertEqual(self._window().range, "last")
-        self.assertIn("Last run · Sep 29, 3:36 AM – 8:08 AM ET · 47 statements", html)
+        self.assertIn("Last Outlook sync · Sep 29, 8:08 AM ET · 4 statements", html)
         self.assertIn('href="/" class="filter-chip active">Last run', html)
 
     def test_cards_use_the_window_sub_labels(self):
@@ -384,14 +505,29 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         html = self._get("/?date=2026-09-28")
         self.assertEqual((self._window().range, self._window().date), ("date", "2026-09-28"))
         self.assertIn('value="2026-09-28"', html)
-        self.assertRegex(html, r'id="window-date" class="filter-chip active"')
+        # No range chip is "active" (Last run/Today), and no dedicated
+        # visual state on the calendar button itself (see home.html's
+        # comment) -- the selected day is instead shown in the window
+        # label under the chips.
+        self.assertIn("Sep 28, 2026 · 4 statements", html)
 
     def test_month_alone_selects_that_month_and_options_have_runs_only(self):
         html = self._get("/?month=2026-09")
         self.assertEqual((self._window().range, self._window().month), ("month", "2026-09"))
         options = re.search(r'<select name="month".*?</select>', html, re.S).group(0)
         self.assertEqual(re.findall(r'<option value="([^"]*)"', options), ["", "2026-09", "2026-08"])
+        self.assertIn('<option value="" >All time</option>', options)
         self.assertIn('<option value="2026-09" selected>Sep 2026</option>', options)
+
+    def test_month_selects_blank_option_is_all_time(self):
+        # range=all is reached via this same <select>'s blank option
+        # (its own value="" submits range=all -- see window-range-for-month
+        # in home.html), not a standalone "All time" chip.
+        html = self._get("/?range=all")
+        self.assertEqual(self._window().range, "all")
+        self.assertIn('<option value="" selected>All time</option>', html)
+        self.assertRegex(html, r'id="window-month" class="filter-chip active"')
+        self.assertIn('id="window-range-for-month" value="all"', html)
 
     def test_bad_params_fall_back_to_last_run(self):
         for url in ("/?range=bogus", "/?range=date&date=nope", "/?month=2026-99", "/?date=2026-02-30"):
@@ -399,12 +535,29 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
                 self._get(url)
                 self.assertEqual(self._window().range, "last")
 
+    def test_only_last_run_and_today_are_chips(self):
+        # "This month"/"All time" chips were removed 2026-09-30: "All
+        # time" moved into the Month select's blank option, and there is
+        # no dedicated "This month" control at all any more (still
+        # reachable by picking the current month from that same select).
+        html = self._get("/")
+        time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
+        chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
+        self.assertEqual(chip_labels, ["Last run", "Today"])
+
     def test_range_chips_keep_status_and_clear_period(self):
         html = self._get("/?range=date&date=2026-09-28&status=exceptions&period=2026-08")
         self.assertIn('href="/?status=exceptions" class="filter-chip ">Last run', html)
         self.assertIn('href="/?range=today&status=exceptions" class="filter-chip ">Today', html)
-        self.assertIn('href="/?range=month_current&status=exceptions" class="filter-chip ">This month', html)
-        self.assertIn('href="/?range=all&status=exceptions" class="filter-chip ">All time', html)
+
+    def test_calendar_button_and_hidden_date_input(self):
+        html = self._get("/?date=2026-09-28")
+        self.assertIn('id="window-date-btn"', html)
+        self.assertIn('<use href="#i-calendar"/>', html)
+        self.assertIn('id="window-date" class="ns-sr-only"', html)
+        self.assertIn('value="2026-09-28"', html)
+        # No visible dd-mm-yyyy chip-styled box any more.
+        self.assertNotIn('id="window-date" class="filter-chip', html)
 
     def test_date_and_month_forms_keep_status_not_period(self):
         html = self._get("/?range=all&status=reconciled&period=2026-08")

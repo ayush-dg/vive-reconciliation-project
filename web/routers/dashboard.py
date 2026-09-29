@@ -16,9 +16,12 @@ from web import time_window as tw
 
 router = APIRouter()
 
-# Time-window chips, in display order. Date and Month are their own
-# controls (a date input and a months-with-runs select).
-RANGE_CHIPS = (("last", "Last run"), ("today", "Today"), ("month_current", "This month"), ("all", "All time"))
+# Time-window chips, in display order. Date (a calendar-icon button) and
+# Month (a select whose blank option doubles as "All time") are their own
+# controls, not plain chips -- "This month"/"All time" chips were removed
+# 2026-09-30; month_current stays a valid resolve_window() value so an old
+# bookmarked ?range=month_current link still works, it just has no chip.
+RANGE_CHIPS = (("last", "Last run"), ("today", "Today"))
 
 
 def home_url(filters: dict, **changes) -> str:
@@ -53,8 +56,14 @@ def home(request: Request, user: str = Depends(require_login),
     # table together (one query -- see get_home_dashboard()); status and
     # period only narrow the table and its N of M. Unknown or malformed
     # values fall back to the defaults (range=last, status=all).
+    #
+    # timestamps (recon_summary run times) only feeds the Month dropdown's
+    # options; outlook_jobs (source_blob_path IS NOT NULL jobs) is what
+    # "last" is actually built from now -- see time_window.outlook_last_sync().
     timestamps = queries.get_run_timestamps()
-    window = tw.resolve_window(range or None, date or None, month or None, timestamps=timestamps)
+    outlook_jobs = queries.get_outlook_synced_jobs()
+    window = tw.resolve_window(range or None, date or None, month or None,
+                               timestamps=timestamps, outlook_jobs=outlook_jobs)
     if status not in queries.RECON_RUN_STATUS_FILTERS:
         status = "all"
     data = queries.get_home_dashboard(window=window, status=status, period=period or None, limit=10)

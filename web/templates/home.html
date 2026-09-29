@@ -29,22 +29,37 @@
   {% for key, label, url in range_chips %}
   <a href="{{ url }}" class="filter-chip {{ 'active' if window.range == key }}">{{ label }}</a>
   {% endfor %}
+  {# The blank option doubles as "All time" (replacing the removed "All
+     time" chip): its own value is "", so the hidden range input has to
+     be switched between "month"/"all" in JS before the form submits,
+     since a plain <select> can't otherwise say which range a given
+     option means. #}
   <form method="get" action="/" style="display:contents">
-    <input type="hidden" name="range" value="date">
+    <input type="hidden" name="range" id="window-range-for-month" value="{{ 'all' if window.range == 'all' else 'month' }}">
     {% if run_status != 'all' %}<input type="hidden" name="status" value="{{ run_status }}">{% endif %}
-    <input type="date" name="date" id="window-date" class="filter-chip {{ 'active' if window.range == 'date' }}"
-           value="{{ window.date if window.range == 'date' else '' }}" onchange="if (this.value) this.form.submit()" aria-label="Pick a day">
-  </form>
-  <form method="get" action="/" style="display:contents">
-    <input type="hidden" name="range" value="month">
-    {% if run_status != 'all' %}<input type="hidden" name="status" value="{{ run_status }}">{% endif %}
-    <select name="month" id="window-month" class="filter-chip {{ 'active' if window.range == 'month' }}" style="cursor:pointer"
-            onchange="if (this.value) this.form.submit()" aria-label="Pick a month">
-      <option value="">Month…</option>
+    <select name="month" id="window-month" class="filter-chip {{ 'active' if window.range in ('month', 'all') }}" style="cursor:pointer"
+            onchange="document.getElementById('window-range-for-month').value = this.value ? 'month' : 'all'; this.form.submit()"
+            aria-label="Pick a month, or all time">
+      <option value="" {{ 'selected' if window.range == 'all' }}>All time</option>
       {% for m in month_options %}
       <option value="{{ m }}" {{ 'selected' if window.range == 'month' and window.month == m }}>{{ m | period_label }}</option>
       {% endfor %}
     </select>
+  </form>
+  {# The real <input type="date"> stays a plain, working date picker --
+     just visually hidden (.ns-sr-only) -- and is opened by the visible
+     calendar icon-button via showPicker() (falls back to focus() where
+     showPicker() isn't supported, e.g. older Safari). #}
+  <form method="get" action="/" style="display:contents">
+    <input type="hidden" name="range" value="date">
+    {% if run_status != 'all' %}<input type="hidden" name="status" value="{{ run_status }}">{% endif %}
+    <button type="button" class="icon-btn" id="window-date-btn" aria-label="Pick a day"
+            title="{{ 'Pick a day (currently ' + window.date + ')' if window.range == 'date' else 'Pick a day' }}"
+            onclick="var d = document.getElementById('window-date'); if (d.showPicker) { d.showPicker(); } else { d.focus(); }">
+      <svg class="icon"><use href="#i-calendar"/></svg>
+    </button>
+    <input type="date" name="date" id="window-date" class="ns-sr-only"
+           value="{{ window.date if window.range == 'date' else '' }}" onchange="if (this.value) this.form.submit()" aria-label="Pick a day">
   </form>
 </div>
 <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px" id="window-label">{{ window_label }}</div>
