@@ -268,20 +268,29 @@
   </div>
 
   <div class="ns-modal-filters" id="nsFilters">
-    <button type="button" class="ns-chip" id="nsChipVendor" aria-pressed="true">
-      <span class="ns-chip-label">Vendor:</span> <span class="ns-chip-value" id="nsChipVendorValue">{{ vendor_display_name }}</span>
-    </button>
+    <div class="ns-chip-wrap">
+      <button type="button" class="ns-chip" id="nsChipVendor" aria-expanded="false" aria-haspopup="true">
+        <span class="ns-chip-label">Vendor:</span> <span class="ns-chip-value" id="nsChipVendorValue">{{ vendor_display_name }}</span>
+      </button>
+      <div class="ns-popover" id="nsPopVendor" hidden>
+        <button type="button" class="ns-pop-opt" data-vendor="on">{{ vendor_display_name }}</button>
+        <button type="button" class="ns-pop-opt" data-vendor="off">All vendors</button>
+      </div>
+    </div>
 
     <div class="ns-chip-wrap">
       <button type="button" class="ns-chip" id="nsChipAmount" aria-expanded="false" aria-haspopup="true">
-        <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Any</span>
+        <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Exact</span>
       </button>
       <div class="ns-popover" id="nsPopAmount" hidden>
         <button type="button" class="ns-pop-opt" data-tol="exact">Exact</button>
         <button type="button" class="ns-pop-opt" data-tol="up_to">Up to</button>
-        <button type="button" class="ns-pop-opt" data-tol="1_dollar">&plusmn; $1</button>
-        <button type="button" class="ns-pop-opt" data-tol="5_percent">&plusmn; 5%</button>
-        <button type="button" class="ns-pop-opt" data-tol="any">Any amount</button>
+        <button type="button" class="ns-pop-opt" data-tol="at_least">At least</button>
+        <div class="ns-pop-custom">
+          <label class="ns-search-label" for="nsAmountInput">Amount</label>
+          <input type="text" id="nsAmountInput" class="ns-date-input" inputmode="decimal"
+                 placeholder="Any" aria-label="Amount (blank = any amount)">
+        </div>
       </div>
     </div>
 
@@ -304,16 +313,23 @@
       </div>
     </div>
 
-    <button type="button" class="ns-chip" id="nsChipStatus" aria-pressed="true">
-      <span class="ns-chip-label">Status:</span> <span class="ns-chip-value" id="nsChipStatusValue">Open only</span>
-    </button>
+    <div class="ns-chip-wrap">
+      <button type="button" class="ns-chip" id="nsChipStatus" aria-expanded="false" aria-haspopup="true">
+        <span class="ns-chip-label">Status:</span> <span class="ns-chip-value" id="nsChipStatusValue">Open</span>
+      </button>
+      <div class="ns-popover" id="nsPopStatus" hidden>
+        <label class="ns-pop-check"><input type="checkbox" id="nsStatusOpen" checked> Open</label>
+        <label class="ns-pop-check"><input type="checkbox" id="nsStatusPaid"> Paid</label>
+      </div>
+    </div>
 
     <div class="ns-search-box">
       <svg class="icon ns-search-icon" aria-hidden="true"><use href="#i-search"/></svg>
       <input type="text" id="nsInvoice" class="ns-search-input"
-             placeholder="Invoice number (full or part)"
-             aria-label="Invoice number (full or part)">
+             placeholder="Enter invoice number (minimum 4 characters)"
+             aria-label="Enter invoice number (minimum 4 characters)">
     </div>
+    <span class="ns-search-hint" id="nsInvoiceHint" hidden>Enter at least 4 characters</span>
 
     <button type="button" class="ns-link-btn" id="nsReset">Reset filters</button>
     <button type="button" class="btn ns-reload-btn" id="nsReload">Reload</button>
@@ -323,8 +339,9 @@
     <div class="ns-modal-empty">Searching&hellip;</div>
   </div>
 
+  {# Selection/footer totals removed 2026-09-30 (rows are no longer
+     selectable) -- the footer is just the Close button now. #}
   <div class="ns-modal-foot">
-    <div class="ns-foot-left" id="nsFootSummary"></div>
     <div class="ns-foot-right">
       <button type="button" class="btn btn-primary ns-foot-close" id="nsModalDone">Close</button>
     </div>

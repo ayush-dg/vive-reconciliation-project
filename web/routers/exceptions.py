@@ -14,16 +14,17 @@ swallow it whole (a :path converter matches slashes too, so no sub-path
 under /exceptions/ is safe from it).
 """
 
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
+from web import time_window as tw
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
-from src.matching.netsuite_search import TOLERANCES, search_open_ap
+from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, search_open_ap
 from src.matching.netsuite_status_codes import decode_netsuite_status
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 
@@ -57,14 +58,59 @@ REASON_BADGE = {
 # get_high_confidence_exception_count()'s docstring.
 BULK_APPROVE_THRESHOLD = 0.99
 
+# Exceptions overview's time filter (2026-09-30) -- same controls and the
+# same web/time_window.py definitions as Home (see dashboard.py's own
+# RANGE_CHIPS), but a different DEFAULT: "all", not "last", so a real
+# open-exception backlog is never hidden the first time this page loads.
+EXCEPTIONS_RANGE_CHIPS = (("last", "Last run"), ("today", "Today"))
+
+
+def exceptions_url(filters: dict, **changes) -> str:
+    """"/exceptions?..." for the current time-window filters with
+    `changes` applied -- vendor/shop/location stay purely client-side
+    (see exceptions_vendors.html), so this only ever carries range/date/
+    month. "all" is this page's own default and so is left out of the
+    URL, same as "last" is Home's."""
+    merged = {**filters, **changes}
+    params = []
+    if merged.get("range") and merged["range"] != "all":
+        params.append(("range", merged["range"]))
+    if merged.get("range") == "date" and merged.get("date"):
+        params.append(("date", merged["date"]))
+    if merged.get("range") == "month" and merged.get("month"):
+        params.append(("month", merged["month"]))
+    return "/exceptions" + (f"?{urlencode(params)}" if params else "")
+
 
 @router.get("/exceptions")
-def exceptions_vendors(request: Request, user: str = Depends(require_login)):
+def exceptions_vendors(request: Request, user: str = Depends(require_login),
+                       range: str = "", date: str = "", month: str = ""):
+    # Time filter (2026-09-30) -- same controls/definitions as Home, but
+    # defaulting to "all" (not "last"), so a real open-exception backlog
+    # is never hidden the first time this page loads. ?date=/?month=
+    # alone still imply their own range, same as Home; anything else
+    # unrecognised also falls back to "all" (not Home's "last") -- done
+    # here rather than in resolve_window() so Home's own default is
+    # untouched.
+    range_param = range or None
+    if range_param and range_param not in tw.RANGES:
+        range_param = "all"
+    if not range_param and not date and not month:
+        range_param = "all"
+    timestamps = queries.get_run_timestamps()
+    outlook_jobs = queries.get_outlook_synced_jobs()
+    window = tw.resolve_window(range_param, date or None, month or None,
+                               timestamps=timestamps, outlook_jobs=outlook_jobs)
+
     # get_exception_runs() -- one card per statement RUN (every PDF ever
     # reconciled), not one per vendor -- see its docstring. Already
     # attaches "aging"/"reason_breakdown" via batched queries the same way
     # get_vendor_summaries() used to for the old vendor-rollup version.
-    runs = queries.get_exception_runs()
+    # Exceptions-only vendors (no run timestamp/statement_id at all) are
+    # appended inside get_exception_runs() AFTER the window filter, so
+    # they always show and always count below, regardless of `window`.
+    runs = queries.get_exception_runs(window)
+    summary_backed_count = sum(1 for v in runs if v.get("statement_id"))
     for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
         # Display-only casing normalization -- vendor_name (the canonical
@@ -116,6 +162,9 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
     shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
     location_options = sorted({v["billing_location"] for v in runs if v.get("billing_location")})
 
+    filters = {"range": window.range, "date": window.date, "month": window.month}
+    new_window = {"date": None, "month": None}
+
     ctx = {
         "active_page": "exceptions",
         "vendors": runs,
@@ -125,6 +174,15 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
         "total_open": total_open,
         "vendor_count_with_ex": len(runs_with_ex),
         "reason_badge": REASON_BADGE,
+        "window": window,
+        "window_label": tw.window_label(window, summary_backed_count),
+        "window_summary_backed_count": summary_backed_count,
+        "window_empty_message": tw.empty_message(window),
+        "range_chips": [(key, label, exceptions_url(filters, range=key, **new_window))
+                        for key, label in EXCEPTIONS_RANGE_CHIPS],
+        "month_options": tw.month_options(timestamps),
+        "last_run_url": exceptions_url(filters, range="last", **new_window),
+        "all_time_url": exceptions_url(filters, range="all", **new_window),
         **sidebar_context(request),
     }
     return render(request, "exceptions_vendors.html", ctx)
@@ -322,6 +380,16 @@ def _search_entity_ids(use_vendor: bool, vendor_id: str, vendor_name: str):
     return resolve_entity_ids(vendor_id or "", vendor_name or "")
 
 
+def _parse_statuses(raw: str) -> frozenset:
+    """"open,paid" (as sent by the Status popover's two checkboxes) ->
+    a validated frozenset. Empty or entirely invalid input defaults to
+    {"open"} -- the UI itself never lets both boxes end up unticked, but
+    a hand-edited/old URL might, and this must not silently search every
+    status as a result."""
+    statuses = frozenset(s.strip() for s in (raw or "").split(",") if s.strip() in STATUSES)
+    return statuses or frozenset({"open"})
+
+
 def _error_partial(request: Request, message: str):
     """A results fragment carrying nothing but a friendly message, so a
     bad input renders in place instead of 500-ing the modal."""
@@ -336,7 +404,7 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
                     vendor_id: str = "", vendor_name: str = "",
                     use_vendor: bool = True, amount: str = "",
                     tolerance: str = "exact", invoice_contains: str = "",
-                    include_paid: bool = False, sort_amount: str = "",
+                    statuses: str = "open", sort_amount: str = "",
                     date_from: str = "", date_to: str = ""):
     """Open-AP search partial for the "Find in NetSuite" modal.
 
@@ -355,6 +423,12 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
     if sort_error:
         return _error_partial(request, sort_error)
 
+    # "1_dollar"/"5_percent" are no longer popover options, but an old
+    # request/bookmark using either must still work, not error -- both
+    # behave exactly like "any" (search_open_ap() does the same
+    # normalization for its other, non-HTTP callers).
+    if tolerance in REMOVED_TOLERANCES:
+        tolerance = "any"
     if tolerance not in TOLERANCES:
         return _error_partial(request, "Pick one of the listed amount tolerances.")
 
@@ -363,7 +437,7 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
         amount=parsed_amount,
         amount_tolerance=tolerance,
         invoice_contains=invoice_contains,
-        include_paid=include_paid,
+        statuses=_parse_statuses(statuses),
         sort_amount=parsed_sort,
         date_from=date_from,
         date_to=date_to,

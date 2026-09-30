@@ -125,6 +125,20 @@ class TestModalIsLookOnly(unittest.TestCase):
         self.assertNotIn("<form", rendered.lower())
         self.assertNotRegex(rendered, r"\baction\s*=")
 
+    def test_results_partial_has_no_checkbox(self):
+        """Rows were selectable via a checkbox until 2026-09-30; that and
+        the footer totals it drove are both gone."""
+        rendered = templates.get_template(RESULTS_PARTIAL).render(
+            result={"rows": [{
+                "record_type": "Bill", "is_credit": False, "tranid": "1", "vendor_name": "V",
+                "entity_id": "1", "total": 1.0, "trandate": "1/1/2026", "trandate_display": "Jan 1, 2026",
+                "duedate": None, "duedate_display": "", "status_label": "Open",
+                "ro_number": None, "location_code": "1", "transaction_number": "T",
+            }], "row_count": 1, "truncated": False, "error": False, "needs_filter": False, "message": None},
+            last_sync=None,
+        )
+        self.assertNotIn('type="checkbox"', rendered)
+
     def test_modal_is_outside_the_action_form(self):
         """The page's Accept/Dispute <form> must close before the dialog
         opens -- a dialog nested in that form would submit it."""
@@ -141,9 +155,11 @@ class TestModalMarkup(unittest.TestCase):
         self.assertIn('id="nsModalTitle"', html)
 
     def test_chips_expose_state_to_assistive_tech(self):
+        """All four chips are popover triggers now (2026-09-30) -- Vendor
+        and Status used to be plain on/off toggles (aria-pressed)."""
         html = _render("Not Found in NetSuite")
-        self.assertRegex(html, r'id="nsChipVendor"[^>]*aria-pressed=')
-        self.assertRegex(html, r'id="nsChipStatus"[^>]*aria-pressed=')
+        self.assertRegex(html, r'id="nsChipVendor"[^>]*aria-expanded=')
+        self.assertRegex(html, r'id="nsChipStatus"[^>]*aria-expanded=')
         self.assertRegex(html, r'id="nsChipAmount"[^>]*aria-expanded=')
         self.assertRegex(html, r'id="nsChipDate"[^>]*aria-expanded=')
 
@@ -176,13 +192,19 @@ class TestModalMarkup(unittest.TestCase):
     def test_every_id_the_javascript_looks_up_exists_exactly_once(self):
         html = _render("Not Found in NetSuite")
         for el_id in ("nsFindBtn", "nsModal", "nsModalClose", "nsModalDone",
-                      "nsModalTitle", "nsResults", "nsInvoice", "nsFootSummary",
-                      "nsChipVendor", "nsChipVendorValue",
-                      "nsChipAmount", "nsChipAmountValue", "nsPopAmount",
+                      "nsModalTitle", "nsResults", "nsInvoice", "nsInvoiceHint",
+                      "nsChipVendor", "nsChipVendorValue", "nsPopVendor",
+                      "nsChipAmount", "nsChipAmountValue", "nsPopAmount", "nsAmountInput",
                       "nsChipDate", "nsChipDateValue", "nsPopDate",
-                      "nsChipStatus", "nsChipStatusValue", "nsDateFrom",
+                      "nsChipStatus", "nsChipStatusValue", "nsPopStatus",
+                      "nsStatusOpen", "nsStatusPaid", "nsDateFrom",
                       "nsDateTo", "nsDateApply", "nsReset", "nsReload"):
             self.assertEqual(html.count(f'id="{el_id}"'), 1, el_id)
+
+    def test_no_footer_summary_element_any_more(self):
+        """Removed 2026-09-30 along with row selection/footer totals."""
+        html = _render("Not Found in NetSuite")
+        self.assertNotIn('id="nsFootSummary"', html)
 
     def test_modal_has_no_copy_or_export_control(self):
         """Dropped deliberately: the modal reports, the reviewer writes
@@ -205,6 +227,67 @@ class TestModalMarkup(unittest.TestCase):
         self.assertIn("ns-panel", html)
         # ...and the modal sits after it, not instead of it.
         self.assertLess(html.index("NetSuite record"), html.index("<dialog"))
+
+
+class TestReasonBasedOpeningDefaults(unittest.TestCase):
+    """Amount Mismatch opens with no amount filter, both statuses ticked,
+    and the invoice number prefilled when selective enough -- the
+    statement amount is BY DEFINITION not the real NetSuite total for
+    this reason (confirmed live 2026-09-30 against several real Amount
+    Mismatch exceptions: the old Exact + statement-amount default missed
+    every one of them). Not Found/Invoice Missing keep the original
+    Exact + statement amount + Open defaults, where the amount IS
+    expected to match once found.
+
+    The actual default-selection logic lives in web/static/app.js's
+    defaultState() (there is no JS test runner in this suite) -- these
+    pin the data attributes app.js reads it from, plus a static check
+    that the reason-based branch is still present in the source, so a
+    regression that deletes it is caught even without executing JS.
+    Verified behaviourally via Playwright screenshots (scratchpad/shots_c/),
+    not by these tests alone."""
+
+    def _app_js(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "web", "static", "app.js")
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_default_state_branches_on_amount_mismatch(self):
+        js = self._app_js()
+        self.assertIn('ctx.reason === "Amount Mismatch"', js)
+        self.assertIn("isAmountMismatch", js)
+
+    def test_amount_mismatch_default_is_empty_amount_and_both_statuses(self):
+        js = self._app_js()
+        self.assertIn('amount: isAmountMismatch ? "" : (ctx.amount || "")', js)
+        self.assertIn('statuses: isAmountMismatch ? ["open", "paid"] : ["open"]', js)
+
+    def test_invoice_prefill_requires_four_non_space_characters(self):
+        js = self._app_js()
+        self.assertIn("MIN_INVOICE_CHARS = 4", js)
+        self.assertIn("invoiceChars >= MIN_INVOICE_CHARS", js)
+
+    def test_data_invoice_attribute_is_populated_for_amount_mismatch(self):
+        """The prefill source: data-invoice, already on the button
+        regardless of length -- app.js decides whether it's long enough
+        to actually use."""
+        html = _render("Amount Mismatch")
+        self.assertIn('data-invoice="900CC752"', html)
+
+    def test_data_invoice_short_case_still_renders_the_raw_value(self):
+        """A 3-character invoice number is still written to data-invoice
+        as-is -- app.js's own length check (not the template) is what
+        decides not to prefill it."""
+        html = _render("Amount Mismatch", selected={
+            "exception_id": "exc-3", "statement_id": "STMT-TEST",
+            "invoice_number": "123", "vendor_id": "KEYSTONE_AUTOMOTIVE_INDUSTRIES",
+            "statement_amount": 158.55, "erp_amount": None,
+            "exception_reason": "Amount Mismatch", "exception_status": "OPEN",
+            "date_raised": "2026-09-21T16:45:51+00:00", "days_open": 7,
+            "match_confidence": None, "escalation_status": None,
+            "invoice_date": "2026-07-09", "ro_number": None,
+        })
+        self.assertIn('data-invoice="123"', html)
 
 
 class TestResultsPartialRendering(unittest.TestCase):
@@ -252,10 +335,13 @@ class TestResultsPartialRendering(unittest.TestCase):
         self.assertIn("Location (code)", html)
         self.assertIn("VENDBILL1", html)
 
-    def test_row_carries_the_data_the_footer_maths_needs(self):
+    def test_no_checkbox_anywhere_in_the_results_partial(self):
+        """Rows are no longer selectable at all (removed 2026-09-30, along
+        with the footer totals they used to drive)."""
         html = self._render_rows([dict(self.ROW)])
-        self.assertIn('data-amount="158.55"', html)
-        self.assertIn("data-summary=", html)
+        self.assertNotIn("<input type=\"checkbox\"", html)
+        self.assertNotIn("ns-row-check", html)
+        self.assertNotIn("ns-col-check", html)
 
     def test_truncation_notice(self):
         html = self._render_rows([dict(self.ROW)], truncated=True)

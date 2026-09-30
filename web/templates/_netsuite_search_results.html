@@ -2,12 +2,13 @@
    own by GET /netsuite-search and swapped into #nsResults, so changing a
    filter re-renders only this table, never the exception under review.
 
-   LOOK-ONLY. There is deliberately no <form>, no action=, no method= and
-   no button that posts anywhere in this file. Selecting rows is a purely
-   client-side affair feeding the footer total and the "Copy to note"
-   button; resolving an exception stays with the page's existing
+   LOOK-ONLY. There is deliberately no <form>, no action=, no method=, no
+   checkbox and no button that posts anywhere in this file -- a row click
+   does nothing (removed 2026-09-30, along with the selection footer it
+   used to drive); the only interactive control per row is the details
+   toggle (^/v). Resolving an exception stays with the page's existing
    Accept/Dispute/Escalate forms. A test asserts this file stays free of
-   form/action/method markup.
+   form/action/method/checkbox markup.
 
    Rendered standalone: it extends nothing and must not assume any
    variable beyond `result` (always present) and `last_sync`. #}
@@ -33,7 +34,6 @@
 <table class="ns-modal-table">
   <thead>
     <tr>
-      <th class="ns-col-check"><span class="ns-sr-only">Select</span></th>
       <th>Vendor</th>
       <th>Bill #</th>
       <th>Status</th>
@@ -44,13 +44,7 @@
   <tbody>
     {% for row in result.rows %}
     {% set rid = "nsrow-" ~ loop.index %}
-    <tr class="ns-modal-row" data-row-id="{{ rid }}"
-        data-amount="{{ row.total if row.total is not none else 0 }}"
-        data-summary="{{ row.tranid or '—' }} · {{ row.vendor_name }} · {{ row.total | money }} · {{ row.trandate_display or row.trandate or '—' }} · {{ row.status_label }}">
-      <td class="ns-col-check">
-        <input type="checkbox" class="ns-row-check" id="{{ rid }}"
-               aria-label="Select bill {{ row.tranid or 'unknown' }}">
-      </td>
+    <tr class="ns-modal-row" data-row-id="{{ rid }}">
       <td class="ns-cell-vendor">{{ row.vendor_name }}</td>
       <td>
         <span class="ns-bill-no">{{ row.tranid or "—" }}</span>
@@ -77,7 +71,6 @@
       </td>
     </tr>
     <tr class="ns-details-row" id="{{ rid }}-details" hidden>
-      <td></td>
       <td colspan="5">
         <div class="ns-details-grid">
           <div><span class="ns-details-key">RO #</span><span>{{ row.ro_number or "—" }}</span></div>

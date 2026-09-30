@@ -67,7 +67,20 @@ DEFAULT_LIMIT = 100
 # off a PDF and through a float, and an exact equality on a decimal cast
 # would drop a legitimate tie-out for a half-cent of representation
 # noise. Mirrors fabric_matching.EXACT_AMOUNT_EPSILON's reasoning.
-TOLERANCES = ("exact", "up_to", "1_dollar", "5_percent", "any")
+#
+# "any" is not offered as its own popover button any more (2026-09-30) --
+# an EMPTY amount box means "no amount filter" regardless of which of the
+# three buttons (Exact/Up to/At least) is selected -- but it stays the
+# internal value amount_bounds() short-circuits on, since amount=None
+# always resolves to "any" behaviour whatever `tolerance` string is
+# passed in.
+TOLERANCES = ("exact", "up_to", "at_least", "any")
+
+# "1_dollar"/"5_percent" were removed from the popover 2026-09-30 (three
+# buttons now: Exact/Up to/At least, plus an editable amount box). An
+# old request or bookmark still using either must not error -- both
+# behave exactly like "any" (see search_open_ap()'s own normalization).
+REMOVED_TOLERANCES = ("1_dollar", "5_percent")
 
 # M/D/YYYY -- trandate/duedate are stored as unpadded US-format strings,
 # so every date comparison goes through TRY_CONVERT(..., 101). Confirmed
@@ -110,30 +123,35 @@ def escape_like(text: str) -> str:
 
 
 def amount_bounds(amount, tolerance: str):
-    """Returns (low, high) for the target amount, or None when no amount
-    filter applies. Compares on ABS(amount): a statement credit line
-    carries a negative amount while NetSuite stores every total
-    positive.
+    """Returns (low, high) for the target amount -- high=None means
+    open-ended ("at least") -- or None when no amount filter applies at
+    all. That's either because the box is empty (amount is None, checked
+    first and short-circuiting regardless of which tolerance button is
+    selected) or tolerance == "any" (kept as the internal "no filter"
+    value; not offered as its own popover button any more -- see
+    TOLERANCES). Compares on ABS(amount): a statement credit line carries
+    a negative amount while NetSuite stores every total positive.
 
-    "up_to" is Ramp's "<= $199" shape -- an open-ended lower bound rather
-    than a window around the target, for "this invoice is somewhere at or
-    below the statement amount, possibly split across bills"."""
-    if amount is None or tolerance == "any":
+    "up_to" is Ramp's "<= $199" shape -- an open-ended lower bound, for
+    "this invoice is somewhere at or below the statement amount, possibly
+    split across bills". "at_least" is its mirror, ">= $199" -- for when
+    the real NetSuite total turned out to be HIGHER than the statement
+    amount (confirmed live 2026-09-30: a real Amount Mismatch exception
+    whose actual bill total exceeded the statement amount -- "up_to"
+    alone could never have surfaced it)."""
+    if amount is None or tolerance == "any" or tolerance in REMOVED_TOLERANCES:
         return None
     target = abs(float(amount))
     if tolerance == "up_to":
         return 0.0, round(target, 2)
-    margin = _TOLERANCE_MARGINS[tolerance](target)
-    return round(target - margin, 2), round(target + margin, 2)
-
-
-# One entry per window-shaped tolerance. "any" has no window and "up_to"
-# is open-ended, so neither appears here -- both are handled above.
-_TOLERANCE_MARGINS = {
-    "exact": lambda target: 0.01,
-    "1_dollar": lambda target: 1.00,
-    "5_percent": lambda target: target * 0.05,
-}
+    if tolerance == "at_least":
+        return round(target, 2), None
+    # "exact" -- 0.01 rather than 0 because the amount being compared came
+    # off a PDF and through a float, and an exact equality on a decimal
+    # cast would drop a legitimate tie-out for a half-cent of
+    # representation noise. Mirrors fabric_matching.EXACT_AMOUNT_EPSILON's
+    # reasoning.
+    return round(target - 0.01, 2), round(target + 0.01, 2)
 
 
 def _entity_condition(entity_ids) -> tuple:
@@ -142,7 +160,11 @@ def _entity_condition(entity_ids) -> tuple:
 
 
 def _amount_condition(bounds) -> tuple:
-    return ("TRY_CAST(t.total AS DECIMAL(18,2)) BETWEEN ? AND ?", [bounds[0], bounds[1]])
+    low, high = bounds
+    if high is None:
+        # "at_least" -- open-ended upper bound.
+        return ("TRY_CAST(t.total AS DECIMAL(18,2)) >= ?", [low])
+    return ("TRY_CAST(t.total AS DECIMAL(18,2)) BETWEEN ? AND ?", [low, high])
 
 
 def _invoice_condition(invoice_contains: str) -> tuple:
@@ -173,8 +195,44 @@ def _open_condition(table: str) -> tuple:
     return ("TRY_CAST(t.unapplied AS DECIMAL(18,2)) > ?", [0])
 
 
+def _paid_condition(table: str) -> tuple:
+    """The "paid" predicate -- bill status 'B' ("Paid In Full"); a
+    credit's remaining balance at or below zero (never negative --
+    confirmed live: 0 rows violate 0 <= unapplied <= total)."""
+    if table == BILL_TABLE:
+        return ("t.status = ?", ["B"])
+    return ("TRY_CAST(t.unapplied AS DECIMAL(18,2)) <= ?", [0])
+
+
+# The Status chip's two checkboxes. Confirmed live 2026-09-30: real bill
+# status codes are NOT limited to A (Open, 57,196 rows)/B (Paid In Full,
+# 1,319,634 rows) -- 19 rows carry 'C' and 6 carry 'E', neither mapped in
+# netsuite_status_codes.py, shown with their raw code via the results
+# table's "other" pill. Credits have no third state (always Open or
+# Paid, by construction of the unapplied-balance predicate above).
+STATUSES = ("open", "paid")
+
+
+def _status_condition(table: str, statuses):
+    """Returns a (fragment, params) pair for the ticked status set, or
+    None for no predicate at all. Ticking BOTH Open and Paid is
+    deliberately treated as "no predicate" (identical to the old
+    include_paid=True), not "status IN (open, paid)" -- the latter would
+    newly exclude the handful of real C/E-status bills above, silently
+    narrowing what "both boxes ticked" has always shown. An
+    empty/unrecognised set defaults to Open only, same as no boxes ever
+    being ticked wasn't a real state the UI allows (see
+    web/routers/exceptions.py's _parse_statuses())."""
+    statuses = frozenset(s for s in (statuses or ()) if s in STATUSES)
+    if statuses == frozenset(STATUSES):
+        return None
+    if statuses == {"paid"}:
+        return _paid_condition(table)
+    return _open_condition(table)  # {"open"} or empty/unrecognised
+
+
 def build_conditions(table: str, entity_ids=None, bounds=None,
-                     invoice_contains=None, include_paid=False,
+                     invoice_contains=None, statuses=None,
                      date_from=None, date_to=None) -> list:
     """Assembles the WHERE clause as a list of (sql_fragment, params)
     pairs -- one pair per active filter, each independent of the others.
@@ -191,8 +249,9 @@ def build_conditions(table: str, entity_ids=None, bounds=None,
         conditions.append(_invoice_condition(invoice_contains))
     if date_from or date_to:
         conditions.append(_date_condition(date_from, date_to))
-    if not include_paid:
-        conditions.append(_open_condition(table))
+    status_condition = _status_condition(table, statuses)
+    if status_condition:
+        conditions.append(status_condition)
     return conditions
 
 
@@ -419,7 +478,7 @@ def _validate_dates(date_from, date_to):
 
 
 def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
-                   invoice_contains=None, include_paid=False,
+                   invoice_contains=None, statuses=None,
                    sort_amount=None, date_from=None, date_to=None,
                    limit=DEFAULT_LIMIT) -> dict:
     """Searches NetSuite bills and credits. Best-effort, like the rest of
@@ -433,9 +492,18 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
     therefore NOT narrowing, and sort_amount alone does not satisfy the
     guardrail.
 
+    `statuses` (STATUSES membership, e.g. {"open"}/{"paid"}/{"open","paid"})
+    replaced the old include_paid bool 2026-09-30 -- see
+    _status_condition()'s own docstring for what each combination means.
+
     Every filter is optional. Returns a dict with rows (display-shaped,
     see _shape_row), row_count, truncated, error, needs_filter, message.
     """
+    # "1_dollar"/"5_percent" no longer exist as popover options, but an
+    # old request/bookmark using either must still work, behaving exactly
+    # like "any" (no amount filter) rather than erroring.
+    if amount_tolerance in REMOVED_TOLERANCES:
+        amount_tolerance = "any"
     if amount_tolerance not in TOLERANCES:
         return _empty_result(error=True, message=f"Unknown amount tolerance: {amount_tolerance}")
     if not _fabric_configured():
@@ -457,13 +525,13 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
         )
 
     try:
-        rows = _run_search(entity_ids, bounds, invoice_contains, include_paid,
+        rows = _run_search(entity_ids, bounds, invoice_contains, statuses,
                            sort_amount, parsed_from, parsed_to, limit)
     except Exception:
         logger.exception(
             "NetSuite open-AP search failed (entity_ids=%s amount=%s tolerance=%s "
-            "invoice_contains=%r include_paid=%s sort_amount=%s date_from=%s date_to=%s)",
-            entity_ids, amount, amount_tolerance, invoice_contains, include_paid,
+            "invoice_contains=%r statuses=%s sort_amount=%s date_from=%s date_to=%s)",
+            entity_ids, amount, amount_tolerance, invoice_contains, statuses,
             sort_amount, parsed_from, parsed_to,
         )
         return _empty_result(error=True, message="NetSuite search is unavailable right now.")
@@ -477,7 +545,7 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
     )
 
 
-def _run_search(entity_ids, bounds, invoice_contains, include_paid,
+def _run_search(entity_ids, bounds, invoice_contains, statuses,
                 sort_amount, date_from, date_to, limit) -> list:
     """Queries both tables and returns the combined display rows.
 
@@ -494,7 +562,7 @@ def _run_search(entity_ids, bounds, invoice_contains, include_paid,
     for table in (BILL_TABLE, CREDIT_TABLE):
         conditions = build_conditions(
             table, entity_ids=entity_ids, bounds=bounds,
-            invoice_contains=invoice_contains, include_paid=include_paid,
+            invoice_contains=invoice_contains, statuses=statuses,
             date_from=date_from, date_to=date_to,
         )
         sql, params = _select_for(table, conditions, limit, order_by)

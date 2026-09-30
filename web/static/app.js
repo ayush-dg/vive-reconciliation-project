@@ -85,48 +85,79 @@ document.addEventListener("DOMContentLoaded", function () {
   // Exceptions review page: the "Find in NetSuite" modal. LOOK-ONLY --
   // it GETs an HTML fragment from /netsuite-search and swaps it into the
   // results area. Nothing here POSTs, resolves an exception, or changes
-  // any record -- selecting rows only feeds the footer total. The
-  // endpoint deliberately sits
-  // OUTSIDE /exceptions/, which is a {vendor_name:path} catch-all that
-  // would otherwise swallow it.
+  // any record -- rows are no longer selectable at all (2026-09-30; the
+  // old checkbox/footer-total feature is gone). The endpoint deliberately
+  // sits OUTSIDE /exceptions/, which is a {vendor_name:path} catch-all
+  // that would otherwise swallow it.
   const nsFindBtn = document.getElementById("nsFindBtn");
   const nsModal = document.getElementById("nsModal");
   if (nsFindBtn && nsModal) {
     const ctx = nsFindBtn.dataset;
     const nsResults = document.getElementById("nsResults");
     const nsInvoice = document.getElementById("nsInvoice");
-    const nsFoot = document.getElementById("nsFootSummary");
-    const statementAmount = parseFloat(ctx.amount || "") || null;
+    const nsInvoiceHint = document.getElementById("nsInvoiceHint");
+    const nsAmountInput = document.getElementById("nsAmountInput");
+    const nsStatusOpen = document.getElementById("nsStatusOpen");
+    const nsStatusPaid = document.getElementById("nsStatusPaid");
 
-    const TOLERANCE_LABELS = {
-      exact: "=", up_to: "≤", "1_dollar": "± $1",
-      "5_percent": "± 5%", any: "Any"
-    };
+    // Fewer than this many non-space characters is not selective enough
+    // to search by invoice number alone -- mirrors
+    // src/matching/netsuite_search.py's MIN_INVOICE_SEARCH_CHARS (kept as
+    // a literal here since JS can't import the Python constant; the two
+    // are meant to always agree).
+    const MIN_INVOICE_CHARS = 4;
+
     const DATE_LABELS = {
       any: "Any time", 30: "Last 30 days", 90: "Last 90 days", 365: "Last 12 months"
     };
 
-    // Opening defaults. The point is that the modal lands on a useful
-    // list rather than an empty box: the statement amount is the
-    // strongest signal for a line that did not tie out, so we RANK by it
-    // (sort_amount) while leaving the amount filter wide open -- filtering
-    // to the exact amount would show an empty list for exactly the
-    // exceptions this exists to research.
+    // Opening defaults. For "Amount Mismatch" specifically, the
+    // statement amount is BY DEFINITION not the NetSuite bill's real
+    // amount, so filtering to it can never find the bill (confirmed live
+    // 2026-09-30 against several real Amount Mismatch exceptions -- the
+    // default Exact-at-statement-amount search missed every one of
+    // them); this reason instead opens with no amount filter, both
+    // statuses ticked, and the invoice number prefilled when it is
+    // selective enough to search by. "Not Found in NetSuite"/
+    // "Invoice Missing" keep the original Exact + statement amount +
+    // Open defaults, where the amount IS expected to match once found.
     function defaultState() {
+      const isAmountMismatch = ctx.reason === "Amount Mismatch";
+      const invoiceChars = (ctx.invoice || "").replace(/\s+/g, "").length;
       return {
-        useVendor: true, tolerance: "any", includePaid: false,
-        invoice: "", range: "any", dateFrom: "", dateTo: ""
+        useVendor: true,
+        tolerance: "exact",
+        amount: isAmountMismatch ? "" : (ctx.amount || ""),
+        statuses: isAmountMismatch ? ["open", "paid"] : ["open"],
+        invoice: (isAmountMismatch && invoiceChars >= MIN_INVOICE_CHARS) ? ctx.invoice : "",
+        range: "any", dateFrom: "", dateTo: ""
       };
     }
 
     let state = defaultState();
 
+    function invoiceCharCount() {
+      return state.invoice.replace(/\s+/g, "").length;
+    }
+
+    // An EMPTY amount box means "no amount filter" regardless of which
+    // of the three tolerance buttons is selected -- there is no separate
+    // "Any amount" button any more.
     function amountChipText() {
-      if (state.tolerance === "any" || statementAmount === null) return "Any";
-      const money = "$" + statementAmount.toFixed(2);
-      if (state.tolerance === "exact") return "= " + money;
-      if (state.tolerance === "up_to") return "≤ " + money;
-      return TOLERANCE_LABELS[state.tolerance];
+      const raw = (state.amount || "").trim();
+      if (!raw) return "Any";
+      const n = parseFloat(raw);
+      const money = isNaN(n) ? raw : "$" + n.toFixed(2);
+      const prefix = state.tolerance === "up_to" ? "Up to "
+        : state.tolerance === "at_least" ? "At least " : "Exact ";
+      return prefix + money;
+    }
+
+    function statusChipText() {
+      const labels = [];
+      if (state.statuses.indexOf("open") !== -1) labels.push("Open");
+      if (state.statuses.indexOf("paid") !== -1) labels.push("Paid");
+      return labels.join(", ") || "Open";
     }
 
     function dateChipText() {
@@ -137,24 +168,21 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function renderChips() {
-      const v = document.getElementById("nsChipVendor");
-      v.setAttribute("aria-pressed", String(state.useVendor));
-      v.classList.toggle("ns-chip-on", state.useVendor);
       document.getElementById("nsChipVendorValue").textContent =
-        state.useVendor ? (ctx.vendorDisplay || "This vendor") : "Any vendor";
+        state.useVendor ? (ctx.vendorDisplay || "This vendor") : "All vendors";
+      document.getElementById("nsChipVendor").classList.toggle("ns-chip-on", state.useVendor);
 
       document.getElementById("nsChipAmountValue").textContent = amountChipText();
-      document.getElementById("nsChipAmount").classList.toggle(
-        "ns-chip-on", state.tolerance !== "any");
+      document.getElementById("nsChipAmount").classList.toggle("ns-chip-on", !!state.amount.trim());
 
       document.getElementById("nsChipDateValue").textContent = dateChipText();
       document.getElementById("nsChipDate").classList.toggle("ns-chip-on", state.range !== "any");
 
-      const st = document.getElementById("nsChipStatus");
-      st.setAttribute("aria-pressed", String(!state.includePaid));
-      st.classList.toggle("ns-chip-on", !state.includePaid);
-      document.getElementById("nsChipStatusValue").textContent =
-        state.includePaid ? "Include paid" : "Open only";
+      document.getElementById("nsChipStatusValue").textContent = statusChipText();
+      document.getElementById("nsChipStatus").classList.toggle(
+        "ns-chip-on", state.statuses.length === 1 && state.statuses[0] === "paid");
+
+      nsInvoiceHint.hidden = invoiceCharCount() === 0 || invoiceCharCount() >= MIN_INVOICE_CHARS;
     }
 
     function computeDates() {
@@ -171,13 +199,15 @@ document.addEventListener("DOMContentLoaded", function () {
         vendor_id: ctx.vendorId || "",
         vendor_name: ctx.vendorName || "",
         use_vendor: state.useVendor,
-        // amount FILTERS; sort_amount only RANKS. Both are sent so the
-        // list stays ranked by closeness even at "Any amount".
-        amount: state.tolerance === "any" ? "" : (ctx.amount || ""),
+        amount: state.amount || "",
         tolerance: state.tolerance,
+        // sort_amount only RANKS, and always stays the statement's own
+        // amount regardless of what the (now-editable) amount FILTER box
+        // holds -- the list keeps ranking by closeness to the statement
+        // even once the filter is widened or cleared.
         sort_amount: ctx.amount || "",
-        invoice_contains: state.invoice,
-        include_paid: state.includePaid,
+        invoice_contains: invoiceCharCount() >= MIN_INVOICE_CHARS ? state.invoice : "",
+        statuses: state.statuses.join(","),
         date_from: dates[0],
         date_to: dates[1]
       });
@@ -186,8 +216,7 @@ document.addEventListener("DOMContentLoaded", function () {
         .then(function (r) { return r.text(); })
         .then(function (html) {
           nsResults.innerHTML = html;
-          wireRows();
-          updateFooter();
+          wireDetailsToggles();
         })
         .catch(function () {
           nsResults.innerHTML =
@@ -195,40 +224,9 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    function selectedRows() {
-      return Array.prototype.slice.call(
-        nsResults.querySelectorAll(".ns-row-check:checked")
-      ).map(function (cb) { return cb.closest(".ns-modal-row"); });
-    }
-
-    function updateFooter() {
-      const rows = selectedRows();
-      if (rows.length === 0) { nsFoot.innerHTML = ""; return; }
-      let total = 0;
-      rows.forEach(function (r) { total += parseFloat(r.dataset.amount) || 0; });
-      let html = '<span class="ns-foot-count">' + rows.length + " selected · Total $" +
-        total.toFixed(2) + "</span>";
-      if (statementAmount !== null) {
-        const diff = total - statementAmount;
-        html += '<span class="ns-foot-diff">Statement $' + statementAmount.toFixed(2) +
-          " · Difference $" + diff.toFixed(2) + "</span>";
-        if (Math.abs(diff) <= 0.01) {
-          html += '<span class="ns-foot-match">✓ Matches the statement</span>';
-        }
-      }
-      nsFoot.innerHTML = html;
-    }
-
-    function wireRows() {
-      nsResults.querySelectorAll(".ns-modal-row").forEach(function (row) {
-        const cb = row.querySelector(".ns-row-check");
-        row.addEventListener("click", function (ev) {
-          if (ev.target.closest(".ns-details-btn")) return;
-          if (ev.target !== cb) cb.checked = !cb.checked;
-          row.classList.toggle("ns-row-selected", cb.checked);
-          updateFooter();
-        });
-      });
+    // The only interactive control left per row -- everything else
+    // (selecting a row, the footer total) was removed 2026-09-30.
+    function wireDetailsToggles() {
       nsResults.querySelectorAll(".ns-details-btn").forEach(function (btn) {
         btn.addEventListener("click", function (ev) {
           ev.stopPropagation();
@@ -242,28 +240,40 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // --- filter wiring -----------------------------------------------
-    let debounce = null;
+    let invoiceDebounce = null;
     nsInvoice.addEventListener("input", function () {
-      clearTimeout(debounce);
-      debounce = setTimeout(function () {
-        state.invoice = nsInvoice.value;
-        runSearch();
-      }, 400);
+      state.invoice = nsInvoice.value;
+      nsInvoiceHint.hidden = invoiceCharCount() === 0 || invoiceCharCount() >= MIN_INVOICE_CHARS;
+      clearTimeout(invoiceDebounce);
+      invoiceDebounce = setTimeout(runSearch, 400);
     });
 
-    document.getElementById("nsChipVendor").addEventListener("click", function () {
-      state.useVendor = !state.useVendor;
+    let amountDebounce = null;
+    nsAmountInput.addEventListener("input", function () {
+      state.amount = nsAmountInput.value;
+      renderChips();
+      clearTimeout(amountDebounce);
+      amountDebounce = setTimeout(runSearch, 400);
+    });
+
+    function updateStatusesFromCheckboxes() {
+      // At least one box stays ticked -- unticking the last one keeps
+      // Open ticked rather than allowing a "no status" search.
+      if (!nsStatusOpen.checked && !nsStatusPaid.checked) {
+        nsStatusOpen.checked = true;
+      }
+      state.statuses = [];
+      if (nsStatusOpen.checked) state.statuses.push("open");
+      if (nsStatusPaid.checked) state.statuses.push("paid");
       renderChips();
       runSearch();
-    });
-    document.getElementById("nsChipStatus").addEventListener("click", function () {
-      state.includePaid = !state.includePaid;
-      renderChips();
-      runSearch();
-    });
+    }
+    nsStatusOpen.addEventListener("change", updateStatusesFromCheckboxes);
+    nsStatusPaid.addEventListener("change", updateStatusesFromCheckboxes);
 
     function closePopovers(except) {
-      [["nsChipAmount", "nsPopAmount"], ["nsChipDate", "nsPopDate"]].forEach(function (pair) {
+      [["nsChipVendor", "nsPopVendor"], ["nsChipAmount", "nsPopAmount"],
+       ["nsChipDate", "nsPopDate"], ["nsChipStatus", "nsPopStatus"]].forEach(function (pair) {
         if (pair[1] === except) return;
         document.getElementById(pair[1]).hidden = true;
         document.getElementById(pair[0]).setAttribute("aria-expanded", "false");
@@ -279,13 +289,27 @@ document.addEventListener("DOMContentLoaded", function () {
       chip.setAttribute("aria-expanded", String(willOpen));
     }
 
+    document.getElementById("nsChipVendor").addEventListener("click", function () {
+      togglePopover("nsChipVendor", "nsPopVendor");
+    });
     document.getElementById("nsChipAmount").addEventListener("click", function () {
       togglePopover("nsChipAmount", "nsPopAmount");
     });
     document.getElementById("nsChipDate").addEventListener("click", function () {
       togglePopover("nsChipDate", "nsPopDate");
     });
+    document.getElementById("nsChipStatus").addEventListener("click", function () {
+      togglePopover("nsChipStatus", "nsPopStatus");
+    });
 
+    document.querySelectorAll("#nsPopVendor .ns-pop-opt").forEach(function (opt) {
+      opt.addEventListener("click", function () {
+        state.useVendor = opt.dataset.vendor === "on";
+        closePopovers(null);
+        renderChips();
+        runSearch();
+      });
+    });
     document.querySelectorAll("#nsPopAmount .ns-pop-opt").forEach(function (opt) {
       opt.addEventListener("click", function () {
         state.tolerance = opt.dataset.tol;
@@ -313,11 +337,19 @@ document.addEventListener("DOMContentLoaded", function () {
       runSearch();
     });
 
-    document.getElementById("nsReset").addEventListener("click", function () {
-      state = defaultState();
+    function applyStateToInputs() {
       nsInvoice.value = state.invoice;
+      nsAmountInput.value = state.amount;
+      nsStatusOpen.checked = state.statuses.indexOf("open") !== -1;
+      nsStatusPaid.checked = state.statuses.indexOf("paid") !== -1;
       document.getElementById("nsDateFrom").value = "";
       document.getElementById("nsDateTo").value = "";
+    }
+
+    document.getElementById("nsReset").addEventListener("click", function () {
+      state = defaultState();
+      applyStateToInputs();
+      closePopovers(null);
       renderChips();
       runSearch();
     });
@@ -326,7 +358,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // --- open / close -------------------------------------------------
     function openModal() {
       state = defaultState();
-      nsInvoice.value = state.invoice;
+      applyStateToInputs();
       renderChips();
       nsModal.showModal();
       runSearch();

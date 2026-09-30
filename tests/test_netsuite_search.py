@@ -28,6 +28,7 @@ from src.matching.netsuite_search import (
     BILL_TABLE,
     CREDIT_TABLE,
     MIN_INVOICE_SEARCH_CHARS,
+    REMOVED_TOLERANCES,
     _select_for,
     amount_bounds,
     build_conditions,
@@ -84,7 +85,7 @@ class TestBuildConditions(unittest.TestCase):
     def test_all_filters_combined_keeps_one_pair_each(self):
         conditions = build_conditions(
             BILL_TABLE, entity_ids=["12203"], bounds=(16.31, 16.33),
-            invoice_contains="TS247", include_paid=False,
+            invoice_contains="TS247", statuses={"open"},
         )
         self.assertEqual(
             _fragments(conditions),
@@ -103,6 +104,12 @@ class TestBuildConditions(unittest.TestCase):
 
 
 class TestOpenVersusPaidCondition(unittest.TestCase):
+    """The Status chip's two checkboxes (replaced the old include_paid
+    bool 2026-09-30): Open only (default), Paid only, or both -- which
+    is deliberately NO status predicate at all (identical to the old
+    include_paid=True), not "status IN (open, paid)" -- confirmed live
+    that real bill statuses aren't limited to A/B (19 'C' + 6 'E' rows
+    exist), and ticking both must not newly hide them."""
 
     def test_bills_filter_on_status_a_when_open_only(self):
         self.assertIn("t.status = ?", _fragments(build_conditions(BILL_TABLE)))
@@ -115,14 +122,37 @@ class TestOpenVersusPaidCondition(unittest.TestCase):
         self.assertIn("TRY_CAST(t.unapplied AS DECIMAL(18,2)) > ?", _fragments(conditions))
         self.assertIn(0, _params(conditions))
 
-    def test_include_paid_drops_the_status_condition_for_bills(self):
-        conditions = build_conditions(BILL_TABLE, include_paid=True)
+    def test_default_statuses_is_open_only(self):
+        """No `statuses` given at all -- same as {"open"}."""
+        self.assertEqual(_fragments(build_conditions(BILL_TABLE)),
+                         _fragments(build_conditions(BILL_TABLE, statuses={"open"})))
+
+    def test_paid_only_bills_filters_on_status_b(self):
+        conditions = build_conditions(BILL_TABLE, statuses={"paid"})
+        self.assertIn("t.status = ?", _fragments(conditions))
+        self.assertIn("B", _params(conditions))
+        self.assertNotIn("A", _params(conditions))
+
+    def test_paid_only_credits_filters_on_unapplied_at_or_below_zero(self):
+        conditions = build_conditions(CREDIT_TABLE, statuses={"paid"})
+        self.assertIn("TRY_CAST(t.unapplied AS DECIMAL(18,2)) <= ?", _fragments(conditions))
+        self.assertIn(0, _params(conditions))
+
+    def test_open_and_paid_both_ticked_drops_the_status_condition_for_bills(self):
+        conditions = build_conditions(BILL_TABLE, statuses={"open", "paid"})
         self.assertNotIn("t.status = ?", _fragments(conditions))
         self.assertNotIn("A", _params(conditions))
 
-    def test_include_paid_drops_the_unapplied_condition_for_credits(self):
-        conditions = build_conditions(CREDIT_TABLE, include_paid=True)
+    def test_open_and_paid_both_ticked_drops_the_unapplied_condition_for_credits(self):
+        conditions = build_conditions(CREDIT_TABLE, statuses={"open", "paid"})
         self.assertNotIn("TRY_CAST(t.unapplied AS DECIMAL(18,2)) > ?", _fragments(conditions))
+        self.assertNotIn("TRY_CAST(t.unapplied AS DECIMAL(18,2)) <= ?", _fragments(conditions))
+
+    def test_empty_or_unrecognised_statuses_falls_back_to_open(self):
+        self.assertEqual(_fragments(build_conditions(BILL_TABLE, statuses=set())),
+                         _fragments(build_conditions(BILL_TABLE, statuses={"open"})))
+        self.assertEqual(_fragments(build_conditions(BILL_TABLE, statuses={"bogus"})),
+                         _fragments(build_conditions(BILL_TABLE, statuses={"open"})))
 
 
 class TestAmountBounds(unittest.TestCase):
@@ -130,24 +160,35 @@ class TestAmountBounds(unittest.TestCase):
     def test_exact_is_one_cent_either_side(self):
         self.assertEqual(amount_bounds(195.65, "exact"), (195.64, 195.66))
 
-    def test_one_dollar(self):
-        self.assertEqual(amount_bounds(195.65, "1_dollar"), (194.65, 196.65))
-
-    def test_five_percent(self):
-        self.assertEqual(amount_bounds(200.00, "5_percent"), (190.00, 210.00))
+    def test_at_least_is_open_ended_above(self):
+        self.assertEqual(amount_bounds(158.55, "at_least"), (158.55, None))
 
     def test_any_means_no_amount_filter(self):
         self.assertIsNone(amount_bounds(195.65, "any"))
 
-    def test_no_amount_means_no_amount_filter(self):
+    def test_no_amount_means_no_amount_filter_regardless_of_tolerance(self):
+        """An empty amount box is "any" no matter which of the three
+        tolerance buttons (Exact/Up to/At least) happens to be selected."""
         self.assertIsNone(amount_bounds(None, "exact"))
+        self.assertIsNone(amount_bounds(None, "up_to"))
+        self.assertIsNone(amount_bounds(None, "at_least"))
 
     def test_negative_target_is_compared_on_absolute_value(self):
         """A statement credit line carries a negative amount, while
         NetSuite stores every total positive (confirmed live: 0 negative
         totals on either table) -- so the bounds must be positive."""
         self.assertEqual(amount_bounds(-16.32, "exact"), (16.31, 16.33))
-        self.assertEqual(amount_bounds(-200.00, "5_percent"), (190.00, 210.00))
+        self.assertEqual(amount_bounds(-158.55, "at_least"), (158.55, None))
+
+    def test_removed_tolerances_behave_like_any(self):
+        """1_dollar/5_percent are gone from the popover, but an old
+        request/bookmark using either must still work exactly like "any"
+        (no amount filter), never error -- amount_bounds() itself
+        recognises them, so this holds for every caller, not just the
+        route's own normalization."""
+        for removed in REMOVED_TOLERANCES:
+            with self.subTest(tolerance=removed):
+                self.assertIsNone(amount_bounds(195.65, removed))
 
 
 class TestEscapeLike(unittest.TestCase):
@@ -262,12 +303,12 @@ class TestInvoiceOnlyGuardrail(unittest.TestCase):
         q.assert_not_called()
         self.assertTrue(result["needs_filter"])
 
-    def test_long_invoice_still_runs_with_include_paid(self):
+    def test_long_invoice_still_runs_with_paid_status(self):
         """The case that actually answers the demo question: the invoice
         is in NetSuite but already Paid In Full, so it is only reachable
-        with include_paid on."""
+        with "paid" in the status set."""
         result, q = self._run(entity_ids=None, amount=None, amount_tolerance="any",
-                              invoice_contains="900CC752", include_paid=True)
+                              invoice_contains="900CC752", statuses={"open", "paid"})
         self.assertTrue(q.called)
         self.assertFalse(result["needs_filter"])
 
@@ -407,6 +448,45 @@ class TestNetsuiteSearchRoute(unittest.TestCase):
             })
         self.assertEqual(search.call_args.kwargs["entity_ids"], ["12203"])
 
+    def test_removed_tolerance_is_normalized_not_rejected(self):
+        """An old bookmark/request using 1_dollar or 5_percent must still
+        work -- both behave like "any", not an error."""
+        fake = {"rows": [], "row_count": 0, "truncated": False, "error": False,
+                "needs_filter": False, "message": None}
+        for removed in netsuite_search.REMOVED_TOLERANCES:
+            with self.subTest(tolerance=removed):
+                with mock.patch.object(exceptions, "search_open_ap", return_value=fake) as search, \
+                     mock.patch.object(exceptions.queries, "get_last_netsuite_sync", return_value=None):
+                    resp = self.client.get("/netsuite-search",
+                                           params={"amount": "195.65", "tolerance": removed})
+                self.assertEqual(resp.status_code, 200)
+                self.assertTrue(search.called)
+                self.assertEqual(search.call_args.kwargs["amount_tolerance"], "any")
+
+    def test_statuses_default_to_open_only(self):
+        fake = {"rows": [], "row_count": 0, "truncated": False, "error": False,
+                "needs_filter": False, "message": None}
+        with mock.patch.object(exceptions, "search_open_ap", return_value=fake) as search, \
+             mock.patch.object(exceptions.queries, "get_last_netsuite_sync", return_value=None):
+            self.client.get("/netsuite-search", params={"amount": "1"})
+        self.assertEqual(search.call_args.kwargs["statuses"], frozenset({"open"}))
+
+    def test_statuses_open_and_paid_both_ticked(self):
+        fake = {"rows": [], "row_count": 0, "truncated": False, "error": False,
+                "needs_filter": False, "message": None}
+        with mock.patch.object(exceptions, "search_open_ap", return_value=fake) as search, \
+             mock.patch.object(exceptions.queries, "get_last_netsuite_sync", return_value=None):
+            self.client.get("/netsuite-search", params={"amount": "1", "statuses": "open,paid"})
+        self.assertEqual(search.call_args.kwargs["statuses"], frozenset({"open", "paid"}))
+
+    def test_invalid_statuses_falls_back_to_open(self):
+        fake = {"rows": [], "row_count": 0, "truncated": False, "error": False,
+                "needs_filter": False, "message": None}
+        with mock.patch.object(exceptions, "search_open_ap", return_value=fake) as search, \
+             mock.patch.object(exceptions.queries, "get_last_netsuite_sync", return_value=None):
+            self.client.get("/netsuite-search", params={"amount": "1", "statuses": ""})
+        self.assertEqual(search.call_args.kwargs["statuses"], frozenset({"open"}))
+
 
 class TestRouteIsNotShadowed(unittest.TestCase):
     """/exceptions/{vendor_name:path} is a catch-all whose "path"
@@ -541,6 +621,33 @@ class TestUpToTolerance(unittest.TestCase):
         with mock.patch.dict(os.environ, TestGuardrail.ENV), \
              mock.patch.object(netsuite_search, "execute_lakehouse_query", return_value=[]) as q:
             result = search_open_ap(amount=158.55, amount_tolerance="up_to")
+        self.assertTrue(q.called)
+        self.assertFalse(result["needs_filter"])
+
+
+class TestAtLeastTolerance(unittest.TestCase):
+    """The mirror of "up_to": open-ended ABOVE the target, for when the
+    real NetSuite total turned out to be HIGHER than the statement
+    amount -- confirmed live 2026-09-30 that a real Amount Mismatch
+    exception's actual bill total exceeded the statement amount, a case
+    "up_to" alone could never have surfaced."""
+
+    def test_at_least_bounds_have_no_upper(self):
+        self.assertEqual(amount_bounds(158.55, "at_least"), (158.55, None))
+
+    def test_at_least_is_an_accepted_tolerance(self):
+        self.assertIn("at_least", netsuite_search.TOLERANCES)
+
+    def test_at_least_produces_an_open_ended_condition(self):
+        conditions = build_conditions(BILL_TABLE, bounds=amount_bounds(158.55, "at_least"))
+        self.assertIn("TRY_CAST(t.total AS DECIMAL(18,2)) >= ?", _fragments(conditions))
+        self.assertIn(158.55, _params(conditions))
+        self.assertNotIn("BETWEEN", " ".join(_fragments(conditions)))
+
+    def test_at_least_satisfies_the_guardrail_on_its_own(self):
+        with mock.patch.dict(os.environ, TestGuardrail.ENV), \
+             mock.patch.object(netsuite_search, "execute_lakehouse_query", return_value=[]) as q:
+            result = search_open_ap(amount=158.55, amount_tolerance="at_least")
         self.assertTrue(q.called)
         self.assertFalse(result["needs_filter"])
 

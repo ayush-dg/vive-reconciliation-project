@@ -662,7 +662,7 @@ def get_vendor_summaries() -> list:
     return sorted(vendors, key=lambda v: v["vendor_name"] or "")
 
 
-def get_exception_runs() -> list:
+def get_exception_runs(window: TimeWindow = None) -> list:
     """One row per statement RUN (every PDF ever reconciled), not one per
     vendor -- see get_vendor_summaries() for the older vendor-rollup
     version this sits alongside (still used internally by
@@ -677,6 +677,18 @@ def get_exception_runs() -> list:
     the current version per vendor+period (unlike get_vendor_summaries()),
     since browsing period-wise is the point.
 
+    `window` (web/time_window.py) scopes summary-backed runs by run date
+    (calendar ranges, applied in SQL) or by "last" (the most recent
+    Outlook sync's statement_ids, checked here in Python, same reasoning
+    as get_home_dashboard()); None/"all" = every run. Exceptions-only
+    vendors (_get_exceptions_only_vendors(), appended below) have no
+    recon_summary row at all and so no run timestamp or statement_id --
+    they are therefore appended AFTER the window filter and are never
+    subject to it: they always show and always count toward the
+    Exceptions overview's header, regardless of the selected time filter
+    (per the user 2026-09-30 -- a real open-exception backlog should
+    never be hidden just because it has nothing to filter by).
+
     shop comes straight off silver.recon_summary (already written per-run
     by fabric_matching.py's _write_summary()). billing_location AND
     statement_period do NOT reliably live there -- silver.statement (and
@@ -688,15 +700,25 @@ def get_exception_runs() -> list:
     statement_period='2026-08', billing_location='Manchester, New
     Hampshire') -- joined in via a second batched query, same
     N+1-avoidance pattern as the reason_breakdown/aging batching below."""
+    window_sql, window_params = window.sql() if window else ("", [])
+    # "WHERE 1 = 1" (rather than the bare, condition-less FROM this had
+    # before window support existed) so a calendar window's "AND ..."
+    # fragment always has something to attach to; harmless no-op when
+    # window_sql is empty (None/"all"), so unwindowed callers see the
+    # exact same rows as before.
     runs = recon_query(
-        """
+        f"""
         SELECT statement_id, vendor_name, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
         FROM silver.recon_summary
+        WHERE 1 = 1{window_sql}
         ORDER BY reconciliation_timestamp DESC
-        """
+        """,
+        window_params,
     )
+    if window is not None and window.statement_ids is not None:
+        runs = [r for r in runs if r.get("statement_id") in window.statement_ids]
 
     if runs:
         statement_ids = [r["statement_id"] for r in runs]
