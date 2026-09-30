@@ -29,6 +29,27 @@
   {% for key, label, url in range_chips %}
   <a href="{{ url }}" class="filter-chip {{ 'active' if window.range == key }}">{{ label }}</a>
   {% endfor %}
+  {# "Last run" dropdown (2026-09-30) -- every past Outlook sync, newest
+     first (see web/time_window.py's outlook_sync_options()), so a user
+     can pick any earlier sync instead of only the latest. The "Last run"
+     chip above still always means "the latest sync" exactly as before;
+     this select is how you reach an OLDER one. Styled identically to the
+     Month select below. #}
+  <form method="get" action="/" style="display:contents">
+    <input type="hidden" name="range" value="last">
+    {% if run_status != 'all' %}<input type="hidden" name="status" value="{{ run_status }}">{% endif %}
+    <select name="sync" id="window-sync" class="filter-chip {{ 'active' if window.range == 'last' }}" style="cursor:pointer"
+            onchange="this.form.submit()" aria-label="Pick an Outlook sync">
+      {% if sync_options %}
+      {% for opt in sync_options %}
+      <option value="{{ opt.value }}" {{ 'selected' if window.range == 'last' and not window.empty and opt.value == selected_sync }}>{{ opt.label }}</option>
+      {% endfor %}
+      {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
+      {% else %}
+      <option disabled>No Outlook syncs yet</option>
+      {% endif %}
+    </select>
+  </form>
   {# The blank option doubles as "All time" (replacing the removed "All
      time" chip): its own value is "", so the hidden range input has to
      be switched between "month"/"all" in JS before the form submits,

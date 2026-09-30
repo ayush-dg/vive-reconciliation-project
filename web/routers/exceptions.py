@@ -79,12 +79,20 @@ def exceptions_url(filters: dict, **changes) -> str:
         params.append(("date", merged["date"]))
     if merged.get("range") == "month" and merged.get("month"):
         params.append(("month", merged["month"]))
+    if merged.get("sync"):
+        # Same reasoning as dashboard.py's home_url(): spell "range=last"
+        # out explicitly whenever a sync is chosen, even though "last"
+        # would otherwise be inferred, since this page's own default is
+        # "all", not "last".
+        if not any(p[0] == "range" for p in params):
+            params.append(("range", "last"))
+        params.append(("sync", merged["sync"]))
     return "/exceptions" + (f"?{urlencode(params)}" if params else "")
 
 
 @router.get("/exceptions")
 def exceptions_vendors(request: Request, user: str = Depends(require_login),
-                       range: str = "", date: str = "", month: str = ""):
+                       range: str = "", date: str = "", month: str = "", sync: str = ""):
     # Time filter (2026-09-30) -- same controls/definitions as Home, but
     # defaulting to "all" (not "last"), so a real open-exception backlog
     # is never hidden the first time this page loads. ?date=/?month=
@@ -100,7 +108,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     timestamps = queries.get_run_timestamps()
     outlook_jobs = queries.get_outlook_synced_jobs()
     window = tw.resolve_window(range_param, date or None, month or None,
-                               timestamps=timestamps, outlook_jobs=outlook_jobs)
+                               timestamps=timestamps, outlook_jobs=outlook_jobs, sync_=sync or None)
 
     # get_exception_runs() -- one card per statement RUN (every PDF ever
     # reconciled), not one per vendor -- see its docstring. Already
@@ -162,8 +170,10 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
     location_options = sorted({v["billing_location"] for v in runs if v.get("billing_location")})
 
-    filters = {"range": window.range, "date": window.date, "month": window.month}
-    new_window = {"date": None, "month": None}
+    filters = {"range": window.range, "date": window.date, "month": window.month, "sync": sync or ""}
+    new_window = {"date": None, "month": None, "sync": None}
+    sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
+    selected_sync = (window.sync_time_utc.isoformat() + "Z") if (window.range == "last" and not window.empty) else ""
 
     ctx = {
         "active_page": "exceptions",
@@ -181,6 +191,9 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         "range_chips": [(key, label, exceptions_url(filters, range=key, **new_window))
                         for key, label in EXCEPTIONS_RANGE_CHIPS],
         "month_options": tw.month_options(timestamps),
+        "sync_options": sync_options,
+        "sync_truncated": sync_truncated,
+        "selected_sync": selected_sync,
         "last_run_url": exceptions_url(filters, range="last", **new_window),
         "all_time_url": exceptions_url(filters, range="all", **new_window),
         **sidebar_context(request),

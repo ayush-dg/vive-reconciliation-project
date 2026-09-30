@@ -280,5 +280,70 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.assertIn(">Orphan CO<", html)
 
 
+class TestExceptionsSyncDropdown(unittest.TestCase):
+    """The "Last run" dropdown (2026-09-30) on /exceptions -- same
+    mechanism as Home's own (web/routers/dashboard.py's counterpart), just
+    exercised through exceptions.py/exceptions_url()."""
+
+    def setUp(self):
+        self.windows = []
+        run_row = {
+            "statement_id": "S1", "vendor_name": "Fenix", "vendor_display_name": "Fenix",
+            "shop": None, "billing_location": None, "statement_period": "2026-08",
+            "total_invoice_count": 10, "matched_count": 8, "exception_count": 2,
+            "statement_total": 100.0, "overall_status": "EXCEPTIONS_PRESENT",
+            "reconciliation_timestamp": None, "reason_breakdown": {"not found in NetSuite": 2},
+            "aging": None, "url_name": "Fenix",
+        }
+
+        def get_exception_runs(window=None):
+            self.windows.append(window)
+            return [dict(run_row)]
+
+        fns = {
+            "get_exception_runs": get_exception_runs,
+            "get_run_timestamps": lambda: [],
+            "get_outlook_synced_jobs": lambda: [
+                _job("N1", U(2026, 9, 29, 16, 2)),
+                _job("O1", U(2026, 9, 28, 12, 0)),
+            ],
+            "get_open_recon_exceptions_count": lambda: 0,
+            "get_pending_review_count": lambda: 0,
+        }
+        for name, fn in fns.items():
+            patcher = mock.patch(f"web.queries.{name}", fn)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.client = _client()
+
+    def _get(self, url):
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp.text.replace("&amp;", "&")
+
+    def test_dropdown_lists_both_syncs_newest_first(self):
+        html = self._get("/exceptions?range=last")
+        select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
+        self.assertIn("Sep 29, 12:02 PM ET · 1 statement", select)
+        self.assertIn("Sep 28, 8:00 AM ET · 1 statement", select)
+
+    def test_choosing_an_older_sync_narrows_the_window_and_url(self):
+        html = self._get("/exceptions?range=last&sync=2026-09-28T12:00:00Z")
+        self.assertEqual(self.windows[-1].statement_ids, frozenset({"O1"}))
+        self.assertIn('href="/exceptions?range=today"', html)
+
+    def test_default_exceptions_page_load_has_no_sync_selected_yet(self):
+        # Exceptions' own default range is "all", not "last" -- the sync
+        # dropdown still renders (so it's reachable), just with nothing
+        # forced into "last" the way Home's default does.
+        html = self._get("/exceptions")
+        self.assertEqual(self._window().range, "all")
+        select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
+        self.assertNotIn("selected", select)
+
+    def _window(self):
+        return self.windows[-1]
+
+
 if __name__ == "__main__":
     unittest.main()

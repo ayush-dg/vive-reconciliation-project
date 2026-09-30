@@ -66,10 +66,20 @@
     <option value="{{ pval }}">{{ pval | period_label }}</option>
     {% endfor %}
   </select>
-  {# "Last run" -- same Outlook-sync definition as Home (see
-     web/routers/validation.py). An independent on/off toggle, not part
-     of the All/Passed/Failed group, so it can combine with any of them. #}
-  <button type="button" class="filter-chip" id="last-run-filter" aria-pressed="false">Last run</button>
+  {# "Last run" dropdown (2026-09-30) -- every past Outlook sync, newest
+     first (web/routers/validation.py, web/time_window.py's
+     outlook_sync_options()), not just the latest. Purely client-side,
+     same as every other filter here -- an independent filter, not part
+     of the All/Passed/Failed group, so it combines with any of them.
+     Default "All syncs" (no filter), unlike Home/Exceptions' own select
+     which defaults to the latest sync. #}
+  <select id="sync-filter" class="filter-chip" style="cursor:pointer" aria-label="Filter by Outlook sync">
+    <option value="">All syncs</option>
+    {% for opt in sync_options %}
+    <option value="{{ opt.value }}">{{ opt.label }}</option>
+    {% endfor %}
+    {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
+  </select>
   {# Same hidden-input + showPicker() pattern as Home's calendar button,
      but purely client-side here -- Validation's filters never touch the
      server. Filters by the attempt's US Eastern calendar day. #}
@@ -84,7 +94,7 @@
   <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}"
        data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
        data-period="{{ run.statement_period or '' }}"
-       data-last-run="{{ '1' if run.is_last_run else '0' }}" data-day="{{ run.ingestion_timestamp | eastern_day }}">
+       data-sync="{{ run.sync_time }}" data-day="{{ run.ingestion_timestamp | eastern_day }}">
     <div class="report-card-head">
       <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-check-circle' if run.passed else 'i-x-circle' }}"/></svg></div>
       <div>
@@ -115,26 +125,26 @@
   var vendorFilter = document.getElementById("vendor-filter");
   var shopFilter = document.getElementById("shop-filter");
   var periodFilter = document.getElementById("period-filter");
-  var lastRunChip = document.getElementById("last-run-filter");
+  var syncFilter = document.getElementById("sync-filter");
   var dateInput = document.getElementById("validation-date");
   var cards = document.querySelectorAll("#validation-card-grid .report-card");
   var currentStatus = "all";
-  var lastRunOnly = false;
 
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
     var period = periodFilter.value;
+    var sync = syncFilter.value;
     var day = dateInput.value;
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
       var matchesVendor = !vendor || card.dataset.vendor === vendor;
       var matchesShop = !shop || card.dataset.shop === shop;
       var matchesPeriod = !period || card.dataset.period === period;
-      var matchesLastRun = !lastRunOnly || card.dataset.lastRun === "1";
+      var matchesSync = !sync || card.dataset.sync === sync;
       var matchesDay = !day || card.dataset.day === day;
       card.style.display = (matchesStatus && matchesVendor && matchesShop && matchesPeriod
-        && matchesLastRun && matchesDay) ? "" : "none";
+        && matchesSync && matchesDay) ? "" : "none";
     });
   }
 
@@ -149,13 +159,8 @@
   vendorFilter.addEventListener("change", applyFilters);
   shopFilter.addEventListener("change", applyFilters);
   periodFilter.addEventListener("change", applyFilters);
+  syncFilter.addEventListener("change", applyFilters);
 
-  lastRunChip.addEventListener("click", function () {
-    lastRunOnly = !lastRunOnly;
-    lastRunChip.classList.toggle("active", lastRunOnly);
-    lastRunChip.setAttribute("aria-pressed", lastRunOnly ? "true" : "false");
-    applyFilters();
-  });
   document.getElementById("validation-date-btn").addEventListener("click", function () {
     if (dateInput.showPicker) { dateInput.showPicker(); } else { dateInput.focus(); }
   });

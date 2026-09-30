@@ -21,12 +21,23 @@ router = APIRouter()
 def validation_list(request: Request, user: str = Depends(require_login)):
     runs = queries.get_validation_report()
 
-    # "Last run" -- the same Outlook-sync definition as Home (see
-    # web/time_window.py's outlook_last_sync()), applied here to intake
-    # attempts instead of reconciliation runs: an attempt counts as "last
-    # run" when its statement_id is one of that sync's jobs' statement_ids.
-    last_sync = tw.outlook_last_sync(queries.get_outlook_synced_jobs())
-    last_run_statement_ids = {j["statement_id"] for j in (last_sync or []) if j.get("statement_id")}
+    # "Last run" dropdown (2026-09-30) -- same Outlook-sync definitions as
+    # Home/Exceptions (web/time_window.py's outlook_all_syncs()), applied
+    # here to intake attempts instead of reconciliation runs. Entirely
+    # client-side (this page never round-trips a range/sync param to the
+    # server) -- each run gets the UTC ISO "value" (outlook_sync_options())
+    # of whichever sync its own statement_id belongs to, or "" if none, so
+    # the select's JS filter can do a plain string-equality match against
+    # data-sync, same pattern as the existing vendor/shop/period filters.
+    outlook_jobs = queries.get_outlook_synced_jobs()
+    all_syncs = tw.outlook_all_syncs(outlook_jobs)
+    sync_by_statement = {}
+    for chain in all_syncs:
+        sync_value = chain[0]["submitted_at"].isoformat() + "Z"
+        for j in chain:
+            if j.get("statement_id"):
+                sync_by_statement[j["statement_id"]] = sync_value
+    sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
 
     for run in runs:
         # Display-only casing normalization, same reasoning as
@@ -35,7 +46,7 @@ def validation_list(request: Request, user: str = Depends(require_login)):
         # attributes in sync with what's actually shown.
         run["vendor_display_name"] = smart_title(vendor_display_name(run.get("vendor_name")))
         run["shop"] = smart_title(run.get("shop"))
-        run["is_last_run"] = run.get("statement_id") in last_run_statement_ids
+        run["sync_time"] = sync_by_statement.get(run.get("statement_id"), "")
 
     vendor_options = sorted({r["vendor_display_name"] for r in runs if r.get("vendor_display_name")})
     shop_options = sorted({r["shop"] for r in runs if r.get("shop")})
@@ -49,6 +60,8 @@ def validation_list(request: Request, user: str = Depends(require_login)):
         "vendor_options": vendor_options,
         "shop_options": shop_options,
         "period_options": period_options,
+        "sync_options": sync_options,
+        "sync_truncated": sync_truncated,
         **sidebar_context(request),
     }
     return render(request, "validation.html", ctx)

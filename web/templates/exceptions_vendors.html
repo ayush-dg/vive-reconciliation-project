@@ -25,6 +25,23 @@
   {% for key, label, url in range_chips %}
   <a href="{{ url }}" class="filter-chip {{ 'active' if window.range == key }}">{{ label }}</a>
   {% endfor %}
+  {# "Last run" dropdown (2026-09-30) -- same as Home's (see
+     web/time_window.py's outlook_sync_options()); the "Last run" chip
+     above still always means "the latest sync". #}
+  <form method="get" action="/exceptions" style="display:contents">
+    <input type="hidden" name="range" value="last">
+    <select name="sync" id="window-sync" class="filter-chip {{ 'active' if window.range == 'last' }}" style="cursor:pointer"
+            onchange="this.form.submit()" aria-label="Pick an Outlook sync">
+      {% if sync_options %}
+      {% for opt in sync_options %}
+      <option value="{{ opt.value }}" {{ 'selected' if window.range == 'last' and not window.empty and opt.value == selected_sync }}>{{ opt.label }}</option>
+      {% endfor %}
+      {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
+      {% else %}
+      <option disabled>No Outlook syncs yet</option>
+      {% endif %}
+    </select>
+  </form>
   <form method="get" action="/exceptions" style="display:contents">
     <input type="hidden" name="range" id="window-range-for-month" value="{{ 'all' if window.range == 'all' else 'month' }}">
     <select name="month" id="window-month" class="filter-chip {{ 'active' if window.range in ('month', 'all') }}" style="cursor:pointer"

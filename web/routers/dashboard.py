@@ -36,6 +36,14 @@ def home_url(filters: dict, **changes) -> str:
         params.append(("date", merged["date"]))
     if merged.get("range") == "month" and merged.get("month"):
         params.append(("month", merged["month"]))
+    if merged.get("sync"):
+        # "range=last" is the default and so is normally left out above,
+        # but a ?sync= is meaningless without it once a non-last range is
+        # ever the default, so it's always spelled out explicitly here --
+        # see web/time_window.py's outlook_sync_options().
+        if not any(p[0] == "range" for p in params):
+            params.append(("range", "last"))
+        params.append(("sync", merged["sync"]))
     if merged.get("status") and merged["status"] != "all":
         params.append(("status", merged["status"]))
     if merged.get("period"):
@@ -45,7 +53,7 @@ def home_url(filters: dict, **changes) -> str:
 
 @router.get("/")
 def home(request: Request, user: str = Depends(require_login),
-         range: str = "", date: str = "", month: str = "",
+         range: str = "", date: str = "", month: str = "", sync: str = "",
          status: str = "all", period: str = ""):
     # Re-enabled 2026-08-26 -- wired to the NEW NetSuite matching flow's
     # results (silver.recon_summary, Fabric), not
@@ -63,17 +71,21 @@ def home(request: Request, user: str = Depends(require_login),
     timestamps = queries.get_run_timestamps()
     outlook_jobs = queries.get_outlook_synced_jobs()
     window = tw.resolve_window(range or None, date or None, month or None,
-                               timestamps=timestamps, outlook_jobs=outlook_jobs)
+                               timestamps=timestamps, outlook_jobs=outlook_jobs, sync_=sync or None)
     if status not in queries.RECON_RUN_STATUS_FILTERS:
         status = "all"
     data = queries.get_home_dashboard(window=window, status=status, period=period or None, limit=10)
 
     filters = {"range": window.range, "date": window.date, "month": window.month,
-               "status": status, "period": period or ""}
+               "sync": sync or "", "status": status, "period": period or ""}
     # Changing the time window clears the statement period (its options
     # change with the window) but keeps the status; the status chips and
-    # the period select keep the window.
-    new_window = {"date": None, "month": None, "period": ""}
+    # the period select keep the window. Picking Today/Month/a calendar
+    # day also clears any explicitly-chosen sync (each is its own <form>
+    # in home.html, so this only matters for the *_url() helpers below).
+    new_window = {"date": None, "month": None, "sync": None, "period": ""}
+    sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
+    selected_sync = (window.sync_time_utc.isoformat() + "Z") if (window.range == "last" and not window.empty) else ""
     period_options = list(data["period_options"])
     if period and period not in period_options:
         # Keep a selected-but-absent period visible, so an empty table is
@@ -102,6 +114,9 @@ def home(request: Request, user: str = Depends(require_login),
         "window_empty_message": tw.empty_message(window),
         "range_chips": [(key, label, home_url(filters, range=key, **new_window)) for key, label in RANGE_CHIPS],
         "month_options": tw.month_options(timestamps),
+        "sync_options": sync_options,
+        "sync_truncated": sync_truncated,
+        "selected_sync": selected_sync,
         "status_urls": {s: home_url(filters, status=s) for s in queries.RECON_RUN_STATUS_FILTERS},
         "clear_table_url": home_url(filters, status="all", period=""),
         "last_run_url": home_url(filters, range="last", **new_window),
