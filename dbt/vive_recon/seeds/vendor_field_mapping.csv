@@ -136,3 +136,21 @@ RIVIAN_LLC,invoice_number,original_invoice_number,string,v1,1
 RIVIAN_LLC,order_number,po_number,string,v1,1
 RIVIAN_LLC,invoice_amount,charge_amount,decimal,v1,1
 RIVIAN_LLC,balance,amount_remaining,decimal,v1,1
+DARLINGS_AUTO_GROUP,Date,line_date,date,v1,1
+DARLINGS_AUTO_GROUP,Invoice Number,original_invoice_number,string,v1,1
+DARLINGS_AUTO_GROUP,Charges,charge_amount,decimal,v1,1
+DARLINGS_AUTO_GROUP,Pymts /Credits,payment_amount,decimal,v1,1
+DARLINGS_AUTO_GROUP,Amount Due,amount_remaining,decimal,v1,1
+GRAPPONE,DATE,line_date,date,v1,1
+GRAPPONE,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+GRAPPONE,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+GRAPPONE,PURCHASES,charge_amount,decimal,v1,1
+GRAPPONE,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+GRAPPONE,BALANCE,amount_remaining,decimal,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Trans Date,line_date,date,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Date Due,due_date,date,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Trans ID / Alt ID,original_invoice_number,string,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Check / PO No.,po_number,string,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Trans Type,transaction_code,string,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Amount,charge_amount,decimal,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Balance,amount_remaining,decimal,v1,1
