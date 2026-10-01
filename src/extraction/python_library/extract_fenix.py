@@ -167,6 +167,15 @@ def parse_totals(last_page_text):
     m = re.search(r"Balance due\s+([\d,]+\.\d{2})", last_page_text)
     if m:
         info["balance_due_printed"] = m.group(1)
+    if "total_due_printed" not in info:
+        # "reprintStatement_*" layout (2026-10-01): no "Total due" /
+        # "Unallocated" / "Balance due" labels -- one bare totals row instead,
+        # in the same Due / Unalloc. / Balance order, e.g.
+        # "Total 3425.00 0.00 3425.00" (reprintStatement_210928/937/948).
+        # Its first figure equals sum(due) on every such statement seen.
+        m = re.search(r"(?m)^Total\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s*$", last_page_text)
+        if m:
+            info["total_due_printed"], info["unallocated_printed"], info["balance_due_printed"] = m.groups()
     return info
 
 

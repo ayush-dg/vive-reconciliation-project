@@ -1,0 +1,15 @@
+{
+  "_comment": "Per-vendor override for the Arithmetic Validation Gate (src/validation/arithmetic_gate.py, compute_vendor_column_total). By default the gate nets outstanding_amount/credit from the extraction engine's generic column mapping; for a vendor listed here it instead sums this one raw extracted column (the key in each line's _raw_row) -- the column the statement's printed total actually adds up. Validation-page only: NetSuite matching reads dbt/vive_recon/seeds/vendor_field_mapping.csv and is unaffected.",
+  "NATIONAL_COATINGS_AND_SUPPLIES": {
+    "column": "Balance",
+    "note": "Printed Total Balance = sum of the Balance column (open items). The generic mapping sums Amount, which includes the PAYMENT rows (customer payments as negatives) -- confirmed 2026-10-01 on all 7 August statements: the gate's difference equalled the payment rows' total exactly every time (Bristol -$12,411.46, Lees -$23,623.89, ...), and Balance summed to the printed total exactly."
+  },
+  "A_NEW_AGE_AUTO_GLASS": {
+    "column": "Total",
+    "note": "'Sales By Customer' report: printed Report Total = sum of the Total column. Claude's generic mapping recognises no amount column on this layout, so the gate summed $0 -- confirmed 2026-10-01 (Lyndhurst $1,630.00, Restoration $2,875.00 tie out exactly once summed by Total; Nutley still $95 off, a scan-misread issue, not a gate issue)."
+  },
+  "FENIX_NE": {
+    "column": "due",
+    "note": "extract_fenix's own docstring: sum(Due) equals the printed 'Total due'. The adapter's default netted charged minus paid, which counts payments and credits already absorbed -- confirmed 2026-10-01 on all 8 August statements that sum(due) equals the printed total exactly."
+  }
+}

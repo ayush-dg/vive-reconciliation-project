@@ -68,7 +68,7 @@ from src.ai.document_understanding_engine import (
 from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
-from src.validation.arithmetic_gate import compute_arithmetic_validation
+from src.validation.arithmetic_gate import compute_arithmetic_validation, compute_vendor_column_total
 from src.validation.date_utils import normalize_statement_month
 from src.validation.location_lookup import resolve_billing_location
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
@@ -1256,6 +1256,17 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     schema_result = engine.understand(pdf_text, pdf_path, statement_id=statement_id)
 
     stmt_meta_for_validation = schema_result.get("statement_metadata", {})
+    # Per-vendor gate column (config/validation_total_columns.json): for a
+    # listed vendor, the computed total is the sum of the one raw column the
+    # printed total adds up, not the engine's generic charges-minus-credits
+    # -- see compute_vendor_column_total()'s docstring for the NCS / A New
+    # Age / Fenix cases that needed it. Unlisted vendors are unchanged.
+    column_total = compute_vendor_column_total(
+        resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")),
+        schema_result.get("invoices") or [],
+    )
+    if column_total is not None:
+        stmt_meta_for_validation["statement_total_computed"] = column_total
     schema_result["validation"] = compute_arithmetic_validation(
         stmt_meta_for_validation.get("statement_total_as_printed"),
         stmt_meta_for_validation.get("statement_total_computed"),
