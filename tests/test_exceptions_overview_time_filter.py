@@ -217,9 +217,10 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
     def _window(self):
         return self.windows[-1]
 
-    def test_default_is_all_time(self):
+    def test_default_is_last_run(self):
+        """Same default as Home's since 2026-10-01 (was "all")."""
         self._get("/exceptions")
-        self.assertEqual(self._window().range, "all")
+        self.assertEqual(self._window().range, "last")
 
     def test_header_counts_both_the_run_and_the_exceptions_only_vendor(self):
         html = self._get("/exceptions")
@@ -229,11 +230,17 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         html = self._get("/exceptions")
         time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
         chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
-        self.assertEqual(chip_labels, ["Last run", "Today"])
+        self.assertEqual(chip_labels, ["Today", "Last run"])
 
-    def test_month_select_blank_option_is_all_time_and_selected_by_default(self):
+    def test_no_month_select_or_all_time_option(self):
+        # Removed 2026-10-01 -- the Month select's blank "All time" option
+        # used to be selected by default here. An old bookmarked
+        # ?range=all link still resolves; it just has no control.
         html = self._get("/exceptions")
-        self.assertIn('<option value="" selected>All time</option>', html)
+        self.assertNotIn('id="window-month"', html)
+        self.assertNotIn(">All time</option>", html)
+        self._get("/exceptions?range=all")
+        self.assertEqual(self._window().range, "all")
 
     def test_date_alone_selects_that_day(self):
         self._get("/exceptions?date=2026-09-28")
@@ -243,18 +250,17 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self._get("/exceptions?month=2026-09")
         self.assertEqual((self._window().range, self._window().month), ("month", "2026-09"))
 
-    def test_unknown_range_falls_back_to_all_not_last(self):
-        """Exceptions' own default is "all", not Home's "last"."""
+    def test_unknown_range_falls_back_to_last(self):
+        """Same fallback as Home's since 2026-10-01 (was "all")."""
         self._get("/exceptions?range=bogus")
-        self.assertEqual(self._window().range, "all")
+        self.assertEqual(self._window().range, "last")
 
     def test_last_run_reachable_via_the_chip(self):
         html = self._get("/exceptions?range=last")
         self.assertEqual(self._window().range, "last")
-        # Unlike Home (default "last"), Exceptions' default is "all", so
-        # its own "Last run" chip link still carries ?range=last even
-        # when already active.
-        self.assertIn('href="/exceptions?range=last" class="filter-chip active">Last run', html)
+        # "last" is this page's own default too since 2026-10-01, so (like
+        # Home's) its "Last run" chip link leaves range= out entirely.
+        self.assertIn('href="/exceptions" class="filter-chip active">Last run', html)
 
     def test_calendar_button_and_hidden_date_input(self):
         html = self._get("/exceptions?date=2026-09-28")
@@ -262,14 +268,14 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.assertIn('<use href="#i-calendar"/>', html)
         self.assertIn('id="window-date" class="ns-sr-only"', html)
 
-    def test_empty_window_message_links_to_last_run_and_all_time(self):
+    def test_empty_window_message_links_to_last_run(self):
         self.runs = [dict(self.orphan_row)]  # no summary-backed run in this window
         html = self._get("/exceptions?range=today")
         self.assertIn("No reconciliation runs today yet.", html)
-        self.assertIn('href="/exceptions?range=last" class="link">Last run</a>', html)
-        # "all" is this page's own default, so its URL omits range= --
-        # unlike the "last" link above, which is never the default here.
-        self.assertIn('href="/exceptions" class="link">All time</a>', html)
+        # "last" is this page's own default, so its URL omits range=.
+        self.assertIn('href="/exceptions" class="link">Last run</a>', html)
+        # No "All time" link since 2026-10-01 (the All time option is gone).
+        self.assertNotIn('class="link">All time</a>', html)
 
     def test_vendor_shop_location_options_rebuilt_from_the_window(self):
         html = self._get("/exceptions")
@@ -332,14 +338,23 @@ class TestExceptionsSyncDropdown(unittest.TestCase):
         self.assertEqual(self.windows[-1].statement_ids, frozenset({"O1"}))
         self.assertIn('href="/exceptions?range=today"', html)
 
-    def test_default_exceptions_page_load_has_no_sync_selected_yet(self):
-        # Exceptions' own default range is "all", not "last" -- the sync
-        # dropdown still renders (so it's reachable), just with nothing
-        # forced into "last" the way Home's default does.
+    def test_default_exceptions_page_load_selects_the_newest_sync(self):
+        # Exceptions' default range is "last" since 2026-10-01 (same as
+        # Home's), so a plain page load pre-selects the NEWEST sync.
         html = self._get("/exceptions")
-        self.assertEqual(self._window().range, "all")
+        self.assertEqual(self._window().range, "last")
+        self.assertEqual(self._window().statement_ids, frozenset({"N1"}))
         select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
-        self.assertNotIn("selected", select)
+        self.assertIn('<option value="2026-09-29T16:02:00Z" selected>', select)
+        self.assertNotIn('value="2026-09-28T12:00:00Z" selected', select)
+        # Custom picker (2026-10-01): "None" (= the Last run chip) comes
+        # first but isn't selected; with no explicit ?sync=, Last run is the
+        # highlighted control and the picker's button is not.
+        options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', select)
+        self.assertEqual(options[0], ("", "None"))
+        self.assertNotIn('<option value="" selected>', select)
+        self.assertIn('href="/exceptions" class="filter-chip active">Last run', html)
+        self.assertRegex(html, r'class="filter-chip sync-picker-btn\s*" id="window-sync-btn"')
 
     def _window(self):
         return self.windows[-1]

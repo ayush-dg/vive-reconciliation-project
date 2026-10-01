@@ -16,12 +16,14 @@ from web import time_window as tw
 
 router = APIRouter()
 
-# Time-window chips, in display order. Date (a calendar-icon button) and
-# Month (a select whose blank option doubles as "All time") are their own
-# controls, not plain chips -- "This month"/"All time" chips were removed
-# 2026-09-30; month_current stays a valid resolve_window() value so an old
-# bookmarked ?range=month_current link still works, it just has no chip.
-RANGE_CHIPS = (("last", "Last run"), ("today", "Today"))
+# Time-window chips, in display order. The "Past Outlook syncs" select and
+# the calendar-icon button are their own controls, not plain chips. The
+# "This month"/"All time" chips were removed 2026-09-30 and the Month
+# select (whose blank option doubled as "All time") 2026-10-01, but
+# all/month/month_current stay valid resolve_window() values, so an old
+# bookmarked ?range=all, ?month= or ?range=month_current link still works
+# -- it just has no control.
+RANGE_CHIPS = (("today", "Today"), ("last", "Last run"))
 
 
 def home_url(filters: dict, **changes) -> str:
@@ -86,6 +88,10 @@ def home(request: Request, user: str = Depends(require_login),
     new_window = {"date": None, "month": None, "sync": None, "period": ""}
     sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
     selected_sync = (window.sync_time_utc.isoformat() + "Z") if (window.range == "last" and not window.empty) else ""
+    # The sync picker's button is highlighted (and the Last run chip isn't)
+    # only when the URL names a sync with ?sync=; a plain Last run window
+    # is not an explicit pick -- see home.html.
+    explicit_sync = selected_sync if sync and sync == selected_sync else ""
     period_options = list(data["period_options"])
     if period and period not in period_options:
         # Keep a selected-but-absent period visible, so an empty table is
@@ -117,6 +123,7 @@ def home(request: Request, user: str = Depends(require_login),
         "sync_options": sync_options,
         "sync_truncated": sync_truncated,
         "selected_sync": selected_sync,
+        "explicit_sync": explicit_sync,
         "status_urls": {s: home_url(filters, status=s) for s in queries.RECON_RUN_STATUS_FILTERS},
         "clear_table_url": home_url(filters, status="all", period=""),
         "last_run_url": home_url(filters, range="last", **new_window),

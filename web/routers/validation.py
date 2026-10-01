@@ -62,6 +62,9 @@ def validation_list(request: Request, user: str = Depends(require_login)):
         "period_options": period_options,
         "sync_options": sync_options,
         "sync_truncated": sync_truncated,
+        # The "Today" chip's day -- same US Eastern "today" as Home's own
+        # Today chip, in the same "YYYY-MM-DD" shape as each card's data-day.
+        "today_eastern": tw.resolve_window("today").date,
         **sidebar_context(request),
     }
     return render(request, "validation.html", ctx)

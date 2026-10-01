@@ -624,23 +624,26 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         # label under the chips.
         self.assertIn("Sep 28, 2026 · 4 statements", html)
 
-    def test_month_alone_selects_that_month_and_options_have_runs_only(self):
+    def test_month_alone_still_selects_that_month(self):
+        # The Month select was removed 2026-10-01, but an old bookmarked
+        # ?month= link still resolves (resolve_window() is unchanged) --
+        # shown in the window label, with no control of its own.
+        # month_options() itself is covered by
+        # test_month_options_are_eastern_months_with_runs_newest_first.
         html = self._get("/?month=2026-09")
         self.assertEqual((self._window().range, self._window().month), ("month", "2026-09"))
-        options = re.search(r'<select name="month".*?</select>', html, re.S).group(0)
-        self.assertEqual(re.findall(r'<option value="([^"]*)"', options), ["", "2026-09", "2026-08"])
-        self.assertIn('<option value="" >All time</option>', options)
-        self.assertIn('<option value="2026-09" selected>Sep 2026</option>', options)
+        self.assertIn("September 2026 · 4 statements", html)
+        self.assertNotIn('<select name="month"', html)
 
-    def test_month_selects_blank_option_is_all_time(self):
-        # range=all is reached via this same <select>'s blank option
-        # (its own value="" submits range=all -- see window-range-for-month
-        # in home.html), not a standalone "All time" chip.
+    def test_range_all_still_resolves_with_no_all_time_control(self):
+        # The Month select's blank "All time" option (how range=all used
+        # to be reached) was removed 2026-10-01; an old bookmarked
+        # ?range=all link still resolves, shown in the window label.
         html = self._get("/?range=all")
         self.assertEqual(self._window().range, "all")
-        self.assertIn('<option value="" selected>All time</option>', html)
-        self.assertRegex(html, r'id="window-month" class="filter-chip active"')
-        self.assertIn('id="window-range-for-month" value="all"', html)
+        self.assertIn("All time · 4 statements", html)
+        self.assertNotIn(">All time</option>", html)
+        self.assertNotIn('id="window-month"', html)
 
     def test_bad_params_fall_back_to_last_run(self):
         for url in ("/?range=bogus", "/?range=date&date=nope", "/?month=2026-99", "/?date=2026-02-30"):
@@ -649,14 +652,13 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
                 self.assertEqual(self._window().range, "last")
 
     def test_only_last_run_and_today_are_chips(self):
-        # "This month"/"All time" chips were removed 2026-09-30: "All
-        # time" moved into the Month select's blank option, and there is
-        # no dedicated "This month" control at all any more (still
-        # reachable by picking the current month from that same select).
+        # "This month"/"All time" chips were removed 2026-09-30, and the
+        # Month select (whose blank option was "All time") 2026-10-01 --
+        # Today and Last run are the only chips, Today first.
         html = self._get("/")
         time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
         chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
-        self.assertEqual(chip_labels, ["Last run", "Today"])
+        self.assertEqual(chip_labels, ["Today", "Last run"])
 
     def test_range_chips_keep_status_and_clear_period(self):
         html = self._get("/?range=date&date=2026-09-28&status=exceptions&period=2026-08")
@@ -696,7 +698,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         html = self._get("/?period=2026-01")
         self.assertIn('<option value="2026-01" selected>Jan 2026</option>', html)
 
-    def test_empty_window_message_links_to_last_run_and_all_time(self):
+    def test_empty_window_message_links_to_last_run(self):
         self.result = {**self.result, "runs": [], "total": 0, "reconciled": 0, "statement_count": 0,
                        "period_options": [],
                        "kpis": {"total_invoices": 0, "auto_reconciled": 0, "open_exceptions": 0,
@@ -704,7 +706,8 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         html = self._get("/?range=today&status=exceptions")
         self.assertIn("No reconciliation runs today yet.", html)
         self.assertIn('<a href="/?status=exceptions" class="link">Last run</a>', html)
-        self.assertIn('<a href="/?range=all&status=exceptions" class="link">All time</a>', html)
+        # No "All time" link since 2026-10-01 (the All time option is gone).
+        self.assertNotIn('class="link">All time</a>', html)
         self.assertIn("—% matched · today", html)
         self.assertIn("none open · today", html)
         self.assertRegex(html, r"Today · \w{3} \d{1,2} · no runs yet")
@@ -771,9 +774,17 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
         html = self._get("/")
         self.assertEqual(self.windows[-1].statement_ids, frozenset({"N1", "N2"}))
         select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
+        # Custom picker (2026-10-01): "None" (= the Last run chip) comes
+        # first, but the hidden control still pre-selects the newest sync.
+        options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', select)
+        self.assertEqual(options[0], ("", "None"))
         self.assertIn('value="2026-09-29T16:02:00Z" selected', select)
         self.assertIn("Sep 29, 12:02 PM ET · 2 statements", select)
         self.assertIn("Sep 28, 8:00 AM ET · 1 statement", select)
+        # No explicit ?sync=, so Last run is the highlighted control and the
+        # picker's button is not.
+        self.assertIn('href="/" class="filter-chip active">Last run', html)
+        self.assertRegex(html, r'class="filter-chip sync-picker-btn\s*" id="window-sync-btn"')
 
     def test_choosing_an_older_sync_narrows_the_window(self):
         html = self._get("/?sync=2026-09-28T12:00:00Z")

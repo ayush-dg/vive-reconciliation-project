@@ -380,4 +380,92 @@ document.addEventListener("DOMContentLoaded", function () {
     // Esc fires "cancel" natively; returning focus is our job.
     nsModal.addEventListener("close", function () { nsFindBtn.focus(); });
   }
+
+  // "Past Outlook syncs" picker (2026-10-01): a fixed-label button plus a
+  // role="listbox" popup (styled like the NetSuite modal's .ns-popover),
+  // layered over a visually hidden native <select> -- the same bridge as
+  // the calendar button over its hidden date input. The <select> stays the
+  // real control: the list is rebuilt from its options every time it
+  // opens, so it always marks the select's current value, and picking an
+  // entry sets select.value and fires the select's own "change" event, so
+  // whatever the page already does on change (submit the form, re-filter
+  // cards) runs exactly as before. Picking always fires "change", even for
+  // the entry that's already selected.
+  document.querySelectorAll("[data-sync-picker]").forEach(function (wrap) {
+    const select = document.getElementById(wrap.dataset.syncPicker);
+    const button = wrap.querySelector(".sync-picker-btn");
+    const list = wrap.querySelector(".sync-picker-list");
+    if (!select || !button || !list) return;
+
+    function enabledOptions() {
+      return Array.from(list.children).filter(function (li) {
+        return li.getAttribute("aria-disabled") !== "true";
+      });
+    }
+
+    function build() {
+      list.textContent = "";
+      Array.from(select.options).forEach(function (opt, i) {
+        const li = document.createElement("li");
+        li.id = list.id + "-" + i;
+        li.className = "ns-pop-opt";
+        li.setAttribute("role", "option");
+        li.tabIndex = -1;
+        li.textContent = opt.text;
+        li.dataset.value = opt.value;
+        li.setAttribute("aria-selected", String(opt.selected && !opt.disabled));
+        if (opt.disabled) { li.setAttribute("aria-disabled", "true"); }
+        list.appendChild(li);
+      });
+    }
+
+    function open() {
+      build();
+      list.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      const current = list.querySelector('[aria-selected="true"]') || enabledOptions()[0];
+      if (current) { current.focus(); }
+    }
+
+    function close(returnFocus) {
+      list.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+      if (returnFocus) { button.focus(); }
+    }
+
+    function pick(li) {
+      close(true);
+      select.value = li.dataset.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    button.addEventListener("click", function () {
+      if (list.hidden) { open(); } else { close(false); }
+    });
+    button.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); open(); }
+    });
+    list.addEventListener("click", function (ev) {
+      const li = ev.target.closest('[role="option"]');
+      if (li && li.getAttribute("aria-disabled") !== "true") { pick(li); }
+    });
+    list.addEventListener("keydown", function (ev) {
+      const opts = enabledOptions();
+      const i = opts.indexOf(document.activeElement);
+      if (ev.key === "ArrowDown") { ev.preventDefault(); opts[Math.min(i + 1, opts.length - 1)].focus(); }
+      else if (ev.key === "ArrowUp") { ev.preventDefault(); opts[Math.max(i - 1, 0)].focus(); }
+      else if (ev.key === "Home") { ev.preventDefault(); opts[0].focus(); }
+      else if (ev.key === "End") { ev.preventDefault(); opts[opts.length - 1].focus(); }
+      else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); if (i >= 0) { pick(opts[i]); } }
+      else if (ev.key === "Tab") { close(false); }
+    });
+    // Escape and outside clicks close it from anywhere, not just from
+    // inside the list (e.g. after clicking the list's own padding).
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && !list.hidden) { ev.preventDefault(); close(true); }
+    });
+    document.addEventListener("click", function (ev) {
+      if (!list.hidden && !wrap.contains(ev.target)) { close(false); }
+    });
+  });
 });

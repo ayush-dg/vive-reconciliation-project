@@ -732,6 +732,22 @@ select {
 .ns-popover { position: absolute; top: calc(100% + 6px); left: 0; z-index: 10; min-width: 190px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(15, 23, 42, .16); }
 .ns-pop-opt { display: block; width: 100%; text-align: left; padding: 7px 10px; font-size: 12.5px; color: var(--text); background: transparent; border: none; border-radius: var(--radius-sm); cursor: pointer; }
 .ns-pop-opt:hover { background: var(--steel-tint); }
+
+/* "Past Outlook syncs" picker (Home/Exceptions/Validation, 2026-10-01): a
+   .filter-chip button + an .ns-popover listbox of .ns-pop-opt rows, over a
+   hidden <select> -- see static/app.js. The current choice gets a check
+   and the navy tint; keyboard focus gets the hover tint. */
+.sync-picker-btn { display: inline-flex; align-items: center; gap: 6px; }
+.sync-picker-chevron { width: 13px; height: 13px; transform: rotate(90deg); transition: transform .15s; }
+.sync-picker-btn[aria-expanded="true"] .sync-picker-chevron { transform: rotate(-90deg); }
+.sync-picker-list { width: max-content; max-height: 320px; overflow-y: auto; list-style: none; }
+.sync-picker-list .ns-pop-opt { white-space: nowrap; }
+.sync-picker-list .ns-pop-opt::before { content: ""; display: inline-block; width: 18px; }
+.sync-picker-list .ns-pop-opt:focus { outline: none; background: var(--steel-tint); }
+.sync-picker-list .ns-pop-opt[aria-selected="true"] { background: var(--navy-tint); color: var(--navy-2); font-weight: 600; }
+.sync-picker-list .ns-pop-opt[aria-selected="true"]::before { content: "\2713"; }
+.sync-picker-list .ns-pop-opt[aria-selected="true"]:focus { box-shadow: inset 0 0 0 1px var(--navy-2); }
+.sync-picker-list .ns-pop-opt[aria-disabled="true"] { color: var(--text-faint); background: transparent; cursor: default; }
 .ns-pop-custom { border-top: 1px solid var(--border); margin-top: 6px; padding: 8px 10px 4px; display: grid; gap: 4px; }
 .ns-date-input { padding: 6px 8px; font-size: 12.5px; font-family: var(--font-body); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 .ns-pop-apply { width: 100%; margin-top: 8px; padding: 7px; font-size: 12.5px; }

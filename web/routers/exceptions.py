@@ -58,32 +58,29 @@ REASON_BADGE = {
 # get_high_confidence_exception_count()'s docstring.
 BULK_APPROVE_THRESHOLD = 0.99
 
-# Exceptions overview's time filter (2026-09-30) -- same controls and the
-# same web/time_window.py definitions as Home (see dashboard.py's own
-# RANGE_CHIPS), but a different DEFAULT: "all", not "last", so a real
-# open-exception backlog is never hidden the first time this page loads.
-EXCEPTIONS_RANGE_CHIPS = (("last", "Last run"), ("today", "Today"))
+# Exceptions overview's time filter (2026-09-30) -- same controls, the
+# same web/time_window.py definitions and (since 2026-10-01) the same
+# "last" default as Home (see dashboard.py's own RANGE_CHIPS).
+EXCEPTIONS_RANGE_CHIPS = (("today", "Today"), ("last", "Last run"))
 
 
 def exceptions_url(filters: dict, **changes) -> str:
     """"/exceptions?..." for the current time-window filters with
     `changes` applied -- vendor/shop/location stay purely client-side
     (see exceptions_vendors.html), so this only ever carries range/date/
-    month. "all" is this page's own default and so is left out of the
-    URL, same as "last" is Home's."""
+    month. "last" is this page's default, same as Home's, and so is left
+    out of the URL."""
     merged = {**filters, **changes}
     params = []
-    if merged.get("range") and merged["range"] != "all":
+    if merged.get("range") and merged["range"] != tw.DEFAULT_RANGE:
         params.append(("range", merged["range"]))
     if merged.get("range") == "date" and merged.get("date"):
         params.append(("date", merged["date"]))
     if merged.get("range") == "month" and merged.get("month"):
         params.append(("month", merged["month"]))
     if merged.get("sync"):
-        # Same reasoning as dashboard.py's home_url(): spell "range=last"
-        # out explicitly whenever a sync is chosen, even though "last"
-        # would otherwise be inferred, since this page's own default is
-        # "all", not "last".
+        # Same as dashboard.py's home_url(): spell "range=last" out
+        # explicitly whenever a sync is chosen.
         if not any(p[0] == "range" for p in params):
             params.append(("range", "last"))
         params.append(("sync", merged["sync"]))
@@ -93,18 +90,16 @@ def exceptions_url(filters: dict, **changes) -> str:
 @router.get("/exceptions")
 def exceptions_vendors(request: Request, user: str = Depends(require_login),
                        range: str = "", date: str = "", month: str = "", sync: str = ""):
-    # Time filter (2026-09-30) -- same controls/definitions as Home, but
-    # defaulting to "all" (not "last"), so a real open-exception backlog
-    # is never hidden the first time this page loads. ?date=/?month=
-    # alone still imply their own range, same as Home; anything else
-    # unrecognised also falls back to "all" (not Home's "last") -- done
-    # here rather than in resolve_window() so Home's own default is
-    # untouched.
+    # Time filter (2026-09-30) -- same controls/definitions as Home, and
+    # (since 2026-10-01) the same "last" default: the most recent Outlook
+    # sync, not the full backlog. ?date=/?month= alone still imply their
+    # own range, same as Home; anything else unrecognised falls back to
+    # "last".
     range_param = range or None
     if range_param and range_param not in tw.RANGES:
-        range_param = "all"
+        range_param = "last"
     if not range_param and not date and not month:
-        range_param = "all"
+        range_param = "last"
     timestamps = queries.get_run_timestamps()
     outlook_jobs = queries.get_outlook_synced_jobs()
     window = tw.resolve_window(range_param, date or None, month or None,
@@ -174,6 +169,10 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     new_window = {"date": None, "month": None, "sync": None}
     sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
     selected_sync = (window.sync_time_utc.isoformat() + "Z") if (window.range == "last" and not window.empty) else ""
+    # Same as dashboard.py: the sync picker's button is highlighted (and
+    # the Last run chip isn't) only when the URL names a sync with ?sync=;
+    # a plain Last run window is not an explicit pick.
+    explicit_sync = selected_sync if sync and sync == selected_sync else ""
 
     ctx = {
         "active_page": "exceptions",
@@ -194,6 +193,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         "sync_options": sync_options,
         "sync_truncated": sync_truncated,
         "selected_sync": selected_sync,
+        "explicit_sync": explicit_sync,
         "last_run_url": exceptions_url(filters, range="last", **new_window),
         "all_time_url": exceptions_url(filters, range="all", **new_window),
         **sidebar_context(request),

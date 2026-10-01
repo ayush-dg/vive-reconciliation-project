@@ -531,10 +531,18 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
     def test_last_run_select_present_as_an_independent_filter(self):
         self.assertIn('id="sync-filter"', self.html)
         options = re.findall(r'<select id="sync-filter".*?</select>', self.html, re.DOTALL)[0]
-        self.assertIn('<option value="">All syncs</option>', options)
+        # The blank "every attempt" option ("All syncs" until 2026-10-01,
+        # "None" since the custom picker) comes first but isn't the default:
+        # the newest sync is pre-selected instead, same as Home.
+        opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', options)
+        self.assertEqual(opts[0], ("", "None"))
+        self.assertIn('<option value="2026-09-29T15:02:00Z" selected>', options)
         # The sync's only real statement is A -- 1 of 2 jobs (B has no
         # statement_id at all -- "still processing").
         self.assertIn("1 of 2 statements", options)
+        # On load Last run is the highlighted control, not the picker's button.
+        self.assertIn('class="filter-chip active" id="time-last-run"', self.html)
+        self.assertIn('class="filter-chip sync-picker-btn" id="sync-filter-btn"', self.html)
 
     def test_calendar_button_and_hidden_date_input(self):
         self.assertIn('id="validation-date-btn"', self.html)
