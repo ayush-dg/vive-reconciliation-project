@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from src.ai import client_factory
 from src.ai.pdfplumber_fallback import extract_with_pdfplumber
 from src.ai.audit_logger import log_ai_call
+from src.ai.page_orientation import upright_copy
 
 
 class CorruptedPDFError(Exception):
@@ -196,12 +197,26 @@ class DocumentUnderstandingEngine:
         """
         source_file = os.path.basename(pdf_path)
 
+        # Scanned pages rotated sideways or upside down are sent upright --
+        # see src/ai/page_orientation.py. A no-op (same path back) for
+        # upright scans, text PDFs, or if detection isn't available.
+        send_path, _rotations = upright_copy(pdf_path)
+        try:
+            return self._understand(pdf_path, send_path, source_file, statement_id)
+        finally:
+            if send_path != pdf_path:
+                try:
+                    os.remove(send_path)
+                except OSError:
+                    pass
+
+    def _understand(self, pdf_path: str, send_path: str, source_file: str, statement_id: str = None) -> dict:
         # --- PRIMARY PATH: active provider from provider_chain (universal, handles all PDF formats) ---
         primary_client = client_factory.get_ai_client()
         provider_label = primary_client.__class__.__name__
         print(f"  [Engine] Attempting {provider_label} (primary path — handles any PDF format)...")
         try:
-            response = primary_client.generate_with_file(pdf_path, VISION_PROMPT)
+            response = primary_client.generate_with_file(send_path, VISION_PROMPT)
 
             try:
                 log_ai_call(

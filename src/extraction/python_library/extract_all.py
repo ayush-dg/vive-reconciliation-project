@@ -47,6 +47,8 @@ import extract_adas        # Adas Calibration Experts
 import extract_abc         # ABC Parts International, Inc.
 import extract_fenix       # Fenix NE
 import extract_rivian      # Rivian, LLC
+import extract_allstar     # All Star Auto Lights, Inc.
+import extract_grappone    # Grappone (CDK AR statement)
 
 EXTRACTORS = [
     extract_statement,
@@ -63,6 +65,8 @@ EXTRACTORS = [
     extract_abc,
     extract_fenix,
     extract_rivian,
+    extract_allstar,
+    extract_grappone,
 ]
 
 

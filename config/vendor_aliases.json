@@ -54,7 +54,8 @@
   "BALD_HILL": [
     "Bald Hill Dodge Chrysler Jeep Kia",
     "Bald Hill Dodge Chrysler",
-    "Bald Hill Realty Co."
+    "Bald Hill Realty Co.",
+    "Bald Hill Dodge Chryler Jeep Kia"
   ],
   "BERLIN_CITY_AUTO_GROUP": [
     "Berlin City Auto Group"
@@ -78,5 +79,44 @@
   "HOSELTON_TOYOTA": [
     "Hoselton Imports Inc. dba Hoselton Toyota",
     "Hoselton Toyota"
+  ],
+  "ALL_STAR_AUTO_LIGHTS": [
+    "All Star Auto Lights, Inc.",
+    "All Star Auto Lights"
+  ],
+  "PARTS_BY_COCHRAN": [
+    "#1 Cochran Megacenter",
+    "Cochran Megacenter",
+    "Parts by Cochran",
+    "Parts by Cochran 1",
+    "Cochran"
+  ],
+  "DARLINGS_AUTO_GROUP": [
+    "Darlings Auto Group",
+    "Darling's Auto Group"
+  ],
+  "GRAPPONE": [
+    "Grappone Automotive Group",
+    "Grappone Companies",
+    "Grappone"
+  ],
+  "NATIONAL_COATINGS_AND_SUPPLIES": [
+    "National Coatings & Supplies US",
+    "National Coatings & Supplies, Inc.",
+    "National Coatings and Supplies",
+    "National Coating and Supplies (NCS)",
+    "NCS"
+  ],
+  "CLINTON_HONDA": [
+    "Clinton Honda"
+  ],
+  "BLAISE_ALEXANDER": [
+    "Blaise Alexander",
+    "Blaise Alexander Family Dealerships",
+    "Alexander Nissan Inc.",
+    "Alexander Nissan",
+    "Blaise Alexander Nissan",
+    "Blaise Alexander Subaru",
+    "Blaise Alexander Hyundai Mazda"
   ]
 }

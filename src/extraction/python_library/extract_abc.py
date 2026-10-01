@@ -24,6 +24,20 @@ field of the row above, in order, e.g. "Sales Order #C7305991 T".
 Reconciliation: printed "Amount Due" (top of statement) equals the last
 row's running Balance, which is also confirmed against the aging-bucket
 table's own "Amount Due" total at the bottom of the page.
+
+so_reference (added 2026-09-29) is so_number with the "Sales Order #"
+label and every space removed, e.g. "Sales Order #C7318463 T" ->
+"C7318463T". This, not the printed INV number, is what NetSuite uses as
+the vendor bill's tranid -- confirmed live against
+bronze.netsuite_vendorbill (entity 6406) on 4 real August statements:
+70 of 71 charge lines tie out exactly by so_reference (the 71st,
+C7753861, isn't in NetSuite under any entity), while zero INV numbers
+exist as a tranid at all. Kept as its own field (so_number stays exactly
+as printed) because the space before a trailing suffix token ("T", "S",
+"3") must go, and no vendor_normalization_rule rule_type can both strip
+a prefix and remove an inner space. Blank on Credit Memo rows, which
+have no SO reference -- their CM number is already the NetSuite
+vendorcredit tranid verbatim.
 """
 
 import re
@@ -36,7 +50,7 @@ VENDOR_SIGNATURE = ["ABC Parts International"]
 ROW_TOLERANCE = 3.0
 
 DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
-MONEY_RE = re.compile(r"^-?\$[\d,]+\.\d{2}$")
+MONEY_RE = re.compile(r"^\(?-?\$[\d,]+\.\d{2}\)?$")
 SO_REF_RE = re.compile(r"^#\S+$")
 # A bare short continuation token (e.g. "T", "S", "6") that can follow an
 # already-appended "#..." reference line for the same row - excludes
@@ -56,8 +70,19 @@ COLUMN_BOUNDS = [
     ("balance", 520, 10_000),
 ]
 
-FIELDNAMES = ["page", "date", "po_number", "so_number", "description", "invoice_number",
+FIELDNAMES = ["page", "date", "po_number", "so_number", "so_reference", "description", "invoice_number",
               "original_amount", "remaining_balance", "credit", "balance"]
+
+SO_LABEL = "Sales Order #"
+
+
+def so_reference(so_number):
+    """'Sales Order #C7318463 T' -> 'C7318463T', '' -> '' (see module
+    docstring for why this is the NetSuite bill tranid)."""
+    s = so_number.strip()
+    if s.startswith(SO_LABEL):
+        s = s[len(SO_LABEL):]
+    return re.sub(r"\s+", "", s)
 
 
 def bucket_column(x0):
@@ -68,11 +93,19 @@ def bucket_column(x0):
 
 
 def clean_money(raw):
-    """'$352.00' -> '352.00', '-' -> ''."""
+    """'$352.00' -> '352.00', '($131.00)' -> '-131.00', '-' -> ''.
+
+    Parentheses are accounting-style negatives -- seen 2026-09-29 in the
+    running Balance column of a statement whose balance dips below zero
+    (Statement_15488, account 03-MODERN: a $131.00 credit memo posted
+    before any invoice). Left unhandled, '(131.00)' reached
+    extract()'s float() and failed the whole statement."""
     s = raw.strip()
     if not s or s == "-":
         return ""
-    return s.replace("$", "").replace(",", "")
+    negative = s.startswith("(") and s.endswith(")")
+    s = s.strip("()").replace("$", "").replace(",", "")
+    return f"-{s}" if negative else s
 
 
 def group_rows(words):
@@ -219,6 +252,7 @@ def extract(pdf_path):
                         "date": date,
                         "po_number": " ".join(w["text"] for w in cols["po_number"]),
                         "so_number": so_number,
+                        "so_reference": "",
                         "description": description,
                         "invoice_number": invoice_number,
                         "original_amount": clean_money(" ".join(w["text"] for w in cols["original_amount"])),
@@ -246,6 +280,11 @@ def extract(pdf_path):
                         # could in principle continue again.
                     else:
                         last_was_so_ref = False
+
+    # After continuation folding -- so_number is only complete once every
+    # "#..."/short-token line beneath its row has been appended.
+    for item in line_items:
+        item["so_reference"] = so_reference(item["so_number"])
 
     fieldnames = FIELDNAMES
 

@@ -69,8 +69,16 @@ FIELDNAMES = ["page", "date", "type", "reference_number", "original_invoice_ref"
 
 
 def clean_money(raw):
+    """'1,325.00' -> '1325.00', blank -> None. None, NOT "" (changed
+    2026-09-29): a "" raw value reaches Silver as a non-null
+    charge_amount_raw, so dbt's sign-based line_type (see
+    models/silver/statement_line.sql's with_line_type CTE) typed every
+    Credit row -- blank Charged, amount in Paid -- as a CHARGE and matching
+    looked it up in netsuite_vendorbill instead of netsuite_vendorcredit,
+    where Fenix's credit tranids actually live (e.g. 3337667 -> vendorcredit
+    entity 112843, $100 exact)."""
     if not raw:
-        return ""
+        return None
     return raw.replace(",", "")
 
 
@@ -132,8 +140,14 @@ def parse_header_info(page1_words, page1_text):
         info["period_start"] = m.group(1)
         info["period_end"] = m.group(2)
 
-    customer_rows = [r for r in rows if 150 <= r[0]["top"] <= 180 and r[0]["x0"] < 300]
-    customer_lines = [row_text(r) for r in customer_rows]
+    # Filter by each WORD's x0, not the row's first word: the right-hand
+    # aging-table header ("Open Items Unalloc. Aged Amount" / "Items") sits
+    # ~1pt higher than the customer block on the same line, so group_rows()
+    # sorts it first and a first-word x0 < 300 check silently dropped the
+    # customer name/address lines on every Fenix statement (shop always
+    # blank in the UI, confirmed 2026-09-29).
+    customer_rows = [r for r in rows if 150 <= r[0]["top"] <= 180]
+    customer_lines = [row_text(left) for r in customer_rows if (left := [w for w in r if w["x0"] < 300])]
     if len(customer_lines) >= 3:
         info["customer_name"] = customer_lines[0]
         info["billing_address"] = customer_lines[1]
@@ -153,6 +167,15 @@ def parse_totals(last_page_text):
     m = re.search(r"Balance due\s+([\d,]+\.\d{2})", last_page_text)
     if m:
         info["balance_due_printed"] = m.group(1)
+    if "total_due_printed" not in info:
+        # "reprintStatement_*" layout (2026-10-01): no "Total due" /
+        # "Unallocated" / "Balance due" labels -- one bare totals row instead,
+        # in the same Due / Unalloc. / Balance order, e.g.
+        # "Total 3425.00 0.00 3425.00" (reprintStatement_210928/937/948).
+        # Its first figure equals sum(due) on every such statement seen.
+        m = re.search(r"(?m)^Total\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s*$", last_page_text)
+        if m:
+            info["total_due_printed"], info["unallocated_printed"], info["balance_due_printed"] = m.groups()
     return info
 
 
@@ -207,7 +230,7 @@ def extract(pdf_path):
                         # transaction data. Drop it rather than surfacing it
                         # as if it were a genuine description.
                         due_desc_words = []
-                    due = ""
+                    due = None
                     description_parts = []
                     if due_desc_words:
                         first = due_desc_words[0]["text"]

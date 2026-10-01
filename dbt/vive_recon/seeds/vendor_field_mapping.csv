@@ -88,3 +88,80 @@ BERLIN_CITY_AUTO_GROUP,DATE,line_date,date,v1,1
 BERLIN_CITY_AUTO_GROUP,DOCUMENT,original_invoice_number,string,v1,1
 BERLIN_CITY_AUTO_GROUP,DESCRIPTION,description_raw,string,v1,1
 BERLIN_CITY_AUTO_GROUP,AMOUNT,charge_amount,decimal,v1,1
+ABC_PARTS_INTERNATIONAL,date,line_date,date,v1,1
+ABC_PARTS_INTERNATIONAL,so_reference,original_invoice_number,string,v1,1
+ABC_PARTS_INTERNATIONAL,invoice_number,original_invoice_number,string,v1,2
+ABC_PARTS_INTERNATIONAL,po_number,po_number,string,v1,1
+ABC_PARTS_INTERNATIONAL,description,description_raw,string,v1,1
+ABC_PARTS_INTERNATIONAL,original_amount,charge_amount,decimal,v1,1
+ABC_PARTS_INTERNATIONAL,credit,payment_amount,decimal,v1,1
+ABC_PARTS_INTERNATIONAL,remaining_balance,amount_remaining,decimal,v1,1
+ALL_STAR_AUTO_LIGHTS,date,line_date,date,v1,1
+ALL_STAR_AUTO_LIGHTS,due_date,due_date,date,v1,1
+ALL_STAR_AUTO_LIGHTS,invoice_number,original_invoice_number,string,v1,1
+ALL_STAR_AUTO_LIGHTS,po_number,po_number,string,v1,1
+ALL_STAR_AUTO_LIGHTS,transaction_type,description_raw,string,v1,1
+ALL_STAR_AUTO_LIGHTS,invoice_amount,charge_amount,decimal,v1,1
+ALL_STAR_AUTO_LIGHTS,pymt_credit,payment_amount,decimal,v1,1
+ALL_STAR_AUTO_LIGHTS,open_balance,amount_remaining,decimal,v1,1
+FENIX_NE,date,line_date,date,v1,1
+FENIX_NE,type,transaction_code,string,v1,1
+FENIX_NE,reference_number,original_invoice_number,string,v1,1
+FENIX_NE,po_chk_number,po_number,string,v1,1
+FENIX_NE,description,description_raw,string,v1,1
+FENIX_NE,charged,charge_amount,decimal,v1,1
+FENIX_NE,paid,payment_amount,decimal,v1,1
+FENIX_NE,due,amount_remaining,decimal,v1,1
+BALD_HILL,DATE,line_date,date,v1,1
+BALD_HILL,SRC,transaction_code,string,v1,1
+BALD_HILL,REF NO.,original_invoice_number,string,v1,1
+BALD_HILL,CHARGES,charge_amount,decimal,v1,1
+BALD_HILL,CREDITS,payment_amount,decimal,v1,1
+BALD_HILL,BALANCE,amount_remaining,decimal,v1,1
+BLAISE_ALEXANDER,DATE,line_date,date,v1,1
+BLAISE_ALEXANDER,SOURCE,transaction_code,string,v1,1
+BLAISE_ALEXANDER,INVOICE,original_invoice_number,string,v1,1
+BLAISE_ALEXANDER,REFERENCE,invoice_number_ref,string,v1,1
+BLAISE_ALEXANDER,DESCRIPTION,description_raw,string,v1,1
+BLAISE_ALEXANDER,AMOUNT,charge_amount,decimal,v1,1
+BLAISE_ALEXANDER,AGE IN DAYS,age_in_days,integer,v1,1
+CLINTON_HONDA,DATE,line_date,date,v1,1
+CLINTON_HONDA,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+CLINTON_HONDA,PURCHASES,charge_amount,decimal,v1,1
+CLINTON_HONDA,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+CLINTON_HONDA,BALANCE,amount_remaining,decimal,v1,1
+RIVIAN_LLC,doc_date,line_date,date,v1,1
+RIVIAN_LLC,due_date,due_date,date,v1,1
+RIVIAN_LLC,invoice_number,original_invoice_number,string,v1,1
+RIVIAN_LLC,order_number,po_number,string,v1,1
+RIVIAN_LLC,invoice_amount,charge_amount,decimal,v1,1
+RIVIAN_LLC,balance,amount_remaining,decimal,v1,1
+DARLINGS_AUTO_GROUP,Date,line_date,date,v1,1
+DARLINGS_AUTO_GROUP,Invoice Number,original_invoice_number,string,v1,1
+DARLINGS_AUTO_GROUP,Charges,charge_amount,decimal,v1,1
+DARLINGS_AUTO_GROUP,Pymts /Credits,payment_amount,decimal,v1,1
+DARLINGS_AUTO_GROUP,Amount Due,amount_remaining,decimal,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Trans Date,line_date,date,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Date Due,due_date,date,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Trans ID / Alt ID,original_invoice_number,string,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Check / PO No.,po_number,string,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Trans Type,transaction_code,string,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Amount,charge_amount,decimal,v1,1
+NATIONAL_COATINGS_AND_SUPPLIES,Balance,amount_remaining,decimal,v1,1
+A_NEW_AGE_AUTO_GLASS,Date,line_date,date,v1,1
+A_NEW_AGE_AUTO_GLASS,Order Number,original_invoice_number,string,v1,1
+A_NEW_AGE_AUTO_GLASS,Total,charge_amount,decimal,v1,1
+A_NEW_AGE_AUTO_GLASS,Customer Name,description_raw,string,v1,1
+PARTS_BY_COCHRAN,DATE,line_date,date,v1,1
+PARTS_BY_COCHRAN,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+PARTS_BY_COCHRAN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+PARTS_BY_COCHRAN,PURCHASES,charge_amount,decimal,v1,1
+PARTS_BY_COCHRAN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+PARTS_BY_COCHRAN,BALANCE,amount_remaining,decimal,v1,1
+GRAPPONE,date,line_date,date,v1,1
+GRAPPONE,dept_code,transaction_code,string,v1,1
+GRAPPONE,dept_name,description_raw,string,v1,1
+GRAPPONE,document,original_invoice_number,string,v1,1
+GRAPPONE,purchases,charge_amount,decimal,v1,1
+GRAPPONE,payments_credits,payment_amount,decimal,v1,1
+GRAPPONE,balance,amount_remaining,decimal,v1,1

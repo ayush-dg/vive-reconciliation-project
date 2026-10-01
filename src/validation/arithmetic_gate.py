@@ -9,7 +9,17 @@ _build_schema()) populate statement_total_as_printed/statement_total_computed
 in the same statement_metadata shape, so this one function covers both.
 """
 
+import json
+import os
+import re
 from typing import Optional
+
+TOTAL_COLUMNS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "validation_total_columns.json",
+)
+
+_total_columns_cache = None
 
 
 def compute_arithmetic_validation(
@@ -159,4 +169,63 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
             total -= credit
         else:
             total += inv.get("outstanding_amount") or 0
+    return round(total, 2)
+
+
+def _load_total_columns() -> dict:
+    global _total_columns_cache
+    if _total_columns_cache is None:
+        try:
+            with open(TOTAL_COLUMNS_PATH, "r") as f:
+                raw = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            raw = {}
+        _total_columns_cache = {
+            vendor_id: entry["column"]
+            for vendor_id, entry in raw.items()
+            if isinstance(entry, dict) and entry.get("column")
+        }
+    return _total_columns_cache
+
+
+def _parse_amount(value) -> Optional[float]:
+    """1234.5 / '1,234.50' / '$1,234.50' / '-5.00' / '5.00-' / '($5.00)' -> float; blank -> None."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    if not s:
+        return None
+    negative = (s.startswith("(") and s.endswith(")")) or s.endswith("-")
+    s = re.sub(r"[()$,\s]", "", s).rstrip("-")
+    try:
+        number = float(s)
+    except ValueError:
+        return None
+    return -abs(number) if negative else number
+
+
+def compute_vendor_column_total(vendor_id: Optional[str], invoices: list) -> Optional[float]:
+    """Per-vendor override for the gate's computed total (config/
+    validation_total_columns.json): the sum of ONE raw extracted column --
+    the column the statement's printed total actually adds up -- read from
+    each line's _raw_row. Returns None when vendor_id has no override (the
+    caller keeps compute_statement_total_from_invoices()'s generic total).
+
+    Exists because the generic total nets outstanding_amount/credit from the
+    extraction engine's own column mapping, which is wrong for some layouts:
+    NCS's Amount column includes customer-payment rows, A New Age's report
+    has no column Claude's mapping recognises as an amount (so it summed $0),
+    and Fenix's charged-minus-paid counts credits already absorbed. In each
+    case one column sums to the printed total exactly (confirmed 2026-10-01
+    on every August statement for these vendors)."""
+    column = _load_total_columns().get(vendor_id) if vendor_id else None
+    if not column or not invoices:
+        return None
+    total = 0.0
+    for inv in invoices:
+        amount = _parse_amount((inv.get("_raw_row") or {}).get(column))
+        if amount is not None:
+            total += amount
     return round(total, 2)
