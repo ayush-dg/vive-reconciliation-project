@@ -1,0 +1,90 @@
+{# Results fragment for the "Find in NetSuite" modal -- returned on its
+   own by GET /netsuite-search and swapped into #nsResults, so changing a
+   filter re-renders only this table, never the exception under review.
+
+   LOOK-ONLY. There is deliberately no <form>, no action=, no method=, no
+   checkbox and no button that posts anywhere in this file -- a row click
+   does nothing (removed 2026-09-30, along with the selection footer it
+   used to drive); the only interactive control per row is the details
+   toggle (^/v). Resolving an exception stays with the page's existing
+   Accept/Dispute/Escalate forms. A test asserts this file stays free of
+   form/action/method/checkbox markup.
+
+   Rendered standalone: it extends nothing and must not assume any
+   variable beyond `result` (always present) and `last_sync`. #}
+
+{% if result.error %}
+<div class="ns-modal-empty">{{ result.message or "NetSuite search is unavailable right now." }}</div>
+
+{% elif result.needs_filter %}
+<div class="ns-modal-empty">{{ result.message }}</div>
+
+{% elif not result.rows %}
+<div class="ns-modal-empty">
+  <div class="ns-modal-empty-title">No matching bills</div>
+  <div>No NetSuite bills match these filters — try loosening one.</div>
+</div>
+
+{% else %}
+<div class="ns-modal-meta">
+  <span>NetSuite data as of {{ last_sync | friendly_dt if last_sync else "unknown" }}</span>
+  <span>{{ result.row_count }} result{{ "s" if result.row_count != 1 }}</span>
+</div>
+
+<table class="ns-modal-table">
+  <thead>
+    <tr>
+      <th>Vendor</th>
+      <th>Bill #</th>
+      <th>Status</th>
+      <th class="ns-col-amount">Amount</th>
+      <th class="ns-col-toggle"><span class="ns-sr-only">Details</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in result.rows %}
+    {% set rid = "nsrow-" ~ loop.index %}
+    <tr class="ns-modal-row" data-row-id="{{ rid }}">
+      <td class="ns-cell-vendor">{{ row.vendor_name }}</td>
+      <td>
+        <span class="ns-bill-no">{{ row.tranid or "—" }}</span>
+        {% if row.is_credit %}<span class="ns-tag-credit">Credit</span>{% endif %}
+        {# NetSuite business dates -- reformatted for display only, never
+           timezone-converted, and falling back to the raw string when
+           unparseable. Credits almost never carry a duedate (0.03% of
+           rows), so the "Due" clause is omitted rather than left bare. #}
+        <div class="ns-bill-sub">
+          {{ row.trandate_display or row.trandate or "—" }}
+          {%- if row.duedate_display %} · Due {{ row.duedate_display }}{% endif %}
+        </div>
+      </td>
+      <td>
+        {% set st = row.status_label %}
+        <span class="ns-pill {{ 'ns-pill-open' if st == 'Open' else ('ns-pill-paid' if st in ('Paid In Full', 'Fully Applied') else 'ns-pill-other') }}">{{ st }}</span>
+      </td>
+      <td class="ns-col-amount ns-cell-amount">{{ row.total | money }}</td>
+      <td class="ns-col-toggle">
+        <button type="button" class="ns-details-btn" aria-expanded="false"
+                aria-controls="{{ rid }}-details" title="Show details">
+          <span aria-hidden="true">⌄</span><span class="ns-sr-only">Show details</span>
+        </button>
+      </td>
+    </tr>
+    <tr class="ns-details-row" id="{{ rid }}-details" hidden>
+      <td colspan="5">
+        <div class="ns-details-grid">
+          <div><span class="ns-details-key">RO #</span><span>{{ row.ro_number or "—" }}</span></div>
+          <div><span class="ns-details-key">Location (code)</span><span>{{ row.location_code or "—" }}</span></div>
+          <div><span class="ns-details-key">Transaction #</span><span>{{ row.transaction_number or "—" }}</span></div>
+          <div><span class="ns-details-key">Entity</span><span>{{ row.entity_id or "—" }}</span></div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if result.truncated %}
+<div class="ns-modal-truncated">Showing first {{ result.row_count }} — narrow your filters.</div>
+{% endif %}
+{% endif %}

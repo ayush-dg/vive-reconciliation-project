@@ -5,20 +5,39 @@ Exceptions vendors overview (/exceptions) and per-vendor review
 (/exceptions/{vendor_name}). Actioning an exception writes a row to
 exception_dispositions and marks the gold_exceptions row RESOLVED, then
 redirects back to the same vendor so the next open exception is shown.
+
+Also hosts GET /netsuite-search, the review page's open-AP search panel
+(read-only -- see src/matching/netsuite_search.py). That route lives at
+the top level, NOT under /exceptions/, because
+/exceptions/{vendor_name:path} is a catch-all that would otherwise
+swallow it whole (a :path converter matches slashes too, so no sub-path
+under /exceptions/ is safe from it).
 """
 
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
+from web import time_window as tw
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
+from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, search_open_ap
 from src.matching.netsuite_status_codes import decode_netsuite_status
+from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 
 router = APIRouter()
+
+# The exception reasons that mean "this line did not tie out to a
+# NetSuite record", which are exactly the cases worth hand-searching for.
+# "Invoice Missing" is the legacy gold_exceptions spelling of "Not Found
+# in NetSuite" -- both kept for the same reason queries._REASON_FILTER_SQL
+# keeps both. "Vendor Not Resolved in NetSuite" is deliberately absent:
+# with no entity ids there is no vendor filter to pre-fill, so the search
+# would open unscoped and immediately hit the no-filter guardrail.
+SEARCHABLE_REASONS = ("Not Found in NetSuite", "Invoice Missing", "Amount Mismatch")
 
 REASON_BADGE = {
     "Invoice Missing": {"label": "Missing in ERP", "css": "exception"},
@@ -39,14 +58,59 @@ REASON_BADGE = {
 # get_high_confidence_exception_count()'s docstring.
 BULK_APPROVE_THRESHOLD = 0.99
 
+# Exceptions overview's time filter (2026-09-30) -- same controls and the
+# same web/time_window.py definitions as Home (see dashboard.py's own
+# RANGE_CHIPS), but a different DEFAULT: "all", not "last", so a real
+# open-exception backlog is never hidden the first time this page loads.
+EXCEPTIONS_RANGE_CHIPS = (("last", "Last run"), ("today", "Today"))
+
+
+def exceptions_url(filters: dict, **changes) -> str:
+    """"/exceptions?..." for the current time-window filters with
+    `changes` applied -- vendor/shop/location stay purely client-side
+    (see exceptions_vendors.html), so this only ever carries range/date/
+    month. "all" is this page's own default and so is left out of the
+    URL, same as "last" is Home's."""
+    merged = {**filters, **changes}
+    params = []
+    if merged.get("range") and merged["range"] != "all":
+        params.append(("range", merged["range"]))
+    if merged.get("range") == "date" and merged.get("date"):
+        params.append(("date", merged["date"]))
+    if merged.get("range") == "month" and merged.get("month"):
+        params.append(("month", merged["month"]))
+    return "/exceptions" + (f"?{urlencode(params)}" if params else "")
+
 
 @router.get("/exceptions")
-def exceptions_vendors(request: Request, user: str = Depends(require_login)):
+def exceptions_vendors(request: Request, user: str = Depends(require_login),
+                       range: str = "", date: str = "", month: str = ""):
+    # Time filter (2026-09-30) -- same controls/definitions as Home, but
+    # defaulting to "all" (not "last"), so a real open-exception backlog
+    # is never hidden the first time this page loads. ?date=/?month=
+    # alone still imply their own range, same as Home; anything else
+    # unrecognised also falls back to "all" (not Home's "last") -- done
+    # here rather than in resolve_window() so Home's own default is
+    # untouched.
+    range_param = range or None
+    if range_param and range_param not in tw.RANGES:
+        range_param = "all"
+    if not range_param and not date and not month:
+        range_param = "all"
+    timestamps = queries.get_run_timestamps()
+    outlook_jobs = queries.get_outlook_synced_jobs()
+    window = tw.resolve_window(range_param, date or None, month or None,
+                               timestamps=timestamps, outlook_jobs=outlook_jobs)
+
     # get_exception_runs() -- one card per statement RUN (every PDF ever
     # reconciled), not one per vendor -- see its docstring. Already
     # attaches "aging"/"reason_breakdown" via batched queries the same way
     # get_vendor_summaries() used to for the old vendor-rollup version.
-    runs = queries.get_exception_runs()
+    # Exceptions-only vendors (no run timestamp/statement_id at all) are
+    # appended inside get_exception_runs() AFTER the window filter, so
+    # they always show and always count below, regardless of `window`.
+    runs = queries.get_exception_runs(window)
+    summary_backed_count = sum(1 for v in runs if v.get("statement_id"))
     for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
         # Display-only casing normalization -- vendor_name (the canonical
@@ -98,6 +162,9 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
     shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
     location_options = sorted({v["billing_location"] for v in runs if v.get("billing_location")})
 
+    filters = {"range": window.range, "date": window.date, "month": window.month}
+    new_window = {"date": None, "month": None}
+
     ctx = {
         "active_page": "exceptions",
         "vendors": runs,
@@ -107,6 +174,15 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
         "total_open": total_open,
         "vendor_count_with_ex": len(runs_with_ex),
         "reason_badge": REASON_BADGE,
+        "window": window,
+        "window_label": tw.window_label(window, summary_backed_count),
+        "window_summary_backed_count": summary_backed_count,
+        "window_empty_message": tw.empty_message(window),
+        "range_chips": [(key, label, exceptions_url(filters, range=key, **new_window))
+                        for key, label in EXCEPTIONS_RANGE_CHIPS],
+        "month_options": tw.month_options(timestamps),
+        "last_run_url": exceptions_url(filters, range="last", **new_window),
+        "all_time_url": exceptions_url(filters, range="all", **new_window),
         **sidebar_context(request),
     }
     return render(request, "exceptions_vendors.html", ctx)
@@ -114,8 +190,12 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login)):
 
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
-                       filter: str = "all", selected: str = None, statement_id: str = None):
+                       filter: str = "all", selected: str = None, statement_id: str = None,
+                       sort: str = None):
     vendor_name = unquote(vendor_name)
+    # Unrecognised values collapse to the default order here, so every
+    # link/redirect built from `sort` below carries only a known value.
+    sort = sort if sort in queries.EXCEPTION_SORTS else None
 
     # A specific run's card (see get_exception_runs()) links here with its
     # own statement_id -- look that exact run up instead of falling back
@@ -147,11 +227,11 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
 
     if exceptions_only:
         source_file = statement["source_file"]
-        open_list = queries.get_open_exceptions_for_source_file(source_file, None if filter == "all" else filter)
+        open_list = queries.get_open_exceptions_for_source_file(source_file, None if filter == "all" else filter, sort)
         total, resolved = queries.get_exception_counts_for_source_file(source_file)
     else:
         statement_id = statement["statement_id"]
-        open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter)
+        open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter, sort)
         total, resolved = queries.get_exception_counts(statement_id)
 
     selected_exc = None
@@ -195,10 +275,12 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "resolved": resolved,
         "progress_pct": progress_pct,
         "filter": filter,
+        "sort": sort or "",
         "reason_badge": REASON_BADGE,
         "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
+        "searchable_reasons": SEARCHABLE_REASONS,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
@@ -222,33 +304,36 @@ def exceptions_bulk_approve(vendor_name: str, request: Request, user: str = Depe
     return {"approved": approved}
 
 
-def _filter_redirect_suffix(filter: str, statement_id: str = None) -> str:
+def _filter_redirect_suffix(filter: str, statement_id: str = None, sort: str = None) -> str:
     """Builds the query string a post-action redirect back to
     /exceptions/{vendor_name} needs to stay on the same statement/filter
     the user was reviewing -- dropping statement_id here (as this used to)
     silently bounces the redirect to get_vendor_latest_statement()'s "the
     vendor's latest run" instead, which can be a completely different
     statement_id than the one just acted on (confirmed live 2026-09-22:
-    Rh Long Motor Sales has 7 separate runs)."""
+    Rh Long Motor Sales has 7 separate runs). `sort` is kept for the same
+    reason -- acting on an exception should not reset the list's order."""
     params = []
     if filter and filter != "all":
         params.append(f"filter={filter}")
     if statement_id:
         params.append(f"statement_id={statement_id}")
+    if sort in queries.EXCEPTION_SORTS:
+        params.append(f"sort={sort}")
     return f"?{'&'.join(params)}" if params else ""
 
 
 @router.post("/exceptions/{vendor_name}/escalate")
 def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(require_login),
                          exception_id: str = Form(...), filter: str = Form("all"),
-                         statement_id: str = Form("")):
+                         statement_id: str = Form(""), sort: str = Form("")):
     """Flags a single exception ESCALATED (see queries.escalate_exception())
     and redirects back to the same vendor/filter/statement. Registered
     ahead of the {vendor_name:path} POST action route below for the same
     greedy-path-converter reason as exceptions_bulk_approve() above."""
     vendor_name = unquote(vendor_name)
     queries.escalate_exception(exception_id, escalated_by=user)
-    suffix = _filter_redirect_suffix(filter, statement_id)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
 
 
@@ -257,7 +342,7 @@ def exceptions_action(vendor_name: str, request: Request, user: str = Depends(re
                        exception_id: str = Form(...), statement_id: str = Form(...),
                        invoice_number: str = Form(...), reason_code: str = Form(...),
                        action: str = Form(...), note: str = Form(""),
-                       filter: str = Form("all")):
+                       filter: str = Form("all"), sort: str = Form("")):
     vendor_name = unquote(vendor_name)
     queries.resolve_exception(
         exception_id=exception_id,
@@ -269,5 +354,93 @@ def exceptions_action(vendor_name: str, request: Request, user: str = Depends(re
         notes=note or None,
         disposed_by=user,
     )
-    suffix = _filter_redirect_suffix(filter, statement_id)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
+
+
+def _parse_amount(raw):
+    """Returns (amount, error_message). An empty box is a legitimate "no
+    amount filter", not an error -- only a non-empty unparseable value is."""
+    if raw is None or str(raw).strip() == "":
+        return None, None
+    try:
+        return float(str(raw).replace(",", "").replace("$", "").strip()), None
+    except ValueError:
+        return None, f"“{raw}” isn’t a number — enter an amount like 195.65."
+
+
+def _search_entity_ids(use_vendor: bool, vendor_id: str, vendor_name: str):
+    """Entity ids for the vendor filter, or None when the user has
+    toggled the vendor filter off (the "maybe it was booked under a
+    different vendor" case this panel exists for). Uses the same
+    resolution the matching engine uses, so "vendor on" here means
+    exactly what it meant at match time."""
+    if not use_vendor:
+        return None
+    return resolve_entity_ids(vendor_id or "", vendor_name or "")
+
+
+def _parse_statuses(raw: str) -> frozenset:
+    """"open,paid" (as sent by the Status popover's two checkboxes) ->
+    a validated frozenset. Empty or entirely invalid input defaults to
+    {"open"} -- the UI itself never lets both boxes end up unticked, but
+    a hand-edited/old URL might, and this must not silently search every
+    status as a result."""
+    statuses = frozenset(s.strip() for s in (raw or "").split(",") if s.strip() in STATUSES)
+    return statuses or frozenset({"open"})
+
+
+def _error_partial(request: Request, message: str):
+    """A results fragment carrying nothing but a friendly message, so a
+    bad input renders in place instead of 500-ing the modal."""
+    return render(request, "_netsuite_search_results.html",
+                  {"result": {"rows": [], "row_count": 0, "truncated": False,
+                              "error": True, "needs_filter": False,
+                              "message": message}})
+
+
+@router.get("/netsuite-search")
+def netsuite_search(request: Request, user: str = Depends(require_login),
+                    vendor_id: str = "", vendor_name: str = "",
+                    use_vendor: bool = True, amount: str = "",
+                    tolerance: str = "exact", invoice_contains: str = "",
+                    statuses: str = "open", sort_amount: str = "",
+                    date_from: str = "", date_to: str = ""):
+    """Open-AP search partial for the "Find in NetSuite" modal.
+
+    STRICTLY READ-ONLY: this issues SELECTs against the Fabric Lakehouse
+    and nothing else. It writes to NetSuite, Fabric and Azure SQL never,
+    resolves no exception, and has no POST counterpart -- closing an
+    exception stays with the existing Accept/Dispute/Escalate forms.
+
+    Returns an HTML fragment rather than a full page so changing a filter
+    re-renders only the results, not the exception under review."""
+    parsed_amount, amount_error = _parse_amount(amount)
+    if amount_error:
+        return _error_partial(request, amount_error)
+
+    parsed_sort, sort_error = _parse_amount(sort_amount)
+    if sort_error:
+        return _error_partial(request, sort_error)
+
+    # "1_dollar"/"5_percent" are no longer popover options, but an old
+    # request/bookmark using either must still work, not error -- both
+    # behave exactly like "any" (search_open_ap() does the same
+    # normalization for its other, non-HTTP callers).
+    if tolerance in REMOVED_TOLERANCES:
+        tolerance = "any"
+    if tolerance not in TOLERANCES:
+        return _error_partial(request, "Pick one of the listed amount tolerances.")
+
+    result = search_open_ap(
+        entity_ids=_search_entity_ids(use_vendor, vendor_id, vendor_name),
+        amount=parsed_amount,
+        amount_tolerance=tolerance,
+        invoice_contains=invoice_contains,
+        statuses=_parse_statuses(statuses),
+        sort_amount=parsed_sort,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return render(request, "_netsuite_search_results.html",
+                  {"result": result, "last_sync": queries.get_last_netsuite_sync()})

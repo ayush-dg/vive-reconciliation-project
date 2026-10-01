@@ -1,0 +1,295 @@
+"""
+time_window.py
+
+The Home page's time filter -- which statements (by
+silver.recon_summary.statement_id) the KPI cards, the "N of M statements
+reconciled" line and the runs table all cover. Pure date/grouping logic,
+no database access, so it is testable on its own; web/queries.py's
+get_home_dashboard() applies the resulting window, and
+web/routers/validation.py reuses the "last" (Outlook) piece for its own
+"Last run" filter.
+
+Two different kinds of window:
+
+- Calendar-bounded (today/date/month/month_current/all): a half-open
+  [start_utc, end_utc) pair of NAIVE UTC datetimes, checked in SQL against
+  silver.recon_summary.reconciliation_timestamp (RUN date, not statement
+  period) -- DATETIME2 holding UTC wall-clock time with no offset
+  (fabric_matching.py writes datetime.now(timezone.utc)), returned by
+  pyodbc as a naive datetime. Calendar boundaries (day, month) are US
+  Eastern -- the same zone web/deps.py's friendly_dt() displays -- and are
+  converted to UTC here in Python, one boundary at a time, so DST is
+  handled by ZoneInfo: Eastern midnight is 04:00Z under EDT and 05:00Z
+  under EST, which makes the spring-forward day 23 hours long and the
+  fall-back day 25. (Fabric does support AT TIME ZONE, but pyodbc cannot
+  read the DATETIMEOFFSET it returns -- and bound boundaries keep the SQL
+  portable to the SQLite test backend.) US clocks change at 02:00, so
+  midnight is never ambiguous.
+- "last" (redefined 2026-09-30): NOT calendar-bounded at all -- "the most
+  recent Outlook mailbox sync" is a set of statement_ids (see
+  outlook_last_sync()), checked by Python-side membership rather than a
+  SQL predicate, since jobs (Azure SQL/SQLite) and silver.recon_summary
+  (Fabric) are different database engines with no join available.
+"""
+
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Optional
+from zoneinfo import ZoneInfo
+
+# Same zone as web/deps.py's EASTERN (friendly_dt()). Defined here too so
+# this module stays importable without the web layer's template setup.
+EASTERN = ZoneInfo("America/New_York")
+
+# "Last run" (redefined 2026-09-30) = the most recent Outlook mailbox
+# sync: the newest job with source_blob_path set (see
+# queries.get_outlook_synced_jobs() -- only web/routers/mailbox_sync.py's
+# "Sync to Webapp" ever sets that column; manual uploads, the dropzone
+# watcher and Event Grid never do), plus every such job chained back from
+# it with no gap longer than this. One "Sync to Webapp" click queues all
+# its jobs in a single synchronous loop (download-then-create_job per
+# blob), so gaps inside one click are seconds, not hours; 10 minutes
+# comfortably covers slow per-file downloads within one click while still
+# separating two distinct clicks minutes apart.
+OUTLOOK_SYNC_GAP = timedelta(minutes=10)
+
+RANGES = ("last", "today", "month_current", "all", "date", "month")
+DEFAULT_RANGE = "last"
+
+
+@dataclass(frozen=True)
+class TimeWindow:
+    range: str
+    # Naive UTC, half-open [start_utc, end_utc). Both None = no bound
+    # ("all"); empty=True = matches nothing (an empty window: "last" with
+    # no Outlook jobs at all).
+    start_utc: Optional[datetime] = None
+    end_utc: Optional[datetime] = None
+    date: Optional[str] = None    # "YYYY-MM-DD" -- range "date" / "today"
+    month: Optional[str] = None   # "YYYY-MM"    -- range "month" / "month_current"
+    empty: bool = False
+    # "last" only (redefined 2026-09-30 as "the most recent Outlook sync",
+    # not a time-gap on reconciliation runs -- see outlook_last_sync()):
+    # the statement_ids that sync's jobs produced (checked by Python-side
+    # membership, not SQL -- see .sql()), that sync's own queued-job count
+    # (for the "X of Y statements (Z still processing)" label) and the
+    # newest of its jobs' submitted_at (the label's timestamp).
+    statement_ids: Optional[frozenset] = None
+    sync_time_utc: Optional[datetime] = None
+    sync_job_count: int = 0
+
+    def sql(self, column: str = "reconciliation_timestamp"):
+        """(" AND <predicate>", params) to append to a WHERE clause."""
+        if self.empty:
+            return " AND 1 = 0", []
+        if self.statement_ids is not None:
+            # Membership is checked in Python by the caller (see
+            # queries.get_home_dashboard()) -- jobs (Azure SQL/SQLite) and
+            # recon_summary (Fabric) are different engines with no single
+            # join available, and reading the whole (modest) table and
+            # filtering in Python avoids ever needing a bound IN-list
+            # (and its 2100-parameter cap).
+            return "", []
+        if self.start_utc is None:
+            return "", []
+        return f" AND {column} >= ? AND {column} < ?", [self.start_utc, self.end_utc]
+
+
+def to_naive_utc(value) -> Optional[datetime]:
+    """A timestamp value as returned by either backend (naive UTC
+    datetime from pyodbc, or an ISO string from SQLite) -> naive UTC."""
+    if value is None or value == "":
+        return None
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _eastern_midnight_as_utc(d: date) -> datetime:
+    return datetime.combine(d, time.min, EASTERN).astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def day_bounds(d: date):
+    return _eastern_midnight_as_utc(d), _eastern_midnight_as_utc(d + timedelta(days=1))
+
+
+def month_bounds(year: int, month: int):
+    next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return _eastern_midnight_as_utc(date(year, month, 1)), _eastern_midnight_as_utc(date(next_year, next_month, 1))
+
+
+def parse_date(value) -> Optional[date]:
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_month(value):
+    try:
+        dt = datetime.strptime(str(value), "%Y-%m")
+        return dt.year, dt.month
+    except (TypeError, ValueError):
+        return None
+
+
+def to_eastern(naive_utc: datetime) -> datetime:
+    return naive_utc.replace(tzinfo=timezone.utc).astimezone(EASTERN)
+
+
+def outlook_last_sync(jobs, gap: timedelta = OUTLOOK_SYNC_GAP):
+    """jobs: dicts with "submitted_at" (any shape to_naive_utc accepts)
+    and "statement_id" (may be None -- extraction/matching hasn't
+    produced one yet) -- see queries.get_outlook_synced_jobs(), already
+    scoped to source_blob_path IS NOT NULL, so a manual upload, a
+    dropzone-watcher job or an Event Grid job is never even in `jobs` to
+    begin with; nothing here needs to re-check their origin.
+
+    Returns the winning chain (list of job dicts, newest first) or None
+    if `jobs` is empty. A gap of exactly `gap` still chains. A "Sync to
+    Webapp" click that queued 0 PDFs creates zero job rows, so it's
+    simply invisible here -- the next older non-empty sync wins with no
+    special-casing needed."""
+    ordered = sorted(
+        (dict(j, submitted_at=to_naive_utc(j["submitted_at"])) for j in jobs if j.get("submitted_at") is not None),
+        key=lambda j: j["submitted_at"], reverse=True,
+    )
+    if not ordered:
+        return None
+    chain = [ordered[0]]
+    for j in ordered[1:]:
+        if chain[-1]["submitted_at"] - j["submitted_at"] > gap:
+            break
+        chain.append(j)
+    return chain
+
+
+def month_options(timestamps) -> list:
+    """Distinct Eastern "YYYY-MM" months that have at least one run,
+    newest first -- the Month dropdown never offers an empty month."""
+    months = {to_eastern(t).strftime("%Y-%m") for t in (to_naive_utc(v) for v in timestamps) if t is not None}
+    return sorted(months, reverse=True)
+
+
+def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
+                   timestamps=(), outlook_jobs=(), now: datetime = None) -> TimeWindow:
+    """URL params -> TimeWindow. ?date= alone implies range=date and
+    ?month= alone range=month. Anything unknown or malformed falls back to
+    the default ("last"). `now` is injectable for tests only.
+
+    `timestamps` (silver.recon_summary run timestamps, via
+    queries.get_run_timestamps()) drives the Month dropdown's options
+    only -- unrelated to "last" since 2026-09-30. `outlook_jobs` (via
+    queries.get_outlook_synced_jobs()) is what "last" is built from now
+    -- see outlook_last_sync()."""
+    if not range_:
+        range_ = "date" if date_ else "month" if month_ else DEFAULT_RANGE
+    if range_ not in RANGES:
+        range_ = DEFAULT_RANGE
+    now_et = (now or datetime.now(timezone.utc)).astimezone(EASTERN)
+
+    if range_ == "date":
+        d = parse_date(date_)
+        if d is None:
+            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now)
+        start, end = day_bounds(d)
+        return TimeWindow("date", start, end, date=d.isoformat())
+
+    if range_ == "month":
+        ym = parse_month(month_)
+        if ym is None:
+            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now)
+        start, end = month_bounds(*ym)
+        return TimeWindow("month", start, end, month=f"{ym[0]:04d}-{ym[1]:02d}")
+
+    if range_ == "today":
+        start, end = day_bounds(now_et.date())
+        return TimeWindow("today", start, end, date=now_et.date().isoformat())
+
+    if range_ == "month_current":
+        start, end = month_bounds(now_et.year, now_et.month)
+        return TimeWindow("month_current", start, end, month=now_et.strftime("%Y-%m"))
+
+    if range_ == "all":
+        return TimeWindow("all")
+
+    chain = outlook_last_sync(outlook_jobs)
+    if chain is None:
+        return TimeWindow("last", empty=True)
+    ids = frozenset(j["statement_id"] for j in chain if j.get("statement_id"))
+    return TimeWindow("last", statement_ids=ids, sync_time_utc=chain[0]["submitted_at"], sync_job_count=len(chain))
+
+
+# ---------------------------------------------------------------------------
+# Labels
+# ---------------------------------------------------------------------------
+
+def _clock(dt: datetime) -> str:
+    return f"{dt.hour % 12 or 12}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
+
+
+def _day(dt, with_year=False) -> str:
+    return f"{dt:%b} {dt.day}" + (f", {dt.year}" if with_year else "")
+
+
+def _month_name(ym: str) -> str:
+    y, m = parse_month(ym)
+    return date(y, m, 1).strftime("%B %Y")
+
+
+def window_title(window: TimeWindow) -> str:
+    """The window itself, without a count -- e.g. "Last Outlook sync ·
+    Sep 29, 7:02 AM ET", "Today · Sep 29", "September 2026"."""
+    if window.range == "all":
+        return "All time"
+    if window.range == "last":
+        if window.empty:
+            return "Last Outlook sync"
+        t = to_eastern(window.sync_time_utc)
+        return f"Last Outlook sync · {_day(t)}, {_clock(t)} ET"
+    if window.range == "today":
+        return f"Today · {_day(parse_date(window.date))}"
+    if window.range == "date":
+        return _day(parse_date(window.date), with_year=True)
+    if window.range == "month_current":
+        return f"This month · {_month_name(window.month)}"
+    return _month_name(window.month)
+
+
+def window_label(window: TimeWindow, statement_count: int) -> str:
+    """window_title() plus the number of statements in it. For "last",
+    `statement_count` (the window's actual matched silver.recon_summary
+    rows) can be lower than the sync's own queued-job count when some of
+    its jobs haven't reached Silver/matching yet -- shown as "9 of 12
+    statements (3 still processing)" rather than silently under-reporting
+    as a plain "9 statements"."""
+    if window.range == "last" and not window.empty and statement_count < window.sync_job_count:
+        still = window.sync_job_count - statement_count
+        return (f"{window_title(window)} · {statement_count} of {window.sync_job_count} statements "
+                f"({still} still processing)")
+    if statement_count:
+        return f"{window_title(window)} · {statement_count:,} statement{'s' if statement_count != 1 else ''}"
+    return f"{window_title(window)} · no runs{' yet' if window.range in ('today', 'month_current') else ''}"
+
+
+def window_short(window: TimeWindow) -> str:
+    """Lower-case phrase for the KPI cards' sub-labels."""
+    if window.range == "date":
+        return _day(parse_date(window.date), with_year=True)
+    if window.range == "month":
+        return _month_name(window.month)
+    return {"last": "last run", "today": "today", "month_current": "this month", "all": "all time"}[window.range]
+
+
+def empty_message(window: TimeWindow) -> str:
+    """The runs panel's message when the window itself has no runs."""
+    if window.range == "today":
+        return "No reconciliation runs today yet."
+    if window.range == "month_current":
+        return "No reconciliation runs this month yet."
+    if window.range == "date":
+        return f"No reconciliation runs on {_day(parse_date(window.date), with_year=True)}."
+    if window.range == "month":
+        return f"No reconciliation runs in {_month_name(window.month)}."
+    return "No reconciliation runs yet — upload a vendor statement to get started."

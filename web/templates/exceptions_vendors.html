@@ -15,6 +15,48 @@
 
 {% block content %}
 {% if vendors %}
+{# Time window -- same controls/definitions as Home (web/time_window.py),
+   default "all" here (not "last"), so no open exception is hidden on
+   first load. Combines with (sits above) the existing client-side
+   vendor/shop/location filters below -- those never touch the server,
+   so their options are simply rebuilt from `vendors`, which is already
+   scoped to this window. #}
+<div class="filter-chips" style="flex-wrap:wrap;align-items:center;margin-bottom:8px" id="time-window" aria-label="Time window">
+  {% for key, label, url in range_chips %}
+  <a href="{{ url }}" class="filter-chip {{ 'active' if window.range == key }}">{{ label }}</a>
+  {% endfor %}
+  <form method="get" action="/exceptions" style="display:contents">
+    <input type="hidden" name="range" id="window-range-for-month" value="{{ 'all' if window.range == 'all' else 'month' }}">
+    <select name="month" id="window-month" class="filter-chip {{ 'active' if window.range in ('month', 'all') }}" style="cursor:pointer"
+            onchange="document.getElementById('window-range-for-month').value = this.value ? 'month' : 'all'; this.form.submit()"
+            aria-label="Pick a month, or all time">
+      <option value="" {{ 'selected' if window.range == 'all' }}>All time</option>
+      {% for m in month_options %}
+      <option value="{{ m }}" {{ 'selected' if window.range == 'month' and window.month == m }}>{{ m | period_label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  <form method="get" action="/exceptions" style="display:contents">
+    <input type="hidden" name="range" value="date">
+    <button type="button" class="icon-btn" id="window-date-btn" aria-label="Pick a day"
+            title="{{ 'Pick a day (currently ' + window.date + ')' if window.range == 'date' else 'Pick a day' }}"
+            onclick="var d = document.getElementById('window-date'); if (d.showPicker) { d.showPicker(); } else { d.focus(); }">
+      <svg class="icon"><use href="#i-calendar"/></svg>
+    </button>
+    <input type="date" name="date" id="window-date" class="ns-sr-only"
+           value="{{ window.date if window.range == 'date' else '' }}" onchange="if (this.value) this.form.submit()" aria-label="Pick a day">
+  </form>
+</div>
+<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px" id="window-label">
+  {{ window_label }}
+  {% if not window_summary_backed_count and window.range != 'all' %}
+  {# The window itself has no summary-backed runs -- any cards still
+     showing below are exceptions-only vendors, which are never scoped
+     by this filter (see get_exception_runs()'s docstring). #}
+  · {{ window_empty_message }} <a href="{{ last_run_url }}" class="link">Last run</a> · <a href="{{ all_time_url }}" class="link">All time</a>
+  {% endif %}
+</div>
+
 <div class="filter-chips">
   <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
     <option value="">All vendors</option>

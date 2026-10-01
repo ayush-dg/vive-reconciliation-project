@@ -6,10 +6,12 @@ filters registered), the login-required dependency, and the sidebar
 context (open exceptions count, shown as the nav-dot on "Exceptions").
 """
 
+import hashlib
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
@@ -185,13 +187,29 @@ def friendly_date(value):
         return text
 
 
-IST = timezone(timedelta(hours=5, minutes=30))
+# America/New_York, NOT a fixed UTC-5 offset: Eastern observes DST, so a
+# fixed offset would render every timestamp an hour early for the ~8
+# months a year the zone is on EDT (UTC-4). ZoneInfo needs the tzdata
+# package on Windows dev machines (Linux uses the system tz database) --
+# see requirements.txt.
+EASTERN = ZoneInfo("America/New_York")
 
 
-def friendly_dt(iso_str):
+def friendly_dt(iso_str, now=None):
     """All timestamps are stored as UTC (see queries.py/resolve_exception
-    etc., which write datetime.now(timezone.utc).isoformat()) — this
-    converts to IST for display, since that's the app's audience."""
+    etc., which write datetime.now(timezone.utc).isoformat()) -- this
+    converts to US Eastern for display, since VIVE's AP team (this app's
+    audience) works in that zone. The rendered string is suffixed " ET"
+    because the app is also viewed from India, where an unlabelled local
+    time would be read as IST.
+
+    Accepts either an ISO8601 string or a native datetime object (Azure
+    SQL/Fabric DATETIME2 columns come back already parsed -- see
+    queries._parse_datetime() for the same split). A naive value is
+    treated as UTC, matching how every writer in this app produces them.
+
+    now is injectable for deterministic tests only; production callers
+    (the Jinja filter) always pass a single argument and get real time."""
     if not iso_str:
         return "—"
     try:
@@ -200,14 +218,36 @@ def friendly_dt(iso_str):
         return str(iso_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    dt = dt.astimezone(IST)
-    now = datetime.now(timezone.utc).astimezone(IST)
+    dt = dt.astimezone(EASTERN)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now = now.astimezone(EASTERN)
     hour12 = dt.hour % 12 or 12
     ampm = "AM" if dt.hour < 12 else "PM"
-    time_part = f"{hour12}:{dt.minute:02d} {ampm}"
+    time_part = f"{hour12}:{dt.minute:02d} {ampm} ET"
     if dt.date() == now.date():
         return f"Today, {time_part}"
     return f"{dt.strftime('%b %d, %Y')}, {time_part}"
+
+
+def eastern_day(iso_str) -> str:
+    """iso_str (a UTC timestamp, string or datetime -- see friendly_dt()'s
+    docstring for the accepted shapes) -> its US Eastern calendar day as
+    "YYYY-MM-DD", for grouping/filtering by day (Validation's calendar-date
+    filter, matched against a native <input type="date">'s own value)
+    rather than for display. Falsy/unparseable input returns "" (never
+    the literal string "None" landing in a data-* attribute)."""
+    if not iso_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(EASTERN).date().isoformat()
 
 
 def friendly_error(raw):
@@ -243,7 +283,60 @@ templates.env.filters["money_short"] = money_short
 templates.env.filters["period_label"] = period_label
 templates.env.filters["initials"] = initials
 templates.env.filters["friendly_dt"] = friendly_dt
+templates.env.filters["eastern_day"] = eastern_day
 templates.env.filters["friendly_date"] = friendly_date
 templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname
 templates.env.filters["smart_title"] = smart_title
+
+# ---------------------------------------------------------------------------
+# Static asset cache busting
+# ---------------------------------------------------------------------------
+
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# path -> (mtime_seen, short_content_hash). Keyed on mtime so a file edited
+# while the server is running (local dev) picks up a new hash on the next
+# render, without re-hashing on every single request.
+_static_versions = {}
+
+
+def static_url(path: str) -> str:
+    """"style.css" -> "/static/style.css?v=<hash>".
+
+    Exists because Starlette's StaticFiles sends `etag`/`last-modified` but
+    NO `Cache-Control`. With no Cache-Control, RFC 9111 lets a browser
+    apply *heuristic* freshness (commonly 10% of the time since
+    Last-Modified) and serve the file from cache without revalidating at
+    all -- so a deploy that changes app.js/style.css can leave users on the
+    old copy for hours with no request hitting the server. Confirmed live
+    2026-09-28: the response carried etag + last-modified and no
+    Cache-Control, and the symptom was a dead button and unstyled text
+    against a server that was serving the correct files.
+
+    The version is a hash of the file's CONTENT, not a build number, so it
+    changes exactly when the file changes -- nothing to remember to bump at
+    release time, and identical content across a redeploy keeps the same
+    URL (so the cache still does its job).
+
+    Falls back to the bare path if the file can't be read: a missing hash
+    must never take the page down."""
+    full = os.path.join(STATIC_DIR, path)
+    try:
+        mtime = os.path.getmtime(full)
+    except OSError:
+        return f"/static/{path}"
+    cached = _static_versions.get(path)
+    if cached is None or cached[0] != mtime:
+        try:
+            with open(full, "rb") as handle:
+                digest = hashlib.md5(handle.read()).hexdigest()[:10]
+        except OSError:
+            return f"/static/{path}"
+        cached = (mtime, digest)
+        _static_versions[path] = cached
+    return f"/static/{path}?v={cached[1]}"
+
+
+templates.env.globals["static_url"] = static_url
+

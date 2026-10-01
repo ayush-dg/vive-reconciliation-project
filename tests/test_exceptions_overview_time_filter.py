@@ -1,0 +1,284 @@
+"""
+tests/test_exceptions_overview_time_filter.py
+
+The Exceptions overview's time filter (2026-09-30): the same controls and
+web/time_window.py definitions as Home, but defaulting to "all" (not
+"last"), and exceptions-only vendors (no recon_summary row, so no run
+timestamp or statement_id at all) always shown and always counted,
+regardless of the selected window.
+
+Query-level tests run the real SQL against in-memory SQLite stand-ins for
+the Fabric Warehouse and Azure SQL (same approach as
+tests/test_home_time_window.py). Route-level tests patch every
+web.queries call the route makes.
+"""
+
+import os
+import re
+import sqlite3
+import sys
+import unittest
+from datetime import datetime
+from unittest import mock
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from starlette.middleware.sessions import SessionMiddleware
+
+from web import queries
+from web import time_window as tw
+from web.deps import require_login
+from web.routers import exceptions
+
+sqlite3.register_adapter(datetime, lambda d: d.isoformat(" "))
+
+U = lambda *a: datetime(*a)  # naive UTC, as pyodbc returns DATETIME2
+
+
+def _job(statement_id, submitted_at):
+    return {"statement_id": statement_id, "submitted_at": submitted_at}
+
+
+_SELECT_TOP_RE = re.compile(r"^\s*SELECT\s+TOP\s+(\d+)\s+(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _query_fn(conn):
+    def query(sql, params=None):
+        top = _SELECT_TOP_RE.match(sql)
+        if top:
+            sql = f"SELECT {top.group(2)}\nLIMIT {top.group(1)}"
+        return [dict(r) for r in conn.execute(sql, params or []).fetchall()]
+    return query
+
+
+class TestGetExceptionRunsWindow(unittest.TestCase):
+
+    def setUp(self):
+        self.fabric = sqlite3.connect(":memory:", check_same_thread=False)
+        self.fabric.row_factory = sqlite3.Row
+        self.fabric.execute("ATTACH DATABASE ':memory:' AS silver")
+        self.fabric.execute(
+            """CREATE TABLE silver.recon_summary (
+                   statement_id TEXT, vendor_name TEXT, statement_period TEXT,
+                   total_invoice_count INTEGER, matched_count INTEGER, exception_count INTEGER,
+                   statement_total REAL, overall_status TEXT, reconciliation_timestamp TEXT,
+                   is_latest_version INTEGER)"""
+        )
+        self.fabric.execute(
+            """CREATE TABLE silver.recon_exceptions (
+                   exception_id TEXT, statement_id TEXT, source_file TEXT, vendor_id TEXT,
+                   shop TEXT, exception_reason TEXT, exception_status TEXT, date_raised TEXT)"""
+        )
+        self.local = sqlite3.connect(":memory:", check_same_thread=False)
+        self.local.row_factory = sqlite3.Row
+        self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, billing_location TEXT, statement_period TEXT, shop_or_entity TEXT)")
+        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT)")
+        for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):
+            patcher = mock.patch(target, _query_fn(conn))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.addCleanup(self.fabric.close)
+        self.addCleanup(self.local.close)
+
+        self._run("A1", "Fenix", ts="2026-09-29 12:08:00", exc=2)
+        self._run("A2", "Bald Hill", ts="2026-09-29 12:04:00", exc=0)
+        self._run("B1", "Abc Parts", ts="2026-09-20 09:31:00", exc=1)
+        # Exceptions-only: no recon_summary row at all for this source_file.
+        self._orphan_exception("orphan.pdf", "Vendor Not Resolved in NetSuite", n=3)
+
+    def _run(self, sid, vendor, *, ts, exc, invoices=10, matched=8, total=100.0, period="2026-08"):
+        self.fabric.execute(
+            "INSERT INTO silver.recon_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+            [sid, vendor, period, invoices, matched, exc, total,
+             "RECONCILED" if exc == 0 else "EXCEPTIONS_PRESENT", ts],
+        )
+        for i in range(exc):
+            self.fabric.execute(
+                "INSERT INTO silver.recon_exceptions VALUES (?, ?, NULL, NULL, NULL, ?, 'OPEN', ?)",
+                [f"{sid}-e{i}", sid, "Not Found in NetSuite", ts],
+            )
+
+    def _orphan_exception(self, source_file, reason, n=1):
+        for i in range(n):
+            self.fabric.execute(
+                "INSERT INTO silver.recon_exceptions VALUES (?, NULL, ?, NULL, NULL, ?, 'OPEN', ?)",
+                [f"{source_file}-e{i}", source_file, reason, "2026-09-15 00:00:00"],
+            )
+
+    def _window(self, *args, **kwargs):
+        return tw.resolve_window(*args, timestamps=queries.get_run_timestamps(),
+                                 outlook_jobs=queries.get_outlook_synced_jobs(), **kwargs)
+
+    def _ids(self, runs):
+        return {r["statement_id"] for r in runs if r.get("statement_id")}
+
+    def test_no_window_returns_every_run_plus_exceptions_only(self):
+        runs = queries.get_exception_runs()
+        self.assertEqual(self._ids(runs), {"A1", "A2", "B1"})
+        self.assertEqual(sum(1 for r in runs if r.get("exceptions_only")), 1)
+
+    def test_calendar_window_scopes_summary_backed_runs(self):
+        runs = queries.get_exception_runs(self._window("date", "2026-09-29"))
+        self.assertEqual(self._ids(runs), {"A1", "A2"})
+
+    def test_exceptions_only_vendor_always_present_regardless_of_window(self):
+        for window in (self._window("date", "2026-09-29"), self._window("date", "2026-01-01"),
+                      self._window("last"), self._window("all")):
+            with self.subTest(window=window.range):
+                runs = queries.get_exception_runs(window)
+                orphans = [r for r in runs if r.get("exceptions_only")]
+                self.assertEqual(len(orphans), 1)
+                self.assertEqual(orphans[0]["exception_count"], 3)
+
+    def test_last_run_scopes_by_outlook_statement_ids(self):
+        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
+                           ["A1", "2026-09-29 12:08:00", "mailbox/x.pdf"])
+        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
+                           ["A2", "2026-09-29 12:05:00", "mailbox/y.pdf"])
+        # B1 is NOT part of this sync (much older submitted_at).
+        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
+                           ["B1", "2026-09-01 00:00:00", "mailbox/z.pdf"])
+        runs = queries.get_exception_runs(self._window("last"))
+        self.assertEqual(self._ids(runs), {"A1", "A2"})
+        # Exceptions-only still there.
+        self.assertEqual(sum(1 for r in runs if r.get("exceptions_only")), 1)
+
+    def test_empty_window_still_shows_exceptions_only_vendor(self):
+        runs = queries.get_exception_runs(self._window("date", "2026-01-01"))
+        self.assertEqual(self._ids(runs), set())
+        self.assertEqual(len(runs), 1)
+        self.assertTrue(runs[0]["exceptions_only"])
+
+    def test_no_window_matches_old_unwindowed_call_shape(self):
+        """window=None must behave exactly like the pre-window function."""
+        with_none = queries.get_exception_runs(None)
+        no_arg = queries.get_exception_runs()
+        self.assertEqual(self._ids(with_none), self._ids(no_arg))
+
+
+# ---------------------------------------------------------------------------
+# Route -- default, chips, URL params, empty state
+# ---------------------------------------------------------------------------
+
+def _client():
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(exceptions.router)
+    app.dependency_overrides[require_login] = lambda: "tester"
+    return TestClient(app)
+
+
+class TestExceptionsOverviewRoute(unittest.TestCase):
+
+    def setUp(self):
+        self.windows = []
+        self.run_row = {
+            "statement_id": "S1", "vendor_name": "Fenix", "vendor_display_name": "Fenix",
+            "shop": None, "billing_location": None, "statement_period": "2026-08",
+            "total_invoice_count": 10, "matched_count": 8, "exception_count": 2,
+            "statement_total": 100.0, "overall_status": "EXCEPTIONS_PRESENT",
+            "reconciliation_timestamp": None, "reason_breakdown": {"not found in NetSuite": 2},
+            "aging": None, "url_name": "Fenix",
+        }
+        self.orphan_row = {
+            "statement_id": None, "source_file": "orphan.pdf", "vendor_name": "Orphan Co",
+            "vendor_display_name": "Orphan Co", "shop": None, "billing_location": None,
+            "statement_period": None, "total_invoice_count": 0, "matched_count": 0,
+            "exception_count": 3, "statement_total": 0, "overall_status": "EXCEPTIONS_PRESENT",
+            "reconciliation_timestamp": None, "reason_breakdown": {"vendor not resolved": 3},
+            "aging": None, "exceptions_only": True, "url_name": "Orphan%20Co",
+        }
+        self.runs = [dict(self.run_row), dict(self.orphan_row)]
+
+        def get_exception_runs(window=None):
+            self.windows.append(window)
+            return [dict(r) for r in self.runs]
+
+        fns = {
+            "get_exception_runs": get_exception_runs,
+            "get_run_timestamps": lambda: [U(2026, 9, 29, 12)],
+            "get_outlook_synced_jobs": lambda: [_job("S1", U(2026, 9, 29, 12, 8))],
+            "get_open_recon_exceptions_count": lambda: 0,
+            "get_pending_review_count": lambda: 0,
+        }
+        for name, fn in fns.items():
+            patcher = mock.patch(f"web.queries.{name}", fn)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.client = _client()
+
+    def _get(self, url):
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp.text.replace("&amp;", "&")
+
+    def _window(self):
+        return self.windows[-1]
+
+    def test_default_is_all_time(self):
+        self._get("/exceptions")
+        self.assertEqual(self._window().range, "all")
+
+    def test_header_counts_both_the_run_and_the_exceptions_only_vendor(self):
+        html = self._get("/exceptions")
+        self.assertIn("5 open across 2 vendors", html)
+
+    def test_only_last_run_and_today_are_chips(self):
+        html = self._get("/exceptions")
+        time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
+        chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
+        self.assertEqual(chip_labels, ["Last run", "Today"])
+
+    def test_month_select_blank_option_is_all_time_and_selected_by_default(self):
+        html = self._get("/exceptions")
+        self.assertIn('<option value="" selected>All time</option>', html)
+
+    def test_date_alone_selects_that_day(self):
+        self._get("/exceptions?date=2026-09-28")
+        self.assertEqual((self._window().range, self._window().date), ("date", "2026-09-28"))
+
+    def test_month_alone_selects_that_month(self):
+        self._get("/exceptions?month=2026-09")
+        self.assertEqual((self._window().range, self._window().month), ("month", "2026-09"))
+
+    def test_unknown_range_falls_back_to_all_not_last(self):
+        """Exceptions' own default is "all", not Home's "last"."""
+        self._get("/exceptions?range=bogus")
+        self.assertEqual(self._window().range, "all")
+
+    def test_last_run_reachable_via_the_chip(self):
+        html = self._get("/exceptions?range=last")
+        self.assertEqual(self._window().range, "last")
+        # Unlike Home (default "last"), Exceptions' default is "all", so
+        # its own "Last run" chip link still carries ?range=last even
+        # when already active.
+        self.assertIn('href="/exceptions?range=last" class="filter-chip active">Last run', html)
+
+    def test_calendar_button_and_hidden_date_input(self):
+        html = self._get("/exceptions?date=2026-09-28")
+        self.assertIn('id="window-date-btn"', html)
+        self.assertIn('<use href="#i-calendar"/>', html)
+        self.assertIn('id="window-date" class="ns-sr-only"', html)
+
+    def test_empty_window_message_links_to_last_run_and_all_time(self):
+        self.runs = [dict(self.orphan_row)]  # no summary-backed run in this window
+        html = self._get("/exceptions?range=today")
+        self.assertIn("No reconciliation runs today yet.", html)
+        self.assertIn('href="/exceptions?range=last" class="link">Last run</a>', html)
+        # "all" is this page's own default, so its URL omits range= --
+        # unlike the "last" link above, which is never the default here.
+        self.assertIn('href="/exceptions" class="link">All time</a>', html)
+
+    def test_vendor_shop_location_options_rebuilt_from_the_window(self):
+        html = self._get("/exceptions")
+        self.assertIn(">Fenix<", html)
+        # smart_title() title-cases "Orphan Co" -- confirmed its own
+        # existing behaviour (unrelated to this change) renders it
+        # "Orphan CO", not "Orphan Co".
+        self.assertIn(">Orphan CO<", html)
+
+
+if __name__ == "__main__":
+    unittest.main()

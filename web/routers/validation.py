@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Request
 
 from web.deps import render, require_login, sidebar_context, smart_title
 from web import queries
+from web import time_window as tw
 from src.vendor_identity import display_name as vendor_display_name
 
 router = APIRouter()
@@ -19,6 +20,14 @@ router = APIRouter()
 @router.get("/validation")
 def validation_list(request: Request, user: str = Depends(require_login)):
     runs = queries.get_validation_report()
+
+    # "Last run" -- the same Outlook-sync definition as Home (see
+    # web/time_window.py's outlook_last_sync()), applied here to intake
+    # attempts instead of reconciliation runs: an attempt counts as "last
+    # run" when its statement_id is one of that sync's jobs' statement_ids.
+    last_sync = tw.outlook_last_sync(queries.get_outlook_synced_jobs())
+    last_run_statement_ids = {j["statement_id"] for j in (last_sync or []) if j.get("statement_id")}
+
     for run in runs:
         # Display-only casing normalization, same reasoning as
         # exceptions.py's exceptions_vendors() -- keeps the filter
@@ -26,15 +35,20 @@ def validation_list(request: Request, user: str = Depends(require_login)):
         # attributes in sync with what's actually shown.
         run["vendor_display_name"] = smart_title(vendor_display_name(run.get("vendor_name")))
         run["shop"] = smart_title(run.get("shop"))
+        run["is_last_run"] = run.get("statement_id") in last_run_statement_ids
 
     vendor_options = sorted({r["vendor_display_name"] for r in runs if r.get("vendor_display_name")})
     shop_options = sorted({r["shop"] for r in runs if r.get("shop")})
+    # Newest first -- statement_period is "YYYY-MM" (see deps.period_label),
+    # so a reverse string sort is a reverse date sort.
+    period_options = sorted({r["statement_period"] for r in runs if r.get("statement_period")}, reverse=True)
 
     ctx = {
         "active_page": "validation",
         "runs": runs,
         "vendor_options": vendor_options,
         "shop_options": shop_options,
+        "period_options": period_options,
         **sidebar_context(request),
     }
     return render(request, "validation.html", ctx)

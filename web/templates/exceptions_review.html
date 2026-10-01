@@ -27,10 +27,19 @@
     <div class="detail-list-head">
       <h3>{{ exceptions | length }} exception{{ "s" if exceptions | length != 1 }}</h3>
       {% set stmt_qs = ("&statement_id=" + statement.statement_id) if statement and statement.statement_id else "" %}
+      {% set sort_qs = ("&sort=" + sort) if sort else "" %}
+      {% set selected_qs = ("&selected=" + selected.exception_id) if selected else "" %}
       <div class="filter-tabs">
-        <a href="/exceptions/{{ vendor_url_name }}?filter=all{{ stmt_qs }}" class="filter-tab {{ 'active' if filter == 'all' }}">All</a>
-        <a href="/exceptions/{{ vendor_url_name }}?filter=missing{{ stmt_qs }}" class="filter-tab {{ 'active' if filter == 'missing' }}">Missing</a>
-        <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch{{ stmt_qs }}" class="filter-tab {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=all{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'all' }}">All</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=missing{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'missing' }}">Missing</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+      </div>
+      {# Sort chips -- same .filter-tab pill as the reason tabs above. Keep
+         filter, statement_id and the selected exception; "Invoice #" is
+         the default order (no sort param). #}
+      <div class="filter-tabs" aria-label="Sort exceptions">
+        <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ selected_qs }}" class="filter-tab {{ 'active' if not sort }}">Invoice #</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ selected_qs }}&sort=amount" class="filter-tab {{ 'active' if sort == 'amount' }}">Largest amount</a>
       </div>
       <div class="resolve-track">
         <div class="progress-track"><div class="progress-fill" style="width:{{ progress_pct }}%"></div></div>
@@ -50,7 +59,7 @@
 
     <div class="list-scroll">
       {% for exc in exceptions %}
-      <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}&selected={{ exc.exception_id }}"
+      <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ sort_qs }}&selected={{ exc.exception_id }}"
          class="exception-row {{ 'active' if selected and selected.exception_id == exc.exception_id }}">
         <div class="exception-row-top">
           <div class="exception-row-main">
@@ -82,7 +91,7 @@
     </div>
     <div class="detail-view-sub">
       <span>
-        Raised {{ selected.date_raised | friendly_date }}
+        Raised {{ selected.date_raised | friendly_dt }}
         {% if selected.days_open is not none %}
         <span class="badge {{ 'badge-aged' if selected.days_open >= 30 else 'badge-neutral' }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
         {% endif %}
@@ -93,6 +102,7 @@
       <form method="post" action="/exceptions/{{ vendor_url_name }}/escalate" style="margin:0">
         <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
         <input type="hidden" name="filter" value="{{ filter }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="statement_id" value="{{ statement.statement_id if statement else '' }}">
         <button type="submit" class="btn-ghost"><svg class="icon" style="width:13px;height:13px"><use href="#i-flag"/></svg> Escalate</button>
       </form>
@@ -104,6 +114,7 @@
     <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
     <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
     <input type="hidden" name="filter" value="{{ filter }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
 
     <div class="sec-label" style="margin-top:6px">Invoice details</div>
     <div class="field-grid">
@@ -181,6 +192,31 @@
     </div>
     {% endif %}
 
+    {# "Find in NetSuite" -- opens the look-only search modal below. Sits
+       under the "NetSuite record" preview and is independent of it: the
+       preview only ever appears for Amount Mismatch, while this covers
+       every reason that means "did not tie out", including the ones
+       where hand-searching matters most. Opening the modal resolves
+       nothing; Accept/Dispute/Escalate remain the only way to close an
+       exception. #}
+    {% if selected.exception_reason in searchable_reasons %}
+    <div class="ns-find-row">
+      <button type="button" class="btn ns-find-btn" id="nsFindBtn"
+              data-vendor-id="{{ selected.vendor_id or '' }}"
+              data-vendor-name="{{ vendor_name }}"
+              data-vendor-display="{{ vendor_display_name }}"
+              data-invoice="{{ selected.invoice_number or '' }}"
+              data-amount="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}"
+              data-reason="{{ selected.exception_reason }}"
+              data-reason-label="{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}"
+              data-reason-css="{{ reason_badge.get(selected.exception_reason, {}).css or 'grey' }}">
+        <svg class="icon" aria-hidden="true" style="width:14px;height:14px"><use href="#i-search"/></svg>
+        Find in NetSuite
+      </button>
+      <span class="ns-find-hint">Search NetSuite bills without leaving this page — nothing is changed.</span>
+    </div>
+    {% endif %}
+
     <div class="note-field">
       <label>Add a note <span class="field-hint">(optional)</span></label>
       <textarea rows="4" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
@@ -203,6 +239,116 @@
   </div>
 </div>
 </div>
+
+{% if selected and selected.exception_reason in searchable_reasons %}
+{# LOOK-ONLY modal. No <form>, no action, no method, nothing that posts.
+   Selecting rows only drives the footer total; resolving an exception
+   stays with the page's own Accept/Dispute/Escalate forms. #}
+<dialog class="ns-modal" id="nsModal" aria-labelledby="nsModalTitle">
+  <div class="ns-modal-head">
+    <div>
+      <h2 class="ns-modal-title" id="nsModalTitle">Find this invoice in NetSuite</h2>
+      <p class="ns-modal-sub">Search open and paid bills across vendors. Nothing here changes the exception.</p>
+    </div>
+    <button type="button" class="ns-modal-close" id="nsModalClose" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="ns-modal-summary">
+    <div class="ns-summary-main">
+      <div class="ns-summary-vendor" id="nsSumVendor">{{ vendor_display_name }}</div>
+      <div class="ns-summary-line">
+        <span class="ns-summary-inv">Invoice #<span id="nsSumInvoice">{{ selected.invoice_number or "Unknown" }}</span></span>
+        <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'grey' }}" id="nsSumReason">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
+      </div>
+    </div>
+    <div class="ns-summary-amount">
+      <div class="ns-search-label">Statement amount</div>
+      <div class="ns-summary-amount-value" id="nsSumAmount">{{ selected.statement_amount | money }}</div>
+    </div>
+  </div>
+
+  <div class="ns-modal-filters" id="nsFilters">
+    <div class="ns-chip-wrap">
+      <button type="button" class="ns-chip" id="nsChipVendor" aria-expanded="false" aria-haspopup="true">
+        <span class="ns-chip-label">Vendor:</span> <span class="ns-chip-value" id="nsChipVendorValue">{{ vendor_display_name }}</span>
+      </button>
+      <div class="ns-popover" id="nsPopVendor" hidden>
+        <button type="button" class="ns-pop-opt" data-vendor="on">{{ vendor_display_name }}</button>
+        <button type="button" class="ns-pop-opt" data-vendor="off">All vendors</button>
+      </div>
+    </div>
+
+    <div class="ns-chip-wrap">
+      <button type="button" class="ns-chip" id="nsChipAmount" aria-expanded="false" aria-haspopup="true">
+        <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Exact</span>
+      </button>
+      <div class="ns-popover" id="nsPopAmount" hidden>
+        <button type="button" class="ns-pop-opt" data-tol="exact">Exact</button>
+        <button type="button" class="ns-pop-opt" data-tol="up_to">Up to</button>
+        <button type="button" class="ns-pop-opt" data-tol="at_least">At least</button>
+        <div class="ns-pop-custom">
+          <label class="ns-search-label" for="nsAmountInput">Amount</label>
+          <input type="text" id="nsAmountInput" class="ns-date-input" inputmode="decimal"
+                 placeholder="Any" aria-label="Amount (blank = any amount)">
+        </div>
+      </div>
+    </div>
+
+    <div class="ns-chip-wrap">
+      <button type="button" class="ns-chip" id="nsChipDate" aria-expanded="false" aria-haspopup="true">
+        <span class="ns-chip-label">Date:</span> <span class="ns-chip-value" id="nsChipDateValue">Any time</span>
+      </button>
+      <div class="ns-popover" id="nsPopDate" hidden>
+        <button type="button" class="ns-pop-opt" data-range="any">Any time</button>
+        <button type="button" class="ns-pop-opt" data-range="30">Last 30 days</button>
+        <button type="button" class="ns-pop-opt" data-range="90">Last 90 days</button>
+        <button type="button" class="ns-pop-opt" data-range="365">Last 12 months</button>
+        <div class="ns-pop-custom">
+          <label class="ns-search-label" for="nsDateFrom">From</label>
+          <input type="date" id="nsDateFrom" class="ns-date-input">
+          <label class="ns-search-label" for="nsDateTo">To</label>
+          <input type="date" id="nsDateTo" class="ns-date-input">
+          <button type="button" class="btn ns-pop-apply" id="nsDateApply">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ns-chip-wrap">
+      <button type="button" class="ns-chip" id="nsChipStatus" aria-expanded="false" aria-haspopup="true">
+        <span class="ns-chip-label">Status:</span> <span class="ns-chip-value" id="nsChipStatusValue">Open</span>
+      </button>
+      <div class="ns-popover" id="nsPopStatus" hidden>
+        <label class="ns-pop-check"><input type="checkbox" id="nsStatusOpen" checked> Open</label>
+        <label class="ns-pop-check"><input type="checkbox" id="nsStatusPaid"> Paid</label>
+      </div>
+    </div>
+
+    <div class="ns-search-box">
+      <svg class="icon ns-search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <input type="text" id="nsInvoice" class="ns-search-input"
+             placeholder="Enter invoice number (minimum 4 characters)"
+             aria-label="Enter invoice number (minimum 4 characters)">
+    </div>
+    <span class="ns-search-hint" id="nsInvoiceHint" hidden>Enter at least 4 characters</span>
+
+    <button type="button" class="ns-link-btn" id="nsReset">Reset filters</button>
+    <button type="button" class="btn ns-reload-btn" id="nsReload">Reload</button>
+  </div>
+
+  <div class="ns-modal-body" id="nsResults">
+    <div class="ns-modal-empty">Searching&hellip;</div>
+  </div>
+
+  {# Selection/footer totals removed 2026-09-30 (rows are no longer
+     selectable) -- the footer is just the Close button now. #}
+  <div class="ns-modal-foot">
+    <div class="ns-foot-right">
+      <button type="button" class="btn btn-primary ns-foot-close" id="nsModalDone">Close</button>
+    </div>
+  </div>
+</dialog>
+{% endif %}
+
 <script>
 (function () {
   var btn = document.getElementById("bulk-approve-btn");

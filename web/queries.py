@@ -39,6 +39,7 @@ from src.lakehouse.fabric_sql import (
 from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import display_name as vendor_display_name
+from web.time_window import TimeWindow
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -176,6 +177,201 @@ def get_recent_runs(limit: int = 10) -> list:
     return _with_live_exception_counts(rows)
 
 
+RECON_RUN_STATUS_FILTERS = ("all", "reconciled", "exceptions")
+
+
+def get_run_timestamps() -> list:
+    """Every run's reconciliation_timestamp (one narrow column), for the
+    Home page's Month dropdown options (web/time_window.py's
+    month_options()). Unrelated to "Last run" since 2026-09-30 -- see
+    get_outlook_synced_jobs()."""
+    rows = recon_query(
+        "SELECT reconciliation_timestamp FROM silver.recon_summary WHERE is_latest_version = 1"
+    )
+    return [r["reconciliation_timestamp"] for r in rows if r.get("reconciliation_timestamp")]
+
+
+def get_outlook_synced_jobs() -> list:
+    """Every job queued by the mailbox-ingest "Sync to Webapp" flow
+    (web/routers/mailbox_sync.py's _queue_eligible_blobs()) -- the only
+    code path that ever sets source_blob_path; manual uploads
+    (web/routers/upload.py), the dropzone watcher and Event Grid
+    (web/worker.py / web/routers/intake_trigger.py, a different blob
+    container entirely) never do, so this WHERE alone is what makes
+    web/time_window.py's "Last run" (redefined 2026-09-30 as "the most
+    recent Outlook sync") never include anything but Outlook-sourced
+    statements.
+
+    One row per job: submitted_at (when "Sync to Webapp" queued it) and
+    statement_id (NULL until Silver/matching has produced one -- see
+    outlook_last_sync()'s "still processing" handling). Used by both the
+    Home page and Validation's own "Last run" filter, so the two stay
+    scoped to the exact same definition."""
+    return execute_query(
+        "SELECT submitted_at, statement_id FROM jobs WHERE source_blob_path IS NOT NULL ORDER BY submitted_at DESC"
+    )
+
+
+def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: str = None,
+                       limit: int = 10) -> dict:
+    """Everything on Home that the time filter drives, from ONE
+    runs-in-window query, so the KPI cards, the "N of M statements
+    reconciled" line and the runs table always cover exactly the same set
+    of statement_ids. `window` (web/time_window.py) is either a bound
+    [start, end) predicate on reconciliation_timestamp (calendar ranges),
+    a `statement_ids` membership filter applied here in Python ("last",
+    redefined 2026-09-30 as the most recent Outlook sync -- see
+    window.sql()'s own docstring for why this can't be a SQL join), or
+    unbound (None/"all" = all time).
+
+    Returns {"kpis", "runs", "total", "reconciled", "period_options",
+    "statement_count"}:
+
+    - "kpis": the four cards, summed from the window's rows only -- status
+      and period do NOT narrow them. open_exceptions is SUM(exception_count)
+      of those same rows rather than a separate live count of OPEN
+      silver.recon_exceptions rows, so the card always equals the table's
+      Exceptions column (_recompute_summary_counts() keeps exception_count
+      in step with the live OPEN rows; they matched exactly live,
+      2026-09-29). The sidebar's Exceptions dot stays unscoped
+      (get_open_recon_exceptions_count()).
+    - "total"/"reconciled": every run in the window matching status/period
+      (not just the `limit` shown). Counts every silver.recon_summary row
+      as-is, re-runs of the same PDF included -- is_latest_version is 1 on
+      every row this pipeline writes (see fabric_matching.py's
+      _write_summary()). Deliberately no dedup.
+    - "period_options": statement periods of the window's runs, built
+      before the status/period filters, so a status never hides a period.
+
+    Filtering has to happen BEFORE the row cap, and the statement period
+    cannot be a SQL WHERE at all: recon_summary's own statement_period is
+    always NULL (see get_recent_recon_runs()'s docstring) and the real
+    value lives in document_intake_log, on a different database engine. So
+    status/period are applied in Python, then the cap, then the per-row
+    job_id lookups for the rows actually shown."""
+    if status not in RECON_RUN_STATUS_FILTERS:
+        status = "all"
+    period = period or None
+    window_sql, window_params = window.sql() if window else ("", [])
+
+    rows = recon_query(
+        f"""
+        SELECT statement_id, vendor_name, statement_period,
+               total_invoice_count, matched_count, exception_count,
+               statement_total, overall_status, reconciliation_timestamp
+        FROM silver.recon_summary
+        WHERE is_latest_version = 1{window_sql}
+        ORDER BY reconciliation_timestamp DESC
+        """,
+        window_params,
+    )
+    if window is not None and window.statement_ids is not None:
+        rows = [r for r in rows if r.get("statement_id") in window.statement_ids]
+
+    total_invoices = sum(r.get("total_invoice_count") or 0 for r in rows)
+    auto_reconciled = sum(r.get("matched_count") or 0 for r in rows)
+    kpis = {
+        "total_invoices": total_invoices,
+        "auto_reconciled": auto_reconciled,
+        "open_exceptions": sum(r.get("exception_count") or 0 for r in rows),
+        "statement_total": sum(float(r.get("statement_total") or 0) for r in rows),
+        "vendor_count": len({r["vendor_name"] for r in rows if r.get("vendor_name")}),
+        "match_rate": round((auto_reconciled / total_invoices) * 100, 1) if total_invoices else None,
+    }
+
+    # All time reads the whole intake log in one go; a bounded window
+    # (calendar or "last"'s statement_ids) looks up just its own
+    # statement_ids.
+    all_time = window is None or (window.start_utc is None and window.statement_ids is None and not window.empty)
+    _attach_intake_period_and_shop(rows, None if all_time else [r["statement_id"] for r in rows])
+
+    period_options = sorted({r["statement_period"] for r in rows if r.get("statement_period")}, reverse=True)
+
+    filtered = rows
+    if status == "reconciled":
+        filtered = [r for r in filtered if (r.get("exception_count") or 0) == 0]
+    elif status == "exceptions":
+        filtered = [r for r in filtered if (r.get("exception_count") or 0) > 0]
+    if period:
+        filtered = [r for r in filtered if r.get("statement_period") == period]
+
+    reconciled = sum(1 for r in filtered if (r.get("exception_count") or 0) == 0)
+    shown = filtered[:int(limit)]
+    _attach_job_ids_and_display_names(shown)
+    return {
+        "kpis": kpis,
+        "runs": shown,
+        "total": len(filtered),
+        "reconciled": reconciled,
+        "period_options": period_options,
+        "statement_count": len(rows),
+    }
+
+
+def get_recon_runs_panel(status: str = "all", period: str = None, limit: int = 10,
+                         window: TimeWindow = None) -> dict:
+    """The runs-panel slice of get_home_dashboard() -- {"runs", "total",
+    "reconciled", "period_options"}. window=None is all time."""
+    data = get_home_dashboard(window=window, status=status, period=period, limit=limit)
+    return {k: data[k] for k in ("runs", "total", "reconciled", "period_options")}
+
+
+# document_intake_log lookups by statement_id are chunked to stay well
+# under SQL Server's 2100-parameters-per-statement cap.
+_INTAKE_LOOKUP_CHUNK = 1000
+
+
+def _attach_intake_period_and_shop(rows: list, statement_ids: list = None) -> None:
+    """Overrides each row's statement_period (and sets "shop") from
+    document_intake_log -- see get_recent_recon_runs()'s docstring for why
+    recon_summary's own statement_period isn't trusted. With statement_ids
+    given, reads just those (chunked); without, reads the whole log in one
+    query. A statement_id can have more than one intake row
+    (reprocessing); a row with a period wins over one without."""
+    if not rows:
+        return
+    if statement_ids:
+        intake_rows = []
+        for i in range(0, len(statement_ids), _INTAKE_LOOKUP_CHUNK):
+            chunk = statement_ids[i:i + _INTAKE_LOOKUP_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            intake_rows += execute_query(
+                f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
+                f"WHERE statement_id IN ({placeholders})",
+                chunk,
+            )
+    else:
+        intake_rows = execute_query(
+            "SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log"
+        )
+    intake_by_statement = {}
+    for r in intake_rows:
+        existing = intake_by_statement.get(r["statement_id"])
+        if existing is None or (not existing.get("statement_period") and r.get("statement_period")):
+            intake_by_statement[r["statement_id"]] = r
+    for row in rows:
+        intake_row = intake_by_statement.get(row["statement_id"])
+        row["statement_period"] = (intake_row["statement_period"] if intake_row else None) or row["statement_period"]
+        # shop_or_entity is a JSON list (see write_intake_log()) -- same
+        # parse pattern as get_exception_runs()'s shop fix (2026-09-21):
+        # silver.recon_summary/statement have no populated shop field.
+        try:
+            shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
+        except (TypeError, ValueError):
+            shop_list = []
+        row["shop"] = ", ".join(shop_list) if shop_list else None
+
+
+def _attach_job_ids_and_display_names(rows: list) -> None:
+    for row in rows:
+        job_rows = execute_query(
+            "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
+            [row["statement_id"]],
+        )
+        row["job_id"] = job_rows[0]["job_id"] if job_rows else None
+        row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
+
+
 def get_recent_recon_runs(limit: int = 10) -> list:
     """Home page's "Reconciliation runs" panel -- completed statements that
     have gone through the NetSuite matching flow (src/matching/fabric_matching.py),
@@ -211,33 +407,8 @@ def get_recent_recon_runs(limit: int = 10) -> list:
         """
     )
     if rows:
-        statement_ids = [r["statement_id"] for r in rows]
-        placeholders = ", ".join("?" for _ in statement_ids)
-        intake_rows = execute_query(
-            f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
-            f"WHERE statement_id IN ({placeholders})",
-            statement_ids,
-        )
-        intake_by_statement = {r["statement_id"]: r for r in intake_rows}
-        for row in rows:
-            intake_row = intake_by_statement.get(row["statement_id"])
-            row["statement_period"] = (intake_row["statement_period"] if intake_row else None) or row["statement_period"]
-            # shop_or_entity is a JSON list (see write_intake_log()) -- same
-            # parse pattern as get_exception_runs()'s shop fix (2026-09-21):
-            # silver.recon_summary/statement have no populated shop field.
-            try:
-                shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
-            except (TypeError, ValueError):
-                shop_list = []
-            row["shop"] = ", ".join(shop_list) if shop_list else None
-
-    for row in rows:
-        job_rows = execute_query(
-            "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
-            [row["statement_id"]],
-        )
-        row["job_id"] = job_rows[0]["job_id"] if job_rows else None
-        row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
+        _attach_intake_period_and_shop(rows, [r["statement_id"] for r in rows])
+    _attach_job_ids_and_display_names(rows)
     return rows
 
 
@@ -491,7 +662,7 @@ def get_vendor_summaries() -> list:
     return sorted(vendors, key=lambda v: v["vendor_name"] or "")
 
 
-def get_exception_runs() -> list:
+def get_exception_runs(window: TimeWindow = None) -> list:
     """One row per statement RUN (every PDF ever reconciled), not one per
     vendor -- see get_vendor_summaries() for the older vendor-rollup
     version this sits alongside (still used internally by
@@ -506,6 +677,18 @@ def get_exception_runs() -> list:
     the current version per vendor+period (unlike get_vendor_summaries()),
     since browsing period-wise is the point.
 
+    `window` (web/time_window.py) scopes summary-backed runs by run date
+    (calendar ranges, applied in SQL) or by "last" (the most recent
+    Outlook sync's statement_ids, checked here in Python, same reasoning
+    as get_home_dashboard()); None/"all" = every run. Exceptions-only
+    vendors (_get_exceptions_only_vendors(), appended below) have no
+    recon_summary row at all and so no run timestamp or statement_id --
+    they are therefore appended AFTER the window filter and are never
+    subject to it: they always show and always count toward the
+    Exceptions overview's header, regardless of the selected time filter
+    (per the user 2026-09-30 -- a real open-exception backlog should
+    never be hidden just because it has nothing to filter by).
+
     shop comes straight off silver.recon_summary (already written per-run
     by fabric_matching.py's _write_summary()). billing_location AND
     statement_period do NOT reliably live there -- silver.statement (and
@@ -517,15 +700,25 @@ def get_exception_runs() -> list:
     statement_period='2026-08', billing_location='Manchester, New
     Hampshire') -- joined in via a second batched query, same
     N+1-avoidance pattern as the reason_breakdown/aging batching below."""
+    window_sql, window_params = window.sql() if window else ("", [])
+    # "WHERE 1 = 1" (rather than the bare, condition-less FROM this had
+    # before window support existed) so a calendar window's "AND ..."
+    # fragment always has something to attach to; harmless no-op when
+    # window_sql is empty (None/"all"), so unwindowed callers see the
+    # exact same rows as before.
     runs = recon_query(
-        """
+        f"""
         SELECT statement_id, vendor_name, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
         FROM silver.recon_summary
+        WHERE 1 = 1{window_sql}
         ORDER BY reconciliation_timestamp DESC
-        """
+        """,
+        window_params,
     )
+    if window is not None and window.statement_ids is not None:
+        runs = [r for r in runs if r.get("statement_id") in window.statement_ids]
 
     if runs:
         statement_ids = [r["statement_id"] for r in runs]
@@ -871,21 +1064,40 @@ def _with_aging_fields(rows: list) -> list:
     return rows
 
 
-def get_open_exceptions(statement_id: str, reason_filter: str = None) -> list:
+# Exceptions review list's sort chips (?sort=...). A fixed whitelist --
+# the URL value picks one of these clauses and is never interpolated
+# itself; anything unrecognised (including the removed "oldest") falls
+# back to the original invoice-number order. invoice_number is the
+# tie-breaker so equal amounts keep a stable order between page loads.
+# Credits (negative statement_amount) land at the bottom of "amount".
+# No date_raised sort: every exception on a statement is raised in the
+# same matching run with the same timestamp, so it only ever repeated
+# invoice order (seen live 2026-09-29).
+EXCEPTION_SORTS = {
+    "amount": "ge.statement_amount DESC, ge.invoice_number",
+}
+_DEFAULT_EXCEPTION_ORDER_BY = "ge.invoice_number"
+
+
+def _exceptions_order_by(sort: str = None) -> str:
+    return EXCEPTION_SORTS.get(sort, _DEFAULT_EXCEPTION_ORDER_BY)
+
+def get_open_exceptions(statement_id: str, reason_filter: str = None, sort: str = None) -> list:
+    order_by = _exceptions_order_by(sort)
     reasons = _REASON_FILTER_SQL.get(reason_filter)
     if reasons:
         placeholders = ", ".join("?" for _ in reasons)
         return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
             WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN' AND ge.exception_reason IN ({placeholders})
-            ORDER BY ge.invoice_number
+            ORDER BY {order_by}
             """,
             [statement_id, *reasons],
         ))
     return _with_aging_fields(recon_query(
-        _OPEN_EXCEPTIONS_SELECT + """
+        _OPEN_EXCEPTIONS_SELECT + f"""
         WHERE ge.statement_id = ? AND ge.exception_status = 'OPEN'
-        ORDER BY ge.invoice_number
+        ORDER BY {order_by}
         """,
         [statement_id],
     ))
@@ -929,21 +1141,23 @@ _ORPHAN_EXCEPTIONS_WHERE = """
 """
 
 
-def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None) -> list:
+def get_open_exceptions_for_source_file(source_file: str, reason_filter: str = None,
+                                        sort: str = None) -> list:
+    order_by = _exceptions_order_by(sort)
     reasons = _REASON_FILTER_SQL.get(reason_filter)
     if reasons:
         placeholders = ", ".join("?" for _ in reasons)
         return _with_aging_fields(recon_query(
             _OPEN_EXCEPTIONS_SELECT + f"""
             WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN' AND ge.exception_reason IN ({placeholders})
-            ORDER BY ge.invoice_number
+            ORDER BY {order_by}
             """,
             [source_file, *reasons],
         ))
     return _with_aging_fields(recon_query(
         _OPEN_EXCEPTIONS_SELECT + f"""
         WHERE {_ORPHAN_EXCEPTIONS_WHERE} AND ge.exception_status = 'OPEN'
-        ORDER BY ge.invoice_number
+        ORDER BY {order_by}
         """,
         [source_file],
     ))

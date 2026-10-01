@@ -47,3 +47,7 @@ jinja2>=3.1.0
 python-multipart>=0.0.9
 itsdangerous>=2.1.0
 bcrypt>=4.1.0
+tzdata>=2024.1  # zoneinfo.ZoneInfo("America/New_York") in web/deps.py's friendly_dt() --
+                # Windows has no system tz database at all, so ZoneInfo raises
+                # ZoneInfoNotFoundError there without this package. Harmless on Linux
+                # (the container falls back to the system tz database first).
