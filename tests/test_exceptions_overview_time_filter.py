@@ -255,6 +255,19 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self._get("/exceptions?range=bogus")
         self.assertEqual(self._window().range, "last")
 
+    def test_no_outlook_syncs_yet_defaults_to_all_time(self):
+        # Found on dev 2026-10-01: with no Outlook syncs at all, the "last"
+        # default is an empty window, so a plain page load falls back to
+        # "all" (the full backlog) instead. An unrecognised range lands on
+        # the same default; an explicit ?range=last is still honoured.
+        with mock.patch("web.queries.get_outlook_synced_jobs", lambda: []):
+            self._get("/exceptions")
+            self.assertEqual(self._window().range, "all")
+            self._get("/exceptions?range=bogus")
+            self.assertEqual(self._window().range, "all")
+            self._get("/exceptions?range=last")
+            self.assertEqual(self._window().range, "last")
+
     def test_last_run_reachable_via_the_chip(self):
         html = self._get("/exceptions?range=last")
         self.assertEqual(self._window().range, "last")

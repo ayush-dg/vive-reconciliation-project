@@ -90,18 +90,23 @@ def exceptions_url(filters: dict, **changes) -> str:
 @router.get("/exceptions")
 def exceptions_vendors(request: Request, user: str = Depends(require_login),
                        range: str = "", date: str = "", month: str = "", sync: str = ""):
-    # Time filter (2026-09-30) -- same controls/definitions as Home, and
-    # (since 2026-10-01) the same "last" default: the most recent Outlook
-    # sync, not the full backlog. ?date=/?month= alone still imply their
-    # own range, same as Home; anything else unrecognised falls back to
-    # "last".
-    range_param = range or None
-    if range_param and range_param not in tw.RANGES:
-        range_param = "last"
-    if not range_param and not date and not month:
-        range_param = "last"
     timestamps = queries.get_run_timestamps()
     outlook_jobs = queries.get_outlook_synced_jobs()
+    sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
+    # Time filter (2026-09-30) -- same controls/definitions as Home, and
+    # (since 2026-10-01) the same "last" default: the most recent Outlook
+    # sync, not the full backlog. But "Last run" means nothing when there's
+    # never been a run, so an empty sync history falls back to "all" --
+    # showing everything instead of an effectively-empty page (found on
+    # dev, which had no Outlook syncs yet). ?date=/?month= alone still
+    # imply their own range, same as Home; anything else unrecognised
+    # falls back to the same default.
+    default_range = "last" if sync_options else "all"
+    range_param = range or None
+    if range_param and range_param not in tw.RANGES:
+        range_param = default_range
+    if not range_param and not date and not month:
+        range_param = default_range
     window = tw.resolve_window(range_param, date or None, month or None,
                                timestamps=timestamps, outlook_jobs=outlook_jobs, sync_=sync or None)
 
@@ -167,7 +172,6 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
 
     filters = {"range": window.range, "date": window.date, "month": window.month, "sync": sync or ""}
     new_window = {"date": None, "month": None, "sync": None}
-    sync_options, sync_truncated = tw.outlook_sync_options(outlook_jobs)
     selected_sync = (window.sync_time_utc.isoformat() + "Z") if (window.range == "last" and not window.empty) else ""
     # Same as dashboard.py: the sync picker's button is highlighted (and
     # the Last run chip isn't) only when the URL names a sync with ?sync=;
