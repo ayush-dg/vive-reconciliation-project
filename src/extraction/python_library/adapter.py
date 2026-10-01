@@ -81,6 +81,7 @@ _VENDOR_DISPLAY_NAMES = {
     "extract_fenix": "Fenix NE",
     "extract_rivian": "Rivian, LLC",
     "extract_allstar": "All Star Auto Lights, Inc.",
+    "extract_grappone": "Grappone Automotive Group",
 }
 
 # Which summary key holds the statement's own printed grand total, per
@@ -103,6 +104,7 @@ _PRINTED_TOTAL_KEY = {
     "extract_fenix": "total_due_printed",
     "extract_rivian": "total_printed",
     "extract_allstar": "amount_due_printed",
+    "extract_grappone": "total_printed",
 }
 
 # Which summary key holds the statement date, per module -- these
@@ -125,6 +127,7 @@ _STATEMENT_DATE_KEY = {
     "extract_fenix": "period_end",
     "extract_rivian": "statement_date_iso",
     "extract_allstar": "statement_date",
+    "extract_grappone": "statement_date",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -304,6 +307,19 @@ _FIELD_MAP = {
         # columns -- NetSuite matching reads invoice_amount (the original
         # bill amount) via dbt/vive_recon/seeds/vendor_field_mapping.csv.
         "charge_field": "open_balance", "credit_field": None,
+    },
+    "extract_grappone": {
+        "invoice_number": ("document",),
+        "date_field": "date", "due_date_field": None,
+        "transaction_code_field": "dept_code",
+        # "balance", not "purchases" -- same reason as extract_allstar /
+        # extract_wilberts above: the printed PLEASE PAY THIS AMOUNT
+        # reconciles against sum(balance). Each paid invoice is reprinted on
+        # a later payment line, so purchases minus payments_credits nets the
+        # history, not the open balance. This only drives the arithmetic
+        # gate and the extracted-data columns -- NetSuite matching reads
+        # purchases/payments_credits via dbt/vive_recon/seeds/vendor_field_mapping.csv.
+        "charge_field": "balance", "credit_field": None,
     },
 }
 

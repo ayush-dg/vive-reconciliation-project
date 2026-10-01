@@ -141,12 +141,6 @@ DARLINGS_AUTO_GROUP,Invoice Number,original_invoice_number,string,v1,1
 DARLINGS_AUTO_GROUP,Charges,charge_amount,decimal,v1,1
 DARLINGS_AUTO_GROUP,Pymts /Credits,payment_amount,decimal,v1,1
 DARLINGS_AUTO_GROUP,Amount Due,amount_remaining,decimal,v1,1
-GRAPPONE,DATE,line_date,date,v1,1
-GRAPPONE,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
-GRAPPONE,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
-GRAPPONE,PURCHASES,charge_amount,decimal,v1,1
-GRAPPONE,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
-GRAPPONE,BALANCE,amount_remaining,decimal,v1,1
 NATIONAL_COATINGS_AND_SUPPLIES,Trans Date,line_date,date,v1,1
 NATIONAL_COATINGS_AND_SUPPLIES,Date Due,due_date,date,v1,1
 NATIONAL_COATINGS_AND_SUPPLIES,Trans ID / Alt ID,original_invoice_number,string,v1,1
@@ -164,3 +158,10 @@ PARTS_BY_COCHRAN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
 PARTS_BY_COCHRAN,PURCHASES,charge_amount,decimal,v1,1
 PARTS_BY_COCHRAN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
 PARTS_BY_COCHRAN,BALANCE,amount_remaining,decimal,v1,1
+GRAPPONE,date,line_date,date,v1,1
+GRAPPONE,dept_code,transaction_code,string,v1,1
+GRAPPONE,dept_name,description_raw,string,v1,1
+GRAPPONE,document,original_invoice_number,string,v1,1
+GRAPPONE,purchases,charge_amount,decimal,v1,1
+GRAPPONE,payments_credits,payment_amount,decimal,v1,1
+GRAPPONE,balance,amount_remaining,decimal,v1,1
