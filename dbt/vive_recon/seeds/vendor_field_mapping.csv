@@ -154,3 +154,13 @@ NATIONAL_COATINGS_AND_SUPPLIES,Check / PO No.,po_number,string,v1,1
 NATIONAL_COATINGS_AND_SUPPLIES,Trans Type,transaction_code,string,v1,1
 NATIONAL_COATINGS_AND_SUPPLIES,Amount,charge_amount,decimal,v1,1
 NATIONAL_COATINGS_AND_SUPPLIES,Balance,amount_remaining,decimal,v1,1
+A_NEW_AGE_AUTO_GLASS,Date,line_date,date,v1,1
+A_NEW_AGE_AUTO_GLASS,Order Number,original_invoice_number,string,v1,1
+A_NEW_AGE_AUTO_GLASS,Total,charge_amount,decimal,v1,1
+A_NEW_AGE_AUTO_GLASS,Customer Name,description_raw,string,v1,1
+PARTS_BY_COCHRAN,DATE,line_date,date,v1,1
+PARTS_BY_COCHRAN,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+PARTS_BY_COCHRAN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+PARTS_BY_COCHRAN,PURCHASES,charge_amount,decimal,v1,1
+PARTS_BY_COCHRAN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+PARTS_BY_COCHRAN,BALANCE,amount_remaining,decimal,v1,1
