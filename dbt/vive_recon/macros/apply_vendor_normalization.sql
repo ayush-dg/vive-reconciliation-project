@@ -39,6 +39,14 @@
     keeps the trailing letter lowercase where FOW's happens not to need
     it -- confirmed live, e.g. GCW590306G -> 590306g, CHW253431C ->
     253431c, both exact ties against bronze.netsuite_vendorbill).
+    keep_before (added 2026-10-05: National Coatings & Supplies prints
+    "Trans ID / Alt ID" in one column, e.g. "28170619 / 8262026" or
+    "28093361 / 28051208"; NetSuite's tranid is always the Trans ID, the
+    left side -- confirmed on all 16 such lines across 5 August statements,
+    each an exact tie as a bill or credit; the Alt ID is a date or the
+    original invoice a credit was applied to): keeps the text before the
+    first occurrence of vnr.pattern, trimmed; a value without vnr.pattern
+    passes through unchanged.
 #}
 {% macro apply_vendor_normalization(invoice_col, line_type_col) %}
     case
@@ -60,6 +68,12 @@
                                  end
                         when vnr.rule_type = 'lowercase'
                             then lower({{ invoice_col }})
+                        when vnr.rule_type = 'keep_before'
+                            then case
+                                    when charindex(vnr.pattern, {{ invoice_col }}) > 1
+                                        then rtrim(left({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) - 1))
+                                    else {{ invoice_col }}
+                                 end
                         else {{ invoice_col }}
                     end
                 )
@@ -76,6 +90,12 @@
                  end
         when vnr.rule_type = 'lowercase'
             then lower({{ invoice_col }})
+        when vnr.rule_type = 'keep_before'
+            then case
+                    when charindex(vnr.pattern, {{ invoice_col }}) > 1
+                        then rtrim(left({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) - 1))
+                    else {{ invoice_col }}
+                 end
         else {{ invoice_col }}
     end
 {% endmacro %}
