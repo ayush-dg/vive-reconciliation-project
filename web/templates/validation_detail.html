@@ -29,6 +29,7 @@
     <div class="kpi-sub">
       {% if intake.passed %}
       <span class="badge success">✓ Matches</span>
+      {% if intake.validation_method %}<span class="badge {{ 'neutral' if intake.validation_method == 'primary' else 'info' }}">{{ intake.validation_method | validation_method_label }}</span>{% endif %}
       {% else %}
       <span class="badge warning">⚠ {{ intake.validation_status | replace("_", " ") | title if intake.validation_status else "Mismatch" }}</span>
       {% endif %}
@@ -46,8 +47,44 @@
     <tr><td style="color:var(--text-secondary)">Vendor</td><td>{{ intake.vendor_name or "—" }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Statement period</td><td>{{ intake.statement_period | period_label }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Checked</td><td>{{ intake.ingestion_timestamp | friendly_dt }}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Validated by</td><td>{{ intake.validation_method | validation_method_label if intake.validation_method else "—" }}</td></tr>
+    {% if intake.primary_computed is not none %}
+    <tr><td style="color:var(--text-secondary)">Charges − credits</td><td>{{ intake.primary_computed | money }}</td></tr>
+    {% endif %}
+    {% if intake.previous_balance is not none %}
+    <tr><td style="color:var(--text-secondary)">Printed previous balance</td><td>{{ intake.previous_balance | money }} <span style="color:var(--text-secondary)">({{ intake.previous_balance_source }})</span></td></tr>
+    {% endif %}
   </tbody>
 </table>
+
+{% if intake.validation_attempts %}
+<div class="section-header">
+  <div class="section-title">Validation checks tried</div>
+</div>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Check</th><th>Result</th><th>Detail</th></tr>
+  </thead>
+  <tbody>
+    {% for attempt in intake.validation_attempts %}
+    <tr>
+      <td>{{ attempt.method | validation_method_label }}</td>
+      <td>
+        {% if attempt.passed %}<span class="badge success">Matched</span>
+        {% elif attempt.applicable %}<span class="badge warning">Did not match</span>
+        {% else %}<span class="badge neutral">Not applicable</span>{% endif %}
+      </td>
+      <td>
+        {% if attempt.computed is not none %}{{ attempt.computed | money }}{% if attempt.reason %} — {% endif %}{% endif %}{{ attempt.reason }}
+        {% if attempt.first_broken_row %}
+        <div style="color:var(--text-secondary)">First broken row: {{ attempt.first_broken_row.invoice_number or ("row " ~ attempt.first_broken_row.row_number) }} — expected balance {{ attempt.first_broken_row.expected_balance | money }}, printed {{ attempt.first_broken_row.printed_balance | money }}</div>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 <div class="section-header">
   <div class="section-title">Extracted amounts ({{ lines | length }})</div>

@@ -53,6 +53,14 @@ from src.validation.arithmetic_gate import compute_statement_total_from_invoices
 
 ROW_CONFIDENCE = 0.75
 
+# document_metadata.document_type for a PDF in which the model found no
+# line-item table at all (see generate_with_file()).
+NOT_A_STATEMENT = "NOT_A_STATEMENT"
+
+# _real_file_call()'s error marker for a read timeout, which
+# generate_with_file() never retries.
+READ_TIMEOUT_ERROR = "READ_TIMEOUT"
+
 # Applied to a row's line_confidence only when the model omits a "confidence"
 # field, or returns something unparseable/out-of-range — deliberately below
 # the 0.0 validate_invoice() threshold (config/validation/extraction_rules.json)
@@ -188,6 +196,20 @@ STEP 3: Extract every single data row exactly as printed. Every row object must 
   7/31) IS included, per the KEEP test above. For any row you do keep
   under this rule, use null for whichever fields are genuinely blank or
   not applicable on that row.
+- A "LAST PAYMENT: <date> <amount>" note printed OUTSIDE the transaction
+  table (in an account-summary area, e.g. under the item list next to the
+  aging buckets or totals) is account information, not a transaction —
+  never emit it as a row. Only a line printed INSIDE the transaction table
+  itself is a candidate for the KEEP test above.
+- A PER-INVOICE RECAP LINE is also excluded: some dealer statements print,
+  after an invoice that has several lines (the charge and its credit
+  memos/payments), an extra line with no date and no invoice number of its
+  own that just shows that invoice's net remaining balance. That recap
+  line is not a transaction — do not emit it as a row.
+- If the table has an "Unalloc." / "Unallocated" column and a separate
+  "Due" column, they are TWO columns even when the header prints them run
+  together (e.g. "Unalloc. Due"): declare both, and put each value under
+  its own column.
 - Include a "confidence" field (0.0-1.0) for every row: 0.9+ only if every
   character is unambiguous; lower it for anything uncertain — unclear
   handwriting/scan quality, an invoice number you had to guess between two
@@ -216,6 +238,24 @@ Also extract document-level metadata at the top of the JSON response:
   rows — only report a number here if you can see it printed on the
   document as its own total figure. If no such total is printed
   anywhere on the document, report null.
+- previous_balance: the balance brought forward from the previous
+  statement, exactly as PRINTED (labels such as "Balance Forward",
+  "Previous Balance", "PRV Balance", "BFWD", "Beg. Balance"). This is the
+  figure the balance-forward row you excluded from "rows" carries. Never
+  calculate it. Report null if none is printed. Also report
+  previous_balance_label: the label text printed next to it, verbatim
+  (null when previous_balance is null).
+- section_totals: ONLY when the line items are printed in separate
+  sections that each have their own printed subtotal (e.g. one section
+  per account or location, each ending or starting with a line like
+  "Invoices: 39  Amount Due: $25,603.60"), report one entry per section
+  printed ANYWHERE in this document, including a section that is only
+  partly shown: {"section": "<section name as printed>", "subtotal":
+  <printed subtotal>, "invoice_count": <printed invoice count or null>}.
+  In that case also add a "section" key to every row naming the section
+  it is printed under (this "section" key is in addition to the keys in
+  columns_found, like "confidence"). If the document has no such
+  sections, report section_totals as null and do not add "section" keys.
 
 Also look for the CUSTOMER's billing information -- the company/shop
 this statement is billed to (NOT the vendor issuing the statement).
@@ -244,6 +284,9 @@ Return JSON:
   vendor_name: '...',
   statement_date: '...',
   statement_total_as_printed: <number or null>,
+  previous_balance: <number or null>,
+  previous_balance_label: <string or null>,
+  section_totals: [{section: '...', subtotal: <number>, invoice_count: <number or null>}] or null,
   shop_or_entity: <string or null>,
   billing_location: <string or null>,
   columns_found: [exact column names from header, in left-to-right order],
@@ -312,9 +355,35 @@ PASSTHROUGH_FIELD_NAMES = ("balance_forward", "period_activity", "credit_applied
 EMBEDDED_INVOICE_RE = re.compile(r'(?:invoice|credit)\s*#\s*([A-Za-z0-9\-]+)', re.IGNORECASE)
 DUE_DATE_KEYWORDS = ("due date",)
 DATE_KEYWORDS = ("invoice date", "posting date", "transaction date", "date")
-OUTSTANDING_KEYWORDS = ("amount due", "balance", "outstanding", "remaining", "remain", "net amount", "unpaid", "due")
+# "open amount"/"open amt" (2026-10-06): O'Reilly's per-row OPEN AMOUNT --
+# the column its printed total adds up -- matched no keyword, so every
+# O'Reilly row went through the value-based fallback instead.
+OUTSTANDING_KEYWORDS = ("amount due", "balance", "outstanding", "remaining", "remain", "net amount", "unpaid", "due",
+                        "open amount", "open amt")
 CREDIT_KEYWORDS = ("credits", "payments", "credit memo", "credit", "applied", "paid", "pymt", "pymts")
 CHARGE_KEYWORDS = ("charges", "purchases", "amount charged", "invoice amt", "debit", "gross amount", "orig amt", "original amount", "charged", "invoice amount")
+# Exact-match headers (2026-10-06). Substring matching can't be used for
+# these: "charge"/"payment" would also hit "Finance Charge"/"Payment Due
+# Date"-style headers. Headlights Depot and Wheel Collision print singular
+# "Charge"/"Payment" columns that matched nothing, so their running Balance
+# column ended up summed as if it were the charge amount.
+EXACT_CHARGE_HEADERS = ("amount", "charge")
+EXACT_CREDIT_HEADERS = ("payment",)
+# A header naming BOTH a charge word and "credit" is one signed amount
+# column (positive = charge, negative = credit), e.g. Continental's
+# "Invoice / Credit" or Parts Authority's "Charges and Credits" -- not a
+# credit column. Mirrors adapter.py's pdfplumber signed_field handling.
+SIGNED_COLUMN_CHARGE_WORDS = ("invoice", "charge", "debit")
+SIGNED_COLUMN_EXCLUDE_WORDS = ("#", " no", "number", "num.", "date")
+# Never a credit column despite containing "applied": Yerty's "Applied To"
+# holds a PO number, which was subtracted as a 7,700,922 credit per row.
+NOT_CREDIT_PHRASES = ("applied to",)
+# Free-text marker of an informational "last payment" note (see
+# _row_to_invoice()).
+LAST_PAYMENT_NOTE_RE = re.compile(r"^\s*last\s+payment\b", re.IGNORECASE)
+# Preferred columns for the value-based amount fallback, in order of
+# preference when several currency-shaped cells are present.
+FALLBACK_AMOUNT_HEADER_WORDS = ("total", "amount", "balance", "due", "open")
 RO_KEYWORDS = ("ro #", "ro no", "repair order")
 PO_KEYWORDS = ("po #", "po no", "purchase order")
 WORK_ORDER_KEYWORDS = ("work order", "wo #", "wo no")
@@ -455,8 +524,8 @@ class ClaudeSonnetClient(AIClient):
 
         try:
             import base64
-            with open(pdf_path, "rb") as f:
-                pdf_b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+            pdf_bytes = self._pdf_bytes_for_upload(pdf_path)
+            pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
         except Exception as e:
             latency_ms = (time.monotonic() - start) * 1000
             return AIResponse(
@@ -468,6 +537,23 @@ class ClaudeSonnetClient(AIClient):
         for attempt in range(1, max_retries + 2):
             try:
                 success, text, error = self._real_file_call(pdf_b64, temperature, max_tokens)
+                if not success and error == READ_TIMEOUT_ERROR:
+                    # A read timeout on one document is systematic (the
+                    # response is too long to finish inside timeout_seconds),
+                    # not transient -- retrying just burns another full
+                    # timeout. 3 attempts x 600 s equals the worker's
+                    # 1800 s job cap, so on 2026-10-01 customerinvoice
+                    # (15).pdf (17 pages, ~416 rows) was most likely killed
+                    # inside this loop before the pdfplumber fallback could
+                    # run. Same fail-fast reasoning as the truncation check
+                    # below.
+                    print(f"  [ClaudeSonnetClient] Read timeout — not retrying, falling back")
+                    last_error = "request timed out (not retried)"
+                    latency_ms = (time.monotonic() - start) * 1000
+                    return AIResponse(
+                        success=False, provider="claude_sonnet", model=self.model,
+                        latency_ms=latency_ms, attempt_count=attempt, error=last_error,
+                    )
                 if not success:
                     raise RuntimeError(error)
 
@@ -498,6 +584,10 @@ class ClaudeSonnetClient(AIClient):
                 if statement_total_as_printed is None and vendor_name and "RH LONG MOTOR" in vendor_name.upper():
                     statement_total_as_printed = self._find_total_after_anchor(pdf_path, "UNAPPLIED CREDITS")
 
+                previous_balance = self._to_float(parsed.get("previous_balance"))
+                previous_balance_label = parsed.get("previous_balance_label") or None
+                section_totals = self._parse_section_totals(parsed.get("section_totals"))
+
                 print(f"  [ClaudeSonnetClient] Columns found: {columns_found}")
 
                 truncation_reason = self._detect_truncation(parsed, rows, columns_found, pdf_path)
@@ -517,7 +607,20 @@ class ClaudeSonnetClient(AIClient):
                     vendor_name=vendor_name, statement_date=statement_date,
                     statement_total_as_printed=statement_total_as_printed,
                     shop_or_entity=shop_or_entity_raw, billing_location=billing_location,
+                    previous_balance=previous_balance, previous_balance_label=previous_balance_label,
+                    section_totals=section_totals,
                 )
+                if not rows and not columns_found:
+                    # The model found no line-item table at all (e.g. a
+                    # printed email thread -- Jack Daniels Porsche,
+                    # 2026-10-01). That's a correct answer about a document
+                    # that isn't a statement, not an extraction failure.
+                    result["document_metadata"]["document_type"] = NOT_A_STATEMENT
+                    result["warnings"].append({
+                        "code": NOT_A_STATEMENT,
+                        "message": "No line-item table found -- this PDF does not look like a vendor statement.",
+                        "severity": "HIGH",
+                    })
 
                 latency_ms = (time.monotonic() - start) * 1000
                 text_out = json.dumps(result)
@@ -588,8 +691,82 @@ class ClaudeSonnetClient(AIClient):
                 if block.get("type") == "text"
             )
             return True, text, None
+        except requests.exceptions.ReadTimeout:
+            return False, "", READ_TIMEOUT_ERROR
         except Exception as e:
             return False, "", self._clean_error(str(e))
+
+    MAX_UPLOAD_PDF_BYTES = 20 * 1024 * 1024
+    _RASTER_DPI_STEPS = (150, 110, 80)
+
+    def _pdf_bytes_for_upload(self, pdf_path: str) -> bytes:
+        """The PDF's own bytes, unless the file is over MAX_UPLOAD_PDF_BYTES:
+        then every page is re-rendered as a JPEG at the first DPI step that
+        brings it under the limit. A very high-resolution scan otherwise
+        exceeds the API's request size once base64-encoded -- Fred Beans-
+        Rockland.pdf (27.5 MB, nine ~600 dpi page images) got HTTP 400 on
+        2026-10-01, while the same vendor's 7.5 MB, 9-page scan went through.
+        Re-rendering drops any text layer, which is why it only applies
+        above the limit. Never raises -- on any failure the original bytes
+        are sent unchanged."""
+        with open(pdf_path, "rb") as f:
+            data = f.read()
+        if len(data) <= self.MAX_UPLOAD_PDF_BYTES:
+            return data
+        try:
+            for dpi in self._RASTER_DPI_STEPS:
+                shrunk = self._rasterize_pdf(pdf_path, dpi)
+                if len(shrunk) <= self.MAX_UPLOAD_PDF_BYTES:
+                    print(f"  [ClaudeSonnetClient] PDF is {len(data):,} bytes — sending a {dpi} dpi "
+                          f"re-render ({len(shrunk):,} bytes) instead")
+                    return shrunk
+            print(f"  [ClaudeSonnetClient] PDF is {len(data):,} bytes and stays over the limit "
+                  f"even at {self._RASTER_DPI_STEPS[-1]} dpi — sending it unchanged")
+        except Exception as e:
+            print(f"  [ClaudeSonnetClient] Could not re-render oversized PDF ({e}) — sending it unchanged")
+        return data
+
+    @staticmethod
+    def _rasterize_pdf(pdf_path: str, dpi: int) -> bytes:
+        try:
+            import pymupdf
+        except ImportError:  # older PyMuPDF only exposes the fitz name
+            import fitz as pymupdf
+        source = pymupdf.open(pdf_path)
+        target = pymupdf.open()
+        try:
+            for page in source:
+                pixmap = page.get_pixmap(dpi=dpi)
+                new_page = target.new_page(width=page.rect.width, height=page.rect.height)
+                new_page.insert_image(new_page.rect, stream=pixmap.tobytes("jpeg", jpg_quality=80))
+            return target.tobytes(garbage=3, deflate=True)
+        finally:
+            target.close()
+            source.close()
+
+    @classmethod
+    def _parse_section_totals(cls, raw) -> Optional[list]:
+        """Normalizes the model's section_totals list; None when absent or
+        when any entry lacks a section name or a numeric subtotal (an
+        incomplete list must not let the section_subtotal check run on a
+        partial picture of the document)."""
+        if not raw or not isinstance(raw, list):
+            return None
+        sections = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                return None
+            name = str(entry.get("section") or "").strip()
+            subtotal = cls._to_float(entry.get("subtotal"))
+            if not name or subtotal is None:
+                return None
+            count = entry.get("invoice_count")
+            try:
+                count = int(count) if count is not None and str(count).strip() != "" else None
+            except (TypeError, ValueError):
+                count = None
+            sections.append({"section": name, "subtotal": subtotal, "invoice_count": count})
+        return sections or None
 
     # ---- truncation detection ----
 
@@ -655,7 +832,93 @@ class ClaudeSonnetClient(AIClient):
             if invoice is None:
                 continue
             invoices.append(invoice)
+        invoices = self._drop_recap_rows(invoices)
+        self._apply_running_ledger_mapping(invoices, field_map)
         return invoices, fallback_warnings
+
+    @staticmethod
+    def _signed_row_amount(inv: dict) -> float:
+        credit = abs(inv.get("credit") or 0)
+        if credit:
+            return -credit
+        return inv.get("outstanding_amount") or 0.0
+
+    @classmethod
+    def _drop_recap_rows(cls, invoices: list) -> list:
+        """Drops a per-invoice recap line: a row with no invoice number and
+        no date whose amount equals the net of the immediately preceding 2+
+        consecutive rows that all share one invoice number. CDK/Reynolds
+        dealer statements print one after every multi-line invoice (charge
+        + its credit memos) showing that invoice's net balance; the prompt
+        says to exclude them, but on 2026-10-01 Claude kept 19 of them
+        across 4 statements (Toyota of Hackensack, Hoselton, Toyota of
+        Dartmouth, Blaise Alexander), double-counting each invoice. Replayed
+        over every Oct 1 failing statement's rows, this rule matched exactly
+        those 19 rows and nothing else."""
+        kept = []
+        for inv in invoices:
+            if (not inv.get("invoice_number") and not inv.get("invoice_date")
+                    and not inv.get("informational") and cls._signed_row_amount(inv)):
+                group = []
+                for previous in reversed(kept):
+                    number = previous.get("invoice_number")
+                    if not number or (group and number != group[0].get("invoice_number")):
+                        break
+                    group.append(previous)
+                if len(group) >= 2:
+                    group_net = round(sum(cls._signed_row_amount(p) for p in group), 2)
+                    if abs(group_net - round(cls._signed_row_amount(inv), 2)) < 0.005:
+                        print(f"  [ClaudeSonnetClient] Row {inv.get('row_number')}: skipped — recap line "
+                              f"for invoice {group[0].get('invoice_number')} ({group_net:,.2f})")
+                        continue
+            kept.append(inv)
+        return kept
+
+    @classmethod
+    def _apply_running_ledger_mapping(cls, invoices: list, field_map: dict) -> None:
+        """LKQ/Keystone ledger layout (Balance Forward / Period Activity /
+        Credit Applied / Payment Applied / Balance Due). Keystone prints
+        Balance Due as a per-row open balance, but LKQ Gorham/Thruway print
+        it as a RUNNING balance -- the same headers, two meanings. Only when
+        the extracted Balance Due values provably chain (each row's balance
+        = previous balance + its activity - its credit/payment applied, on
+        at least 80% of consecutive pairs) is the row's amount taken from
+        Period Activity / Credit Applied / Payment Applied instead of the
+        running balance, with Balance Due kept as amount_due for the
+        running-balance validation check. Keystone-style open-item ledgers
+        don't chain and are left exactly as before. Mutates in place."""
+        if "period_activity" not in field_map or "charges" in field_map or not invoices:
+            return
+
+        def activity(inv):
+            return ((inv.get("period_activity") or 0)
+                    - abs(inv.get("credit_applied") or 0) - abs(inv.get("payment_applied") or 0))
+
+        comparisons = hits = 0
+        previous = None
+        for inv in invoices:
+            balance = inv.get("outstanding_amount")
+            if balance is None:
+                previous = None
+                continue
+            if previous is not None and activity(inv):
+                comparisons += 1
+                if abs(round(previous + activity(inv) - balance, 2)) < 0.005:
+                    hits += 1
+            previous = balance
+        if comparisons < 2 or hits < 0.8 * comparisons:
+            return
+
+        for inv in invoices:
+            running_balance = inv.get("outstanding_amount")
+            charge = inv.get("period_activity")
+            credit = abs(inv.get("credit_applied") or 0) + abs(inv.get("payment_applied") or 0)
+            inv["charges"] = charge
+            inv["amount"] = charge
+            inv["outstanding_amount"] = charge
+            inv["credit"] = credit or None
+            inv["credits"] = credit or None
+            inv["amount_due"] = running_balance
 
     @staticmethod
     def _normalize_header(header) -> str:
@@ -732,16 +995,26 @@ class ClaudeSonnetClient(AIClient):
                 field_map.setdefault("due_date", header)
             elif self._match_any(h, DATE_KEYWORDS):
                 field_map.setdefault("invoice_date", header)
+            # Autoly's "Unalloc." column (an unapplied payment remainder):
+            # its own field, subtracted by the open-balance validation
+            # check. A run-together "Unalloc. Due" header is left to the
+            # OUTSTANDING branch below as before -- it can't be split here.
+            elif h.startswith("unalloc") and "due" not in h:
+                field_map.setdefault("unallocated", header)
+            elif ("credit" in h and self._match_any(h, SIGNED_COLUMN_CHARGE_WORDS)
+                    and not self._match_any(f" {h}", SIGNED_COLUMN_EXCLUDE_WORDS)):
+                field_map.setdefault("signed_amount", header)
             elif self._match_any(h, OUTSTANDING_KEYWORDS):
                 field_map.setdefault("outstanding_amount", header)
                 # Candidate only -- surfaced as the real amount_due output
                 # field in _row_to_invoice() only when this document also
                 # has its own distinct charges column (see docstring above).
                 field_map.setdefault("amount_due", header)
-            elif self._match_any(h, CREDIT_KEYWORDS):
+            elif ((self._match_any(h, CREDIT_KEYWORDS) or h in EXACT_CREDIT_HEADERS)
+                    and not self._match_any(h, NOT_CREDIT_PHRASES)):
                 field_map.setdefault("credit", header)
                 field_map.setdefault("credits", header)
-            elif self._match_any(h, CHARGE_KEYWORDS) or h == "amount":
+            elif self._match_any(h, CHARGE_KEYWORDS) or h in EXACT_CHARGE_HEADERS:
                 field_map.setdefault("amount", header)
                 field_map.setdefault("charges", header)
             elif self._match_any(h, RO_KEYWORDS):
@@ -775,6 +1048,17 @@ class ClaudeSonnetClient(AIClient):
         unlabeled_headers = [h for h in headers if self._normalize_header(h).startswith("unlabeled")]
         if unlabeled_headers:
             field_map["_unlabeled_headers"] = unlabeled_headers
+
+        # A bare "Total" column is the row amount when nothing else on the
+        # document was recognised as one (2026-10-06: Twin City Tire's
+        # "Parts / Labor / Tire / Fees / Tax / Total" layout matched no
+        # amount keyword, so the value-based fallback picked the Fees cell).
+        # Exact match only, and only as a last resort, so it never displaces
+        # a real charges/balance column.
+        if not any(k in field_map for k in ("charges", "outstanding_amount", "signed_amount")):
+            total_header = next((h for h in headers if self._normalize_header(h) == "total"), None)
+            if total_header is not None:
+                field_map["outstanding_amount"] = total_header
 
         return field_map
 
@@ -836,7 +1120,23 @@ class ClaudeSonnetClient(AIClient):
         # New pass-through fields (migrations/010_add_python_extraction_columns.sql).
         charges = self._to_float(get("charges"))
         credits_value = self._to_float(get("credits"))
+        credit = self._to_float(get("credit"))
         transaction_code = self._combine_unlabeled_columns(row, field_map)
+
+        # One signed amount column (see SIGNED_COLUMN_CHARGE_WORDS): a
+        # positive value is this row's charge, a negative one its credit.
+        # Only used when the document has no dedicated charges column.
+        signed_key = field_map.get("signed_amount") if "charges" not in field_map else None
+        if signed_key:
+            signed = self._to_float(row.get(signed_key))
+            if signed is not None and signed < 0:
+                charges = None
+                if credit is None:
+                    credit = abs(signed)
+                if credits_value is None:
+                    credits_value = abs(signed)
+            else:
+                charges = signed
 
         # Ground-truth rule (same as adapter.py's PythonLibraryExtractionEngine
         # and migrations/010_add_python_extraction_columns.sql): when this
@@ -858,13 +1158,25 @@ class ClaudeSonnetClient(AIClient):
         # the document, e.g. KSI's "Remaining Amount"). amount_due still
         # only becomes a genuinely distinct display field once a real,
         # separate charges column exists on the document.
-        has_charges_column = "charges" in field_map
+        has_charges_column = "charges" in field_map or bool(signed_key)
         if has_charges_column:
             outstanding = charges
             amount = charges
         else:
             charges = outstanding
         amount_due = self._to_float(get("amount_due")) if has_charges_column else None
+
+        # An informational "LAST PAYMENT ..." / "Last payment of X received"
+        # note with no invoice number of its own: still a row (it reaches
+        # Bronze, see get_skip_reason()'s BERLIN HEW carve-out in
+        # notebooks/01_document_intake.py), but it never carries an amount,
+        # so it can never move the computed total. MAINE OXY's
+        # "LAST PAYMENT: 07/21/26 134.03" was otherwise picked up by the
+        # value-based fallback and counted as a 134.03 charge (2026-10-01).
+        informational = not raw_invoice_number and self._is_last_payment_note(row)
+        if informational:
+            outstanding = amount = charges = amount_due = None
+            credit = credits_value = None
 
         # Tolerant fallback mapping — standard keyword-based mapping missed
         # this field for this row. Scan the row's raw values directly rather
@@ -876,14 +1188,14 @@ class ClaudeSonnetClient(AIClient):
         used_fallback = []
         already_used = {v for v in (raw_invoice_number, raw_outstanding, raw_amount) if v is not None}
 
-        if not invoice_number:
+        if not invoice_number and not informational:
             _, candidate = self._fallback_invoice_number(row, exclude=already_used)
             if candidate is not None:
                 invoice_number = candidate
                 already_used.add(candidate)
                 used_fallback.append("invoice_number")
 
-        if outstanding is None and not has_charges_column:
+        if outstanding is None and not has_charges_column and not informational:
             _, candidate = self._fallback_amount(row, exclude=already_used)
             if candidate is not None:
                 # This candidate was scanned for as a stand-in for
@@ -915,7 +1227,7 @@ class ClaudeSonnetClient(AIClient):
             "po_number": get("po_number"),
             "work_order_number": get("work_order_number"),
             "description": get("description"),
-            "credit": self._to_float(get("credit")),
+            "credit": credit,
             "shop": get("shop"),
             "page_number": 1,  # single whole-document call — no per-page split to track
             "row_number": row_num,
@@ -933,6 +1245,15 @@ class ClaudeSonnetClient(AIClient):
             # field_map picked one up (e.g. Keystone's Balance Forward/
             # Period Activity/Credit Applied/Payment Applied).
             **{name: self._to_float(get(name)) for name in PASSTHROUGH_FIELD_NAMES},
+            # Validation-gate inputs (2026-10-06, migrations/019): Autoly's
+            # "Unalloc." column, and the printed section a row sits under
+            # when the document is split into separately-subtotalled
+            # sections (see EXTRACTION_PROMPT's section_totals).
+            "unallocated": None if informational else self._to_float(get("unallocated")),
+            "section": (str(row.get("section")).strip() or None) if row.get("section") is not None else None,
+            # True for a "LAST PAYMENT ..." note (see above) -- the gate
+            # leaves these out of every check.
+            "informational": informational,
             # Internal only -- the original dynamic-column row exactly as
             # the model returned it, before this mapping collapsed it to
             # the fixed schema above. Not part of the Universal Financial
@@ -1000,14 +1321,14 @@ class ClaudeSonnetClient(AIClient):
         being grabbed instead (see EMBEDDED_INVOICE_RE's module-level
         comment)."""
         for key, val in row.items():
-            if val in exclude or not isinstance(val, str):
+            if key in ("section", "confidence") or val in exclude or not isinstance(val, str):
                 continue
             m = EMBEDDED_INVOICE_RE.search(val)
             if m:
                 return key, m.group(1)
 
         for key, val in row.items():
-            if val in exclude:
+            if key in ("section", "confidence") or val in exclude:
                 continue
             if cls._looks_like_invoice_number(val):
                 return key, val
@@ -1022,7 +1343,7 @@ class ClaudeSonnetClient(AIClient):
     # null. Checked by key name, not by value, so a real amount that
     # happens to numerically match a confidence score elsewhere in the row
     # is unaffected.
-    _NON_AMOUNT_KEYS = frozenset({"confidence", "line_confidence"})
+    _NON_AMOUNT_KEYS = frozenset({"confidence", "line_confidence", "section"})
 
     @classmethod
     def _fallback_amount(cls, row: dict, exclude=frozenset()):
@@ -1033,18 +1354,52 @@ class ClaudeSonnetClient(AIClient):
         duplicate column (e.g. "8923821") parses as a float just as easily
         as "706.29" does, so accepting any numeric value would reintroduce
         invoice-number-as-amount cross-contamination (see module docstring).
-        Returns (key, parsed_float) or (None, None)."""
+        Returns (key, parsed_float) or (None, None).
+
+        2026-10-06: a JSON float is accepted as-is. The model is told to
+        return amounts as plain numbers, so 156.10 arrives as the float
+        156.1, whose str() "156.1" fails CURRENCY_LIKE_RE's two-decimal
+        shape -- every amount ending in 0 cents was silently dropped (all
+        ten O'Reilly statements, NOVUS, Twin City on 2026-10-01). Integers
+        are still rejected, so an invoice/PO number returned as a JSON
+        number can't become an amount. When several cells qualify, a column
+        whose header names an amount (FALLBACK_AMOUNT_HEADER_WORDS, in that
+        order of preference) wins over the first one found."""
+        candidates = []
         for key, val in row.items():
             if isinstance(key, str) and key.strip().lower() in cls._NON_AMOUNT_KEYS:
                 continue
-            if val in exclude or val is None:
+            if val is None or isinstance(val, bool):
                 continue
-            if not CURRENCY_LIKE_RE.match(str(val).strip()):
+            try:
+                if val in exclude:
+                    continue
+            except TypeError:
+                pass
+            if isinstance(val, float):
+                parsed = val
+            elif isinstance(val, int):
                 continue
-            parsed = cls._to_float(val)
-            if parsed is not None:
-                return key, parsed
-        return None, None
+            else:
+                if not CURRENCY_LIKE_RE.match(str(val).strip()):
+                    continue
+                parsed = cls._to_float(val)
+                if parsed is None:
+                    continue
+            candidates.append((key, parsed))
+        if not candidates:
+            return None, None
+        for word in FALLBACK_AMOUNT_HEADER_WORDS:
+            named = [c for c in candidates if word in str(c[0]).lower()]
+            if named:
+                return named[0]
+        return candidates[0]
+
+    @staticmethod
+    def _is_last_payment_note(row: dict) -> bool:
+        """True when any text cell of the row starts with "last payment"
+        (see LAST_PAYMENT_NOTE_RE)."""
+        return any(isinstance(v, str) and LAST_PAYMENT_NOTE_RE.search(v) for v in row.values())
 
     @staticmethod
     def _find_total_after_anchor(pdf_path: str, anchor: str) -> Optional[float]:
@@ -1107,7 +1462,10 @@ class ClaudeSonnetClient(AIClient):
                        statement_date: Optional[str] = None,
                        statement_total_as_printed: Optional[float] = None,
                        shop_or_entity: Optional[str] = None,
-                       billing_location: Optional[str] = None) -> dict:
+                       billing_location: Optional[str] = None,
+                       previous_balance: Optional[float] = None,
+                       previous_balance_label: Optional[str] = None,
+                       section_totals: Optional[list] = None) -> dict:
         statement_total_computed = compute_statement_total_from_invoices(invoices)
         confidence = ROW_CONFIDENCE if invoices else 0.20
 
@@ -1143,6 +1501,13 @@ class ClaudeSonnetClient(AIClient):
                 "statement_total_as_printed": statement_total_as_printed,
                 "statement_total_computed": statement_total_computed if invoices else None,
                 "statement_confidence": 0.30,
+                # Inputs to the Arithmetic Validation Gate's fallback checks
+                # (src/validation/arithmetic_gate.py validate_with_fallbacks()).
+                # previous_balance is resolved/verified against the PDF text
+                # layer in notebooks/01_document_intake.py before use.
+                "previous_balance": previous_balance,
+                "previous_balance_label": previous_balance_label,
+                "section_totals": section_totals,
             },
             "invoices": invoices,
             "extraction_confidence": {

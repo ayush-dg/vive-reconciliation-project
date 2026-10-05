@@ -126,6 +126,9 @@
     <div class="report-card-meta">
       <span>Printed total <b>{{ run.statement_total_as_printed | money if run.statement_total_as_printed is not none else "—" }}</b></span>
       <span>{{ "Diff " + (run.validation_difference | money_signed) if run.validation_difference is not none else "No printed total" }}</span>
+      {% if run.passed and run.validation_method %}
+      <span class="badge {{ 'neutral' if run.validation_method == 'primary' else 'info' }}" title="Check that matched the printed total">{{ run.validation_method | validation_method_label }}</span>
+      {% endif %}
     </div>
 
     <div class="report-card-footer">

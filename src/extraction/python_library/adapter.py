@@ -165,6 +165,11 @@ _FIELD_MAP = {
         "invoice_number": ("doc_no",),
         "date_field": "transaction_date", "due_date_field": "due_date",
         "charge_field": "amount", "credit_field": None,
+        # The printed Total Balance is the sum of the Balance column -- a
+        # payment row's Amount is the whole payment, its Balance only the
+        # unapplied remainder (2026-10-06, see extract_empire.py's
+        # PAYMENT_LABEL_RE). Feeds the gate's open_balance fallback check.
+        "amount_due_field": "balance",
     },
     "extract_wilberts": {
         "invoice_number": ("invoice_number",),
@@ -211,6 +216,12 @@ _FIELD_MAP = {
         # open_amount against the printed TOTAL DUE, is separate from this
         # per-row Bronze/matching field and is unaffected by this change.)
         "charge_field": "amount", "credit_field": None,
+        # open_amount is what the printed TOTAL DUE adds up (the module's
+        # own reconciles check) -- exposed as amount_due so the gate's
+        # open_balance fallback can verify it (2026-10-06: Don Joe Auto
+        # Body, sum(open_amount) = 13,943.93 = printed, sum(amount) =
+        # 24,629.68). charge_field stays "amount" for matching.
+        "amount_due_field": "open_amount",
     },
     "extract_keystone": {
         # Ledger-style statement (see extract_keystone.py's own docstring

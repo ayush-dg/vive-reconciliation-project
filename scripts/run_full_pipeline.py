@@ -83,6 +83,9 @@ def main():
                         help="Generate AI explanations for exceptions")
     parser.add_argument("--max-explanations", type=int, default=5,
                         help="Max exceptions to explain (default: 5)")
+    parser.add_argument("--allow-duplicate", action="store_true",
+                        help="Reprocess a PDF even if a byte-identical copy was already extracted "
+                             "(default: report it as a duplicate of that statement and stop)")
     args = parser.parse_args()
 
     print(f"\n{'#'*65}")
@@ -100,6 +103,7 @@ def main():
                 pdf_path=args.pdf,
                 statement_id=args.statement_id,
                 statement_period=args.period,
+                allow_duplicate=args.allow_duplicate,
             )
     except CorruptedPDFError as e:
         print(f"\n{'#'*65}")
@@ -109,6 +113,19 @@ def main():
         sys.exit(1)
     statement_id = intake_result["statement_id"]
     print(f"    Statement ID: {statement_id}")
+
+    # A byte-identical PDF that was already extracted: intake wrote nothing
+    # new and returned the existing statement_id (see run_intake()'s
+    # allow_duplicate), so there is nothing to build or match again.
+    if intake_result.get("duplicate_of"):
+        print(f"
+{'#'*65}")
+        print(f"  PIPELINE STOPPED — duplicate of {intake_result['duplicate_of']}")
+        print(f"  This exact PDF was already processed; nothing new was written.")
+        print(f"  Rerun with --allow-duplicate to reprocess it as a new statement.")
+        print(f"{'#'*65}
+")
+        return
 
     # RESEARCH_MODE_EXTRACTION_ONLY (local .env only -- see
     # notebooks/01_document_intake.py's _research_mode_extraction_only()):

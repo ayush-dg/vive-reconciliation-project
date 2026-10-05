@@ -20,12 +20,34 @@ numeric fields (invoice numbers, amounts) against the original scan.
 """
 
 import io
+import os
+import shutil
 
 import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 
-TESSERACT_CMD = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+_WINDOWS_TESSERACT = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+
+def _find_tesseract() -> str:
+    """The Tesseract binary on PATH (the container's apt-installed
+    /usr/bin/tesseract -- see Dockerfile), else the default Windows install
+    location, else plain "tesseract". This used to be hard-coded to the
+    Windows path and assigned globally at import (below), so on the Linux
+    container every later pytesseract call in the same process --
+    page-orientation detection, the pdfplumber OCR fallback -- failed with
+    TesseractNotFoundError even though tesseract-ocr is installed
+    (2026-10-01 job logs: Fred Beans- Rockland.pdf)."""
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    if os.path.exists(_WINDOWS_TESSERACT):
+        return _WINDOWS_TESSERACT
+    return "tesseract"
+
+
+TESSERACT_CMD = _find_tesseract()
 OCR_UPSCALE = 3.0  # empirically best balance of accuracy vs speed for ~200dpi scans
 OCR_PSM = 6
 MIN_CONFIDENCE = 30  # skip garbage low-confidence tokens (noise, stray marks)

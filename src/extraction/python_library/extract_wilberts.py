@@ -67,6 +67,60 @@ def bucket_column(x0):
     return None
 
 
+# Header word -> column. COLUMN_BOUNDS above were measured on one PDF
+# (Wilbert's Owego); other Wilbert's statements shift the columns -- on
+# Statement_2234465_20260930.pdf (2026-10-01) the Store value "1" sits at
+# x0=75.0, inside the fixed date bucket, so every date cell read
+# "09/02/26 1" and the extractor returned 0 rows. header_columns() reads
+# the positions from each page's own header row instead.
+_HEADER_WORD_COLUMNS = {
+    "Date": "date", "Store": "store", "Invoice": "invoice_number", "Reference": "reference",
+    "Amount": "amount", "Core": "core_chg", "Chg": "core_chg", "Balance": "balance",
+}
+_TEXT_COLUMNS = ("date", "store", "invoice_number", "reference")
+_MONEY_COLUMNS = ("amount", "core_chg", "balance")
+_HEADER_X_TOLERANCE = 2.0
+
+
+def header_columns(rows):
+    """Finds this page's "Date Store Invoice # Reference Amount Core Chg
+    Balance" header row. Returns {"left": {column: x0}, "right": {column:
+    x1}, "stub_x0": x0 where the duplicate remittance stub starts or None},
+    or None when the page has no such header."""
+    for row in rows:
+        ordered = sorted(row, key=lambda w: w["x0"])
+        texts = [w["text"] for w in ordered]
+        if not all(t in texts for t in ("Date", "Store", "Reference", "Amount", "Balance")):
+            continue
+        left, right, stub_x0 = {}, {}, None
+        for w in ordered:
+            column = _HEADER_WORD_COLUMNS.get(w["text"])
+            if column is None:
+                continue
+            if column == "invoice_number" and column in left:
+                stub_x0 = w["x0"]  # second "Invoice #": the tear-off stub
+                break
+            left.setdefault(column, w["x0"])
+            right[column] = w["x1"]  # "Core Chg": the right edge is "Chg"'s
+        if all(c in left for c in _TEXT_COLUMNS + _MONEY_COLUMNS):
+            return {"left": left, "right": right, "stub_x0": stub_x0}
+    return None
+
+
+def bucket_word(word, header):
+    """Column for one word on a page whose header was found. Money values
+    are right-aligned under their headers, so they're matched by right edge
+    (x1) to the nearest money header; everything else by left edge (x0) to
+    the last text column that starts at or before it. Words in the
+    remittance stub are ignored (None)."""
+    if header["stub_x0"] is not None and word["x0"] >= header["stub_x0"] - _HEADER_X_TOLERANCE:
+        return None
+    if MONEY_RE.match(word["text"]):
+        return min(_MONEY_COLUMNS, key=lambda c: abs(header["right"][c] - word["x1"]))
+    starts = [(header["left"][c], c) for c in _TEXT_COLUMNS if header["left"][c] <= word["x0"] + _HEADER_X_TOLERANCE]
+    return max(starts)[1] if starts else None
+
+
 def group_rows(words):
     """Group words into rows by their 'top' coordinate."""
     rows = []
@@ -213,55 +267,15 @@ def parse_aging_summary(words):
 
 def extract(pdf_path):
     """Returns {"line_items": [...], "fieldnames": [...], "summary": {...}, "full_text": None}."""
-    line_items = []
-    header_info = {}
-    last_page_text = ""
-
     with pdfplumber.open(pdf_path) as pdf:
         header_info = parse_header_info(pdf.pages[0].extract_words(), pdf.pages[0].extract_text() or "")
-
-        for page_num, page in enumerate(pdf.pages, start=1):
-            last_page_text = page.extract_text() or ""
-            words = page.extract_words()
-            rows = group_rows(words)
-
-            for row in rows:
-                cols = {name: [] for name, _, _ in COLUMN_BOUNDS}
-                for w in row:
-                    col = bucket_column(w["x0"])
-                    if col:
-                        cols[col].append(w)
-
-                date = " ".join(w["text"] for w in cols["date"])
-                invoice_number = " ".join(w["text"] for w in sorted(cols["invoice_number"], key=lambda w: w["x0"]))
-                amount = " ".join(w["text"] for w in cols["amount"])
-                reference = " ".join(w["text"] for w in sorted(cols["reference"], key=lambda w: w["x0"]))
-                core_chg = " ".join(w["text"] for w in cols["core_chg"])
-                balance = " ".join(w["text"] for w in cols["balance"])
-                store = " ".join(w["text"] for w in cols["store"])
-
-                # A genuine transaction row has a transaction date and a money
-                # amount. Header/label rows (e.g. the "Statement Date Account
-                # No." block, which also matches the date regex) never carry
-                # a matching amount token, so they're excluded here.
-                if DATE_RE.match(date) and MONEY_RE.match(amount):
-                    line_items.append({
-                        "page": page_num,
-                        "date": date,
-                        "store": store,
-                        "invoice_number": invoice_number,
-                        "reference": reference,
-                        "amount": clean_money(amount),
-                        "core_chg": clean_money(core_chg),
-                        "balance": clean_money(balance),
-                    })
-                elif DT_CONTINUATION_RE.match(reference.strip()) and line_items:
-                    # Wrapped second line of a credit-memo reference, e.g.
-                    # "CR for #1690264," followed on the next line by
-                    # "DT#704518" - fold it back into the row above. The
-                    # reference already ends with a comma in these cases,
-                    # so just append with a space (no extra comma).
-                    line_items[-1]["reference"] += " " + reference.strip()
+        # The fixed COLUMN_BOUNDS first -- unchanged behavior for every
+        # layout they already handle (Wilbert's Owego, Clarks Summit). Only
+        # when they find nothing at all are the bounds re-derived from the
+        # page's own header row (see header_columns()).
+        line_items, last_page_text, words = _extract_line_items(pdf, use_page_header=False)
+        if not line_items:
+            line_items, last_page_text, words = _extract_line_items(pdf, use_page_header=True)
 
     computed_total = round(sum(float(item["balance"]) for item in line_items if item["balance"]), 2)
     computed_amount_total = round(sum(float(item["amount"]) for item in line_items if item["amount"]), 2)
@@ -288,6 +302,60 @@ def extract(pdf_path):
         "summary": summary,
         "full_text": None,
     }
+
+
+def _extract_line_items(pdf, use_page_header: bool):
+    """Returns (line_items, last_page_text, last_page_words). With
+    use_page_header, a page whose header row is found is bucketed by
+    header_columns()/bucket_word(); otherwise (or when a page has no such
+    header) by the fixed COLUMN_BOUNDS."""
+    line_items = []
+    last_page_text = ""
+    words = []
+    for page_num, page in enumerate(pdf.pages, start=1):
+        last_page_text = page.extract_text() or ""
+        words = page.extract_words()
+        rows = group_rows(words)
+        header = header_columns(rows) if use_page_header else None
+
+        for row in rows:
+            cols = {name: [] for name, _, _ in COLUMN_BOUNDS}
+            for w in row:
+                col = bucket_word(w, header) if header else bucket_column(w["x0"])
+                if col:
+                    cols[col].append(w)
+
+            date = " ".join(w["text"] for w in cols["date"])
+            invoice_number = " ".join(w["text"] for w in sorted(cols["invoice_number"], key=lambda w: w["x0"]))
+            amount = " ".join(w["text"] for w in cols["amount"])
+            reference = " ".join(w["text"] for w in sorted(cols["reference"], key=lambda w: w["x0"]))
+            core_chg = " ".join(w["text"] for w in cols["core_chg"])
+            balance = " ".join(w["text"] for w in cols["balance"])
+            store = " ".join(w["text"] for w in cols["store"])
+
+            # A genuine transaction row has a transaction date and a money
+            # amount. Header/label rows (e.g. the "Statement Date Account
+            # No." block, which also matches the date regex) never carry
+            # a matching amount token, so they're excluded here.
+            if DATE_RE.match(date) and MONEY_RE.match(amount):
+                line_items.append({
+                    "page": page_num,
+                    "date": date,
+                    "store": store,
+                    "invoice_number": invoice_number,
+                    "reference": reference,
+                    "amount": clean_money(amount),
+                    "core_chg": clean_money(core_chg),
+                    "balance": clean_money(balance),
+                })
+            elif DT_CONTINUATION_RE.match(reference.strip()) and line_items:
+                # Wrapped second line of a credit-memo reference, e.g.
+                # "CR for #1690264," followed on the next line by
+                # "DT#704518" - fold it back into the row above. The
+                # reference already ends with a comma in these cases,
+                # so just append with a space (no extra comma).
+                line_items[-1]["reference"] += " " + reference.strip()
+    return line_items, last_page_text, words
 
 
 if __name__ == "__main__":
