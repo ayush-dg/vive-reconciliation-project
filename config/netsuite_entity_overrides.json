@@ -112,12 +112,12 @@
     "note": "Goodwins Chevy Mazda-Domestic (6957) and Goodwins Volvo (12416). Derived 2026-10-05 by tranid trace of 6 stored Goodwins statements (Reynolds and Reynolds template, CVW-prefixed invoices): 33 of 34 unique lines tie out across ALL NetSuite entities only under these two -- charges after the 3-char prefix strip, credits as CM + stripped. Goodwins Chevy Mazda-Foreign (6688), Oxford-Sublet (11974) and Land Rover (13397) also exist; add them only on a confirmed hit."
   },
   "LKQ": {
-    "entity_ids": ["3019", "63531", "32050"],
-    "note": "LKQ New England (3019), LKQ (63531), Royal Used LKQ Parts (32050). Derived 2026-10-05 by tranid trace of 5 stored LKQ statements (Gorham, Thruway): 117 of 125 unique lines tie out verbatim across ALL NetSuite entities only under these three (103 / 13 / 1). LKQ is NOT under Keystone in NetSuite despite the corporate relationship."
+    "entity_ids": ["3019", "63531", "32050", "138636"],
+    "note": "LKQ New England (3019), LKQ (63531), Royal Used LKQ Parts (32050), LKQ Corp Northeast (138636 -- added 2026-10-05 from the LKQ Venice / First Choice statement, 3 of 3 lines). Derived 2026-10-05 by tranid trace of 5 stored LKQ statements (Gorham, Thruway): 117 of 125 unique lines tie out verbatim across ALL NetSuite entities only under these three (103 / 13 / 1). LKQ is NOT under Keystone in NetSuite despite the corporate relationship."
   },
   "NAPA_AUTO_PARTS": {
-    "entity_ids": ["402001", "7147", "8495"],
-    "note": "Auto Parts Connection (402001), NAPA (7147), NAPA 1 (8495). Derived 2026-10-05 by tranid trace of 6 stored NAPA statements: 14 of 22 unique lines tie out across ALL NetSuite entities only under these three. NAPA is a franchise network with ~20 store-level vendor records in NetSuite; add another store only on a confirmed hit."
+    "entity_ids": ["402001", "7147", "8495", "150640", "2568", "85458", "84789"],
+    "note": "Auto Parts Connection (402001), NAPA (7147), NAPA 1 (8495), plus store records added 2026-10-05 from statements Claude labelled with the store name: Napa Auto Parts (150640, Val-U / First Choice), NAPA - Pawtucket (2568, Raps), NAPA Auto Parts - Bridge Auto Supply (85458), Shrewsbury AutoParts Inc(NAPA) (84789). Derived 2026-10-05 by tranid trace of 6 stored NAPA statements: 14 of 22 unique lines tie out across ALL NetSuite entities only under these three. NAPA is a franchise network with ~20 store-level vendor records in NetSuite; add another store only on a confirmed hit."
   },
   "1800_RADIATOR": {
     "entity_ids": ["8214", "637035"],

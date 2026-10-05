@@ -431,15 +431,23 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
     tried only after the number as normalized missed (exact amount only).
     Each is a convention NetSuite holds alongside the plain one, so it
     can't be a Silver rewrite without breaking the plain matches:
-      - NAPA: zero-pad to 6 (57849 -> 057849), see _ZERO_PAD_VENDORS.
+      - NAPA: drop a '<store>-' prefix and zero-pad to 6 (57849 -> 057849,
+        664-33962 -> 033962), see _ZERO_PAD_VENDORS.
       - O'Reilly (confirmed 2026-10-05, 150 of 218 traced lines): the
         statement prints store + document run together (4507140208);
         NetSuite mostly holds them dashed after the 4-digit store
         (4507-140208), a few undashed (4530128235)."""
     alts = []
     pad_to = _ZERO_PAD_VENDORS.get(vendor_id)
-    if pad_to and inv.isdigit() and len(inv) < pad_to:
-        alts.append(inv.zfill(pad_to))
+    if pad_to:
+        # NAPA store layouts print '<store>-<number>' (664-33962,
+        # 554-440349, 558-729382, 100-630373); NetSuite holds the number
+        # alone, zero-padded to 6, under that store's own vendor record.
+        base = inv.split("-", 1)[1] if re.fullmatch(r"\d{3}-\d+", inv) else inv
+        if base != inv:
+            alts.append(base)
+        if base.isdigit() and len(base) < pad_to:
+            alts.append(base.zfill(pad_to))
     if vendor_id == "OREILLY_AUTO_PARTS" and inv.isdigit() and len(inv) == 10:
         alts.append(f"{inv[:4]}-{inv[4:]}")
     return alts
