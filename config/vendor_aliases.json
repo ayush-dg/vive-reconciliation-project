@@ -45,7 +45,9 @@
   "HOSELTON": [
     "HOSELTON IMPORTS Inc.",
     "Hoselton Toyota",
-    "HOSELTON IMPORTS Inc. Dba. HOSELTON TOYOTA"
+    "HOSELTON IMPORTS Inc. Dba. HOSELTON TOYOTA",
+    "Hoselton Chevrolet, Inc.",
+    "Hoselton Chevrolet"
   ],
   "BOWSER": [
     "Power Bowser",
@@ -75,10 +77,6 @@
   "A_NEW_AGE_AUTO_GLASS": [
     "A New Age Auto Glass",
     "A New Age Auto Glass, INC."
-  ],
-  "HOSELTON_TOYOTA": [
-    "Hoselton Imports Inc. dba Hoselton Toyota",
-    "Hoselton Toyota"
   ],
   "ALL_STAR_AUTO_LIGHTS": [
     "All Star Auto Lights, Inc.",
