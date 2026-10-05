@@ -217,9 +217,10 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
     def _window(self):
         return self.windows[-1]
 
-    def test_default_is_all_time(self):
+    def test_default_is_last_run(self):
+        """Same default as Home's since 2026-10-01 (was "all")."""
         self._get("/exceptions")
-        self.assertEqual(self._window().range, "all")
+        self.assertEqual(self._window().range, "last")
 
     def test_header_counts_both_the_run_and_the_exceptions_only_vendor(self):
         html = self._get("/exceptions")
@@ -229,11 +230,17 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         html = self._get("/exceptions")
         time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
         chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
-        self.assertEqual(chip_labels, ["Last run", "Today"])
+        self.assertEqual(chip_labels, ["Today", "Last run"])
 
-    def test_month_select_blank_option_is_all_time_and_selected_by_default(self):
+    def test_no_month_select_or_all_time_option(self):
+        # Removed 2026-10-01 -- the Month select's blank "All time" option
+        # used to be selected by default here. An old bookmarked
+        # ?range=all link still resolves; it just has no control.
         html = self._get("/exceptions")
-        self.assertIn('<option value="" selected>All time</option>', html)
+        self.assertNotIn('id="window-month"', html)
+        self.assertNotIn(">All time</option>", html)
+        self._get("/exceptions?range=all")
+        self.assertEqual(self._window().range, "all")
 
     def test_date_alone_selects_that_day(self):
         self._get("/exceptions?date=2026-09-28")
@@ -243,18 +250,30 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self._get("/exceptions?month=2026-09")
         self.assertEqual((self._window().range, self._window().month), ("month", "2026-09"))
 
-    def test_unknown_range_falls_back_to_all_not_last(self):
-        """Exceptions' own default is "all", not Home's "last"."""
+    def test_unknown_range_falls_back_to_last(self):
+        """Same fallback as Home's since 2026-10-01 (was "all")."""
         self._get("/exceptions?range=bogus")
-        self.assertEqual(self._window().range, "all")
+        self.assertEqual(self._window().range, "last")
+
+    def test_no_outlook_syncs_yet_defaults_to_all_time(self):
+        # Found on dev 2026-10-01: with no Outlook syncs at all, the "last"
+        # default is an empty window, so a plain page load falls back to
+        # "all" (the full backlog) instead. An unrecognised range lands on
+        # the same default; an explicit ?range=last is still honoured.
+        with mock.patch("web.queries.get_outlook_synced_jobs", lambda: []):
+            self._get("/exceptions")
+            self.assertEqual(self._window().range, "all")
+            self._get("/exceptions?range=bogus")
+            self.assertEqual(self._window().range, "all")
+            self._get("/exceptions?range=last")
+            self.assertEqual(self._window().range, "last")
 
     def test_last_run_reachable_via_the_chip(self):
         html = self._get("/exceptions?range=last")
         self.assertEqual(self._window().range, "last")
-        # Unlike Home (default "last"), Exceptions' default is "all", so
-        # its own "Last run" chip link still carries ?range=last even
-        # when already active.
-        self.assertIn('href="/exceptions?range=last" class="filter-chip active">Last run', html)
+        # "last" is this page's own default too since 2026-10-01, so (like
+        # Home's) its "Last run" chip link leaves range= out entirely.
+        self.assertIn('href="/exceptions" class="filter-chip active">Last run', html)
 
     def test_calendar_button_and_hidden_date_input(self):
         html = self._get("/exceptions?date=2026-09-28")
@@ -262,14 +281,14 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.assertIn('<use href="#i-calendar"/>', html)
         self.assertIn('id="window-date" class="ns-sr-only"', html)
 
-    def test_empty_window_message_links_to_last_run_and_all_time(self):
+    def test_empty_window_message_links_to_last_run(self):
         self.runs = [dict(self.orphan_row)]  # no summary-backed run in this window
         html = self._get("/exceptions?range=today")
         self.assertIn("No reconciliation runs today yet.", html)
-        self.assertIn('href="/exceptions?range=last" class="link">Last run</a>', html)
-        # "all" is this page's own default, so its URL omits range= --
-        # unlike the "last" link above, which is never the default here.
-        self.assertIn('href="/exceptions" class="link">All time</a>', html)
+        # "last" is this page's own default, so its URL omits range=.
+        self.assertIn('href="/exceptions" class="link">Last run</a>', html)
+        # No "All time" link since 2026-10-01 (the All time option is gone).
+        self.assertNotIn('class="link">All time</a>', html)
 
     def test_vendor_shop_location_options_rebuilt_from_the_window(self):
         html = self._get("/exceptions")
@@ -278,6 +297,80 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         # existing behaviour (unrelated to this change) renders it
         # "Orphan CO", not "Orphan Co".
         self.assertIn(">Orphan CO<", html)
+
+
+class TestExceptionsSyncDropdown(unittest.TestCase):
+    """The "Last run" dropdown (2026-09-30) on /exceptions -- same
+    mechanism as Home's own (web/routers/dashboard.py's counterpart), just
+    exercised through exceptions.py/exceptions_url()."""
+
+    def setUp(self):
+        self.windows = []
+        run_row = {
+            "statement_id": "S1", "vendor_name": "Fenix", "vendor_display_name": "Fenix",
+            "shop": None, "billing_location": None, "statement_period": "2026-08",
+            "total_invoice_count": 10, "matched_count": 8, "exception_count": 2,
+            "statement_total": 100.0, "overall_status": "EXCEPTIONS_PRESENT",
+            "reconciliation_timestamp": None, "reason_breakdown": {"not found in NetSuite": 2},
+            "aging": None, "url_name": "Fenix",
+        }
+
+        def get_exception_runs(window=None):
+            self.windows.append(window)
+            return [dict(run_row)]
+
+        fns = {
+            "get_exception_runs": get_exception_runs,
+            "get_run_timestamps": lambda: [],
+            "get_outlook_synced_jobs": lambda: [
+                _job("N1", U(2026, 9, 29, 16, 2)),
+                _job("O1", U(2026, 9, 28, 12, 0)),
+            ],
+            "get_open_recon_exceptions_count": lambda: 0,
+            "get_pending_review_count": lambda: 0,
+        }
+        for name, fn in fns.items():
+            patcher = mock.patch(f"web.queries.{name}", fn)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.client = _client()
+
+    def _get(self, url):
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 200)
+        return resp.text.replace("&amp;", "&")
+
+    def test_dropdown_lists_both_syncs_newest_first(self):
+        html = self._get("/exceptions?range=last")
+        select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
+        self.assertIn("Sep 29, 12:02 PM ET · 1 statement", select)
+        self.assertIn("Sep 28, 8:00 AM ET · 1 statement", select)
+
+    def test_choosing_an_older_sync_narrows_the_window_and_url(self):
+        html = self._get("/exceptions?range=last&sync=2026-09-28T12:00:00Z")
+        self.assertEqual(self.windows[-1].statement_ids, frozenset({"O1"}))
+        self.assertIn('href="/exceptions?range=today"', html)
+
+    def test_default_exceptions_page_load_selects_the_newest_sync(self):
+        # Exceptions' default range is "last" since 2026-10-01 (same as
+        # Home's), so a plain page load pre-selects the NEWEST sync.
+        html = self._get("/exceptions")
+        self.assertEqual(self._window().range, "last")
+        self.assertEqual(self._window().statement_ids, frozenset({"N1"}))
+        select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
+        self.assertIn('<option value="2026-09-29T16:02:00Z" selected>', select)
+        self.assertNotIn('value="2026-09-28T12:00:00Z" selected', select)
+        # Custom picker (2026-10-01): "None" (= the Last run chip) comes
+        # first but isn't selected; with no explicit ?sync=, Last run is the
+        # highlighted control and the picker's button is not.
+        options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', select)
+        self.assertEqual(options[0], ("", "None"))
+        self.assertNotIn('<option value="" selected>', select)
+        self.assertIn('href="/exceptions" class="filter-chip active">Last run', html)
+        self.assertRegex(html, r'class="filter-chip sync-picker-btn\s*" id="window-sync-btn"')
+
+    def _window(self):
+        return self.windows[-1]
 
 
 if __name__ == "__main__":

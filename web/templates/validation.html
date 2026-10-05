@@ -44,6 +44,46 @@
   </div>
 </div>
 
+{# Time window (2026-10-01) -- the same four controls, in the same order,
+   as Home's and Exceptions' #time-window row, but client-side like every
+   other filter on this page. Like Home's, it is ONE window, not stacked
+   filters: Today and the calendar pick a US Eastern day (matched against
+   each card's data-day), Last run and the "Past Outlook syncs" picker
+   pick an Outlook sync (outlook_sync_options(), newest first, matched
+   against data-sync), and picking either kind clears the other. Defaults
+   to the newest sync, same as Home; the picker's "None" shows every
+   attempt. The picker is the same fixed-label button + listbox as Home's
+   (static/app.js) over the hidden #sync-filter select, and as on Home
+   exactly one of Last run / the picker is highlighted: Last run while the
+   newest sync came from the chip (or the default), the picker while a
+   sync was picked from its list. The status/vendor/shop/period filters
+   below combine with it and are never changed by it. #}
+<div class="filter-chips" style="flex-wrap:wrap;align-items:center;margin-bottom:8px" id="time-window" aria-label="Time window">
+  <button type="button" class="filter-chip" id="time-today" data-today="{{ today_eastern }}">Today</button>
+  <button type="button" class="filter-chip{{ ' active' if sync_options }}" id="time-last-run"
+          data-sync="{{ sync_options[0].value if sync_options else '' }}"{% if not sync_options %} disabled title="No Outlook syncs yet"{% endif %}>Last run</button>
+  <select id="sync-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
+    <option value="">None</option>
+    {% for opt in sync_options %}
+    <option value="{{ opt.value }}" {{ 'selected' if loop.first }}>{{ opt.label }}</option>
+    {% endfor %}
+    {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
+    {% if not sync_options %}<option disabled>No Outlook syncs yet</option>{% endif %}
+  </select>
+  <div class="ns-chip-wrap" data-sync-picker="sync-filter">
+    <button type="button" class="filter-chip sync-picker-btn" id="sync-filter-btn"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="sync-filter-list">
+      Past Outlook syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+    </button>
+    <ul class="ns-popover sync-picker-list" id="sync-filter-list" role="listbox" aria-labelledby="sync-filter-btn" hidden></ul>
+  </div>
+  {# Same hidden-input + showPicker() pattern as Home's calendar button. #}
+  <button type="button" class="icon-btn" id="validation-date-btn" aria-label="Pick a day" title="Pick a day">
+    <svg class="icon"><use href="#i-calendar"/></svg>
+  </button>
+  <input type="date" id="validation-date" class="ns-sr-only" aria-label="Pick a day">
+</div>
+
 <div class="filter-chips">
   <button type="button" class="filter-chip active" data-filter="all">All</button>
   <button type="button" class="filter-chip" data-filter="pass">Passed</button>
@@ -66,17 +106,6 @@
     <option value="{{ pval }}">{{ pval | period_label }}</option>
     {% endfor %}
   </select>
-  {# "Last run" -- same Outlook-sync definition as Home (see
-     web/routers/validation.py). An independent on/off toggle, not part
-     of the All/Passed/Failed group, so it can combine with any of them. #}
-  <button type="button" class="filter-chip" id="last-run-filter" aria-pressed="false">Last run</button>
-  {# Same hidden-input + showPicker() pattern as Home's calendar button,
-     but purely client-side here -- Validation's filters never touch the
-     server. Filters by the attempt's US Eastern calendar day. #}
-  <button type="button" class="icon-btn" id="validation-date-btn" aria-label="Pick a day" title="Pick a day">
-    <svg class="icon"><use href="#i-calendar"/></svg>
-  </button>
-  <input type="date" id="validation-date" class="ns-sr-only" aria-label="Pick a day">
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
@@ -84,7 +113,7 @@
   <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}"
        data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
        data-period="{{ run.statement_period or '' }}"
-       data-last-run="{{ '1' if run.is_last_run else '0' }}" data-day="{{ run.ingestion_timestamp | eastern_day }}">
+       data-sync="{{ run.sync_time }}" data-day="{{ run.ingestion_timestamp | eastern_day }}">
     <div class="report-card-head">
       <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-check-circle' if run.passed else 'i-x-circle' }}"/></svg></div>
       <div>
@@ -115,26 +144,26 @@
   var vendorFilter = document.getElementById("vendor-filter");
   var shopFilter = document.getElementById("shop-filter");
   var periodFilter = document.getElementById("period-filter");
-  var lastRunChip = document.getElementById("last-run-filter");
+  var syncFilter = document.getElementById("sync-filter");
   var dateInput = document.getElementById("validation-date");
   var cards = document.querySelectorAll("#validation-card-grid .report-card");
   var currentStatus = "all";
-  var lastRunOnly = false;
 
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
     var period = periodFilter.value;
+    var sync = syncFilter.value;
     var day = dateInput.value;
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
       var matchesVendor = !vendor || card.dataset.vendor === vendor;
       var matchesShop = !shop || card.dataset.shop === shop;
       var matchesPeriod = !period || card.dataset.period === period;
-      var matchesLastRun = !lastRunOnly || card.dataset.lastRun === "1";
+      var matchesSync = !sync || card.dataset.sync === sync;
       var matchesDay = !day || card.dataset.day === day;
       card.style.display = (matchesStatus && matchesVendor && matchesShop && matchesPeriod
-        && matchesLastRun && matchesDay) ? "" : "none";
+        && matchesSync && matchesDay) ? "" : "none";
     });
   }
 
@@ -150,16 +179,48 @@
   shopFilter.addEventListener("change", applyFilters);
   periodFilter.addEventListener("change", applyFilters);
 
-  lastRunChip.addEventListener("click", function () {
-    lastRunOnly = !lastRunOnly;
-    lastRunChip.classList.toggle("active", lastRunOnly);
-    lastRunChip.setAttribute("aria-pressed", lastRunOnly ? "true" : "false");
+  // Time window -- see the #time-window comment above. The hidden
+  // #sync-filter select (set by the picker, static/app.js) and the hidden
+  // date input stay the source of truth (applyFilters() reads them as
+  // before); the chips only set and mirror them. Clicking an active chip
+  // again turns it off: every sync, no day.
+  var todayChip = document.getElementById("time-today");
+  var lastRunChip = document.getElementById("time-last-run");
+  var syncPickerBtn = document.getElementById("sync-filter-btn");
+  var today = todayChip.dataset.today;
+  var newestSync = lastRunChip.dataset.sync;
+
+  // `picked`: the sync came from the picker's list rather than the Last
+  // run chip or the default -- it decides which of the two is highlighted,
+  // the client-side counterpart of Home's explicit ?sync=.
+  function setTimeWindow(sync, day, picked) {
+    syncFilter.value = sync;
+    dateInput.value = day;
+    todayChip.classList.toggle("active", !!day && day === today);
+    lastRunChip.classList.toggle("active", !!sync && sync === newestSync && !picked);
+    syncPickerBtn.classList.toggle("active", !!sync && !!picked);
     applyFilters();
+  }
+
+  todayChip.addEventListener("click", function () {
+    setTimeWindow("", todayChip.classList.contains("active") ? "" : today);
   });
+  lastRunChip.addEventListener("click", function () {
+    setTimeWindow(lastRunChip.classList.contains("active") ? "" : newestSync, "");
+  });
+  // The hidden select only ever changes through the picker now.
+  syncFilter.addEventListener("change", function () { setTimeWindow(syncFilter.value, "", true); });
+  dateInput.addEventListener("change", function () { setTimeWindow("", dateInput.value); });
+
   document.getElementById("validation-date-btn").addEventListener("click", function () {
     if (dateInput.showPicker) { dateInput.showPicker(); } else { dateInput.focus(); }
   });
-  dateInput.addEventListener("change", applyFilters);
+
+  // Apply the default window (the newest sync, pre-selected server-side)
+  // on load -- read from the controls, so a value the browser restored on
+  // Back/reload is honoured too (a restored older sync can only have come
+  // from the picker).
+  setTimeWindow(syncFilter.value, dateInput.value, syncFilter.value !== newestSync);
 })();
 </script>
 

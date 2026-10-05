@@ -138,7 +138,10 @@ def to_eastern(naive_utc: datetime) -> datetime:
     return naive_utc.replace(tzinfo=timezone.utc).astimezone(EASTERN)
 
 
-def outlook_last_sync(jobs, gap: timedelta = OUTLOOK_SYNC_GAP):
+MAX_SYNC_OPTIONS = 30
+
+
+def outlook_all_syncs(jobs, gap: timedelta = OUTLOOK_SYNC_GAP) -> list:
     """jobs: dicts with "submitted_at" (any shape to_naive_utc accepts)
     and "statement_id" (may be None -- extraction/matching hasn't
     produced one yet) -- see queries.get_outlook_synced_jobs(), already
@@ -146,23 +149,71 @@ def outlook_last_sync(jobs, gap: timedelta = OUTLOOK_SYNC_GAP):
     dropzone-watcher job or an Event Grid job is never even in `jobs` to
     begin with; nothing here needs to re-check their origin.
 
-    Returns the winning chain (list of job dicts, newest first) or None
-    if `jobs` is empty. A gap of exactly `gap` still chains. A "Sync to
-    Webapp" click that queued 0 PDFs creates zero job rows, so it's
-    simply invisible here -- the next older non-empty sync wins with no
-    special-casing needed."""
+    Returns EVERY Outlook sync (not just the newest -- see
+    outlook_last_sync()), newest first: a list of chains, each chain a
+    list of job dicts (newest job first within it). A gap of exactly
+    `gap` still chains. A "Sync to Webapp" click that queued 0 PDFs
+    creates zero job rows, so it's simply invisible here -- it never
+    produces an empty chain. Added 2026-09-30 for the "Last run"
+    dropdown (web/routers/dashboard.py, exceptions.py, validation.py) --
+    see outlook_sync_options() and resolve_window()'s `sync_` param."""
     ordered = sorted(
         (dict(j, submitted_at=to_naive_utc(j["submitted_at"])) for j in jobs if j.get("submitted_at") is not None),
         key=lambda j: j["submitted_at"], reverse=True,
     )
-    if not ordered:
-        return None
-    chain = [ordered[0]]
-    for j in ordered[1:]:
-        if chain[-1]["submitted_at"] - j["submitted_at"] > gap:
-            break
+    syncs = []
+    chain = []
+    for j in ordered:
+        if chain and chain[-1]["submitted_at"] - j["submitted_at"] > gap:
+            syncs.append(chain)
+            chain = []
         chain.append(j)
-    return chain
+    if chain:
+        syncs.append(chain)
+    return syncs
+
+
+def outlook_last_sync(jobs, gap: timedelta = OUTLOOK_SYNC_GAP):
+    """The single newest Outlook sync -- see outlook_all_syncs() for the
+    full list (every sync, not just this one). Returns the winning chain
+    (list of job dicts, newest first) or None if `jobs` is empty."""
+    syncs = outlook_all_syncs(jobs, gap)
+    return syncs[0] if syncs else None
+
+
+def outlook_sync_options(jobs, cap: int = MAX_SYNC_OPTIONS, gap: timedelta = OUTLOOK_SYNC_GAP):
+    """The "Last run" dropdown's options (Home, Exceptions, Validation) --
+    every Outlook sync (outlook_all_syncs()), newest first, capped at
+    `cap` so the <select> stays a reasonable size. A bookmarked ?sync=
+    for a sync older than this cap still resolves correctly --
+    resolve_window() always searches the FULL (uncapped) list, so
+    truncating this display list never breaks a direct link to an older
+    sync, only hides it from the dropdown itself.
+
+    Returns (options, truncated): `options` is a newest-first list of
+    {"value": <UTC ISO "Z" string of that sync's newest job -- the
+    exact ?sync= a <select> submits, and what resolve_window() parses
+    back via to_naive_utc()>, "label": <"Sep 29, 7:02 AM ET · 12
+    statements", or "9 of 12 statements" when some of that sync's jobs
+    haven't reached Silver/matching yet -- same "X of Y" wording as
+    window_label()>}. `truncated` is True when more syncs exist than
+    `cap` allowed through (the caller shows a trailing disabled "older
+    syncs not shown" option)."""
+    syncs = outlook_all_syncs(jobs, gap)
+    truncated = len(syncs) > cap
+    options = []
+    for chain in syncs[:cap]:
+        statement_ids = {j["statement_id"] for j in chain if j.get("statement_id")}
+        t = to_eastern(chain[0]["submitted_at"])
+        if len(statement_ids) < len(chain):
+            count = f"{len(statement_ids)} of {len(chain)} statement{'s' if len(chain) != 1 else ''}"
+        else:
+            count = f"{len(chain)} statement{'s' if len(chain) != 1 else ''}"
+        options.append({
+            "value": chain[0]["submitted_at"].isoformat() + "Z",
+            "label": f"{_day(t)}, {_clock(t)} ET · {count}",
+        })
+    return options, truncated
 
 
 def month_options(timestamps) -> list:
@@ -173,7 +224,7 @@ def month_options(timestamps) -> list:
 
 
 def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
-                   timestamps=(), outlook_jobs=(), now: datetime = None) -> TimeWindow:
+                   timestamps=(), outlook_jobs=(), now: datetime = None, sync_: str = None) -> TimeWindow:
     """URL params -> TimeWindow. ?date= alone implies range=date and
     ?month= alone range=month. Anything unknown or malformed falls back to
     the default ("last"). `now` is injectable for tests only.
@@ -182,7 +233,15 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
     queries.get_run_timestamps()) drives the Month dropdown's options
     only -- unrelated to "last" since 2026-09-30. `outlook_jobs` (via
     queries.get_outlook_synced_jobs()) is what "last" is built from now
-    -- see outlook_last_sync()."""
+    -- see outlook_all_syncs().
+
+    `sync_` (added 2026-09-30, the "Last run" dropdown's ?sync=) picks
+    one specific Outlook sync by its newest job's UTC ISO timestamp
+    (outlook_sync_options()'s own "value") out of the FULL sync list --
+    never just the capped/displayed one, so a bookmark to a sync older
+    than the dropdown's cap still resolves. Unset, unparseable, or
+    matching no known sync all fall back to the latest sync with no
+    error -- same permissive posture as an unknown `range_`."""
     if not range_:
         range_ = "date" if date_ else "month" if month_ else DEFAULT_RANGE
     if range_ not in RANGES:
@@ -192,14 +251,14 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
     if range_ == "date":
         d = parse_date(date_)
         if d is None:
-            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now)
+            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now, sync_=sync_)
         start, end = day_bounds(d)
         return TimeWindow("date", start, end, date=d.isoformat())
 
     if range_ == "month":
         ym = parse_month(month_)
         if ym is None:
-            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now)
+            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now, sync_=sync_)
         start, end = month_bounds(*ym)
         return TimeWindow("month", start, end, month=f"{ym[0]:04d}-{ym[1]:02d}")
 
@@ -214,9 +273,20 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
     if range_ == "all":
         return TimeWindow("all")
 
-    chain = outlook_last_sync(outlook_jobs)
-    if chain is None:
+    all_syncs = outlook_all_syncs(outlook_jobs)
+    if not all_syncs:
         return TimeWindow("last", empty=True)
+    chain = all_syncs[0]
+    if sync_:
+        try:
+            target = to_naive_utc(sync_)
+        except (ValueError, TypeError):
+            target = None
+        if target is not None:
+            for candidate in all_syncs:
+                if candidate[0]["submitted_at"] == target:
+                    chain = candidate
+                    break
     ids = frozenset(j["statement_id"] for j in chain if j.get("statement_id"))
     return TimeWindow("last", statement_ids=ids, sync_time_utc=chain[0]["submitted_at"], sync_job_count=len(chain))
 

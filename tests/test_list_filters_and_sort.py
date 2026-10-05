@@ -500,11 +500,11 @@ class TestValidationPeriodFilter(unittest.TestCase):
 
 
 class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
-    """Validation's "Last run" chip and calendar-day filter -- same
-    Outlook-sync definition as Home (web/time_window.py's
-    outlook_last_sync()), applied to intake attempts instead of
-    reconciliation runs. Purely client-side, like Validation's existing
-    filters -- see web/routers/validation.py."""
+    """Validation's "Last run" dropdown and calendar-day filter -- same
+    Outlook-sync definitions as Home/Exceptions (web/time_window.py's
+    outlook_all_syncs()/outlook_sync_options()), applied to intake
+    attempts instead of reconciliation runs. Purely client-side, like
+    Validation's existing filters -- see web/routers/validation.py."""
 
     def setUp(self):
         runs = [
@@ -528,24 +528,34 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
                    get_outlook_synced_jobs=lambda: outlook_jobs, **_SIDEBAR)
         self.html = _client(validation.router).get("/validation").text
 
-    def test_last_run_chip_present_as_an_independent_toggle(self):
-        self.assertIn('id="last-run-filter"', self.html)
-        self.assertIn('aria-pressed="false"', self.html)
-        # Not part of the All/Passed/Failed data-filter group.
-        self.assertNotIn('data-filter="all">Last run', self.html)
+    def test_last_run_select_present_as_an_independent_filter(self):
+        self.assertIn('id="sync-filter"', self.html)
+        options = re.findall(r'<select id="sync-filter".*?</select>', self.html, re.DOTALL)[0]
+        # The blank "every attempt" option ("All syncs" until 2026-10-01,
+        # "None" since the custom picker) comes first but isn't the default:
+        # the newest sync is pre-selected instead, same as Home.
+        opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', options)
+        self.assertEqual(opts[0], ("", "None"))
+        self.assertIn('<option value="2026-09-29T15:02:00Z" selected>', options)
+        # The sync's only real statement is A -- 1 of 2 jobs (B has no
+        # statement_id at all -- "still processing").
+        self.assertIn("1 of 2 statements", options)
+        # On load Last run is the highlighted control, not the picker's button.
+        self.assertIn('class="filter-chip active" id="time-last-run"', self.html)
+        self.assertIn('class="filter-chip sync-picker-btn" id="sync-filter-btn"', self.html)
 
     def test_calendar_button_and_hidden_date_input(self):
         self.assertIn('id="validation-date-btn"', self.html)
         self.assertIn('<use href="#i-calendar"/>', self.html)
         self.assertIn('id="validation-date" class="ns-sr-only"', self.html)
 
-    def test_cards_carry_last_run_and_day_attributes(self):
-        self.assertIn('data-last-run="1" data-day="2026-09-29"', self.html)  # A: in the sync, 11 AM ET Sep 29
-        self.assertIn('data-last-run="0" data-day="2026-09-28"', self.html)  # B: not in the sync, Sep 28 ET
-        self.assertIn('data-last-run="0" data-day=""', self.html)           # C: no ingestion_timestamp at all
+    def test_cards_carry_sync_and_day_attributes(self):
+        self.assertIn('data-sync="2026-09-29T15:02:00Z" data-day="2026-09-29"', self.html)  # A: in the sync
+        self.assertIn('data-sync="" data-day="2026-09-28"', self.html)  # B: not in the sync, Sep 28 ET
+        self.assertIn('data-sync="" data-day=""', self.html)            # C: no ingestion_timestamp at all
 
-    def test_filter_script_checks_last_run_and_day(self):
-        self.assertIn('card.dataset.lastRun === "1"', self.html)
+    def test_filter_script_checks_sync_and_day(self):
+        self.assertIn('card.dataset.sync === sync', self.html)
         self.assertIn('card.dataset.day === day', self.html)
 
     def test_hero_summary_stays_unfiltered(self):
