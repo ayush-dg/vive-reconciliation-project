@@ -183,3 +183,40 @@ MASTRIA,document,original_invoice_number,string,v1,1
 MASTRIA,purchases,charge_amount,decimal,v1,1
 MASTRIA,payments_credits,payment_amount,decimal,v1,1
 MASTRIA,balance,amount_remaining,decimal,v1,1
+GOODWINS,DATE,line_date,date,v1,1
+GOODWINS,SOURCE,transaction_code,string,v1,1
+GOODWINS,INVOICE,original_invoice_number,string,v1,1
+GOODWINS,REFERENCE,invoice_number_ref,string,v1,1
+GOODWINS,DESCRIPTION,description_raw,string,v1,1
+GOODWINS,AMOUNT,charge_amount,decimal,v1,1
+GOODWINS,AGE IN DAYS,age_in_days,integer,v1,1
+LKQ,Reference Date,line_date,date,v1,1
+LKQ,Reference Number,original_invoice_number,string,v1,1
+LKQ,Purchase Order Number,po_number,string,v1,1
+LKQ,Period Activity,charge_amount,decimal,v1,1
+LKQ,Credit Applied,charge_amount,decimal,v1,2
+LKQ,Balance Due,amount_remaining,decimal,v1,1
+NAPA_AUTO_PARTS,Inv Date,line_date,date,v1,1
+NAPA_AUTO_PARTS,DATE,line_date,date,v1,2
+NAPA_AUTO_PARTS,Due Date,due_date,date,v1,1
+NAPA_AUTO_PARTS,Type Code,transaction_code,string,v1,1
+NAPA_AUTO_PARTS,TYPE,transaction_code,string,v1,2
+NAPA_AUTO_PARTS,Invoice #,original_invoice_number,string,v1,1
+NAPA_AUTO_PARTS,REFERENCE,original_invoice_number,string,v1,2
+NAPA_AUTO_PARTS,P.O. #,po_number,string,v1,1
+NAPA_AUTO_PARTS,P.O./CHECK/J.E.,po_number,string,v1,2
+NAPA_AUTO_PARTS,Open Amount,charge_amount,decimal,v1,1
+NAPA_AUTO_PARTS,AMOUNT,charge_amount,decimal,v1,2
+NAPA_AUTO_PARTS,Explanation,description_raw,string,v1,1
+1800_RADIATOR,Date,line_date,date,v1,1
+1800_RADIATOR,Item,transaction_code,string,v1,1
+1800_RADIATOR,Ref#,original_invoice_number,string,v1,1
+1800_RADIATOR,Description,description_raw,string,v1,1
+1800_RADIATOR,Amount,charge_amount,decimal,v1,1
+CONTINENTAL_AUTO_PARTS,Trans Date,line_date,date,v1,1
+CONTINENTAL_AUTO_PARTS,Invoice,original_invoice_number,string,v1,1
+CONTINENTAL_AUTO_PARTS,Type,transaction_code,string,v1,1
+CONTINENTAL_AUTO_PARTS,PO No / RA No / Ck No,po_number,string,v1,1
+CONTINENTAL_AUTO_PARTS,PO No/RA No/Ck No,po_number,string,v1,2
+CONTINENTAL_AUTO_PARTS,Invoice / Credit,charge_amount,decimal,v1,1
+CONTINENTAL_AUTO_PARTS,Invoice/Credit,charge_amount,decimal,v1,2

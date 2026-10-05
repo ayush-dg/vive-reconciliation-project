@@ -136,5 +136,39 @@
     "Mastria GMC Cadillac Inc.",
     "Mastria GMC Cadillac",
     "Mastria Buick Cadillac GMC"
+  ],
+  "GOODWINS": [
+    "Goodwins",
+    "Goodwins Chevrolet Mazda",
+    "Goodwins Volvo",
+    "Goodwins Chevy Mazda",
+    "Goodwins Chevrolet Mazda Volvo"
+  ],
+  "LKQ": [
+    "LKQ",
+    "LKQ Gorham Auto",
+    "LKQ Thruway Auto Parts",
+    "LKQ New England",
+    "LKQ Corporation",
+    "LKQ Corp"
+  ],
+  "NAPA_AUTO_PARTS": [
+    "NAPA Auto Parts",
+    "NAPA",
+    "NAPA Auto Parts - Auto Parts Connection - Mt Holly",
+    "Auto Parts Connection"
+  ],
+  "1800_RADIATOR": [
+    "1-800-RADIATOR",
+    "1-800 Radiator",
+    "1-800 RADIATOR OF PITTSBURGH",
+    "1-800-Radiator & A/C",
+    "1-800 Radiator & A/C"
+  ],
+  "CONTINENTAL_AUTO_PARTS": [
+    "Continental Auto Parts",
+    "Continental Auto Parts, Inc.",
+    "Continental Auto Parts LLC",
+    "CAP"
   ]
 }

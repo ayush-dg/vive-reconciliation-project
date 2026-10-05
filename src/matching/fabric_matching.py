@@ -418,6 +418,13 @@ _ORDINAL_REF_RE = re.compile(r"\*(\d+)$")
 # (182036) isn't in NetSuite at all.
 _DT_REF_RE = re.compile(r"DT#\s*(\d+)", re.IGNORECASE)
 
+# NAPA-confirmed 2026-10-05: one store's statement prints invoice numbers
+# as 5 digits (57849, 58736) while NetSuite holds them zero-padded to 6
+# (057849, 058736 under NAPA 1 / 8495). Padding can't happen in Silver --
+# 18 genuine 5-digit tranids exist under the same NAPA entities -- so it is
+# a miss-only retry, exact amount only.
+_ZERO_PAD_VENDORS = {"NAPA_AUTO_PARTS": 6}
+
 
 def _apply_ordinal_suffix(invoice_number: str, invoice_number_ref) -> str:
     """Nucar's 'Lees' layout (Reynolds and Reynolds template) can show
@@ -710,6 +717,14 @@ def run_fabric_matching(statement_id: str) -> dict:
                         )
                         if dt_is_exact:
                             netsuite_total, is_exact = dt_total, dt_is_exact
+
+                pad_to = _ZERO_PAD_VENDORS.get(vendor_id)
+                if netsuite_total is None and table and pad_to and inv.isdigit() and len(inv) < pad_to:
+                    pad_total, pad_is_exact = _best_candidate(
+                        netsuite_by_table.get(table, {}).get(inv.zfill(pad_to), []), stmt_amount
+                    )
+                    if pad_is_exact:
+                        netsuite_total, is_exact = pad_total, pad_is_exact
 
                 if netsuite_total is None:
                     _write_exception(

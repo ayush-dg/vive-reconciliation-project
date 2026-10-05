@@ -106,5 +106,25 @@
   "MASTRIA": {
     "entity_ids": ["2572", "13402", "4407", "2337", "5344"],
     "note": "Mastria rooftops (Buick GMC Cadillac, Subaru and siblings: 2572, 13402, 4407, 2337, Kia 5344). Derived 2026-10-05 by tranid trace of the Quonset / Pawtucket August statements (CDK AR layout, parsed by extract_mastria.py): invoices and CM credits tie out verbatim. 5344 confirmed by 200380K ($454.81, Kia dept 6). Nissan (2336), VW (15934) also exist in NetSuite -- add them only on a confirmed hit."
+  },
+  "GOODWINS": {
+    "entity_ids": ["6957", "12416"],
+    "note": "Goodwins Chevy Mazda-Domestic (6957) and Goodwins Volvo (12416). Derived 2026-10-05 by tranid trace of 6 stored Goodwins statements (Reynolds and Reynolds template, CVW-prefixed invoices): 33 of 34 unique lines tie out across ALL NetSuite entities only under these two -- charges after the 3-char prefix strip, credits as CM + stripped. Goodwins Chevy Mazda-Foreign (6688), Oxford-Sublet (11974) and Land Rover (13397) also exist; add them only on a confirmed hit."
+  },
+  "LKQ": {
+    "entity_ids": ["3019", "63531", "32050"],
+    "note": "LKQ New England (3019), LKQ (63531), Royal Used LKQ Parts (32050). Derived 2026-10-05 by tranid trace of 5 stored LKQ statements (Gorham, Thruway): 117 of 125 unique lines tie out verbatim across ALL NetSuite entities only under these three (103 / 13 / 1). LKQ is NOT under Keystone in NetSuite despite the corporate relationship."
+  },
+  "NAPA_AUTO_PARTS": {
+    "entity_ids": ["402001", "7147", "8495"],
+    "note": "Auto Parts Connection (402001), NAPA (7147), NAPA 1 (8495). Derived 2026-10-05 by tranid trace of 6 stored NAPA statements: 14 of 22 unique lines tie out across ALL NetSuite entities only under these three. NAPA is a franchise network with ~20 store-level vendor records in NetSuite; add another store only on a confirmed hit."
+  },
+  "1800_RADIATOR": {
+    "entity_ids": ["8214", "637035"],
+    "note": "1-800-Radiator (8214) and 1 800-Radiator AC and Exhaust of Pittsburgh (637035). Derived 2026-10-05 by tranid trace of 12 stored statements: 26 of 32 unique lines tie out verbatim across ALL NetSuite entities only under these two (19 / 7)."
+  },
+  "CONTINENTAL_AUTO_PARTS": {
+    "entity_ids": ["7146"],
+    "note": "Continental Auto Parts LLC (7146). Derived 2026-10-05 by tranid trace of 6 stored statements: 162 of 181 unique lines tie out verbatim under 7146. Two more tied under Lehigh Valley Honda (134807) -- coincidental number collisions with another vendor, deliberately left out."
   }
 }
