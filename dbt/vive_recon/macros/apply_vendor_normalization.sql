@@ -47,6 +47,15 @@
     original invoice a credit was applied to): keeps the text before the
     first occurrence of vnr.pattern, trimmed; a value without vnr.pattern
     passes through unchanged.
+    token_after (added 2026-10-05: Bow Auto Parts prints the document in a
+    text column -- "Invoice #824029", "Credit #823225 for inv. 822744" --
+    and Paragon likewise -- "Invoice #63128: 2305090"; NetSuite's tranid is
+    the number right after the '#', confirmed by tranid trace (Bow 93 lines
+    under 6681, Paragon under 7149)): keeps the run of letters / digits /
+    dashes right after the first occurrence of vnr.pattern. A value WITHOUT
+    vnr.pattern becomes NULL, deliberately: those are payment lines
+    ("Payment: Check 1234567890"), and a NULL invoice number keeps them out
+    of matching instead of surfacing them as Not Found.
 #}
 {% macro apply_vendor_normalization(invoice_col, line_type_col) %}
     case
@@ -68,6 +77,12 @@
                                  end
                         when vnr.rule_type = 'lowercase'
                             then lower({{ invoice_col }})
+                        when vnr.rule_type = 'token_after'
+                            then case
+                                    when charindex(vnr.pattern, {{ invoice_col }}) > 0
+                                        then left(ltrim(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000)), patindex('%[^0-9A-Za-z-]%', ltrim(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000)) + ' ') - 1)
+                                    else null
+                                 end
                         when vnr.rule_type = 'keep_before'
                             then case
                                     when charindex(vnr.pattern, {{ invoice_col }}) > 1
@@ -90,6 +105,12 @@
                  end
         when vnr.rule_type = 'lowercase'
             then lower({{ invoice_col }})
+        when vnr.rule_type = 'token_after'
+            then case
+                    when charindex(vnr.pattern, {{ invoice_col }}) > 0
+                        then left(ltrim(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000)), patindex('%[^0-9A-Za-z-]%', ltrim(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000)) + ' ') - 1)
+                    else null
+                 end
         when vnr.rule_type = 'keep_before'
             then case
                     when charindex(vnr.pattern, {{ invoice_col }}) > 1

@@ -426,6 +426,25 @@ _DT_REF_RE = re.compile(r"DT#\s*(\d+)", re.IGNORECASE)
 _ZERO_PAD_VENDORS = {"NAPA_AUTO_PARTS": 6}
 
 
+def _alternate_tranids(vendor_id: str, inv: str) -> list:
+    """Vendor-specific alternate spellings of a statement invoice number,
+    tried only after the number as normalized missed (exact amount only).
+    Each is a convention NetSuite holds alongside the plain one, so it
+    can't be a Silver rewrite without breaking the plain matches:
+      - NAPA: zero-pad to 6 (57849 -> 057849), see _ZERO_PAD_VENDORS.
+      - O'Reilly (confirmed 2026-10-05, 150 of 218 traced lines): the
+        statement prints store + document run together (4507140208);
+        NetSuite mostly holds them dashed after the 4-digit store
+        (4507-140208), a few undashed (4530128235)."""
+    alts = []
+    pad_to = _ZERO_PAD_VENDORS.get(vendor_id)
+    if pad_to and inv.isdigit() and len(inv) < pad_to:
+        alts.append(inv.zfill(pad_to))
+    if vendor_id == "OREILLY_AUTO_PARTS" and inv.isdigit() and len(inv) == 10:
+        alts.append(f"{inv[:4]}-{inv[4:]}")
+    return alts
+
+
 def _apply_ordinal_suffix(invoice_number: str, invoice_number_ref) -> str:
     """Nucar's 'Lees' layout (Reynolds and Reynolds template) can show
     MULTIPLE separate real credit memos against the same base invoice on
@@ -718,13 +737,14 @@ def run_fabric_matching(statement_id: str) -> dict:
                         if dt_is_exact:
                             netsuite_total, is_exact = dt_total, dt_is_exact
 
-                pad_to = _ZERO_PAD_VENDORS.get(vendor_id)
-                if netsuite_total is None and table and pad_to and inv.isdigit() and len(inv) < pad_to:
-                    pad_total, pad_is_exact = _best_candidate(
-                        netsuite_by_table.get(table, {}).get(inv.zfill(pad_to), []), stmt_amount
-                    )
-                    if pad_is_exact:
-                        netsuite_total, is_exact = pad_total, pad_is_exact
+                if netsuite_total is None and table:
+                    for alt in _alternate_tranids(vendor_id, inv):
+                        alt_total, alt_is_exact = _best_candidate(
+                            netsuite_by_table.get(table, {}).get(alt.lower(), []), stmt_amount
+                        )
+                        if alt_is_exact:
+                            netsuite_total, is_exact = alt_total, alt_is_exact
+                            break
 
                 if netsuite_total is None:
                     _write_exception(

@@ -126,5 +126,25 @@
   "CONTINENTAL_AUTO_PARTS": {
     "entity_ids": ["7146"],
     "note": "Continental Auto Parts LLC (7146). Derived 2026-10-05 by tranid trace of 6 stored statements: 162 of 181 unique lines tie out verbatim under 7146. Two more tied under Lehigh Valley Honda (134807) -- coincidental number collisions with another vendor, deliberately left out."
+  },
+  "BILL_DODGE": {
+    "entity_ids": ["26349", "653129", "121920", "416254"],
+    "note": "Bill Dodge Infiniti (26349), BMW of Westbrook (653129), Bill Dodge GMC (121920), Bill Dodge Kia (416254). Derived 2026-10-05 by tranid trace of 9 stored Bill Dodge Auto Group statements (Tekion AR layout, one statement covers several franchises): 47 of 58 unique lines tie out verbatim across ALL NetSuite entities only under these four (39 / 3 / 3 / 2). The misses are R-suffixed returns (F3335R, K10437-1R) with no NetSuite credit at that amount."
+  },
+  "BOW_AUTO_PARTS": {
+    "entity_ids": ["6681"],
+    "note": "Bow Auto Parts (6681). Derived 2026-10-05 by tranid trace of 8 stored statements: 93 lines tie out under 6681 using the number after '#' in Transaction Type (token_after normalization) -- invoices as bills, 'Credit #nnn for inv. mmm' as vendorcredit nnn. Bow Auto Parts 1 (10918) had no hits."
+  },
+  "HEALEY": {
+    "entity_ids": ["219785", "322933", "219786", "220235", "42211", "53967"],
+    "note": "Healey rooftops: Chrysler Dodge Jeep Ram (219785), Chevrolet (322933), Hyundai (219786), Kia 1 (220235), Chevrolet Buick Inc. (42211), Mitsubishi (53967). Derived 2026-10-05 by tranid trace of 7 stored Prestige statements (one shared layout): 48 of 65 unique lines tie out verbatim across ALL NetSuite entities only under these six. Healey Ford (35495) and Healey Chevy Buick (61610) also exist -- add only on a confirmed hit."
+  },
+  "OREILLY_AUTO_PARTS": {
+    "entity_ids": ["6967"],
+    "note": "OREILLY AUTO PARTS (6967) -- the only active O'Reilly record (5340, 6680, 87596 inactive). Derived 2026-10-05 by tranid trace of 10 stored statements: 155 of 218 unique lines tie out under 6967, 150 of them only after inserting a dash after the 4-digit store number (statement 4507140208 -> NetSuite 4507-140208; fabric_matching._alternate_tranids). Most misses are late-2025 items."
+  },
+  "PARAGON": {
+    "entity_ids": ["7149"],
+    "note": "Paragon Powder Coating and Wheel Repair (7149), the only Paragon record. Derived 2026-10-05 by tranid trace of 10 stored statements: the invoice number after 'Invoice #' in ACTIVITY is the NetSuite tranid, but most lines surface as Amount Mismatch -- NetSuite holds the list price ($195.00 / $200.00) while the statement bills the discounted amount ($175.50 / $180.50). Genuine discrepancy for AP review, not a key problem."
   }
 }

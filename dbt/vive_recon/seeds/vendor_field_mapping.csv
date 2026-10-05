@@ -220,3 +220,32 @@ CONTINENTAL_AUTO_PARTS,PO No / RA No / Ck No,po_number,string,v1,1
 CONTINENTAL_AUTO_PARTS,PO No/RA No/Ck No,po_number,string,v1,2
 CONTINENTAL_AUTO_PARTS,Invoice / Credit,charge_amount,decimal,v1,1
 CONTINENTAL_AUTO_PARTS,Invoice/Credit,charge_amount,decimal,v1,2
+BILL_DODGE,Invoice Date,line_date,date,v1,1
+BILL_DODGE,Invoice Dat e,line_date,date,v1,2
+BILL_DODGE,Invoice#,original_invoice_number,string,v1,1
+BILL_DODGE,Franchise,description_raw,string,v1,1
+BILL_DODGE,Purchases,charge_amount,decimal,v1,1
+BILL_DODGE,Payments,payment_amount,decimal,v1,1
+BILL_DODGE,Balance,amount_remaining,decimal,v1,1
+BOW_AUTO_PARTS,Date,line_date,date,v1,1
+BOW_AUTO_PARTS,Transaction Type,original_invoice_number,string,v1,1
+BOW_AUTO_PARTS,Cust PO/Chk #,po_number,string,v1,1
+BOW_AUTO_PARTS,Description,description_raw,string,v1,1
+BOW_AUTO_PARTS,Charged,charge_amount,decimal,v1,1
+BOW_AUTO_PARTS,Paid,payment_amount,decimal,v1,1
+BOW_AUTO_PARTS,Due,amount_remaining,decimal,v1,1
+HEALEY,Date,line_date,date,v1,1
+HEALEY,Invoice#,original_invoice_number,string,v1,1
+HEALEY,PO#..,po_number,string,v1,1
+HEALEY,Amount,charge_amount,decimal,v1,1
+HEALEY,Balance,amount_remaining,decimal,v1,1
+HEALEY,Age,age_in_days,integer,v1,1
+OREILLY_AUTO_PARTS,DATE,line_date,date,v1,1
+OREILLY_AUTO_PARTS,TRANS #,original_invoice_number,string,v1,1
+OREILLY_AUTO_PARTS,PO #,po_number,string,v1,1
+OREILLY_AUTO_PARTS,DESCRIPTION,description_raw,string,v1,1
+OREILLY_AUTO_PARTS,INV AMOUNT,charge_amount,decimal,v1,1
+OREILLY_AUTO_PARTS,OPEN AMOUNT,amount_remaining,decimal,v1,1
+PARAGON,DATE,line_date,date,v1,1
+PARAGON,ACTIVITY,original_invoice_number,string,v1,1
+PARAGON,AMOUNT,charge_amount,decimal,v1,1

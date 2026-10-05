@@ -170,5 +170,42 @@
     "Continental Auto Parts, Inc.",
     "Continental Auto Parts LLC",
     "CAP"
+  ],
+  "BILL_DODGE": [
+    "Bill Dodge",
+    "Bill Dodge Auto Group",
+    "Bill Dodge Auto Group, Inc",
+    "Bill Dodge Auto Group Inc."
+  ],
+  "BOW_AUTO_PARTS": [
+    "Bow Auto Parts",
+    "Bow Auto Parts - AUTOLY",
+    "Bow Auto Parts AUTOLY"
+  ],
+  "HEALEY": [
+    "Healey Automotive",
+    "Healey Mitsubishi",
+    "Healey Chevrolet Inc",
+    "Healey Chevrolet",
+    "Healey Ford Lincoln, LLC",
+    "Healey Ford",
+    "W S Healey Chevrolet Inc",
+    "WS Healey Chevrolet",
+    "Healey Chrysler Dodge Jeep, LLC",
+    "Healey Chrysler Dodge Jeep Ram",
+    "Healey Kia",
+    "Healey Hyundai Inc-North",
+    "Healey Hyundai"
+  ],
+  "OREILLY_AUTO_PARTS": [
+    "O'Reilly Auto Parts",
+    "O'REILLY AUTOMOTIVE, INC.",
+    "O'Reilly Automotive Inc.",
+    "OReilly Auto Parts"
+  ],
+  "PARAGON": [
+    "Paragon Powder Coating & Wheel Repair",
+    "Paragon Powder Coating and Wheel Repair",
+    "Paragon"
   ]
 }
