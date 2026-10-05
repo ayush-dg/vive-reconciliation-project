@@ -412,6 +412,12 @@ def _build_invoice_shapes(lines: list) -> dict:
 
 _ORDINAL_REF_RE = re.compile(r"\*(\d+)$")
 
+# Lentini-confirmed 2026-10-05: a credit line's Reference reads
+# 'CR for #181513, DT#66583' -- the DT# number is the NetSuite vendorcredit
+# tranid (66583, $820, entity 123828), while the statement's own Invoice #
+# (182036) isn't in NetSuite at all.
+_DT_REF_RE = re.compile(r"DT#\s*(\d+)", re.IGNORECASE)
+
 
 def _apply_ordinal_suffix(invoice_number: str, invoice_number_ref) -> str:
     """Nucar's 'Lees' layout (Reynolds and Reynolds template) can show
@@ -690,6 +696,20 @@ def run_fabric_matching(statement_id: str) -> dict:
                     cm_total, cm_is_exact = _best_candidate(cm_candidates, stmt_amount)
                     if cm_total is not None:
                         netsuite_total, is_exact = cm_total, cm_is_exact
+
+                if netsuite_total is None and table == "netsuite_vendorcredit":
+                    # Last resort for a credit whose own number missed: the
+                    # 'DT#<tranid>' its Reference column points at (see
+                    # _DT_REF_RE). Exact amount only -- a DT# hit at a
+                    # different amount stays Not Found rather than showing
+                    # an unrelated record as the closest candidate.
+                    dt = _DT_REF_RE.search(item.get("invoice_number_ref") or "")
+                    if dt:
+                        dt_total, dt_is_exact = _best_candidate(
+                            netsuite_by_table.get(table, {}).get(dt.group(1), []), stmt_amount
+                        )
+                        if dt_is_exact:
+                            netsuite_total, is_exact = dt_total, dt_is_exact
 
                 if netsuite_total is None:
                     _write_exception(

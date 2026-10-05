@@ -165,3 +165,21 @@ GRAPPONE,document,original_invoice_number,string,v1,1
 GRAPPONE,purchases,charge_amount,decimal,v1,1
 GRAPPONE,payments_credits,payment_amount,decimal,v1,1
 GRAPPONE,balance,amount_remaining,decimal,v1,1
+GATES_GMC_NISSAN,TRANSACTION DATE,line_date,date,v1,1
+GATES_GMC_NISSAN,INVOICE#,original_invoice_number,string,v1,1
+GATES_GMC_NISSAN,AMOUNT,charge_amount,decimal,v1,1
+GATES_GMC_NISSAN,MEMO/PO#,po_number,string,v1,1
+GATES_GMC_NISSAN,TRANSACTION,description_raw,string,v1,1
+GATES_GMC_NISSAN,BALANCE DUE,amount_remaining,decimal,v1,1
+LENTINI_AUTO_SALVAGE,Date,line_date,date,v1,1
+LENTINI_AUTO_SALVAGE,Invoice #,original_invoice_number,string,v1,1
+LENTINI_AUTO_SALVAGE,Reference,invoice_number_ref,string,v1,1
+LENTINI_AUTO_SALVAGE,Amount,charge_amount,decimal,v1,1
+LENTINI_AUTO_SALVAGE,Balance,amount_remaining,decimal,v1,1
+MASTRIA,date,line_date,date,v1,1
+MASTRIA,txn_code,transaction_code,string,v1,1
+MASTRIA,dept_code,description_raw,string,v1,1
+MASTRIA,document,original_invoice_number,string,v1,1
+MASTRIA,purchases,charge_amount,decimal,v1,1
+MASTRIA,payments_credits,payment_amount,decimal,v1,1
+MASTRIA,balance,amount_remaining,decimal,v1,1

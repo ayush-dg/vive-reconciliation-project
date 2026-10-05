@@ -119,5 +119,22 @@
     "Blaise Alexander Nissan",
     "Blaise Alexander Subaru",
     "Blaise Alexander Hyundai Mazda"
+  ],
+  "GATES_GMC_NISSAN": [
+    "GATES GMC - NISSAN",
+    "Gates GMC Nissan",
+    "Gates GMC - Nissan"
+  ],
+  "LENTINI_AUTO_SALVAGE": [
+    "Lentini Auto Salvage Inc",
+    "Lentini Auto Salvage INC",
+    "Lentini Auto Salvage"
+  ],
+  "MASTRIA": [
+    "Mastria",
+    "MASTRIA",
+    "Mastria GMC Cadillac Inc.",
+    "Mastria GMC Cadillac",
+    "Mastria Buick Cadillac GMC"
   ]
 }

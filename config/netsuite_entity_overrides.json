@@ -94,5 +94,17 @@
   "QUIRK_AUTO_GROUP": {
     "entity_ids": ["48069", "46333", "46332", "55672", "47163", "46059", "46637", "10654", "119935", "104293"],
     "note": "10 of the statement's 15 rooftop codes confirmed 2026-09-05 against real tranid data across 3 real Quirk statements (STMT-8C2BCD72 and two others) -- CV=Chevy Bangor=48069 (Quirk Chevrolet Cadillac of Bangor), SU=Subaru=46333 (Quirk Subaru of Bangor), JE=Jeep=46332 (Quirk Chrysler Jeep Dodge Ram of Bangor, disambiguated from 2 other name-similar candidates via live match), MB=Mercedes=55672, HY=Hyundai=47163, 7C=Chev Portland=46059 (first one confirmed, via direct tranid lookup on 891928C), FO=Ford Augusta=46637, AM=Quirk Aftermarket=10654, 1F/1D=Belfast Ford Chrysler=119935 (shared by both prefixes), RC=Rockland Chevrolet GMC=104293. Unresolved: MI (Mitsubishi), 6U (Cars By Us), 6P (Quirk Motorsports), 8F (Alfa Romeo and Fiat) -- none of these four appear anywhere in bronze.netsuite_vendor under any name variant searched, despite 24 total 'quirk'-matching vendor records existing (Quirk Kia, Quirk Auto Glass, Quirk Buick GMC, Quirk Volkswagen Manchester, generic 'QUIRK', several Crown/Parts/Domestic/Foreign records, etc.) -- none of those 14 extra records are a name match for the 4 missing rooftops either, so they're deliberately NOT included here (same reasoning as ABC's excluded false-positive candidates: a 'Quirk'-prefixed name isn't enough on its own to justify inclusion in a 15-rooftop statement's own entity boundary without a specific business reason to believe it's one of the missing 4). This entity_ids list is used as a broad collision-guard scope only (entity IN (...) on the join), NOT for per-invoice rooftop precision -- confirmed 2026-09-05 that a credit's actual NetSuite entity doesn't reliably match what its invoice's rooftop prefix predicts (a 7C-prefixed credit landed under CV's entity), so per-rooftop entity comparison was deliberately dropped from the matching logic, not from this scope list."
+  },
+  "GATES_GMC_NISSAN": {
+    "entity_ids": ["81232"],
+    "note": "Gates GMC Nissan (81232). Derived 2026-10-05 by tranid trace of the stored Claude rows of the August Gates statements (New Britain, Pawtucket, Bristol): charges tie out under 81232 once the 2-char '00' invoice prefix is stripped (seed vendor_normalization_rule). Credits carry irregular NetSuite tranids and mostly surface as exceptions."
+  },
+  "LENTINI_AUTO_SALVAGE": {
+    "entity_ids": ["123828", "128702"],
+    "note": "Lentini Auto Salvage (123828, 128702). Derived 2026-10-05 by tranid trace of the stored Claude rows of the August Lentini statements: invoices tie out verbatim under these two records. Credit / payment lines reference the NetSuite vendorcredit as 'DT# nnnn' in the Reference column -- matched by the DT# fallback in fabric_matching.py."
+  },
+  "MASTRIA": {
+    "entity_ids": ["2572", "13402", "4407", "2337", "5344"],
+    "note": "Mastria rooftops (Buick GMC Cadillac, Subaru and siblings: 2572, 13402, 4407, 2337, Kia 5344). Derived 2026-10-05 by tranid trace of the Quonset / Pawtucket August statements (CDK AR layout, parsed by extract_mastria.py): invoices and CM credits tie out verbatim. 5344 confirmed by 200380K ($454.81, Kia dept 6). Nissan (2336), VW (15934) also exist in NetSuite -- add them only on a confirmed hit."
   }
 }

@@ -82,6 +82,7 @@ _VENDOR_DISPLAY_NAMES = {
     "extract_rivian": "Rivian, LLC",
     "extract_allstar": "All Star Auto Lights, Inc.",
     "extract_grappone": "Grappone Automotive Group",
+    "extract_mastria": "Mastria",
 }
 
 # Which summary key holds the statement's own printed grand total, per
@@ -105,6 +106,7 @@ _PRINTED_TOTAL_KEY = {
     "extract_rivian": "total_printed",
     "extract_allstar": "amount_due_printed",
     "extract_grappone": "total_printed",
+    "extract_mastria": "total_printed",
 }
 
 # Which summary key holds the statement date, per module -- these
@@ -128,6 +130,7 @@ _STATEMENT_DATE_KEY = {
     "extract_rivian": "statement_date_iso",
     "extract_allstar": "statement_date",
     "extract_grappone": "statement_date",
+    "extract_mastria": "statement_date",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -319,6 +322,17 @@ _FIELD_MAP = {
         # history, not the open balance. This only drives the arithmetic
         # gate and the extracted-data columns -- NetSuite matching reads
         # purchases/payments_credits via dbt/vive_recon/seeds/vendor_field_mapping.csv.
+        "charge_field": "balance", "credit_field": None,
+    },
+    "extract_mastria": {
+        "invoice_number": ("document",),
+        "date_field": "date", "due_date_field": None,
+        "transaction_code_field": "txn_code",
+        # "balance" for the same reason as extract_grappone above: PLEASE PAY
+        # THIS AMOUNT reconciles against sum(balance). Matching reads
+        # purchases / payments_credits via the field-mapping seed; closing
+        # (txn code 57) rows carry their amounts in closing_* fields and are
+        # never matched -- see extract_mastria.py.
         "charge_field": "balance", "credit_field": None,
     },
 }
