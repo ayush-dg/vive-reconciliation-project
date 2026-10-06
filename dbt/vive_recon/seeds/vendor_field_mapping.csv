@@ -227,13 +227,6 @@ BILL_DODGE,Franchise,description_raw,string,v1,1
 BILL_DODGE,Purchases,charge_amount,decimal,v1,1
 BILL_DODGE,Payments,payment_amount,decimal,v1,1
 BILL_DODGE,Balance,amount_remaining,decimal,v1,1
-BOW_AUTO_PARTS,Date,line_date,date,v1,1
-BOW_AUTO_PARTS,Transaction Type,original_invoice_number,string,v1,1
-BOW_AUTO_PARTS,Cust PO/Chk #,po_number,string,v1,1
-BOW_AUTO_PARTS,Description,description_raw,string,v1,1
-BOW_AUTO_PARTS,Charged,charge_amount,decimal,v1,1
-BOW_AUTO_PARTS,Paid,payment_amount,decimal,v1,1
-BOW_AUTO_PARTS,Due,amount_remaining,decimal,v1,1
 HEALEY,Date,line_date,date,v1,1
 HEALEY,Invoice#,original_invoice_number,string,v1,1
 HEALEY,PO#..,po_number,string,v1,1
@@ -277,3 +270,12 @@ WHEELS_ON_SITE,DATE,line_date,date,v1,1
 WHEELS_ON_SITE,DESCRIPTION,original_invoice_number,string,v1,1
 WHEELS_ON_SITE,AMOUNT,charge_amount,decimal,v1,1
 WHEELS_ON_SITE,OPEN AMOUNT,amount_remaining,decimal,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,date,line_date,date,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,type,transaction_code,string,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,reference_number,original_invoice_number,string,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,original_invoice_ref,invoice_number_ref,string,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,po_chk_number,po_number,string,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,description,description_raw,string,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,charged,charge_amount,decimal,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,paid,payment_amount,decimal,v1,1
+BOW_AUTO_PARTS_-_AUTOLY,due,amount_remaining,decimal,v1,1

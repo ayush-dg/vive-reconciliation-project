@@ -393,6 +393,13 @@ COLUMNS = {
         ("raw_period_activity", "ALTER TABLE bronze_vendor_statement_raw ADD raw_period_activity NVARCHAR(MAX)"),
         ("raw_credit_applied", "ALTER TABLE bronze_vendor_statement_raw ADD raw_credit_applied NVARCHAR(MAX)"),
         ("raw_payment_applied", "ALTER TABLE bronze_vendor_statement_raw ADD raw_payment_applied NVARCHAR(MAX)"),
+        # migrations/019_add_validation_fallback_columns.sql (SQLite side of
+        # this same change) -- Autoly's "Unalloc." column and the printed
+        # section a row sits under, both inputs to the Arithmetic
+        # Validation Gate's fallback checks (src/validation/arithmetic_gate.py
+        # validate_with_fallbacks()). NULL for every other layout.
+        ("raw_unallocated", "ALTER TABLE bronze_vendor_statement_raw ADD raw_unallocated NVARCHAR(MAX)"),
+        ("raw_section", "ALTER TABLE bronze_vendor_statement_raw ADD raw_section NVARCHAR(MAX)"),
     ],
     "document_intake_log": [
         # migrations/013_add_aging_summary_column.sql (SQLite side of this
@@ -425,6 +432,18 @@ COLUMNS = {
         # produced the value in billing_location: "printed",
         # "lookup_table", "shop_name_fallback", or NULL.
         ("billing_location_source", "ALTER TABLE document_intake_log ADD billing_location_source NVARCHAR(MAX)"),
+        # migrations/019_add_validation_fallback_columns.sql (SQLite side of
+        # this same change) -- which validation check passed ("primary",
+        # "open_balance", "statement_equation", "running_balance",
+        # "section_subtotal"; NULL when none did or for rows written before
+        # this migration), every fallback attempt as JSON, and the
+        # fallback inputs (the verified printed previous balance + where it
+        # came from, and printed section subtotals as JSON).
+        ("validation_method", "ALTER TABLE document_intake_log ADD validation_method NVARCHAR(50)"),
+        ("validation_detail", "ALTER TABLE document_intake_log ADD validation_detail NVARCHAR(MAX)"),
+        ("previous_balance", "ALTER TABLE document_intake_log ADD previous_balance FLOAT"),
+        ("previous_balance_source", "ALTER TABLE document_intake_log ADD previous_balance_source NVARCHAR(100)"),
+        ("section_totals", "ALTER TABLE document_intake_log ADD section_totals NVARCHAR(MAX)"),
     ],
     "silver_reconciliation_standard": [
         ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),

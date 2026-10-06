@@ -375,6 +375,13 @@ def select_lines(vendor_id: str, lines: list, rules: dict = None) -> list:
     result = []
     if charge_rule and charge_rule.get("rule_type") == "keep_earliest":
         result.extend(_select_lines_keep_earliest(charge_side))
+    elif charge_rule and charge_rule.get("rule_type") == "exclude_by_transaction_code":
+        # Added 2026-10-06 for Bow Auto Parts (extract_autoly): a Payment
+        # row carries the check number as its reference and its amount in
+        # Paid, so it is PAYMENT-typed and lands on this side, not the
+        # credit side -- same "drop the statement's own payment
+        # bookkeeping" purpose as the credit-side use below.
+        result.extend(_exclude_by_transaction_code(charge_side, charge_rule))
     elif charge_rule:
         result.extend(_select_charge_lines(charge_side, charge_rule))
     else:

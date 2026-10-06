@@ -107,7 +107,15 @@ _PRINTED_TOTAL_KEY = {
     "extract_allstar": "amount_due_printed",
     "extract_grappone": "total_printed",
     "extract_mastria": "total_printed",
+    # "Balance due" (= Total due - Unallocated), the amount the statement
+    # asks for -- what the AI path stored for every Oct 1 Autoly statement.
+    "extract_autoly": "balance_due_printed",
 }
+
+# Modules that serve many vendors: vendor_name is the letterhead name the
+# module reads off the PDF (summary["vendor_name"]), not one fixed name.
+# config/vendor_aliases.json folds each vendor's name variants to one id.
+_VENDOR_NAME_FROM_DOCUMENT = {"extract_autoly"}
 
 # Which summary key holds the statement date, per module -- these
 # genuinely differ in both key name and printed format (DDMonYY, MM/DD/YY,
@@ -131,6 +139,7 @@ _STATEMENT_DATE_KEY = {
     "extract_allstar": "statement_date",
     "extract_grappone": "statement_date",
     "extract_mastria": "statement_date",
+    "extract_autoly": "period_end",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -168,6 +177,11 @@ _FIELD_MAP = {
         "invoice_number": ("doc_no",),
         "date_field": "transaction_date", "due_date_field": "due_date",
         "charge_field": "amount", "credit_field": None,
+        # The printed Total Balance is the sum of the Balance column -- a
+        # payment row's Amount is the whole payment, its Balance only the
+        # unapplied remainder (2026-10-06, see extract_empire.py's
+        # PAYMENT_LABEL_RE). Feeds the gate's open_balance fallback check.
+        "amount_due_field": "balance",
     },
     "extract_wilberts": {
         "invoice_number": ("invoice_number",),
@@ -214,6 +228,12 @@ _FIELD_MAP = {
         # open_amount against the printed TOTAL DUE, is separate from this
         # per-row Bronze/matching field and is unaffected by this change.)
         "charge_field": "amount", "credit_field": None,
+        # open_amount is what the printed TOTAL DUE adds up (the module's
+        # own reconciles check) -- exposed as amount_due so the gate's
+        # open_balance fallback can verify it (2026-10-06: Don Joe Auto
+        # Body, sum(open_amount) = 13,943.93 = printed, sum(amount) =
+        # 24,629.68). charge_field stays "amount" for matching.
+        "amount_due_field": "open_amount",
     },
     "extract_keystone": {
         # Ledger-style statement (see extract_keystone.py's own docstring
@@ -334,6 +354,19 @@ _FIELD_MAP = {
         # (txn code 57) rows carry their amounts in closing_* fields and are
         # never matched -- see extract_mastria.py.
         "charge_field": "balance", "credit_field": None,
+    },
+    "extract_autoly": {
+        # Same columns and field names as extract_fenix (Fenix NE is an
+        # Autoly vendor): Charged is the original charge, Paid the credit or
+        # payment amount. Due is each invoice's open amount and Unalloc. the
+        # unapplied payment pool -- printed Balance due = sum(Due) -
+        # sum(Unalloc.), which the gate's open_balance check verifies.
+        "invoice_number": ("reference_number",),
+        "date_field": "date", "due_date_field": None,
+        "po_number_field": "po_chk_number",
+        "charge_field": "charged", "credit_field": "paid",
+        "amount_due_field": "due",
+        "unallocated_field": "unalloc",
     },
 }
 
@@ -588,6 +621,13 @@ class PythonLibraryExtractionEngine:
             for bronze_key, source_key in field_map.get("passthrough_fields", {}).items():
                 invoice[bronze_key] = _parse_money(item.get(source_key))
 
+            # Unapplied payment pool (Autoly's "Unalloc."): reaches Bronze's
+            # raw_unallocated and the gate's open_balance check, same as the
+            # AI path's "unallocated" field.
+            unallocated_field = field_map.get("unallocated_field")
+            if unallocated_field:
+                invoice["unallocated"] = _parse_money(item.get(unallocated_field))
+
             # Internal only -- the pre-mapping row exactly as this vendor's
             # extractor module produced it (field names are whatever that
             # module's own author chose, e.g. "invoice_no"/"doc_no" -- not
@@ -613,7 +653,8 @@ class PythonLibraryExtractionEngine:
         # must exist under "VOUCHER-<vendor_id>" for matching to find
         # anything to reconcile against; that's a separate prerequisite
         # from extraction working, unaffected by this change either way.
-        vendor_name = _VENDOR_DISPLAY_NAMES.get(module.__name__, module.VENDOR_SIGNATURE[0])
+        vendor_name = (summary.get("vendor_name") if module.__name__ in _VENDOR_NAME_FROM_DOCUMENT else None) \
+            or _VENDOR_DISPLAY_NAMES.get(module.__name__, module.VENDOR_SIGNATURE[0])
 
         statement_date = _normalize_date(summary.get(_STATEMENT_DATE_KEY.get(module.__name__, "statement_date")))
 

@@ -289,6 +289,27 @@ templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname
 templates.env.filters["smart_title"] = smart_title
 
+
+# Arithmetic Validation Gate check names (document_intake_log.
+# validation_method, src/validation/arithmetic_gate.py) -> what each check
+# actually verified, for the Validation page.
+VALIDATION_METHOD_LABELS = {
+    "primary": "Charges − credits",
+    "open_balance": "Open balances",
+    "statement_equation": "Previous balance + activity",
+    "running_balance": "Running balance",
+    "section_subtotal": "Section subtotals",
+}
+
+
+def validation_method_label(value):
+    if not value:
+        return ""
+    return VALIDATION_METHOD_LABELS.get(str(value), str(value).replace("_", " ").capitalize())
+
+
+templates.env.filters["validation_method_label"] = validation_method_label
+
 # ---------------------------------------------------------------------------
 # Static asset cache busting
 # ---------------------------------------------------------------------------

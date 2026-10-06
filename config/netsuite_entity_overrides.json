@@ -131,9 +131,9 @@
     "entity_ids": ["26349", "653129", "121920", "416254"],
     "note": "Bill Dodge Infiniti (26349), BMW of Westbrook (653129), Bill Dodge GMC (121920), Bill Dodge Kia (416254). Derived 2026-10-05 by tranid trace of 9 stored Bill Dodge Auto Group statements (Tekion AR layout, one statement covers several franchises): 47 of 58 unique lines tie out verbatim across ALL NetSuite entities only under these four (39 / 3 / 3 / 2). The misses are R-suffixed returns (F3335R, K10437-1R) with no NetSuite credit at that amount."
   },
-  "BOW_AUTO_PARTS": {
+  "BOW_AUTO_PARTS_-_AUTOLY": {
     "entity_ids": ["6681"],
-    "note": "Bow Auto Parts (6681). Derived 2026-10-05 by tranid trace of 8 stored statements: 93 lines tie out under 6681 using the number after '#' in Transaction Type (token_after normalization) -- invoices as bills, 'Credit #nnn for inv. mmm' as vendorcredit nnn. Bow Auto Parts 1 (10918) had no hits."
+    "note": "Bow Auto Parts (6681). Derived 2026-10-05 by tranid trace of 8 stored statements: 93 lines tie out under 6681 as the number after '#' in Transaction Type -- invoices as bills, 'Credit #nnn for inv. mmm' as vendorcredit nnn. Key renamed BOW_AUTO_PARTS -> BOW_AUTO_PARTS_-_AUTOLY 2026-10-06 on merging fix/oct1-validation, whose extract_autoly parser now reads Bow statements and whose alias uses that id. Bow Auto Parts 1 (10918) had no hits."
   },
   "HEALEY": {
     "entity_ids": ["219785", "322933", "219786", "220235", "42211", "53967"],

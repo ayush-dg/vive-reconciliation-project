@@ -27,6 +27,13 @@ MONEY_RE = re.compile(r"^-?[\d,]+\.\d{2}$")
 # strict digits-only version silently dropped these rows entirely
 # (worth $88.00 and $42.00 respectively on those two statements).
 DOC_NO_RE = re.compile(r"^/?\d{7,9}$")
+# A payment row carries no doc number -- only a payment-method label in the
+# description column, its amount, and (when part of it is still unapplied)
+# a balance, e.g. "09/29/26 LOCKBOX -3,049.00 -193.00" (EMPIRE COLE 0926)
+# or "08/05/26 Cash -423.00 -12.60" (EMPIRE SEB 0826). Requiring a doc
+# number dropped these rows, and with them the unapplied balances the
+# printed Total Balance includes (2026-10-01: off by exactly 193.00/12.60).
+PAYMENT_LABEL_RE = re.compile(r"^(lockbox|cash|check|chk|ck|ach|eft|wire|payment|pmt)\b", re.IGNORECASE)
 
 # Column boundaries (x0), measured from this document's word positions.
 COLUMN_BOUNDS = [
@@ -132,8 +139,12 @@ def extract(pdf_path):
                 due_date = " ".join(w["text"] for w in cols["due_date"])
                 balance = " ".join(w["text"] for w in cols["balance"])
 
-                # A genuine transaction row has a transaction date and a doc number.
-                if DATE_RE.match(transaction_date) and DOC_NO_RE.match(doc_no):
+                # A genuine transaction row has a transaction date and a doc
+                # number -- or, for a payment, a payment-method label and an
+                # amount instead of a doc number (see PAYMENT_LABEL_RE).
+                is_payment_row = (not doc_no and PAYMENT_LABEL_RE.match(description.strip())
+                                  and MONEY_RE.match(amount))
+                if DATE_RE.match(transaction_date) and (DOC_NO_RE.match(doc_no) or is_payment_row):
                     line_items.append({
                         "page": page_num,
                         "transaction_date": transaction_date,
@@ -150,13 +161,18 @@ def extract(pdf_path):
                   "orig_inv_no", "amount", "due_date", "balance"]
 
     computed_total = round(sum(float(r["amount"].replace(",", "")) for r in line_items if MONEY_RE.match(r["amount"])), 2)
+    balance_total = round(sum(float(r["balance"].replace(",", "")) for r in line_items if MONEY_RE.match(r["balance"])), 2)
     printed_total = float((total_balance or "0").replace(",", ""))
 
     summary = dict(header_info)
     summary["activity_through"] = activity_through
     summary["total_balance_printed"] = total_balance
     summary["total_balance_computed_from_amount_column"] = f"{computed_total:,.2f}"
-    summary["reconciles"] = computed_total == printed_total
+    # The printed Total Balance is the sum of the Balance column; the Amount
+    # column only matches it when no payment row is listed (a payment's
+    # amount is the full payment, its balance only the unapplied part).
+    summary["total_balance_computed_from_balance_column"] = f"{balance_total:,.2f}"
+    summary["reconciles"] = balance_total == printed_total
 
     return {
         "line_items": line_items,

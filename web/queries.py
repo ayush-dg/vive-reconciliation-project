@@ -2329,7 +2329,7 @@ def get_validation_report() -> list:
         """
         SELECT statement_id, source_file, vendor_name, statement_period,
                statement_total_as_printed, validation_status, validation_difference,
-               ingestion_timestamp, shop_or_entity
+               validation_method, ingestion_timestamp, shop_or_entity
         FROM document_intake_log
         WHERE validation_status IS NOT NULL
         ORDER BY ingestion_timestamp DESC
@@ -2375,6 +2375,7 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
         """
         SELECT statement_id, source_file, vendor_name, statement_period,
                statement_total_as_printed, validation_status, validation_difference,
+               validation_method, validation_detail, previous_balance, previous_balance_source,
                ingestion_timestamp
         FROM document_intake_log
         WHERE statement_id = ?
@@ -2386,6 +2387,15 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
         return {"intake": None, "computed_total": None, "lines": []}
 
     intake["passed"] = intake["validation_status"] == "matches"
+    # validation_detail (migrations/019) is the gate's JSON record of every
+    # fallback check it tried -- shown as-is so a reviewer can see exactly
+    # which identity matched, or why each one didn't.
+    try:
+        detail = json.loads(intake["validation_detail"]) if intake.get("validation_detail") else None
+    except (TypeError, ValueError):
+        detail = None
+    intake["validation_attempts"] = (detail or {}).get("attempts") or []
+    intake["primary_computed"] = (detail or {}).get("primary_computed")
     printed = intake["statement_total_as_printed"]
     difference = intake["validation_difference"]
     computed_total = (

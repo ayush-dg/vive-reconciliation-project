@@ -68,7 +68,13 @@ from src.ai.document_understanding_engine import (
 from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
-from src.validation.arithmetic_gate import compute_arithmetic_validation, compute_vendor_column_total
+from src.validation.arithmetic_gate import (
+    compute_statement_total_from_invoices, compute_vendor_column_total, validate_with_fallbacks,
+)
+from src.validation.last_payment import mark_last_payment_notes
+from src.validation.previous_balance import resolve_previous_balance
+from src.ai.claude_sonnet_client import NOT_A_STATEMENT
+from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
 from src.validation.location_lookup import resolve_billing_location
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
@@ -335,8 +341,9 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
                 extraction_confidence, extraction_model, raw_ai_response,
                 raw_charges, raw_credits, raw_amount_due, raw_transaction_code,
                 raw_balance_forward, raw_period_activity, raw_credit_applied, raw_payment_applied,
-                version_number, previous_statement_id, is_latest_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                version_number, previous_statement_id, is_latest_version,
+                raw_unallocated, raw_section
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 vendor_id,
@@ -387,6 +394,11 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
                 version_info["version_number"],
                 version_info["previous_statement_id"],
                 version_info["is_latest_version"],
+                # migrations/019_add_validation_fallback_columns.sql --
+                # Autoly's "Unalloc." column and the printed section a row
+                # sits under; NULL for every layout without them.
+                str(inv["unallocated"]) if inv.get("unallocated") is not None else None,
+                inv.get("section"),
             ]
         )
         count += 1
@@ -819,8 +831,10 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             extraction_confidence_overall, extraction_model, extraction_method,
             routing_decision, statement_id, invoice_count, warnings, schema_version,
             raw_aging_summary, validation_status, validation_difference,
-            billing_location, statement_month, billing_location_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            billing_location, statement_month, billing_location_source,
+            validation_method, validation_detail, previous_balance,
+            previous_balance_source, section_totals
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             document_id,
@@ -849,6 +863,14 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
             billing_location,
             statement_month,
             billing_location_source,
+            # migrations/019_add_validation_fallback_columns.sql -- which
+            # check passed ("primary", "open_balance", ...; NULL when none
+            # did), the fallback attempts as JSON, and the fallback inputs.
+            validation.get("method"),
+            json.dumps(validation["detail"]) if validation.get("detail") is not None else None,
+            stmt.get("previous_balance"),
+            stmt.get("previous_balance_source"),
+            json.dumps(stmt["section_totals"]) if stmt.get("section_totals") else None,
         ]
     )
 
@@ -1064,10 +1086,81 @@ def resolve_version_info(vendor_id: str, statement_period: str) -> dict:
     }
 
 
-def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = None):
+def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
+    """Sets schema_result["validation"] (and the verified previous balance
+    in statement_metadata) for a freshly extracted statement. Returns the
+    validation dict.
+
+    0. A row that is really an unlabelled "LAST PAYMENT" note (its amount
+       printed only on a LAST PAYMENT line of the text layer) keeps its row
+       but loses its amount, and the computed total is recomputed.
+    1. Per-vendor gate column (config/validation_total_columns.json): for a
+       listed vendor, the computed total is the sum of the one raw column
+       the printed total adds up -- see compute_vendor_column_total().
+    2. The printed previous balance the fallback checks may use -- a
+       model-reported value only counts when the PDF's text layer
+       corroborates it (or, on a scan with no text layer, it came with a
+       printed balance-forward label); see src/validation/previous_balance.py.
+       A scan's value under any other label (e.g. only the opening line's
+       date) is passed to the running_balance check alone, as its opening.
+    3. A document with no line-item table at all is "not_a_statement", not
+       a validation failure; anything else goes through
+       validate_with_fallbacks() (primary check, then the fallback chain).
+    """
+    stmt_meta = schema_result.setdefault("statement_metadata", {})
+    # An unlabelled "LAST PAYMENT" note returned as a row: recognised from
+    # the PDF text layer and stripped of its amount (src/validation/
+    # last_payment.py), so the computed total is recomputed without it.
+    invoices = schema_result.get("invoices") or []
+    notes = mark_last_payment_notes(invoices, pdf_text)
+    if notes:
+        stmt_meta["statement_total_computed"] = compute_statement_total_from_invoices(invoices)
+        print(f"  {notes} row(s) recognised as an informational LAST PAYMENT note -- amount not counted")
+    column_total = compute_vendor_column_total(
+        resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")),
+        schema_result.get("invoices") or [],
+    )
+    if column_total is not None:
+        stmt_meta["statement_total_computed"] = column_total
+    previous_balance = resolve_previous_balance(
+        stmt_meta.get("previous_balance"), stmt_meta.get("previous_balance_label"), pdf_text,
+    )
+    stmt_meta["previous_balance"] = previous_balance["value"]
+    stmt_meta["previous_balance_source"] = previous_balance["source"]
+    if schema_result.get("document_metadata", {}).get("document_type") == NOT_A_STATEMENT:
+        validation = {
+            "status": "not_a_statement", "printed": stmt_meta.get("statement_total_as_printed"),
+            "computed": None, "difference": None, "method": None, "detail": None,
+        }
+        print(f"  {NOT_A_STATEMENT_MARKER} no line-item table found -- this PDF does not look like a vendor statement.")
+    else:
+        validation = validate_with_fallbacks(
+            stmt_meta.get("statement_total_as_printed"),
+            stmt_meta.get("statement_total_computed"),
+            schema_result.get("invoices") or [],
+            previous_balance=previous_balance["value"],
+            section_totals=stmt_meta.get("section_totals"),
+            chain_opening_balance=previous_balance.get("chain_opening"),
+        )
+    schema_result["validation"] = validation
+    print(f"  Validation: {validation.get('status')} (method: {validation.get('method') or '-'})")
+    return validation
+
+
+def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = None,
+               allow_duplicate: bool = False):
     """
     Main intake function. Called by the CLI or directly from other scripts.
     Returns a summary dict.
+
+    allow_duplicate (2026-10-06): a byte-identical PDF that was already
+    extracted successfully (extraction_cache row with rows, keyed by
+    document_hash) is now reported as a duplicate of that statement and
+    nothing new is written -- on 2026-10-01 the same PDF arriving twice
+    (e.g. PARAGON COLE 0926.pdf, Lentini 14255/Mat) became two separate
+    statements. Pass allow_duplicate=True (run_full_pipeline.py
+    --allow-duplicate) to reprocess it anyway, which takes the previous
+    cache-hit path (a new statement_id sharing the cached extraction).
     """
     print(f"\n{'='*60}")
     print(f"DOCUMENT INTAKE")
@@ -1077,6 +1170,31 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # Validate PDF exists
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+    # Duplicate check -- before any statement ID is generated or printed,
+    # so the "Statement ID:" line web/worker.py parses names the EXISTING
+    # statement this upload duplicates.
+    if not allow_duplicate:
+        early_hash = compute_file_hash(pdf_path)
+        existing = check_cache(early_hash)
+        if existing and existing.get("statement_id"):
+            existing_id = existing["statement_id"]
+            bronze_count = execute_query(
+                "SELECT COUNT(*) as cnt FROM bronze_vendor_statement_raw WHERE statement_id = ?",
+                [existing_id]
+            )[0]["cnt"]
+            print(f"Statement ID: {existing_id}")
+            print(f"  Document Hash: {early_hash}")
+            print(f"  {DUPLICATE_MARKER} {existing_id} -- this exact PDF was already extracted; "
+                  f"nothing new written (rerun with --allow-duplicate to reprocess).")
+            return {
+                "statement_id": existing_id,
+                "duplicate_of": existing_id,
+                "cache_hit": True,
+                "bronze_count": bronze_count,
+                "silver_count": 0,
+                "extraction_incomplete_count": 0,
+            }
 
     # Generate IDs
     document_id = str(uuid.uuid4())
@@ -1205,8 +1323,23 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             "validation": {
                 "status": original_intake_row.get("validation_status") if original_intake_row else None,
                 "difference": original_intake_row.get("validation_difference") if original_intake_row else None,
+                "method": original_intake_row.get("validation_method") if original_intake_row else None,
+                "detail": (
+                    json.loads(original_intake_row["validation_detail"])
+                    if original_intake_row and original_intake_row.get("validation_detail")
+                    else None
+                ),
             },
         }
+        if original_intake_row:
+            cache_schema_result["statement_metadata"].update({
+                "previous_balance": original_intake_row.get("previous_balance"),
+                "previous_balance_source": original_intake_row.get("previous_balance_source"),
+                "section_totals": (
+                    json.loads(original_intake_row["section_totals"])
+                    if original_intake_row.get("section_totals") else None
+                ),
+            })
 
         print(f"\n[Step 7 - cache hit] Writing intake log...")
         write_intake_log(
@@ -1254,23 +1387,15 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Running Document Understanding Engine...")
         engine = DocumentUnderstandingEngine()
     schema_result = engine.understand(pdf_text, pdf_path, statement_id=statement_id)
+    if route["engine"] == "python_library" and not schema_result.get("invoices"):
+        # A vendor-signature match whose fixed-layout extractor found no
+        # rows at all (2026-10-01: Wilbert's Inc. Statement_2234465 -- a
+        # column shift the extractor didn't expect) -- let the AI engine,
+        # which handles any layout, try before giving up.
+        print(f"  Python-library extractor returned 0 line items — retrying with the Document Understanding Engine...")
+        schema_result = DocumentUnderstandingEngine().understand(pdf_text, pdf_path, statement_id=statement_id)
 
-    stmt_meta_for_validation = schema_result.get("statement_metadata", {})
-    # Per-vendor gate column (config/validation_total_columns.json): for a
-    # listed vendor, the computed total is the sum of the one raw column the
-    # printed total adds up, not the engine's generic charges-minus-credits
-    # -- see compute_vendor_column_total()'s docstring for the NCS / A New
-    # Age / Fenix cases that needed it. Unlisted vendors are unchanged.
-    column_total = compute_vendor_column_total(
-        resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")),
-        schema_result.get("invoices") or [],
-    )
-    if column_total is not None:
-        stmt_meta_for_validation["statement_total_computed"] = column_total
-    schema_result["validation"] = compute_arithmetic_validation(
-        stmt_meta_for_validation.get("statement_total_as_printed"),
-        stmt_meta_for_validation.get("statement_total_computed"),
-    )
+    apply_arithmetic_validation(schema_result, pdf_text)
 
     # Three-tier billing_location fallback (src/validation/location_lookup.py)
     # -- a printed address always wins (tier 1); when extraction found none

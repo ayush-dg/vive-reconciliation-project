@@ -191,11 +191,6 @@
     "Bill Dodge Auto Group, Inc",
     "Bill Dodge Auto Group Inc."
   ],
-  "BOW_AUTO_PARTS": [
-    "Bow Auto Parts",
-    "Bow Auto Parts - AUTOLY",
-    "Bow Auto Parts AUTOLY"
-  ],
   "HEALEY": [
     "Healey Automotive",
     "Healey Mitsubishi",
@@ -249,5 +244,23 @@
     "Wheels on Site",
     "WheelsOnsite",
     "Wheels On Site, Inc."
+  ],
+  "BOW_AUTO_PARTS_-_AUTOLY": [
+    "Bow Auto Parts - AUTOLY",
+    "Bow Auto Parts",
+    "Bow Auto Parts AUTOLY"
+  ],
+  "CHUCK'S_DOUGLASSVILLE_-_AUTOLY": [
+    "Chuck's Douglassville - AUTOLY",
+    "Chuck's Auto Parts Solutions"
+  ],
+  "DING'S_AUTO_PARTS": [
+    "Ding's Auto Parts",
+    "Ding's Auto Parts - Autoly CT05"
+  ],
+  "GOYETTE'S_INC": [
+    "GOYETTE'S INC",
+    "Goyette's Inc",
+    "GOYETTE'S INC PRP-NE"
   ]
 }

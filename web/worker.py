@@ -69,6 +69,7 @@ FABRIC_STATUS_RE = re.compile(
 # identifies "extraction succeeded, matching had no real ERP data to
 # compare against" specifically, as opposed to any other non-zero exit.
 NO_VOUCHER_DATA_MARKER = "No real voucher-sourced INTERNAL_ERP rows"
+from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER  # noqa: E402
 
 # Dropzone auto-intake, polling variant -- see _dropzone_watcher_loop()'s
 # docstring for why this exists alongside (not instead of)
@@ -195,10 +196,25 @@ def _run_job(job: dict) -> None:
         silver_count = queries.get_silver_row_count(statement_id)
         if silver_count == 0:
             print(f"[worker] Job {job_id} FAILED (exit 0, but {statement_id} has zero Silver rows)")
-            error_message = (
-                f"Extraction completed but produced 0 rows for statement_id {statement_id} "
-                f"-- see application logs for this job's real output.\n\n{output.strip()[-4000:]}"
-            )
+            if NOT_A_STATEMENT_MARKER in output:
+                # The model found no line-item table at all -- an email,
+                # letter or other non-statement attachment, not an
+                # extraction failure (see claude_sonnet_client.py's
+                # NOT_A_STATEMENT and document_intake_log.validation_status
+                # 'not_a_statement').
+                # Explanation LAST: the UI shows the final line of
+                # error_message (web/deps.py friendly_error()).
+                error_message = (
+                    f"{output.strip()[-4000:]}\n\n"
+                    f"{NOT_A_STATEMENT_MARKER} no line-item table found in this PDF -- it does not look like "
+                    f"a vendor statement (e.g. an email or letter). Review and discard or re-route it "
+                    f"(statement_id {statement_id})."
+                )
+            else:
+                error_message = (
+                    f"Extraction completed but produced 0 rows for statement_id {statement_id} "
+                    f"-- see application logs for this job's real output.\n\n{output.strip()[-4000:]}"
+                )
             queries.update_job_status(
                 job_id,
                 status="FAILED",
@@ -210,7 +226,15 @@ def _run_job(job: dict) -> None:
             return
 
         vendor_name = queries.get_vendor_name_for_statement(statement_id)
-        print(f"[worker] Job {job_id} COMPLETED — {statement_id} ({vendor_name})")
+        duplicate_note = None
+        if DUPLICATE_MARKER in output:
+            # run_intake() matched this PDF byte-for-byte to an already-
+            # extracted statement and wrote nothing new; statement_id is
+            # that existing statement.
+            duplicate_note = (f"Duplicate of {statement_id} -- this exact PDF was already processed, "
+                              f"so nothing new was written.")
+        print(f"[worker] Job {job_id} COMPLETED — {statement_id} ({vendor_name})"
+              + (" [duplicate]" if duplicate_note else ""))
         queries.update_job_status(
             job_id,
             status="COMPLETED",
@@ -218,6 +242,7 @@ def _run_job(job: dict) -> None:
             statement_id=statement_id,
             vendor_name=vendor_name,
             document_hash=document_hash,
+            **({"error_message": duplicate_note} if duplicate_note else {}),
         )
         _write_blob_outcome(job, "completed")
     except Exception as e:
