@@ -210,5 +210,33 @@
   "MCGOVERN": {
     "entity_ids": ["12208", "9868", "127885", "101182"],
     "note": "McGovern rooftops: Chrysler Jeep Dodge Ram (12208), Hyundai (9868), BMW of Shrewsbury (127885), Buick GMC (101182). Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 11 of 11 lines tie out across ALL NetSuite entities only under these four. McGovern has ~13 rooftop records (Ford, Subaru, Toyota, Volvo, Jaguar Land Rover, ...) -- add one only on a confirmed hit."
+  },
+  "ADHESIVE_TEMPLATES": {
+    "entity_ids": ["43045"],
+    "note": "Adhesive Templates (43045). Derived 2026-10-06 by tranid trace of 2 stored statements: 4 of 5 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after). adhesive templates 2 (37417) exists -- add only on a confirmed hit."
+  },
+  "BLUE_SUN_SUPER_SERVICE": {
+    "entity_ids": ["17898"],
+    "note": "Blue Sun Super Service (17898) -- not Blue Sun Towing (2766). Derived 2026-10-06 by tranid trace of 2 stored statements (the Crown Middletown / Pawtucket towing statements): 55 of 60 lines tie out verbatim (26-0730-7794)."
+  },
+  "BROWN'S_AUTO_SALVAGE-_AUTOLY": {
+    "entity_ids": ["181729"],
+    "note": "Browns Auto Salvage PRP (181729). Derived 2026-10-06 by tranid trace of 4 stored statements (same statement system as Lentini / Bishop's): 13 of 16 lines tie out verbatim. Keyed on intake's fallback vendor id rather than an alias, because tests/test_vendor_aliases_autoly.py asserts this name stays unaliased."
+  },
+  "RADIATOR_STORE": {
+    "entity_ids": ["26850", "8214"],
+    "note": "The Radiator Store, Inc. (26850) plus 1-800-Radiator (8214), which the same statements' invoices also post under. Derived 2026-10-06 by tranid trace of 3 stored statements (1-800 Radiator (Lamon / M3) files): 10 of 10 lines tie out verbatim."
+  },
+  "TOYOTA_OF_DARTMOUTH": {
+    "entity_ids": ["4615"],
+    "note": "TOYOTA OF DARTMOUTH (4615). Derived 2026-10-06 by tranid trace of 1 stored statement (Reynolds and Reynolds layout, Crown Collision Middletown): 37 of 42 lines tie out after the 3-char TOW strip, credits as CM + stripped."
+  },
+  "TOYOTA_OF_HACKENSACK": {
+    "entity_ids": ["125668"],
+    "note": "TOYOTA OF HACKENSACK (125668). Derived 2026-10-06 by tranid trace of 3 stored statements (Reynolds and Reynolds layout): 54 of 62 lines tie out after the 3-char TOW strip, credits as CM + stripped. One coincidental hit under Fred Beans (18706) deliberately left out."
+  },
+  "WURTH_USA": {
+    "entity_ids": ["4920"],
+    "note": "WURTH USA INC (4920). Derived 2026-10-06 by tranid trace of 3 stored statements: 15 of 15 lines tie out verbatim. WURTH USA LNC. (41106) exists -- add only on a confirmed hit."
   }
 }

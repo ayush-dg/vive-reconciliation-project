@@ -322,5 +322,33 @@
     "McGovern Chrysler",
     "BMW of Shrewsbury",
     "McGovern"
+  ],
+  "ADHESIVE_TEMPLATES": [
+    "Adhesive Templates, Inc.",
+    "Adhesive Templates",
+    "Adhesive Templates Inc."
+  ],
+  "BLUE_SUN_SUPER_SERVICE": [
+    "Blue Sun Super Service",
+    "Blue Sun Super Service, Inc."
+  ],
+  "RADIATOR_STORE": [
+    "The Radiator Store, Inc.",
+    "THE RADIATOR STORE INC",
+    "The Radiator Store",
+    "Radiator Store"
+  ],
+  "TOYOTA_OF_DARTMOUTH": [
+    "Toyota of Dartmouth",
+    "Toyota of Dartmouth / Check Collision"
+  ],
+  "TOYOTA_OF_HACKENSACK": [
+    "Toyota of Hackensack"
+  ],
+  "WURTH_USA": [
+    "WURTH USA INC",
+    "Wurth USA, Inc.",
+    "Wurth USA Inc.",
+    "Wurth USA"
   ]
 }

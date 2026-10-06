@@ -350,3 +350,42 @@ MCGOVERN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
 MCGOVERN,PURCHASES,charge_amount,decimal,v1,1
 MCGOVERN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
 MCGOVERN,BALANCE,amount_remaining,decimal,v1,1
+ADHESIVE_TEMPLATES,DATE,line_date,date,v1,1
+ADHESIVE_TEMPLATES,DESCRIPTION,original_invoice_number,string,v1,1
+ADHESIVE_TEMPLATES,AMOUNT,charge_amount,decimal,v1,1
+ADHESIVE_TEMPLATES,PAYMENT,payment_amount,decimal,v1,1
+ADHESIVE_TEMPLATES,OPEN AMOUNT,amount_remaining,decimal,v1,1
+BLUE_SUN_SUPER_SERVICE,Date,line_date,date,v1,1
+BLUE_SUN_SUPER_SERVICE,Invoice#,original_invoice_number,string,v1,1
+BLUE_SUN_SUPER_SERVICE,Description,description_raw,string,v1,1
+BLUE_SUN_SUPER_SERVICE,P.O.#,po_number,string,v1,1
+BLUE_SUN_SUPER_SERVICE,Amount,charge_amount,decimal,v1,1
+BLUE_SUN_SUPER_SERVICE,Payment,payment_amount,decimal,v1,1
+BROWN'S_AUTO_SALVAGE-_AUTOLY,Date,line_date,date,v1,1
+BROWN'S_AUTO_SALVAGE-_AUTOLY,Store,description_raw,string,v1,1
+BROWN'S_AUTO_SALVAGE-_AUTOLY,Invoice #,original_invoice_number,string,v1,1
+BROWN'S_AUTO_SALVAGE-_AUTOLY,Reference,invoice_number_ref,string,v1,1
+BROWN'S_AUTO_SALVAGE-_AUTOLY,Amount,charge_amount,decimal,v1,1
+BROWN'S_AUTO_SALVAGE-_AUTOLY,Balance,amount_remaining,decimal,v1,1
+RADIATOR_STORE,Date,line_date,date,v1,1
+RADIATOR_STORE,Item,transaction_code,string,v1,1
+RADIATOR_STORE,Ref#,original_invoice_number,string,v1,1
+RADIATOR_STORE,Description,description_raw,string,v1,1
+RADIATOR_STORE,Amount,charge_amount,decimal,v1,1
+TOYOTA_OF_DARTMOUTH,DATE,line_date,date,v1,1
+TOYOTA_OF_DARTMOUTH,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+TOYOTA_OF_DARTMOUTH,INVOICE_NO,original_invoice_number,string,v1,1
+TOYOTA_OF_DARTMOUTH,REF_NO,invoice_number_ref,string,v1,1
+TOYOTA_OF_DARTMOUTH,TYPE,description_raw,string,v1,1
+TOYOTA_OF_DARTMOUTH,AMOUNT,charge_amount,decimal,v1,1
+TOYOTA_OF_HACKENSACK,DATE,line_date,date,v1,1
+TOYOTA_OF_HACKENSACK,SOURCE,transaction_code,string,v1,1
+TOYOTA_OF_HACKENSACK,INVOICE,original_invoice_number,string,v1,1
+TOYOTA_OF_HACKENSACK,REFERENCE,invoice_number_ref,string,v1,1
+TOYOTA_OF_HACKENSACK,DESCRIPTION,description_raw,string,v1,1
+TOYOTA_OF_HACKENSACK,AMOUNT,charge_amount,decimal,v1,1
+TOYOTA_OF_HACKENSACK,AGE IN DAYS,age_in_days,integer,v1,1
+WURTH_USA,Inv Date,line_date,date,v1,1
+WURTH_USA,Doc #,original_invoice_number,string,v1,1
+WURTH_USA,Inv Amt,charge_amount,decimal,v1,1
+WURTH_USA,Due,amount_remaining,decimal,v1,1
