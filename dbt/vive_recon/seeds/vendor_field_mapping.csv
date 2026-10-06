@@ -314,3 +314,39 @@ LEXUS_OF_WARWICK,DATE,line_date,date,v1,1
 LEXUS_OF_WARWICK,DOCUMENT,original_invoice_number,string,v1,1
 LEXUS_OF_WARWICK,DESCRIPTION,description_raw,string,v1,1
 LEXUS_OF_WARWICK,AMOUNT,charge_amount,decimal,v1,1
+CERTIFIED_AUTO_PARTS,Date,line_date,date,v1,1
+CERTIFIED_AUTO_PARTS,PO Number,po_number,string,v1,1
+CERTIFIED_AUTO_PARTS,SO Number,original_invoice_number,string,v1,1
+CERTIFIED_AUTO_PARTS,Description,original_invoice_number,string,v1,2
+CERTIFIED_AUTO_PARTS,Original Amount,charge_amount,decimal,v1,1
+CERTIFIED_AUTO_PARTS,Remaining Balance,amount_remaining,decimal,v1,1
+EASTERN_AUTOPARTS_WAREHOUSE,Trans Date,line_date,date,v1,1
+EASTERN_AUTOPARTS_WAREHOUSE,Transaction Number,original_invoice_number,string,v1,1
+EASTERN_AUTOPARTS_WAREHOUSE,Customer Reference,po_number,string,v1,1
+EASTERN_AUTOPARTS_WAREHOUSE,Code,transaction_code,string,v1,1
+EASTERN_AUTOPARTS_WAREHOUSE,Debit,charge_amount,decimal,v1,1
+EASTERN_AUTOPARTS_WAREHOUSE,Credit,charge_amount,decimal,v1,2
+GOYETTE'S_INC,date,line_date,date,v1,1
+GOYETTE'S_INC,type,transaction_code,string,v1,1
+GOYETTE'S_INC,reference_number,original_invoice_number,string,v1,1
+GOYETTE'S_INC,original_invoice_ref,invoice_number_ref,string,v1,1
+GOYETTE'S_INC,po_chk_number,po_number,string,v1,1
+GOYETTE'S_INC,description,description_raw,string,v1,1
+GOYETTE'S_INC,charged,charge_amount,decimal,v1,1
+GOYETTE'S_INC,paid,payment_amount,decimal,v1,1
+GOYETTE'S_INC,due,amount_remaining,decimal,v1,1
+MAINE_OXY,INVOICE DATE,line_date,date,v1,1
+MAINE_OXY,INVOICE NUMBER,original_invoice_number,string,v1,1
+MAINE_OXY,CODE,transaction_code,string,v1,1
+MAINE_OXY,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,2
+MAINE_OXY,CURRENT,charge_amount,decimal,v1,1
+MAINE_OXY,1 TO 30,charge_amount,decimal,v1,2
+MAINE_OXY,31 TO 60,charge_amount,decimal,v1,3
+MAINE_OXY,61 TO 90,charge_amount,decimal,v1,4
+MAINE_OXY,OVER 90 DAYS,charge_amount,decimal,v1,5
+MCGOVERN,DATE,line_date,date,v1,1
+MCGOVERN,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+MCGOVERN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+MCGOVERN,PURCHASES,charge_amount,decimal,v1,1
+MCGOVERN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+MCGOVERN,BALANCE,amount_remaining,decimal,v1,1

@@ -190,5 +190,25 @@
   "LEXUS_OF_WARWICK": {
     "entity_ids": ["40605"],
     "note": "Lexus of Warwick (40605). Derived 2026-10-06 by tranid trace of 1 stored statement: 5 of 5 lines tie out verbatim."
+  },
+  "CERTIFIED_AUTO_PARTS": {
+    "entity_ids": ["81837"],
+    "note": "Certified Auto Parts, Inc. (81837), the only active Certified record. Derived 2026-10-06 by tranid trace of 2 stored statements: bills are keyed by the SALES ORDER number, not the invoice number ('Sales Order #C7813250 T' -> C7813250T, token_after_nospace), credit memos by the memo number (CM145185). 38 of 45 lines."
+  },
+  "EASTERN_AUTOPARTS_WAREHOUSE": {
+    "entity_ids": ["134811"],
+    "note": "Eastern Autoparts Warehouse (134811). Derived 2026-10-06 by tranid trace of 3 stored statements: 11 of 14 non-payment lines tie out verbatim (3IV1308159). CSH rows (Transaction Number 'MC') are payments, excluded by line-selection rule."
+  },
+  "GOYETTE'S_INC": {
+    "entity_ids": ["1757"],
+    "note": "Goyette's Inc (1757) -- GOYETTE`S (5343) and GOYETTE`S INC. (32550) are inactive. Statements are read by extract_autoly (merged from fix/oct1-validation); configured 2026-10-06, see the simulation in that commit."
+  },
+  "MAINE_OXY": {
+    "entity_ids": ["4921"],
+    "note": "MAINE OXY (4921). Derived 2026-10-06 by tranid trace of 3 stored statements: 6 of 6 lines tie out verbatim."
+  },
+  "MCGOVERN": {
+    "entity_ids": ["12208", "9868", "127885", "101182"],
+    "note": "McGovern rooftops: Chrysler Jeep Dodge Ram (12208), Hyundai (9868), BMW of Shrewsbury (127885), Buick GMC (101182). Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 11 of 11 lines tie out across ALL NetSuite entities only under these four. McGovern has ~13 rooftop records (Ford, Subaru, Toyota, Volvo, Jaguar Land Rover, ...) -- add one only on a confirmed hit."
   }
 }

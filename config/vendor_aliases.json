@@ -261,7 +261,11 @@
   "GOYETTE'S_INC": [
     "GOYETTE'S INC",
     "Goyette's Inc",
-    "GOYETTE'S INC PRP-NE"
+    "GOYETTE'S INC PRP-NE",
+    "GOYETTE`S INC.",
+    "Goyette's Inc.",
+    "Goyette's",
+    "Goyette Auto Parts"
   ],
   "BISHOPS_USED_AUTO_PARTS": [
     "Bishop's Used Auto Parts Inc",
@@ -296,5 +300,27 @@
   ],
   "LEXUS_OF_WARWICK": [
     "Lexus of Warwick"
+  ],
+  "CERTIFIED_AUTO_PARTS": [
+    "Certified Auto Parts, Inc.",
+    "Certified Auto Parts",
+    "Certified Auto Parts of Connecticut, Inc.",
+    "Certified Auto Parts of Connecticut"
+  ],
+  "EASTERN_AUTOPARTS_WAREHOUSE": [
+    "Eastern Autoparts Warehouse",
+    "Eastern Auto Parts Warehouse",
+    "Eastern Auto Parts"
+  ],
+  "MAINE_OXY": [
+    "Maine Oxy",
+    "MAINE OXY"
+  ],
+  "MCGOVERN": [
+    "McGovern Automotive Group",
+    "McGovern Chrysler Jeep Dodge Ram",
+    "McGovern Chrysler",
+    "BMW of Shrewsbury",
+    "McGovern"
   ]
 }

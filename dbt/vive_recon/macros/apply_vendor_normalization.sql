@@ -56,6 +56,13 @@
     vnr.pattern becomes NULL, deliberately: those are payment lines
     ("Payment: Check 1234567890"), and a NULL invoice number keeps them out
     of matching instead of surfacing them as Not Found.
+    token_after_nospace (added 2026-10-06: Certified Auto Parts' NetSuite
+    tranid is its Sales Order number, which the statement prints with a
+    space before a suffix letter -- "Sales Order #C7813250 T" is tranid
+    C7813250T, a different bill from C7813250; 38 of 45 traced lines tie
+    out this way against 24 for plain token_after): same as token_after,
+    but spaces after vnr.pattern are removed first, so the token runs on
+    through them. NULL when vnr.pattern is absent, as for token_after.
 #}
 {% macro apply_vendor_normalization(invoice_col, line_type_col) %}
     case
@@ -77,6 +84,12 @@
                                  end
                         when vnr.rule_type = 'lowercase'
                             then lower({{ invoice_col }})
+                        when vnr.rule_type = 'token_after_nospace'
+                            then case
+                                    when charindex(vnr.pattern, {{ invoice_col }}) > 0
+                                        then left(replace(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000), ' ', ''), patindex('%[^0-9A-Za-z-]%', replace(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000), ' ', '') + '|') - 1)
+                                    else null
+                                 end
                         when vnr.rule_type = 'token_after'
                             then case
                                     when charindex(vnr.pattern, {{ invoice_col }}) > 0
@@ -105,6 +118,12 @@
                  end
         when vnr.rule_type = 'lowercase'
             then lower({{ invoice_col }})
+        when vnr.rule_type = 'token_after_nospace'
+            then case
+                    when charindex(vnr.pattern, {{ invoice_col }}) > 0
+                        then left(replace(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000), ' ', ''), patindex('%[^0-9A-Za-z-]%', replace(substring({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) + len(vnr.pattern), 4000), ' ', '') + '|') - 1)
+                    else null
+                 end
         when vnr.rule_type = 'token_after'
             then case
                     when charindex(vnr.pattern, {{ invoice_col }}) > 0
