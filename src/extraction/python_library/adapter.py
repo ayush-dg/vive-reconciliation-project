@@ -83,6 +83,7 @@ _VENDOR_DISPLAY_NAMES = {
     "extract_allstar": "All Star Auto Lights, Inc.",
     "extract_grappone": "Grappone Automotive Group",
     "extract_mastria": "Mastria",
+    "extract_partsauthority": "Parts Authority",
 }
 
 # Which summary key holds the statement's own printed grand total, per
@@ -107,6 +108,7 @@ _PRINTED_TOTAL_KEY = {
     "extract_allstar": "amount_due_printed",
     "extract_grappone": "total_printed",
     "extract_mastria": "total_printed",
+    "extract_partsauthority": "total_printed",
     # "Balance due" (= Total due - Unallocated), the amount the statement
     # asks for -- what the AI path stored for every Oct 1 Autoly statement.
     "extract_autoly": "balance_due_printed",
@@ -139,6 +141,7 @@ _STATEMENT_DATE_KEY = {
     "extract_allstar": "statement_date",
     "extract_grappone": "statement_date",
     "extract_mastria": "statement_date",
+    "extract_partsauthority": "statement_date",
     "extract_autoly": "period_end",
 }
 
@@ -354,6 +357,13 @@ _FIELD_MAP = {
         # (txn code 57) rows carry their amounts in closing_* fields and are
         # never matched -- see extract_mastria.py.
         "charge_field": "balance", "credit_field": None,
+    },
+    "extract_partsauthority": {
+        # One signed amount column (trailing '-' on credits), as extract_quirk.
+        "invoice_number": ("invoice_number",),
+        "date_field": "date", "due_date_field": None,
+        "transaction_code_field": "code",
+        "signed_field": "amount",
     },
     "extract_autoly": {
         # Same columns and field names as extract_fenix (Fenix NE is an

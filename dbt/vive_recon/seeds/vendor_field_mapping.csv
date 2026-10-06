@@ -455,3 +455,33 @@ VINART,Invoice#,original_invoice_number,string,v1,1
 VINART,Purchases,charge_amount,decimal,v1,1
 VINART,Payments,payment_amount,decimal,v1,1
 VINART,Balance,amount_remaining,decimal,v1,1
+PARTS_AUTHORITY,date,line_date,date,v1,1
+PARTS_AUTHORITY,code,transaction_code,string,v1,1
+PARTS_AUTHORITY,reference,invoice_number_ref,string,v1,1
+PARTS_AUTHORITY,invoice_number,original_invoice_number,string,v1,1
+PARTS_AUTHORITY,amount,charge_amount,decimal,v1,1
+PRESTIGE_LEXUS_OF_RAMSEY,Date,line_date,date,v1,1
+PRESTIGE_LEXUS_OF_RAMSEY,Invoice Date,line_date,date,v1,2
+PRESTIGE_LEXUS_OF_RAMSEY,Due Date,due_date,date,v1,1
+PRESTIGE_LEXUS_OF_RAMSEY,Reference/Invoice,original_invoice_number,string,v1,1
+PRESTIGE_LEXUS_OF_RAMSEY,Invoice Number,original_invoice_number,string,v1,2
+PRESTIGE_LEXUS_OF_RAMSEY,Transaction Type,description_raw,string,v1,1
+PRESTIGE_LEXUS_OF_RAMSEY,Purchase/Payments Amount,charge_amount,decimal,v1,1
+PRESTIGE_LEXUS_OF_RAMSEY,Amount,charge_amount,decimal,v1,2
+PRESTIGE_LEXUS_OF_RAMSEY,Balance Due,amount_remaining,decimal,v1,1
+ELITE_WHEELS,DATE,line_date,date,v1,1
+ELITE_WHEELS,DESCRIPTION,original_invoice_number,string,v1,1
+ELITE_WHEELS,AMOUNT,charge_amount,decimal,v1,1
+ELITE_WHEELS,OPEN AMOUNT,amount_remaining,decimal,v1,1
+FETTE,DATE,line_date,date,v1,1
+FETTE,REFERENCE #,original_invoice_number,string,v1,1
+FETTE,JOURNAL ID,transaction_code,string,v1,1
+FETTE,COMPANY ID,description_raw,string,v1,1
+FETTE,PURCHASES ($),charge_amount,decimal,v1,1
+FETTE,PAYMENTS & CREDITS ($),payment_amount,decimal,v1,1
+FETTE,BALANCE DUE ($),amount_remaining,decimal,v1,1
+TOWN_FAIR_TIRE,DATE,line_date,date,v1,1
+TOWN_FAIR_TIRE,REFERENCE NUMBER,original_invoice_number,string,v1,1
+TOWN_FAIR_TIRE,CHARGES,charge_amount,decimal,v1,1
+TOWN_FAIR_TIRE,CREDITS,payment_amount,decimal,v1,1
+TOWN_FAIR_TIRE,BALANCE,amount_remaining,decimal,v1,1

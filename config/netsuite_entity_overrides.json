@@ -274,5 +274,25 @@
   "VINART": {
     "entity_ids": ["134410", "134808", "134405", "135660", "134807"],
     "note": "VinArt bills on behalf of the Lehigh Valley dealerships and has no NetSuite record of its own; invoices post under the dealership: Mercedes Benz of Lehigh Valley (134410), Lehigh Valley Acura (134808), Lehigh Valley Hyundai (134405), Porsche Lehigh Valley (135660), Lehigh Valley Honda (134807). Derived 2026-10-06 by tranid trace of 4 stored statements (Tekion layout): 219 of 253 unique lines tie out verbatim across ALL NetSuite entities only under these five. Most misses are R-suffixed returns with no NetSuite credit."
+  },
+  "PARTS_AUTHORITY": {
+    "entity_ids": ["68562"],
+    "note": "Parts Authority (68562). Derived 2026-10-06 by tracing the 9-digit document number on all 6 statements (extract_partsauthority): bills held as <branch>-<number> (055-568636), credits without the leading zero -- 41 of 58 lines, all under 68562. West Springfield (198476) and B&L (230399) are separate Parts Authority records -- add only on a confirmed hit."
+  },
+  "PRESTIGE_LEXUS_OF_RAMSEY": {
+    "entity_ids": ["29335", "80530"],
+    "note": "Prestige Lexus of Ramsey (29335) and BMW of Freehold (80530) -- the Lithia/billtrust statement covers both (customer ARC1612 is DCH Freehold BMW). Derived 2026-10-06 by tranid trace of 5 statements: 46 of 55 lines verbatim on the Lithia layout, 18 of 20 on the invoice-list layout via the last '_' segment."
+  },
+  "ELITE_WHEELS": {
+    "entity_ids": ["113850"],
+    "note": "Elite Wheels (113850). Derived 2026-10-06 by tracing 4 statements' text: invoices 'Invoice #I-003-03241' are held as 003-03241 (recent) or I-000-53938 (older) -- token_after + _alternate_tranids. Not to be confused with Elitek Vehicle Services (27647), where two numbers coincidentally collide."
+  },
+  "FETTE": {
+    "entity_ids": ["123687", "123686", "132084"],
+    "note": "Fette Kia (123687), Fette Ford (123686), Fette INFINITI (132084). Derived 2026-10-06 by tracing 4 statements (eF320 layout, as Faulkner): 41 of 45 lines verbatim across ALL NetSuite entities only under these three."
+  },
+  "TOWN_FAIR_TIRE": {
+    "entity_ids": ["2574"],
+    "note": "Town Fair Tire - East Haven (2574) -- the Centers records (3995, 4951, 8888) are inactive. Derived 2026-10-06 by tracing 4 statements: '40315-537 PO 4203067' -> 40315-537 (verbatim) or 72838580 (undashed). Town Fair Tire (256863) holds other stores' bills -- add only on a confirmed hit."
   }
 }

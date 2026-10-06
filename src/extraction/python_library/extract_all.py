@@ -50,6 +50,7 @@ import extract_rivian      # Rivian, LLC
 import extract_allstar     # All Star Auto Lights, Inc.
 import extract_grappone    # Grappone (CDK AR statement)
 import extract_mastria     # Mastria (CDK AR statement)
+import extract_partsauthority  # Parts Authority (letterhead is an image; signature is the returned-check notice)
 import extract_autoly      # Autoly statements (Bow, Chuck's, Ding's, Goyette's, ...)
 
 EXTRACTORS = [
@@ -70,6 +71,7 @@ EXTRACTORS = [
     extract_allstar,
     extract_grappone,
     extract_mastria,
+    extract_partsauthority,
     # Last: its signature is the Autoly ledger header, which Fenix NE's
     # statements print too -- extract_fenix (above) must match them first.
     extract_autoly,

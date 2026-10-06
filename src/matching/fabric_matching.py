@@ -437,7 +437,8 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
         statement prints store + document run together (4507140208);
         NetSuite mostly holds them dashed after the 4-digit store
         (4507-140208), a few undashed (4530128235).
-      - B-C Tire, Sullivan Tire, Wheels on Site: see the comment below."""
+      - B-C Tire, Sullivan Tire, Wheels on Site, Parts Authority, Elite
+        Wheels, Prestige Lexus, Town Fair: see the comments below."""
     alts = []
     pad_to = _ZERO_PAD_VENDORS.get(vendor_id)
     if pad_to:
@@ -463,6 +464,22 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
         alts.append(inv.split("-", 1)[1].lstrip("0"))
     if vendor_id == "WHEELS_ON_SITE" and inv.isdigit() and inv.startswith("0"):
         alts.append(inv.lstrip("0"))
+    # Confirmed 2026-10-06 by tranid trace: Parts Authority bills are held
+    # with a dash after the 3-digit branch (055568636 -> 055-568636, 41 of
+    # 58 lines) and its credits without the leading zero (55674653); Elite
+    # Wheels drops the 'I-' of 'I-003-03241' on recent bills; Prestige
+    # Lexus's invoice-list layout prints C194930_RAMLEX-A_768_252394_232686
+    # where the tranid is the last segment (18 of 20); Town Fair holds a
+    # few '72838-580' as 72838580.
+    if vendor_id == "PARTS_AUTHORITY" and inv.isdigit() and len(inv) == 9:
+        alts += [f"{inv[:3]}-{inv[3:]}", inv.lstrip("0")]
+    if vendor_id == "ELITE_WHEELS" and inv.upper().startswith("I-"):
+        # NetSuite data entry varies: 003-03241, I-00065471, plain 65716.
+        alts += [inv[2:], "I-" + inv[2:].replace("-", ""), inv.rsplit("-", 1)[1]]
+    if vendor_id == "PRESTIGE_LEXUS_OF_RAMSEY" and "_" in inv:
+        alts.append(inv.rsplit("_", 1)[1])
+    if vendor_id == "TOWN_FAIR_TIRE" and "-" in inv:
+        alts.append(inv.replace("-", ""))
     return alts
 
 

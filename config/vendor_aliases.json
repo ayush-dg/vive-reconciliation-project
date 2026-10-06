@@ -396,5 +396,37 @@
     "VinArt (Lehigh Valley Hyundai)",
     "VinArt (Mercedes-Benz of Lehigh Valley)",
     "VinArt (Porsche Lehigh Valley)"
+  ],
+  "PARTS_AUTHORITY": [
+    "Parts Authority",
+    "Parts Authority LLC",
+    "Parts Authority, LLC"
+  ],
+  "PRESTIGE_LEXUS_OF_RAMSEY": [
+    "Prestige Lexus of Ramsey",
+    "Prestige Ramsey Lexus",
+    "Prestige Lexus",
+    "Prestige Ramsey Lexus / DCH Freehold BMW (Lithia Motors)",
+    "Prestige Lexus of Ramsey (Lithia Motors)"
+  ],
+  "ELITE_WHEELS": [
+    "Elite Wheels of Albany Inc",
+    "Elite Wheels of Albany",
+    "Elite Wheels"
+  ],
+  "FETTE": [
+    "Fette Ford",
+    "FETTE FORD, INC.",
+    "Fette Ford Inc.",
+    "Fette Kia",
+    "Fette KIA",
+    "Fette INFINITI",
+    "Fette Auto"
+  ],
+  "TOWN_FAIR_TIRE": [
+    "Town Fair Tire Centers Inc.",
+    "TOWN FAIR TIRE CENTERS",
+    "Town Fair Tire Centers",
+    "Town Fair Tire"
   ]
 }
