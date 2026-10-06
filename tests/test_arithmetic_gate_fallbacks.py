@@ -386,6 +386,62 @@ class TestRunningBalance(unittest.TestCase):
         self.assertFalse(gate._check_running_balance(140.0, rows, tolerance=0.01)["applicable"])
 
 
+def coffee_rows():
+    """Northeast Coffee shape: a scan whose opening line prints only a date
+    and the balance (08/01/26 ... 80.40), then three rows with a running
+    Balance column."""
+    return [row("2524536", 76.29, due=156.69, row_number=1),
+            row(None, credit=80.40, due=76.29, row_number=2),
+            row("2531421", 17.92, due=94.21, row_number=3)]
+
+
+class TestChainOpeningBalance(unittest.TestCase):
+    """An opening figure read off a scan without a balance-forward label
+    (previous_balance.py's "chain_opening") -- running_balance only."""
+
+    def test_running_balance_chains_from_an_unlabelled_opening(self):
+        result = run(94.21, coffee_rows(), chain_opening_balance=80.40)
+        self.assertEqual(result["method"], "running_balance")
+        self.assertEqual(attempt(result, "running_balance")["opening_balance_source"], "unlabelled opening line")
+
+    def test_never_used_by_statement_equation(self):
+        # 80.40 + activity 13.81 = printed 94.21, but with no Balance column
+        # only statement_equation could pass -- and it must not see the figure.
+        rows = coffee_rows()
+        for inv in rows:
+            inv["amount_due"] = None
+        result = run(94.21, rows, chain_opening_balance=80.40)
+        assert_every_check_failed(self, result)
+        self.assertEqual(attempt(result, "statement_equation")["reason"], "no verified previous balance was extracted")
+
+    def test_adversarial_wrong_opening_fails(self):
+        result = run(94.21, coffee_rows(), chain_opening_balance=180.40)
+        assert_every_check_failed(self, result)
+        self.assertEqual(attempt(result, "running_balance")["first_broken_row"]["position"], 1)
+
+    def test_adversarial_chain_breaking_mid_way_fails(self):
+        rows = coffee_rows()
+        rows[1]["amount_due"] = 76.92  # second printed balance misread
+        result = run(94.21, rows, chain_opening_balance=80.40)
+        assert_every_check_failed(self, result)
+        self.assertEqual(attempt(result, "running_balance")["first_broken_row"]["position"], 2)
+
+    def test_adversarial_chain_holding_to_another_total_fails(self):
+        result = run(194.21, coffee_rows(), chain_opening_balance=80.40)
+        assert_every_check_failed(self, result)
+
+    def test_a_verified_previous_balance_takes_precedence(self):
+        result = gate._check_running_balance(94.21, coffee_rows(), tolerance=0.01,
+                                             previous_balance=80.40, chain_opening_balance=999.0)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["opening_balance_source"], "previous balance")
+
+    def test_without_any_opening_the_chain_starts_from_zero(self):
+        result = run(94.21, coffee_rows())
+        assert_every_check_failed(self, result)
+        self.assertEqual(attempt(result, "running_balance")["opening_balance_source"], "none printed")
+
+
 # ---------------------------------------------------------------------------
 # Fallback 4 -- section_subtotal
 # ---------------------------------------------------------------------------

@@ -111,6 +111,24 @@ class TestApplyArithmeticValidation(unittest.TestCase):
         self.assertIsNone(s["statement_metadata"]["previous_balance"])
         self.assertTrue(s["statement_metadata"]["previous_balance_source"].startswith("rejected"))
 
+    def test_scan_date_label_opens_the_running_balance_only(self):
+        # Northeast Coffee: the scan's opening line prints "08/01/26 ... 80.40".
+        rows = [inv("2524536", 76.29, due=156.69), inv(None, credit=80.40, due=76.29), inv("2531421", 17.92, due=94.21)]
+        s = schema(rows, 94.21, previous_balance=80.40, previous_balance_label="08/01/26")
+        result = INTAKE.apply_arithmetic_validation(s, "Page 1")
+        self.assertEqual((result["status"], result["method"]), ("matches", "running_balance"))
+        self.assertIsNone(s["statement_metadata"]["previous_balance"])
+        self.assertEqual(s["statement_metadata"]["previous_balance_source"], "rejected: label is not a balance-forward label")
+
+    def test_adversarial_scan_field_name_label_never_reaches_statement_equation(self):
+        # Previous balance + activity = printed, but the label is another
+        # field's name and there is no balance column to chain through.
+        rows = [inv("TOCS402013", 179.0), inv("TOW106311", 70.0), inv("TOW106319", 28.55)]
+        s = schema(rows, 456.55, previous_balance=179.0, previous_balance_label="PREV SERV CHARGES")
+        result = INTAKE.apply_arithmetic_validation(s, "Page 1")
+        self.assertEqual(result["status"], "mismatch")
+        self.assertIsNone(result["method"])
+
     def test_unlabelled_last_payment_row_is_dropped_from_the_total(self):
         # MAINE OXY RP 0826: the note came back as a bare row and was counted.
         rows = [inv("5000359406", 165.11), inv(None, 134.03)]

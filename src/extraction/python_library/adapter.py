@@ -105,7 +105,15 @@ _PRINTED_TOTAL_KEY = {
     "extract_rivian": "total_printed",
     "extract_allstar": "amount_due_printed",
     "extract_grappone": "total_printed",
+    # "Balance due" (= Total due - Unallocated), the amount the statement
+    # asks for -- what the AI path stored for every Oct 1 Autoly statement.
+    "extract_autoly": "balance_due_printed",
 }
+
+# Modules that serve many vendors: vendor_name is the letterhead name the
+# module reads off the PDF (summary["vendor_name"]), not one fixed name.
+# config/vendor_aliases.json folds each vendor's name variants to one id.
+_VENDOR_NAME_FROM_DOCUMENT = {"extract_autoly"}
 
 # Which summary key holds the statement date, per module -- these
 # genuinely differ in both key name and printed format (DDMonYY, MM/DD/YY,
@@ -128,6 +136,7 @@ _STATEMENT_DATE_KEY = {
     "extract_rivian": "statement_date_iso",
     "extract_allstar": "statement_date",
     "extract_grappone": "statement_date",
+    "extract_autoly": "period_end",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -331,6 +340,19 @@ _FIELD_MAP = {
         # gate and the extracted-data columns -- NetSuite matching reads
         # purchases/payments_credits via dbt/vive_recon/seeds/vendor_field_mapping.csv.
         "charge_field": "balance", "credit_field": None,
+    },
+    "extract_autoly": {
+        # Same columns and field names as extract_fenix (Fenix NE is an
+        # Autoly vendor): Charged is the original charge, Paid the credit or
+        # payment amount. Due is each invoice's open amount and Unalloc. the
+        # unapplied payment pool -- printed Balance due = sum(Due) -
+        # sum(Unalloc.), which the gate's open_balance check verifies.
+        "invoice_number": ("reference_number",),
+        "date_field": "date", "due_date_field": None,
+        "po_number_field": "po_chk_number",
+        "charge_field": "charged", "credit_field": "paid",
+        "amount_due_field": "due",
+        "unallocated_field": "unalloc",
     },
 }
 
@@ -585,6 +607,13 @@ class PythonLibraryExtractionEngine:
             for bronze_key, source_key in field_map.get("passthrough_fields", {}).items():
                 invoice[bronze_key] = _parse_money(item.get(source_key))
 
+            # Unapplied payment pool (Autoly's "Unalloc."): reaches Bronze's
+            # raw_unallocated and the gate's open_balance check, same as the
+            # AI path's "unallocated" field.
+            unallocated_field = field_map.get("unallocated_field")
+            if unallocated_field:
+                invoice["unallocated"] = _parse_money(item.get(unallocated_field))
+
             # Internal only -- the pre-mapping row exactly as this vendor's
             # extractor module produced it (field names are whatever that
             # module's own author chose, e.g. "invoice_no"/"doc_no" -- not
@@ -610,7 +639,8 @@ class PythonLibraryExtractionEngine:
         # must exist under "VOUCHER-<vendor_id>" for matching to find
         # anything to reconcile against; that's a separate prerequisite
         # from extraction working, unaffected by this change either way.
-        vendor_name = _VENDOR_DISPLAY_NAMES.get(module.__name__, module.VENDOR_SIGNATURE[0])
+        vendor_name = (summary.get("vendor_name") if module.__name__ in _VENDOR_NAME_FROM_DOCUMENT else None) \
+            or _VENDOR_DISPLAY_NAMES.get(module.__name__, module.VENDOR_SIGNATURE[0])
 
         statement_date = _normalize_date(summary.get(_STATEMENT_DATE_KEY.get(module.__name__, "statement_date")))
 

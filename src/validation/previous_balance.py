@@ -17,8 +17,17 @@ Two sources, and the rule that keeps a fallback pass honest:
 When the PDF has a text layer, a model value is accepted ONLY if that same
 value is printed on a labelled balance-forward line; otherwise it is
 rejected (never "trusted"). When there is no text layer (a scan), the model
-value is accepted only if it came with its printed label. When the model
-gave nothing, a single unambiguous labelled value in the text layer is used.
+value is accepted only if its printed label is a balance-forward label
+(is_balance_forward_label()) -- not a date or another field's name. When the
+model gave nothing, a single unambiguous labelled value in the text layer is
+used.
+
+A scan's model value that came with some other label -- typically only the
+date printed on an unlabelled opening line (Northeast Coffee: "08/01/26 ...
+80.40") -- is never a previous balance, so statement_equation can't use it.
+It is returned as "chain_opening": the opening figure the running_balance
+check may start from, where it only passes if every row's printed balance
+chains from it to the printed total (2026-10-06).
 """
 
 import re
@@ -30,6 +39,12 @@ _LABELS = (
     "balanceforward", "balancefwd", "balancebfwd", "bfwd", "previousbalance", "prevbalance",
     "prevbal", "prvbalance", "priorbalance", "beg.balance", "begbalance", "beginningbalance",
     "balancebroughtforward", "broughtforward", "openingbalance", "lastbalance",
+)
+# A model label is compared with punctuation removed as well, so a few more
+# abbreviations are listed for it ("BAL. FWD", "Previous Statement Balance").
+_MODEL_LABEL_EXTRAS = (
+    "balfwd", "balforward", "previousstatementbalance", "priorstatementbalance",
+    "laststatementbalance", "beginbal", "openingbal",
 )
 _MONEY_RE = re.compile(r"\(?-?\$?\s?\d{1,3}(?:,\d{3})*\.\d{2}\)?-?|\(?-?\$?\s?\d+\.\d{2}\)?-?")
 # Below this many letters/digits a PDF is treated as having no usable text
@@ -49,6 +64,14 @@ def _money_values(line: str) -> list:
             continue
         values.append(round(-value if negative else value, 2))
     return values
+
+
+def is_balance_forward_label(label: Optional[str]) -> bool:
+    """True when label names a balance forward ("Balance Forward", "Previous
+    Balance", "BFWD", "Beg. Balance", ...) -- not a date, an amount, or
+    another field ("PREV SERV CHARGES", "Total Due", "Balance")."""
+    squashed = re.sub(r"[\s.:\-_/]", "", (label or "").lower())
+    return any(l.replace(".", "") in squashed for l in _LABELS + _MODEL_LABEL_EXTRAS)
 
 
 def has_text_layer(pdf_text: Optional[str]) -> bool:
@@ -94,8 +117,10 @@ def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: 
 
     source is one of "text_layer" (value read from the PDF text),
     "model+text_layer" (model value corroborated by the text layer),
-    "model_label_only" (scan: model value with its printed label),
-    or "rejected: ..." when a model value could not be accepted."""
+    "model_label_only" (scan: model value with its printed balance-forward
+    label), or "rejected: ..." when a model value could not be accepted.
+    A rejected scan value that came with a non-balance-forward label is
+    also returned as "chain_opening" (running_balance check only)."""
     value = None
     if model_value is not None:
         try:
@@ -111,8 +136,11 @@ def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: 
             if any(abs(c - value) < 0.005 for c in candidates):
                 return {"value": value, "source": "model+text_layer", "label": label}
             return {"value": None, "source": "rejected: not on a labelled line in the text layer", "label": label}
-        if label:
+        if label and is_balance_forward_label(label):
             return {"value": value, "source": "model_label_only", "label": label}
+        if label:
+            return {"value": None, "source": "rejected: label is not a balance-forward label", "label": label,
+                    "chain_opening": value}
         return {"value": None, "source": "rejected: no printed label", "label": None}
 
     distinct = sorted(set(candidates))

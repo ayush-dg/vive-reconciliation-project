@@ -1099,8 +1099,10 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
        the printed total adds up -- see compute_vendor_column_total().
     2. The printed previous balance the fallback checks may use -- a
        model-reported value only counts when the PDF's text layer
-       corroborates it (or, on a scan with no text layer, it came with its
-       printed label); see src/validation/previous_balance.py.
+       corroborates it (or, on a scan with no text layer, it came with a
+       printed balance-forward label); see src/validation/previous_balance.py.
+       A scan's value under any other label (e.g. only the opening line's
+       date) is passed to the running_balance check alone, as its opening.
     3. A document with no line-item table at all is "not_a_statement", not
        a validation failure; anything else goes through
        validate_with_fallbacks() (primary check, then the fallback chain).
@@ -1138,6 +1140,7 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
             schema_result.get("invoices") or [],
             previous_balance=previous_balance["value"],
             section_totals=stmt_meta.get("section_totals"),
+            chain_opening_balance=previous_balance.get("chain_opening"),
         )
     schema_result["validation"] = validation
     print(f"  Validation: {validation.get('status')} (method: {validation.get('method') or '-'})")

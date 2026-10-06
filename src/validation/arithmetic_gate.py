@@ -467,7 +467,7 @@ def _check_statement_equation(printed, rows, *, tolerance, previous_balance=None
     return result
 
 
-def _check_running_balance(printed, rows, *, tolerance, previous_balance=None, **_):
+def _check_running_balance(printed, rows, *, tolerance, previous_balance=None, chain_opening_balance=None, **_):
     if not rows:
         return {"applicable": False, "passed": False, "computed": None, "reason": "no rows"}
     missing = [inv for inv in rows if inv.get("amount_due") is None]
@@ -476,8 +476,16 @@ def _check_running_balance(printed, rows, *, tolerance, previous_balance=None, *
                 "reason": f"{len(missing)} of {len(rows)} rows have no balance value"}
     # The opening balance must be a printed figure (or 0 when none is
     # printed), never inferred from the first row -- inferring it would let
-    # a dropped first row pass.
-    opening = previous_balance if previous_balance is not None else 0.0
+    # a dropped first row pass. chain_opening_balance is a figure the model
+    # read off a scan's opening line without a balance-forward label (see
+    # previous_balance.py): only this check may start from it, since a wrong
+    # one breaks the chain at the first row.
+    if previous_balance is not None:
+        opening, opening_source = previous_balance, "previous balance"
+    elif chain_opening_balance is not None:
+        opening, opening_source = chain_opening_balance, "unlabelled opening line"
+    else:
+        opening, opening_source = 0.0, "none printed"
     running = opening
     for position, inv in enumerate(rows, start=1):
         expected = round(running + _row_net(inv), 2)
@@ -485,7 +493,7 @@ def _check_running_balance(printed, rows, *, tolerance, previous_balance=None, *
         if abs(expected - printed_balance) > tolerance:
             return {
                 "applicable": True, "passed": False, "computed": None, "opening_balance": round(opening, 2),
-                "reason": "running balance chain breaks",
+                "opening_balance_source": opening_source, "reason": "running balance chain breaks",
                 "first_broken_row": {
                     "position": position, "row_number": inv.get("row_number"),
                     "invoice_number": inv.get("invoice_number"), "row_amount": round(_row_net(inv), 2),
@@ -494,7 +502,7 @@ def _check_running_balance(printed, rows, *, tolerance, previous_balance=None, *
             }
         running = printed_balance
     computed = round(running, 2)
-    result = {"applicable": True, "computed": computed, "opening_balance": round(opening, 2)}
+    result = {"applicable": True, "computed": computed, "opening_balance": round(opening, 2), "opening_balance_source": opening_source}
     if not _matches(printed, computed, tolerance):
         result.update(passed=False, reason=f"chain holds but last balance {computed:,.2f} is not printed {printed:,.2f}")
         return result
@@ -556,11 +564,16 @@ def validate_with_fallbacks(
     previous_balance: Optional[float] = None,
     section_totals: Optional[list] = None,
     tolerance: float = 0.01,
+    chain_opening_balance: Optional[float] = None,
 ) -> dict:
     """Primary check, then -- only if it mismatches -- the four fallback
     identities in order. Returns compute_arithmetic_validation()'s dict plus
     "method" (which check passed, or None) and "detail" (every fallback that
     was tried and why it did or didn't pass).
+
+    chain_opening_balance (an unlabelled opening figure from a scan -- see
+    previous_balance.py) is passed to the running_balance check only; it is
+    never a previous balance for statement_equation.
 
     A fallback pass is stored as status "matches" with its own method, and
     "computed"/"difference" are that check's own figures; the primary
@@ -582,8 +595,9 @@ def validate_with_fallbacks(
     printed = statement_total_as_printed
     attempts = []
     for method, check in _FALLBACK_CHECKS:
+        extra = {"chain_opening_balance": chain_opening_balance} if method == VALIDATION_METHOD_RUNNING_BALANCE else {}
         outcome = check(printed, rows, tolerance=tolerance,
-                        previous_balance=previous_balance, section_totals=section_totals)
+                        previous_balance=previous_balance, section_totals=section_totals, **extra)
         attempts.append({"method": method, **outcome})
         if outcome.get("passed"):
             computed = outcome["computed"]

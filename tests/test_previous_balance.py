@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.validation.previous_balance import (
     find_labelled_previous_balances,
     has_text_layer,
+    is_balance_forward_label,
     resolve_previous_balance,
 )
 
@@ -85,6 +86,42 @@ class TestResolvePreviousBalance(unittest.TestCase):
         self.assertEqual((accepted["value"], accepted["source"]), (80.4, "model_label_only"))
         rejected = resolve_previous_balance(80.40, None, "Page 1")
         self.assertIsNone(rejected["value"])
+
+    def test_balance_forward_labels(self):
+        for label in ("Balance Forward", "BALANCE FWD", "BAL. FWD", "Bal Fwd", "BFWD", "Previous Balance",
+                      "PREV BAL", "Prior Balance", "Beg. Balance", "Beginning Balance", "Opening Balance",
+                      "Balance Brought Forward", "Previous Statement Balance", "Last Balance", "Balance Forward:"):
+            self.assertTrue(is_balance_forward_label(label), label)
+
+    def test_not_balance_forward_labels(self):
+        for label in ("08/01/26", "2026-08-01", "08-31", "PREV SERV CHARGES", "Total Due", "Amount Due",
+                      "Balance", "Balance Due", "Current", "Statement Date", "80.40", "", None):
+            self.assertFalse(is_balance_forward_label(label), label)
+
+    def test_scan_value_under_a_date_label_is_only_a_chain_opening(self):
+        # Northeast Coffee: the opening line prints its date, no label.
+        result = resolve_previous_balance(80.40, "08/01/26", "Page 1")
+        self.assertIsNone(result["value"])
+        self.assertEqual(result["source"], "rejected: label is not a balance-forward label")
+        self.assertEqual(result["chain_opening"], 80.40)
+
+    def test_scan_value_under_another_field_name_is_not_a_previous_balance(self):
+        # Emerson Toyota: "PREV SERV CHARGES 0.00 ... $179.00".
+        result = resolve_previous_balance(179.0, "PREV SERV CHARGES", "Page 1")
+        self.assertIsNone(result["value"])
+
+    def test_scan_value_without_any_label_is_not_even_a_chain_opening(self):
+        result = resolve_previous_balance(80.40, None, "Page 1")
+        self.assertIsNone(result["value"])
+        self.assertIsNone(result.get("chain_opening"))
+
+    def test_text_layer_rule_is_unchanged_for_a_date_label(self):
+        # With a text layer the value must be on a labelled line -- a date
+        # label never gives it a second route.
+        text = statement("08/01/26 80.40", "08/12/26 2524536 76.29 156.69")
+        result = resolve_previous_balance(80.40, "08/01/26", text)
+        self.assertIsNone(result["value"])
+        self.assertIsNone(result.get("chain_opening"))
 
     def test_ambiguous_text_layer_gives_nothing(self):
         text = statement("Balance Forward 100.00", "Previous Balance 250.00")
