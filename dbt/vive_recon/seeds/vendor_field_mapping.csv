@@ -436,3 +436,22 @@ EMERSON_TOYOTA,REFERENCE,original_invoice_number,string,v1,1
 EMERSON_TOYOTA,CHARGES,charge_amount,decimal,v1,1
 EMERSON_TOYOTA,CREDITS,payment_amount,decimal,v1,1
 EMERSON_TOYOTA,BALANCE,amount_remaining,decimal,v1,1
+JAGUAR_LAND_ROVER_WARWICK,DATE,line_date,date,v1,1
+JAGUAR_LAND_ROVER_WARWICK,DOCUMENT,original_invoice_number,string,v1,1
+JAGUAR_LAND_ROVER_WARWICK,DESCRIPTION,description_raw,string,v1,1
+JAGUAR_LAND_ROVER_WARWICK,AMOUNT,charge_amount,decimal,v1,1
+NATIONAL_HAIL_AND_DENT,Date,line_date,date,v1,1
+NATIONAL_HAIL_AND_DENT,Transaction,original_invoice_number,string,v1,1
+NATIONAL_HAIL_AND_DENT,Amount,charge_amount,decimal,v1,1
+NATIONAL_HAIL_AND_DENT,Balance,amount_remaining,decimal,v1,1
+TIRE_RACK_WHOLESALE,Date,line_date,date,v1,1
+TIRE_RACK_WHOLESALE,Inv. Number,original_invoice_number,string,v1,1
+TIRE_RACK_WHOLESALE,PO / Description,po_number,string,v1,1
+TIRE_RACK_WHOLESALE,Charges,charge_amount,decimal,v1,1
+TIRE_RACK_WHOLESALE,Credits,payment_amount,decimal,v1,1
+TIRE_RACK_WHOLESALE,Amount Due,amount_remaining,decimal,v1,1
+VINART,Invoice Date,line_date,date,v1,1
+VINART,Invoice#,original_invoice_number,string,v1,1
+VINART,Purchases,charge_amount,decimal,v1,1
+VINART,Payments,payment_amount,decimal,v1,1
+VINART,Balance,amount_remaining,decimal,v1,1

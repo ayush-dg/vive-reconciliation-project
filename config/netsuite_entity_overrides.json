@@ -258,5 +258,21 @@
   "EMERSON_TOYOTA": {
     "entity_ids": ["18506"],
     "note": "Emerson Toyota (18506) -- the Coleman's sublet records (10859, 10860) are inactive. Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 4 of 4 -- TOW-prefixed invoices after the 3-char strip, TOCS-prefixed (source 3) verbatim."
+  },
+  "JAGUAR_LAND_ROVER_WARWICK": {
+    "entity_ids": ["134813"],
+    "note": "Jaguar Land Rover Warwick (134813). Derived 2026-10-06 by tranid trace of 2 stored statements (same layout as Lexus of Warwick): 12 of 18 lines tie out verbatim."
+  },
+  "NATIONAL_HAIL_AND_DENT": {
+    "entity_ids": ["92301"],
+    "note": "National Hail & Dent Removal LLC. (92301). Derived 2026-10-06 by tranid trace of 2 stored statements: 2 of 2 lines tie out as the number after '#' in Transaction ('INV #33609.. Orig. Amount $300.00.')."
+  },
+  "TIRE_RACK_WHOLESALE": {
+    "entity_ids": ["5128"],
+    "note": "TIRE RACK WHOLESALE (5128) -- TIRE RACK (23318) is inactive. Derived 2026-10-06 by tranid trace of 2 stored statements: 5 of 7 lines tie out verbatim (VJ8572701)."
+  },
+  "VINART": {
+    "entity_ids": ["134410", "134808", "134405", "135660", "134807"],
+    "note": "VinArt bills on behalf of the Lehigh Valley dealerships and has no NetSuite record of its own; invoices post under the dealership: Mercedes Benz of Lehigh Valley (134410), Lehigh Valley Acura (134808), Lehigh Valley Hyundai (134405), Porsche Lehigh Valley (135660), Lehigh Valley Honda (134807). Derived 2026-10-06 by tranid trace of 4 stored statements (Tekion layout): 219 of 253 unique lines tie out verbatim across ALL NetSuite entities only under these five. Most misses are R-suffixed returns with no NetSuite credit."
   }
 }
