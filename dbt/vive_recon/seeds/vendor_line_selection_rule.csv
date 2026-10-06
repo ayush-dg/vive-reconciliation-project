@@ -25,3 +25,7 @@ GOYETTE'S_INC,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-06,,1,vaisha
 TOYOTA_OF_DARTMOUTH,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice (as Hoselton)."
 TOYOTA_OF_HACKENSACK,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice (as Blaise)."
 TOYOTA_OF_HACKENSACK,credit,exclude_by_transaction_code,5,,,,2026-10-06,,1,vaishali,"Same legend as Blaise (source 5 = payment): a source-5 line is the payment applied to an invoice, not a credit memo, and would otherwise collide with the real CM credit."
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-06,,1,vaishali,"extract_autoly path, as for Bow: a Payment row carries the check number as its reference and is PAYMENT-typed; it is the statement's own payment bookkeeping."
+EL_M_AUTO_PARTS,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-06,,1,vaishali,"extract_autoly path, as for Bow: a Payment row carries the card / check number as its reference and is PAYMENT-typed; it is the statement's own payment bookkeeping."
+DOVER_DODGE,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
+DOVER_DODGE,credit,exclude_by_transaction_code,5,,,,2026-10-06,,1,vaishali,"Same legend as Blaise (source 5 = payment)."

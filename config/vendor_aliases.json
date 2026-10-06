@@ -252,7 +252,10 @@
   ],
   "CHUCK'S_DOUGLASSVILLE_-_AUTOLY": [
     "Chuck's Douglassville - AUTOLY",
-    "Chuck's Auto Parts Solutions"
+    "Chuck's Auto Parts Solutions",
+    "Chuck's Auto Parts",
+    "Chuck's Douglassville",
+    "Chuck's Auto Salvage"
   ],
   "DING'S_AUTO_PARTS": [
     "Ding's Auto Parts",
@@ -350,5 +353,25 @@
     "Wurth USA, Inc.",
     "Wurth USA Inc.",
     "Wurth USA"
+  ],
+  "EL_M_AUTO_PARTS": [
+    "EL & M Auto Parts - AUTOLY",
+    "EL & M Auto Parts",
+    "EL&M Auto Parts",
+    "EL&M Auto Recycling",
+    "EL & M Auto Recycling"
+  ],
+  "COLLISIONSTONEGUARD": [
+    "CollisionStoneGuard",
+    "Collision StoneGuard",
+    "Collision Stone Guard"
+  ],
+  "DOVER_DODGE": [
+    "Dover Dodge",
+    "DOVER DODGE CHRYSLER JEEP, INC.",
+    "Dover Dodge Chrysler Jeep"
+  ],
+  "EMERSON_TOYOTA": [
+    "Emerson Toyota"
   ]
 }

@@ -238,5 +238,25 @@
   "WURTH_USA": {
     "entity_ids": ["4920"],
     "note": "WURTH USA INC (4920). Derived 2026-10-06 by tranid trace of 3 stored statements: 15 of 15 lines tie out verbatim. WURTH USA LNC. (41106) exists -- add only on a confirmed hit."
+  },
+  "CHUCK'S_DOUGLASSVILLE_-_AUTOLY": {
+    "entity_ids": ["134806"],
+    "note": "Chuck's Auto Salvage - Douglassville - Team PRP (134806). Derived 2026-10-06 by tranid trace of 3 stored statements (Autoly ledger): 8 of 8 invoice lines tie out as the number after '#'. Chuck's Auto Salvage - York (242916) exists and the statements tag some parts (YOR) -- add it only on a confirmed hit."
+  },
+  "EL_M_AUTO_PARTS": {
+    "entity_ids": ["150641"],
+    "note": "EL&M Auto Recycling - Team PRP (150641). Derived 2026-10-06 by tranid trace of 2 stored statements (Autoly ledger): 15 of 17 non-payment lines tie out as the number after '#' (invoices as bills, 'Credit #n for inv. m' as vendorcredit n)."
+  },
+  "COLLISIONSTONEGUARD": {
+    "entity_ids": ["23634"],
+    "note": "CollisionStoneGuard (23634) -- the Clarkstown record (5642) is inactive. Derived 2026-10-06 by tranid trace of 2 stored statements: 2 of 2 lines tie out as the number after '#' in Transaction ('INV #252608. Due ...')."
+  },
+  "DOVER_DODGE": {
+    "entity_ids": ["81666"],
+    "note": "Dover Dodge Chrysler Jeep (81666). Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 5 of 5 lines tie out after the 3-char CHW strip."
+  },
+  "EMERSON_TOYOTA": {
+    "entity_ids": ["18506"],
+    "note": "Emerson Toyota (18506) -- the Coleman's sublet records (10859, 10860) are inactive. Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 4 of 4 -- TOW-prefixed invoices after the 3-char strip, TOCS-prefixed (source 3) verbatim."
   }
 }

@@ -389,3 +389,50 @@ WURTH_USA,Inv Date,line_date,date,v1,1
 WURTH_USA,Doc #,original_invoice_number,string,v1,1
 WURTH_USA,Inv Amt,charge_amount,decimal,v1,1
 WURTH_USA,Due,amount_remaining,decimal,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,date,line_date,date,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,type,transaction_code,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,reference_number,original_invoice_number,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,original_invoice_ref,invoice_number_ref,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,po_chk_number,po_number,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,description,description_raw,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,charged,charge_amount,decimal,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,paid,payment_amount,decimal,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,due,amount_remaining,decimal,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,Date,line_date,date,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,Transaction Type,original_invoice_number,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,Cust PO/Chk #,po_number,string,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,Charged,charge_amount,decimal,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,Paid,payment_amount,decimal,v1,1
+CHUCK'S_DOUGLASSVILLE_-_AUTOLY,Due,amount_remaining,decimal,v1,1
+EL_M_AUTO_PARTS,date,line_date,date,v1,1
+EL_M_AUTO_PARTS,type,transaction_code,string,v1,1
+EL_M_AUTO_PARTS,reference_number,original_invoice_number,string,v1,1
+EL_M_AUTO_PARTS,original_invoice_ref,invoice_number_ref,string,v1,1
+EL_M_AUTO_PARTS,po_chk_number,po_number,string,v1,1
+EL_M_AUTO_PARTS,description,description_raw,string,v1,1
+EL_M_AUTO_PARTS,charged,charge_amount,decimal,v1,1
+EL_M_AUTO_PARTS,paid,payment_amount,decimal,v1,1
+EL_M_AUTO_PARTS,due,amount_remaining,decimal,v1,1
+EL_M_AUTO_PARTS,Date,line_date,date,v1,1
+EL_M_AUTO_PARTS,Transaction Type,original_invoice_number,string,v1,1
+EL_M_AUTO_PARTS,Cust PO/Chk #,po_number,string,v1,1
+EL_M_AUTO_PARTS,Charged,charge_amount,decimal,v1,1
+EL_M_AUTO_PARTS,Paid,payment_amount,decimal,v1,1
+EL_M_AUTO_PARTS,Due,amount_remaining,decimal,v1,1
+COLLISIONSTONEGUARD,Date,line_date,date,v1,1
+COLLISIONSTONEGUARD,Transaction,original_invoice_number,string,v1,1
+COLLISIONSTONEGUARD,Amount,charge_amount,decimal,v1,1
+COLLISIONSTONEGUARD,Balance,amount_remaining,decimal,v1,1
+DOVER_DODGE,DATE,line_date,date,v1,1
+DOVER_DODGE,SOURCE,transaction_code,string,v1,1
+DOVER_DODGE,INVOICE,original_invoice_number,string,v1,1
+DOVER_DODGE,REFERENCE,invoice_number_ref,string,v1,1
+DOVER_DODGE,DESCRIPTION,description_raw,string,v1,1
+DOVER_DODGE,AMOUNT,charge_amount,decimal,v1,1
+DOVER_DODGE,AGE IN DAYS,age_in_days,integer,v1,1
+EMERSON_TOYOTA,DATE,line_date,date,v1,1
+EMERSON_TOYOTA,SOURCE,transaction_code,string,v1,1
+EMERSON_TOYOTA,REFERENCE,original_invoice_number,string,v1,1
+EMERSON_TOYOTA,CHARGES,charge_amount,decimal,v1,1
+EMERSON_TOYOTA,CREDITS,payment_amount,decimal,v1,1
+EMERSON_TOYOTA,BALANCE,amount_remaining,decimal,v1,1
