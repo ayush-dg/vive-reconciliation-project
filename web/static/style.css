@@ -686,7 +686,7 @@ select {
 
 /* Sized to match .btn-secondary (the page's standard action button) so it
    reads as a real action, and coloured with the accent rather than the
-   green/red of Accept/Dispute -- this researches, it does not resolve.
+   green/red of Accept/Reject -- this researches, it does not resolve.
    The generous bottom margin keeps it off the "Add a note" field below. */
 .ns-find-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 18px 0 28px; }
 .ns-find-btn { width: auto; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; font-size: 14px; font-weight: 600; margin-top: 0; color: var(--navy-2); border-color: var(--navy-2); background: var(--surface); }
@@ -728,12 +728,24 @@ select {
 .ns-chip-label { color: var(--text-faint); }
 .ns-chip.ns-chip-on .ns-chip-label { color: var(--navy-2); opacity: .75; }
 .ns-chip-value { font-weight: 600; }
+/* Each chip's x (2026-10-06): a sibling button laid over the pill's right
+   end, shown only while that filter is set (always a highlighted chip, so
+   navy). .ns-chip-has-clear makes room for it. The [hidden] rule must
+   beat the display below, or the attribute would stop hiding it. */
+.ns-chip-wrap.ns-chip-has-clear .ns-chip { padding-right: 32px; }
+.ns-chip-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; font-size: 16px; line-height: 1; color: var(--navy-2); background: transparent; border: none; border-radius: 50%; cursor: pointer; }
+.ns-chip-clear[hidden] { display: none; }
+.ns-chip-clear:hover { background: var(--surface); }
+.ns-chip-clear:focus-visible { outline: 2px solid var(--navy-2); outline-offset: 1px; }
 
 .ns-popover { position: absolute; top: calc(100% + 6px); left: 0; z-index: 10; min-width: 190px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(15, 23, 42, .16); }
 .ns-pop-opt { display: block; width: 100%; text-align: left; padding: 7px 10px; font-size: 12.5px; color: var(--text); background: transparent; border: none; border-radius: var(--radius-sm); cursor: pointer; }
 .ns-pop-opt:hover { background: var(--steel-tint); }
+/* The chosen amount tolerance (Exact/Up to/At least) -- visible even while
+   the amount box is still empty and the chip reads "Any amount". */
+.ns-pop-opt[aria-pressed="true"] { background: var(--navy-tint); color: var(--navy-2); font-weight: 600; }
 
-/* "Past Outlook syncs" picker (Home/Exceptions/Validation, 2026-10-01): a
+/* "Past syncs" picker (Home/Exceptions/Validation, 2026-10-01): a
    .filter-chip button + an .ns-popover listbox of .ns-pop-opt rows, over a
    hidden <select> -- see static/app.js. The current choice gets a check
    and the navy tint; keyboard focus gets the hover tint. */

@@ -16,7 +16,7 @@ from web import time_window as tw
 
 router = APIRouter()
 
-# Time-window chips, in display order. The "Past Outlook syncs" select and
+# Time-window chips, in display order. The "Past syncs" select and
 # the calendar-icon button are their own controls, not plain chips. The
 # "This month"/"All time" chips were removed 2026-09-30 and the Month
 # select (whose blank option doubled as "All time") 2026-10-01, but

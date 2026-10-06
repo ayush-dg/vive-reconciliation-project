@@ -37,8 +37,8 @@ sqlite3.register_adapter(datetime, lambda d: d.isoformat(" "))
 U = lambda *a: datetime(*a)  # naive UTC, as pyodbc returns DATETIME2
 
 
-def _job(statement_id, submitted_at):
-    return {"statement_id": statement_id, "submitted_at": submitted_at}
+def _job(statement_id, submitted_at, status="COMPLETED"):
+    return {"statement_id": statement_id, "submitted_at": submitted_at, "status": status}
 
 
 _SELECT_TOP_RE = re.compile(r"^\s*SELECT\s+TOP\s+(\d+)\s+(.*)$", re.IGNORECASE | re.DOTALL)
@@ -74,7 +74,8 @@ class TestGetExceptionRunsWindow(unittest.TestCase):
         self.local = sqlite3.connect(":memory:", check_same_thread=False)
         self.local.row_factory = sqlite3.Row
         self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, billing_location TEXT, statement_period TEXT, shop_or_entity TEXT)")
-        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT)")
+        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT, "
+                           "status TEXT DEFAULT 'COMPLETED')")
         for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):
             patcher = mock.patch(target, _query_fn(conn))
             patcher.start()
@@ -289,6 +290,27 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.assertIn('href="/exceptions" class="link">Last run</a>', html)
         # No "All time" link since 2026-10-01 (the All time option is gone).
         self.assertNotIn('class="link">All time</a>', html)
+
+    def test_sync_label_counts_jobs_by_status(self):
+        # 2026-10-06: S1 is the only run with a recon_summary row; the
+        # cache hit completed without one and one job failed. Read "1 of
+        # 3 statements (2 still processing)" before -- nothing is in flight.
+        jobs = [_job("S1", U(2026, 9, 29, 12, 8)), _job("CACHE-HIT", U(2026, 9, 29, 12, 6)),
+                _job(None, U(2026, 9, 29, 12, 4), "FAILED")]
+        with mock.patch("web.queries.get_outlook_synced_jobs", lambda: jobs):
+            html = self._get("/exceptions")
+        self.assertIn("Last sync · Sep 29, 8:08 AM ET · 3 statements (2 completed, 1 failed)", html)
+        self.assertNotIn("still processing", html)
+        self.assertNotIn("Last Outlook sync", html)
+
+    def test_past_syncs_button_and_no_syncs_yet_wording(self):
+        html = self._get("/exceptions")
+        self.assertRegex(html, r'id="window-sync-btn"[^>]*>\s*Past syncs<svg')
+        self.assertNotIn("Outlook sync", html)
+        with mock.patch("web.queries.get_outlook_synced_jobs", lambda: []):
+            html = self._get("/exceptions?range=last")
+        self.assertIn("<option disabled>No syncs yet</option>", html)
+        self.assertNotIn("No Outlook syncs yet", html)
 
     def test_vendor_shop_location_options_rebuilt_from_the_window(self):
         html = self._get("/exceptions")

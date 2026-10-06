@@ -72,11 +72,15 @@ class TimeWindow:
     # not a time-gap on reconciliation runs -- see outlook_last_sync()):
     # the statement_ids that sync's jobs produced (checked by Python-side
     # membership, not SQL -- see .sql()), that sync's own queued-job count
-    # (for the "X of Y statements (Z still processing)" label) and the
+    # and its jobs counted by status (for the "572 statements (568
+    # completed, 4 failed)" label -- see sync_status_counts()) and the
     # newest of its jobs' submitted_at (the label's timestamp).
     statement_ids: Optional[frozenset] = None
     sync_time_utc: Optional[datetime] = None
     sync_job_count: int = 0
+    sync_completed: int = 0
+    sync_failed: int = 0
+    sync_processing: int = 0
 
     def sql(self, column: str = "reconciliation_timestamp"):
         """(" AND <predicate>", params) to append to a WHERE clause."""
@@ -140,11 +144,47 @@ def to_eastern(naive_utc: datetime) -> datetime:
 
 MAX_SYNC_OPTIONS = 30
 
+# jobs.status values that mean a job is still in flight -- the only
+# statuses web/queries.py ever writes are PENDING (create_job()),
+# PROCESSING (claim_next_pending_job()), COMPLETED and FAILED
+# (update_job_status() via web/worker.py).
+IN_FLIGHT_STATUSES = frozenset({"PENDING", "PROCESSING"})
+
+
+def sync_status_counts(chain) -> tuple:
+    """(completed, failed, still_processing) for one sync's jobs, by
+    jobs.status alone (2026-10-06). Until then "still processing" was
+    every job without a silver.recon_summary row, so a finished sync
+    with no job left in flight still read "481 of 572 statements (91
+    still processing)" on dev for the Oct 1 sync: 87 cache hits (a
+    byte-identical PDF already extracted, which completes without a
+    recon_summary row of its own) plus 4 failed jobs. A cache hit counts
+    as completed here; a FAILED job as failed, with or without a
+    statement_id."""
+    processing = sum(1 for j in chain if j.get("status") in IN_FLIGHT_STATUSES)
+    failed = sum(1 for j in chain if j.get("status") == "FAILED")
+    return len(chain) - processing - failed, failed, processing
+
+
+def sync_count_text(completed: int, failed: int, processing: int) -> str:
+    """"572 statements", or "572 statements (568 completed, 4 failed)"
+    once anything failed or is still in flight -- zero counts left out,
+    e.g. "3 statements (3 still processing)". Shared by the window label
+    and the Past syncs dropdown so the two never disagree."""
+    total = completed + failed + processing
+    text = f"{total:,} statement{'s' if total != 1 else ''}"
+    if not failed and not processing:
+        return text
+    parts = [f"{n:,} {word}" for n, word in ((completed, "completed"), (failed, "failed"),
+                                             (processing, "still processing")) if n]
+    return f"{text} ({', '.join(parts)})"
+
 
 def outlook_all_syncs(jobs, gap: timedelta = OUTLOOK_SYNC_GAP) -> list:
-    """jobs: dicts with "submitted_at" (any shape to_naive_utc accepts)
-    and "statement_id" (may be None -- extraction/matching hasn't
-    produced one yet) -- see queries.get_outlook_synced_jobs(), already
+    """jobs: dicts with "submitted_at" (any shape to_naive_utc accepts),
+    "statement_id" (may be None -- extraction/matching hasn't produced
+    one yet, or the job failed before it did) and "status" (see
+    sync_status_counts()) -- see queries.get_outlook_synced_jobs(), already
     scoped to source_blob_path IS NOT NULL, so a manual upload, a
     dropzone-watcher job or an Event Grid job is never even in `jobs` to
     begin with; nothing here needs to re-check their origin.
@@ -194,24 +234,19 @@ def outlook_sync_options(jobs, cap: int = MAX_SYNC_OPTIONS, gap: timedelta = OUT
     {"value": <UTC ISO "Z" string of that sync's newest job -- the
     exact ?sync= a <select> submits, and what resolve_window() parses
     back via to_naive_utc()>, "label": <"Sep 29, 7:02 AM ET · 12
-    statements", or "9 of 12 statements" when some of that sync's jobs
-    haven't reached Silver/matching yet -- same "X of Y" wording as
-    window_label()>}. `truncated` is True when more syncs exist than
-    `cap` allowed through (the caller shows a trailing disabled "older
-    syncs not shown" option)."""
+    statements", or "12 statements (11 completed, 1 failed)" when any
+    of that sync's jobs failed or are still in flight -- same
+    sync_count_text() wording as window_label()>}. `truncated` is True
+    when more syncs exist than `cap` allowed through (the caller shows a
+    trailing disabled "older syncs not shown" option)."""
     syncs = outlook_all_syncs(jobs, gap)
     truncated = len(syncs) > cap
     options = []
     for chain in syncs[:cap]:
-        statement_ids = {j["statement_id"] for j in chain if j.get("statement_id")}
         t = to_eastern(chain[0]["submitted_at"])
-        if len(statement_ids) < len(chain):
-            count = f"{len(statement_ids)} of {len(chain)} statement{'s' if len(chain) != 1 else ''}"
-        else:
-            count = f"{len(chain)} statement{'s' if len(chain) != 1 else ''}"
         options.append({
             "value": chain[0]["submitted_at"].isoformat() + "Z",
-            "label": f"{_day(t)}, {_clock(t)} ET · {count}",
+            "label": f"{_day(t)}, {_clock(t)} ET · {sync_count_text(*sync_status_counts(chain))}",
         })
     return options, truncated
 
@@ -288,7 +323,9 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
                     chain = candidate
                     break
     ids = frozenset(j["statement_id"] for j in chain if j.get("statement_id"))
-    return TimeWindow("last", statement_ids=ids, sync_time_utc=chain[0]["submitted_at"], sync_job_count=len(chain))
+    completed, failed, processing = sync_status_counts(chain)
+    return TimeWindow("last", statement_ids=ids, sync_time_utc=chain[0]["submitted_at"], sync_job_count=len(chain),
+                      sync_completed=completed, sync_failed=failed, sync_processing=processing)
 
 
 # ---------------------------------------------------------------------------
@@ -309,15 +346,17 @@ def _month_name(ym: str) -> str:
 
 
 def window_title(window: TimeWindow) -> str:
-    """The window itself, without a count -- e.g. "Last Outlook sync ·
-    Sep 29, 7:02 AM ET", "Today · Sep 29", "September 2026"."""
+    """The window itself, without a count -- e.g. "Last sync · Sep 29,
+    7:02 AM ET", "Today · Sep 29", "September 2026". ("Last Outlook
+    sync" until 2026-10-06; the top bar's "Outlook: <time>" badge is
+    what names Outlook now.)"""
     if window.range == "all":
         return "All time"
     if window.range == "last":
         if window.empty:
-            return "Last Outlook sync"
+            return "Last sync"
         t = to_eastern(window.sync_time_utc)
-        return f"Last Outlook sync · {_day(t)}, {_clock(t)} ET"
+        return f"Last sync · {_day(t)}, {_clock(t)} ET"
     if window.range == "today":
         return f"Today · {_day(parse_date(window.date))}"
     if window.range == "date":
@@ -328,16 +367,15 @@ def window_title(window: TimeWindow) -> str:
 
 
 def window_label(window: TimeWindow, statement_count: int) -> str:
-    """window_title() plus the number of statements in it. For "last",
-    `statement_count` (the window's actual matched silver.recon_summary
-    rows) can be lower than the sync's own queued-job count when some of
-    its jobs haven't reached Silver/matching yet -- shown as "9 of 12
-    statements (3 still processing)" rather than silently under-reporting
-    as a plain "9 statements"."""
-    if window.range == "last" and not window.empty and statement_count < window.sync_job_count:
-        still = window.sync_job_count - statement_count
-        return (f"{window_title(window)} · {statement_count} of {window.sync_job_count} statements "
-                f"({still} still processing)")
+    """window_title() plus the number of statements in it. For "last" the
+    count is the sync's own jobs by status (sync_count_text()), and
+    `statement_count` (the window's silver.recon_summary rows) is not
+    used: a cache-hit job completes without a recon_summary row of its
+    own, so comparing the two misreported finished jobs as "still
+    processing" -- see sync_status_counts()."""
+    if window.range == "last" and not window.empty:
+        return (f"{window_title(window)} · "
+                f"{sync_count_text(window.sync_completed, window.sync_failed, window.sync_processing)}")
     if statement_count:
         return f"{window_title(window)} · {statement_count:,} statement{'s' if statement_count != 1 else ''}"
     return f"{window_title(window)} · no runs{' yet' if window.range in ('today', 'month_current') else ''}"

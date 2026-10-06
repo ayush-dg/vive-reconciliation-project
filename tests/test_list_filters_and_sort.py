@@ -498,6 +498,14 @@ class TestValidationPeriodFilter(unittest.TestCase):
     def test_hero_summary_stays_unfiltered(self):
         self.assertIn('<div class="report-hero-stat-num">3</div>', self.html)
 
+    def test_no_syncs_yet_wording(self):
+        # No Outlook jobs in this fixture: the picker's placeholder option
+        # and the disabled Last run chip's tooltip ("No Outlook syncs yet"
+        # until 2026-10-06).
+        self.assertIn("<option disabled>No syncs yet</option>", self.html)
+        self.assertIn('disabled title="No syncs yet"', self.html)
+        self.assertNotIn("Outlook sync", self.html)
+
 
 class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
     """Validation's "Last run" dropdown and calendar-day filter -- same
@@ -521,8 +529,8 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         # One Outlook sync (gap < 10 min) that produced statement A only;
         # B and C are NOT part of it (B predates it, C has no job at all).
         outlook_jobs = [
-            {"submitted_at": "2026-09-29 15:02:00", "statement_id": "A"},
-            {"submitted_at": "2026-09-29 14:58:00", "statement_id": None},
+            {"submitted_at": "2026-09-29 15:02:00", "statement_id": "A", "status": "COMPLETED"},
+            {"submitted_at": "2026-09-29 14:58:00", "statement_id": None, "status": "PROCESSING"},
         ]
         _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs],
                    get_outlook_synced_jobs=lambda: outlook_jobs, **_SIDEBAR)
@@ -537,12 +545,17 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', options)
         self.assertEqual(opts[0], ("", "None"))
         self.assertIn('<option value="2026-09-29T15:02:00Z" selected>', options)
-        # The sync's only real statement is A -- 1 of 2 jobs (B has no
-        # statement_id at all -- "still processing").
-        self.assertIn("1 of 2 statements", options)
+        # Counted by job status (2026-10-06): A completed, the other job
+        # is still PROCESSING (no statement_id yet).
+        self.assertIn("2 statements (1 completed, 1 still processing)", options)
         # On load Last run is the highlighted control, not the picker's button.
         self.assertIn('class="filter-chip active" id="time-last-run"', self.html)
         self.assertIn('class="filter-chip sync-picker-btn" id="sync-filter-btn"', self.html)
+
+    def test_past_syncs_button_wording(self):
+        # "Past Outlook syncs" until 2026-10-06.
+        self.assertRegex(self.html, r'id="sync-filter-btn"[^>]*>\s*Past syncs<svg')
+        self.assertNotIn("Outlook sync", self.html)
 
     def test_calendar_button_and_hidden_date_input(self):
         self.assertIn('id="validation-date-btn"', self.html)

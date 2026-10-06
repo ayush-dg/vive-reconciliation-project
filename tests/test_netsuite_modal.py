@@ -113,7 +113,9 @@ class TestModalIsLookOnly(unittest.TestCase):
 
     def test_modal_has_no_resolve_or_match_control(self):
         modal = self._modal_markup(_render("Not Found in NetSuite")).lower()
-        for word in ("accept", "dispute", "resolve", "write off", "writeoff"):
+        # "reject" since 2026-10-06: the page's "Dispute with vendor"
+        # button is labelled "Reject" now (value still DISPUTED).
+        for word in ("accept", "dispute", "reject", "resolve", "write off", "writeoff"):
             self.assertNotIn(word, modal, f"{word!r} must not appear in a look-only modal")
 
     def test_results_partial_has_no_form_or_action(self):
@@ -198,7 +200,8 @@ class TestModalMarkup(unittest.TestCase):
                       "nsChipDate", "nsChipDateValue", "nsPopDate",
                       "nsChipStatus", "nsChipStatusValue", "nsPopStatus",
                       "nsStatusOpen", "nsStatusPaid", "nsDateFrom",
-                      "nsDateTo", "nsDateApply", "nsReset", "nsReload"):
+                      "nsDateTo", "nsDateApply", "nsReset", "nsReload",
+                      "nsClearVendor", "nsClearAmount", "nsClearDate", "nsClearStatus"):
             self.assertEqual(html.count(f'id="{el_id}"'), 1, el_id)
 
     def test_no_footer_summary_element_any_more(self):
@@ -228,6 +231,120 @@ class TestModalMarkup(unittest.TestCase):
         # ...and the modal sits after it, not instead of it.
         self.assertLess(html.index("NetSuite record"), html.index("<dialog"))
 
+
+
+def _app_js():
+    path = os.path.join(os.path.dirname(__file__), "..", "web", "static", "app.js")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+CLEAR_BUTTONS = (("Vendor", "nsChipVendor", "nsClearVendor", "nsPopVendor"),
+                 ("Amount", "nsChipAmount", "nsClearAmount", "nsPopAmount"),
+                 ("Date", "nsChipDate", "nsClearDate", "nsPopDate"),
+                 ("Status", "nsChipStatus", "nsClearStatus", "nsPopStatus"))
+
+
+class TestChipClearButtons(unittest.TestCase):
+    """Each filter chip's x (2026-10-06): a real, labelled button that
+    resets that filter to its "any" state. Shown/hidden by app.js
+    (renderChips()) -- rendered hidden, and as the chip's SIBLING inside
+    the same .ns-chip-wrap, never nested inside the chip button (a button
+    inside a button is invalid HTML and breaks keyboard focus)."""
+
+    def setUp(self):
+        self.html = _render("Not Found in NetSuite")
+
+    def _wrap(self, chip_id):
+        start = self.html.rindex('<div class="ns-chip-wrap">', 0, self.html.index(f'id="{chip_id}"'))
+        return self.html[start:self.html.index('<div class="ns-popover"', start)]
+
+    def test_each_chip_has_a_labelled_hidden_clear_button_beside_it(self):
+        for label, chip_id, clear_id, _ in CLEAR_BUTTONS:
+            with self.subTest(chip=label):
+                tag = re.search(rf'<button[^>]*id="{clear_id}"[^>]*>', self.html).group(0)
+                self.assertIn('type="button"', tag)
+                self.assertIn(f'aria-label="Clear {label.lower()} filter"', tag)
+                self.assertRegex(tag, r"\shidden\b")
+                wrap = self._wrap(chip_id)
+                self.assertIn(f'id="{clear_id}"', wrap)
+                chip_button = re.search(rf'<button[^>]*id="{chip_id}".*?</button>', wrap, re.S).group(0)
+                self.assertNotIn(clear_id, chip_button)
+
+    def test_chips_name_the_dropdown_they_open(self):
+        for label, chip_id, _, pop_id in CLEAR_BUTTONS:
+            with self.subTest(chip=label):
+                self.assertRegex(self.html, rf'id="{chip_id}"[^>]*aria-controls="{pop_id}"')
+
+    def test_any_wording_in_the_markup(self):
+        self.assertIn('data-vendor="off">Any vendor</button>', self.html)
+        self.assertNotIn("All vendors", self.html)
+        self.assertIn('id="nsChipAmountValue">Any amount<', self.html)
+        self.assertIn('placeholder="Any amount"', self.html)
+
+    def test_tolerance_options_expose_which_is_chosen(self):
+        for tol in ("exact", "up_to", "at_least"):
+            with self.subTest(tol=tol):
+                self.assertRegex(self.html, rf'data-tol="{tol}" aria-pressed="(true|false)"')
+
+
+class TestChipBehaviourInAppJs(unittest.TestCase):
+    """Static checks on web/static/app.js (no JS test runner in this
+    suite -- same approach as TestReasonBasedOpeningDefaults below), so a
+    regression that drops a piece of the wiring is caught without
+    executing JS. Verified behaviourally with Playwright screenshots
+    (2026-10-06): x per chip, click outside, Escape, empty amount."""
+
+    def setUp(self):
+        self.js = _app_js()
+
+    def test_chip_texts_for_the_any_states(self):
+        self.assertIn('if (!raw) return "Any amount";', self.js)
+        self.assertIn('state.useVendor ? (ctx.vendorDisplay || "This vendor") : "Any vendor"', self.js)
+        self.assertIn('if (state.statuses.length !== 1) return "Any status";', self.js)
+
+    def test_what_each_x_resets_to(self):
+        self.assertIn("vendor: function () { state.useVendor = false; }", self.js)
+        self.assertIn('amount: function () { state.amount = ""; state.tolerance = "exact"; }', self.js)
+        self.assertIn('date: function () { state.range = "any"; state.dateFrom = ""; state.dateTo = ""; }', self.js)
+        self.assertIn('status: function () { state.statuses = ["open", "paid"]; }', self.js)
+
+    def test_x_shows_only_while_its_filter_is_set(self):
+        self.assertIn("clearBtn.hidden = !set;", self.js)
+        self.assertIn('if (name === "amount") return !!state.amount.trim();', self.js)
+
+    def test_clearing_reruns_the_search_and_refocuses_the_chip(self):
+        body = self.js[self.js.index("function clearFilter(name)"):]
+        body = body[:body.index("\n    }\n")]
+        self.assertIn("runSearch();", body)
+        self.assertIn("document.getElementById(FILTERS[name].chip).focus();", body)
+
+    def test_click_outside_closes_the_open_dropdown_in_capture_phase(self):
+        self.assertIn(".parentElement.contains(ev.target)", self.js)
+        self.assertRegex(self.js, r'(?s)nsModal\.addEventListener\("click", function \(ev\) \{\s*const open = openFilter\(\);'
+                                  r'.*?\}, true\);')
+
+    def test_escape_closes_only_the_open_dropdown(self):
+        handler = re.search(r'nsModal\.addEventListener\("keydown", function \(ev\) \{.*?\n    \}\);',
+                            self.js, re.S).group(0)
+        self.assertIn('if (ev.key !== "Escape" || !open) return;', handler)
+        self.assertIn("ev.preventDefault();", handler)
+        self.assertIn("closePopovers(null);", handler)
+
+    def test_tolerance_pick_with_an_empty_box_keeps_the_dropdown_open(self):
+        # The click wiring, not renderChips()'s aria-pressed loop over the
+        # same options.
+        handler = self.js[self.js.index('document.querySelectorAll("#nsPopAmount .ns-pop-opt").forEach(function (opt) {\n'
+                                        '      opt.addEventListener("click"'):]
+        handler = handler[:handler.index("\n    });\n")]
+        self.assertIn("nsAmountInput.focus();", handler)
+        self.assertLess(handler.index("nsAmountInput.focus();"), handler.index("closePopovers(null);"))
+
+    def test_reset_filters_still_goes_back_to_the_opening_defaults(self):
+        handler = self.js[self.js.index('document.getElementById("nsReset")'):]
+        handler = handler[:handler.index("});")]
+        self.assertIn("state = defaultState();", handler)
+        self.assertIn("runSearch();", handler)
 
 class TestReasonBasedOpeningDefaults(unittest.TestCase):
     """Amount Mismatch opens with no amount filter, both statuses ticked,

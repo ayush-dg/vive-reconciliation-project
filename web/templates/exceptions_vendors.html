@@ -26,7 +26,7 @@
   {% for key, label, url in range_chips %}
   <a href="{{ url }}" class="filter-chip {{ 'active' if window.range == key and not (key == 'last' and explicit_sync) }}">{{ label }}</a>
   {% endfor %}
-  {# "Past Outlook syncs" picker -- same as Home's (see home.html's comment
+  {# "Past syncs" picker -- same as Home's (see home.html's comment
      and static/app.js): the hidden <select> is still what the form
      submits, under a fixed-label button + listbox. "None" goes to the Last
      run chip's own URL (last_run_url). #}
@@ -40,12 +40,12 @@
       <option value="{{ opt.value }}" {{ 'selected' if opt.value == selected_sync }}>{{ opt.label }}</option>
       {% endfor %}
       {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
-      {% if not sync_options %}<option disabled>No Outlook syncs yet</option>{% endif %}
+      {% if not sync_options %}<option disabled>No syncs yet</option>{% endif %}
     </select>
     <div class="ns-chip-wrap" data-sync-picker="window-sync">
       <button type="button" class="filter-chip sync-picker-btn {{ 'active' if explicit_sync }}" id="window-sync-btn"
               aria-haspopup="listbox" aria-expanded="false" aria-controls="window-sync-list">
-        Past Outlook syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+        Past syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
       </button>
       <ul class="ns-popover sync-picker-list" id="window-sync-list" role="listbox" aria-labelledby="window-sync-btn" hidden></ul>
     </div>

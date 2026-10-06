@@ -48,7 +48,7 @@
    as Home's and Exceptions' #time-window row, but client-side like every
    other filter on this page. Like Home's, it is ONE window, not stacked
    filters: Today and the calendar pick a US Eastern day (matched against
-   each card's data-day), Last run and the "Past Outlook syncs" picker
+   each card's data-day), Last run and the "Past syncs" picker
    pick an Outlook sync (outlook_sync_options(), newest first, matched
    against data-sync), and picking either kind clears the other. Defaults
    to the newest sync, same as Home; the picker's "None" shows every
@@ -61,19 +61,19 @@
 <div class="filter-chips" style="flex-wrap:wrap;align-items:center;margin-bottom:8px" id="time-window" aria-label="Time window">
   <button type="button" class="filter-chip" id="time-today" data-today="{{ today_eastern }}">Today</button>
   <button type="button" class="filter-chip{{ ' active' if sync_options }}" id="time-last-run"
-          data-sync="{{ sync_options[0].value if sync_options else '' }}"{% if not sync_options %} disabled title="No Outlook syncs yet"{% endif %}>Last run</button>
+          data-sync="{{ sync_options[0].value if sync_options else '' }}"{% if not sync_options %} disabled title="No syncs yet"{% endif %}>Last run</button>
   <select id="sync-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
     <option value="">None</option>
     {% for opt in sync_options %}
     <option value="{{ opt.value }}" {{ 'selected' if loop.first }}>{{ opt.label }}</option>
     {% endfor %}
     {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
-    {% if not sync_options %}<option disabled>No Outlook syncs yet</option>{% endif %}
+    {% if not sync_options %}<option disabled>No syncs yet</option>{% endif %}
   </select>
   <div class="ns-chip-wrap" data-sync-picker="sync-filter">
     <button type="button" class="filter-chip sync-picker-btn" id="sync-filter-btn"
             aria-haspopup="listbox" aria-expanded="false" aria-controls="sync-filter-list">
-      Past Outlook syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+      Past syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
     </button>
     <ul class="ns-popover sync-picker-list" id="sync-filter-list" role="listbox" aria-labelledby="sync-filter-btn" hidden></ul>
   </div>
