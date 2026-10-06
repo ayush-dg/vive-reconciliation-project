@@ -547,7 +547,7 @@ def _live_open_exception_count(statement_id: str) -> int:
          matching's Silver-based classification already ran, so matching
          (src/matching/engine.py) never counts them into the summary it
          writes.
-      2. Resolving an exception (Accept/Dispute/Write-off) updates
+      2. Resolving an exception (Accept/Reject/Write-off) updates
          gold_exceptions.exception_status but never touches the summary's
          cached count.
     """

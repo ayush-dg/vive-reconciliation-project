@@ -197,7 +197,7 @@
        preview only ever appears for Amount Mismatch, while this covers
        every reason that means "did not tie out", including the ones
        where hand-searching matters most. Opening the modal resolves
-       nothing; Accept/Dispute/Escalate remain the only way to close an
+       nothing; Accept/Reject/Escalate remain the only way to close an
        exception. #}
     {% if selected.exception_reason in searchable_reasons %}
     <div class="ns-find-row">
@@ -222,10 +222,14 @@
       <textarea rows="4" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
     </div>
 
+    {# "Reject" (2026-10-06, was "Dispute with vendor") is the visible label
+       only: the submitted value stays DISPUTED, the value
+       exception_dispositions.disposition_status stores and its CHECK
+       constraint allows, so existing rows and every query are unchanged. #}
     <div class="detail-actions">
       <div class="action-cluster">
         <button class="btn btn-accept" type="submit" name="action" value="ACCEPTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> Accept</button>
-        <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-x-circle"/></svg> Dispute with vendor</button>
+        <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-x-circle"/></svg> Reject</button>
       </div>
     </div>
     </form>
@@ -243,7 +247,7 @@
 {% if selected and selected.exception_reason in searchable_reasons %}
 {# LOOK-ONLY modal. No <form>, no action, no method, nothing that posts.
    Selecting rows only drives the footer total; resolving an exception
-   stays with the page's own Accept/Dispute/Escalate forms. #}
+   stays with the page's own Accept/Reject/Escalate forms. #}
 <dialog class="ns-modal" id="nsModal" aria-labelledby="nsModalTitle">
   <div class="ns-modal-head">
     <div>

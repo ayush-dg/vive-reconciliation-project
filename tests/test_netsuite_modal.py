@@ -113,7 +113,9 @@ class TestModalIsLookOnly(unittest.TestCase):
 
     def test_modal_has_no_resolve_or_match_control(self):
         modal = self._modal_markup(_render("Not Found in NetSuite")).lower()
-        for word in ("accept", "dispute", "resolve", "write off", "writeoff"):
+        # "reject" since 2026-10-06: the page's "Dispute with vendor"
+        # button is labelled "Reject" now (value still DISPUTED).
+        for word in ("accept", "dispute", "reject", "resolve", "write off", "writeoff"):
             self.assertNotIn(word, modal, f"{word!r} must not appear in a look-only modal")
 
     def test_results_partial_has_no_form_or_action(self):

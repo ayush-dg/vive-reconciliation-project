@@ -686,7 +686,7 @@ select {
 
 /* Sized to match .btn-secondary (the page's standard action button) so it
    reads as a real action, and coloured with the accent rather than the
-   green/red of Accept/Dispute -- this researches, it does not resolve.
+   green/red of Accept/Reject -- this researches, it does not resolve.
    The generous bottom margin keeps it off the "Add a note" field below. */
 .ns-find-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 18px 0 28px; }
 .ns-find-btn { width: auto; display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; font-size: 14px; font-weight: 600; margin-top: 0; color: var(--navy-2); border-color: var(--navy-2); background: var(--surface); }
