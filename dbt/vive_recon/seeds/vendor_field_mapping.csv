@@ -249,3 +249,31 @@ OREILLY_AUTO_PARTS,OPEN AMOUNT,amount_remaining,decimal,v1,1
 PARAGON,DATE,line_date,date,v1,1
 PARAGON,ACTIVITY,original_invoice_number,string,v1,1
 PARAGON,AMOUNT,charge_amount,decimal,v1,1
+BC_TIRE,Date,line_date,date,v1,1
+BC_TIRE,Ref #,original_invoice_number,string,v1,1
+BC_TIRE,Loc#,description_raw,string,v1,1
+BC_TIRE,Amount,charge_amount,decimal,v1,1
+BC_TIRE,Payments,payment_amount,decimal,v1,1
+BC_TIRE,Due Date,due_date,date,v1,1
+BC_TIRE,Due,amount_remaining,decimal,v1,1
+JACK_MADDEN_FORD,DATE,line_date,date,v1,1
+JACK_MADDEN_FORD,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+JACK_MADDEN_FORD,PURCHASES,charge_amount,decimal,v1,1
+JACK_MADDEN_FORD,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+JACK_MADDEN_FORD,BALANCE,amount_remaining,decimal,v1,1
+SULLIVAN_TIRE,DATE,line_date,date,v1,1
+SULLIVAN_TIRE,INVOICE NUMBER,original_invoice_number,string,v1,1
+SULLIVAN_TIRE,CUSTOMER P.O. NUMBER,po_number,string,v1,1
+SULLIVAN_TIRE,WORK ORD,work_order_number,string,v1,1
+SULLIVAN_TIRE,COMMENT,description_raw,string,v1,1
+SULLIVAN_TIRE,AMOUNT,charge_amount,decimal,v1,1
+VIP_TIRES,Date,line_date,date,v1,1
+VIP_TIRES,Document No.,original_invoice_number,string,v1,1
+VIP_TIRES,PO Number,po_number,string,v1,1
+VIP_TIRES,Code,transaction_code,string,v1,1
+VIP_TIRES,Description,description_raw,string,v1,1
+VIP_TIRES,Amount,charge_amount,decimal,v1,1
+WHEELS_ON_SITE,DATE,line_date,date,v1,1
+WHEELS_ON_SITE,DESCRIPTION,original_invoice_number,string,v1,1
+WHEELS_ON_SITE,AMOUNT,charge_amount,decimal,v1,1
+WHEELS_ON_SITE,OPEN AMOUNT,amount_remaining,decimal,v1,1

@@ -436,7 +436,8 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
       - O'Reilly (confirmed 2026-10-05, 150 of 218 traced lines): the
         statement prints store + document run together (4507140208);
         NetSuite mostly holds them dashed after the 4-digit store
-        (4507-140208), a few undashed (4530128235)."""
+        (4507-140208), a few undashed (4530128235).
+      - B-C Tire, Sullivan Tire, Wheels on Site: see the comment below."""
     alts = []
     pad_to = _ZERO_PAD_VENDORS.get(vendor_id)
     if pad_to:
@@ -450,6 +451,18 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
             alts.append(base.zfill(pad_to))
     if vendor_id == "OREILLY_AUTO_PARTS" and inv.isdigit() and len(inv) == 10:
         alts.append(f"{inv[:4]}-{inv[4:]}")
+    # Confirmed 2026-10-06 by tranid trace of the stored statements:
+    # B-C Tire bills are PW + ref (352478 -> PW352478), some PW- + ref
+    # (355263 -> PW-355263); Sullivan prints '<store>-<zero-padded no.>'
+    # (0000-4024835) where NetSuite mostly holds the number alone
+    # (4024835); Wheels on Site's 'Invoice #00631267' is sometimes held
+    # without the leading zeros.
+    if vendor_id == "BC_TIRE":
+        alts += [f"PW{inv}", f"PW-{inv}"]
+    if vendor_id == "SULLIVAN_TIRE" and re.fullmatch(r"\d{4}-\d+", inv):
+        alts.append(inv.split("-", 1)[1].lstrip("0"))
+    if vendor_id == "WHEELS_ON_SITE" and inv.isdigit() and inv.startswith("0"):
+        alts.append(inv.lstrip("0"))
     return alts
 
 

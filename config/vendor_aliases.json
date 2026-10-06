@@ -219,5 +219,33 @@
     "Paragon Powder Coating & Wheel Repair",
     "Paragon Powder Coating and Wheel Repair",
     "Paragon"
+  ],
+  "BC_TIRE": [
+    "B-C Tire Service, Inc.",
+    "B-C Tire Service",
+    "BC Tire",
+    "B C Tire"
+  ],
+  "JACK_MADDEN_FORD": [
+    "Jack Madden Ford",
+    "JACK MADDEN FORD",
+    "Jack Madden"
+  ],
+  "SULLIVAN_TIRE": [
+    "Sullivan Tire",
+    "Sullivan Tire Co., Inc.",
+    "Sullivan Tire Co. Inc."
+  ],
+  "VIP_TIRES": [
+    "VIP",
+    "VIP Tires & Service",
+    "VIP Tires and Service",
+    "VIP Tire",
+    "VIP, Inc"
+  ],
+  "WHEELS_ON_SITE": [
+    "Wheels on Site",
+    "WheelsOnsite",
+    "Wheels On Site, Inc."
   ]
 }

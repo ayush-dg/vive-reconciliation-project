@@ -146,5 +146,25 @@
   "PARAGON": {
     "entity_ids": ["7149"],
     "note": "Paragon Powder Coating and Wheel Repair (7149), the only Paragon record. Derived 2026-10-05 by tranid trace of 10 stored statements: the invoice number after 'Invoice #' in ACTIVITY is the NetSuite tranid, but most lines surface as Amount Mismatch -- NetSuite holds the list price ($195.00 / $200.00) while the statement bills the discounted amount ($175.50 / $180.50). Genuine discrepancy for AP review, not a key problem."
+  },
+  "BC_TIRE": {
+    "entity_ids": ["81234"],
+    "note": "BC Tire (81234), the only BC Tire record. Derived 2026-10-06 by tranid trace of 5 stored B-C Tire Service statements: NetSuite holds bills as PW + the statement's Ref # (352478 -> PW352478, some PW-355263) -- matched by fabric_matching._alternate_tranids."
+  },
+  "JACK_MADDEN_FORD": {
+    "entity_ids": ["112242"],
+    "note": "JACK MADDEN FORD (112242). Derived 2026-10-06 by tranid trace of 5 stored statements (CDK AR layout): 127 of 149 unique lines tie out verbatim under 112242, invoices as bills and CM-prefixed lines as credits."
+  },
+  "SULLIVAN_TIRE": {
+    "entity_ids": ["6960"],
+    "note": "Sullivan Tire (6960). Derived 2026-10-06 by tranid trace of 6 stored statements: 60 of 79 lines tie out under 6960 -- some verbatim (0000-4024835), most as the number after the store prefix without leading zeros (_alternate_tranids). Store 0119-prefixed invoices have no NetSuite record yet. Sullivan Tire Bangor (85161) exists -- add only on a confirmed hit; Sullivan Tire-Sublet (6961) is inactive."
+  },
+  "VIP_TIRES": {
+    "entity_ids": ["6694"],
+    "note": "VIP, Inc (6694) -- VIP Tires & Service (29856) is inactive. Derived 2026-10-06 by tranid trace of 5 stored statements: 77 of 78 invoice lines tie out under 6694 as the number after the dash in Document No. (INV7-2007037814 -> 2007037814, token_after normalization)."
+  },
+  "WHEELS_ON_SITE": {
+    "entity_ids": ["138869"],
+    "note": "Wheels on Site (138869). Derived 2026-10-06 by tranid trace of 5 stored statements: 33 of 33 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after), 3 of them without leading zeros (_alternate_tranids)."
   }
 }
