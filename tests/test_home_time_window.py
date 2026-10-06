@@ -124,8 +124,8 @@ class TestResolveWindow(unittest.TestCase):
                                    [U(2026, 9, 28, 4), U(2026, 9, 29, 4)]))
 
 
-def _job(statement_id, submitted_at):
-    return {"statement_id": statement_id, "submitted_at": submitted_at}
+def _job(statement_id, submitted_at, status="COMPLETED"):
+    return {"statement_id": statement_id, "submitted_at": submitted_at, "status": status}
 
 
 class TestOutlookLastSync(unittest.TestCase):
@@ -174,7 +174,7 @@ class TestOutlookLastSync(unittest.TestCase):
     def test_a_job_with_no_statement_id_yet_still_counts_toward_the_chain(self):
         # Still processing -- no statement_id, but it's still part of the
         # sync (see the "still processing" label test below).
-        jobs = [_job(None, U(2026, 9, 29, 12, 8)), _job("S1", U(2026, 9, 29, 12, 3))]
+        jobs = [_job(None, U(2026, 9, 29, 12, 8), "PROCESSING"), _job("S1", U(2026, 9, 29, 12, 3))]
         chain = tw.outlook_last_sync(jobs)
         self.assertEqual(len(chain), 2)
 
@@ -199,10 +199,63 @@ class TestResolveWindowLast(unittest.TestCase):
         self.assertFalse(w.empty)
 
     def test_statement_ids_excludes_jobs_still_processing(self):
-        jobs = [_job(None, U(2026, 9, 29, 12, 8)), _job("S1", U(2026, 9, 29, 12, 3))]
+        jobs = [_job(None, U(2026, 9, 29, 12, 8), "PROCESSING"), _job("S1", U(2026, 9, 29, 12, 3))]
         w = tw.resolve_window("last", outlook_jobs=jobs)
         self.assertEqual(w.statement_ids, frozenset({"S1"}))
         self.assertEqual(w.sync_job_count, 2)  # still counts toward the total
+        self.assertEqual((w.sync_completed, w.sync_failed, w.sync_processing), (1, 0, 1))
+
+    def test_window_carries_the_syncs_job_counts_by_status(self):
+        jobs = [_job("C1", U(2026, 9, 29, 12, 8)), _job("F1", U(2026, 9, 29, 12, 7), "FAILED"),
+                _job(None, U(2026, 9, 29, 12, 6), "FAILED"), _job(None, U(2026, 9, 29, 12, 5), "PENDING"),
+                _job(None, U(2026, 9, 29, 12, 4), "PROCESSING")]
+        w = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual((w.sync_job_count, w.sync_completed, w.sync_failed, w.sync_processing), (5, 1, 2, 2))
+
+
+# ---------------------------------------------------------------------------
+# sync_status_counts() / sync_count_text() -- "still processing" means a
+# job really is PENDING/PROCESSING (2026-10-06), not "no recon_summary row"
+# ---------------------------------------------------------------------------
+
+class TestSyncStatusCounts(unittest.TestCase):
+
+    def test_only_pending_and_processing_count_as_still_processing(self):
+        chain = [_job("A", None, "PENDING"), _job("B", None, "PROCESSING"),
+                 _job("C", None, "COMPLETED"), _job("D", None, "FAILED")]
+        self.assertEqual(tw.sync_status_counts(chain), (1, 1, 2))
+
+    def test_failed_counts_as_failed_with_or_without_a_statement_id(self):
+        # Oct 1: three 0-row extractions kept their statement_id, the
+        # 30-minute timeout never got one -- all four are just failed.
+        chain = [_job("STMT-1", None, "FAILED"), _job(None, None, "FAILED")]
+        self.assertEqual(tw.sync_status_counts(chain), (0, 2, 0))
+
+    def test_a_completed_cache_hit_counts_as_completed(self):
+        # A cache hit completes with a statement_id that never gets a
+        # silver.recon_summary row of its own -- that is not "processing".
+        self.assertEqual(tw.sync_status_counts([_job("STMT-CACHE-HIT", None, "COMPLETED")]), (1, 0, 0))
+
+    def test_empty_chain(self):
+        self.assertEqual(tw.sync_status_counts([]), (0, 0, 0))
+
+    def test_text_all_completed_is_a_plain_count(self):
+        self.assertEqual(tw.sync_count_text(572, 0, 0), "572 statements")
+        self.assertEqual(tw.sync_count_text(1, 0, 0), "1 statement")
+        self.assertEqual(tw.sync_count_text(1500, 0, 0), "1,500 statements")
+
+    def test_text_with_failures(self):
+        self.assertEqual(tw.sync_count_text(568, 4, 0), "572 statements (568 completed, 4 failed)")
+
+    def test_text_with_everything(self):
+        self.assertEqual(tw.sync_count_text(500, 2, 70),
+                         "572 statements (500 completed, 2 failed, 70 still processing)")
+
+    def test_text_leaves_zero_counts_out(self):
+        self.assertEqual(tw.sync_count_text(2, 0, 1), "3 statements (2 completed, 1 still processing)")
+        self.assertEqual(tw.sync_count_text(0, 0, 3), "3 statements (3 still processing)")
+        self.assertEqual(tw.sync_count_text(0, 2, 0), "2 statements (2 failed)")
+        self.assertEqual(tw.sync_count_text(0, 1, 1), "2 statements (1 failed, 1 still processing)")
 
     def test_sql_is_a_python_side_membership_filter_not_a_predicate(self):
         w = tw.resolve_window("last", outlook_jobs=[_job("S1", U(2026, 9, 29, 12, 8))])
@@ -272,17 +325,25 @@ class TestOutlookSyncOptions(unittest.TestCase):
                          ["2026-09-29T16:02:00Z", "2026-09-28T12:00:00Z"])
         self.assertEqual(options[0]["label"], "Sep 29, 12:02 PM ET · 1 statement")
 
-    def test_still_processing_jobs_use_x_of_y_wording(self):
-        jobs = [_job(None, U(2026, 9, 29, 16, 2)), _job("A", U(2026, 9, 29, 16, 0)),
+    def test_still_processing_jobs_are_counted_by_status(self):
+        jobs = [_job(None, U(2026, 9, 29, 16, 2), "PROCESSING"), _job("A", U(2026, 9, 29, 16, 0)),
                 _job("B", U(2026, 9, 29, 15, 58))]
         options, _ = tw.outlook_sync_options(jobs)
-        self.assertEqual(options[0]["label"], "Sep 29, 12:02 PM ET · 2 of 3 statements")
+        self.assertEqual(options[0]["label"], "Sep 29, 12:02 PM ET · 3 statements (2 completed, 1 still processing)")
 
     def test_a_sync_with_zero_statements_yet_is_still_listed(self):
-        jobs = [_job(None, U(2026, 9, 29, 16, 2)), _job(None, U(2026, 9, 29, 16, 0))]
+        jobs = [_job(None, U(2026, 9, 29, 16, 2), "PENDING"), _job(None, U(2026, 9, 29, 16, 0), "PENDING")]
         options, _ = tw.outlook_sync_options(jobs)
         self.assertEqual(len(options), 1)
-        self.assertEqual(options[0]["label"], "Sep 29, 12:02 PM ET · 0 of 2 statements")
+        self.assertEqual(options[0]["label"], "Sep 29, 12:02 PM ET · 2 statements (2 still processing)")
+
+    def test_failed_jobs_and_cache_hits_in_a_finished_sync(self):
+        # Until 2026-10-06 this read "2 of 3 statements": the failed job
+        # had no statement_id. Nothing here is in flight any more.
+        jobs = [_job("CACHE-HIT", U(2026, 9, 29, 16, 2)), _job("A", U(2026, 9, 29, 16, 0)),
+                _job(None, U(2026, 9, 29, 15, 58), "FAILED")]
+        options, _ = tw.outlook_sync_options(jobs)
+        self.assertEqual(options[0]["label"], "Sep 29, 12:02 PM ET · 3 statements (2 completed, 1 failed)")
 
     def test_capped_at_30_with_a_truncated_flag(self):
         jobs = [_job(f"S{i}", U(2026, 9, 1, 0, 0) + timedelta(days=i)) for i in range(35)]
@@ -340,23 +401,48 @@ class TestMonthOptionsAndLabels(unittest.TestCase):
         jobs = [_job("A", U(2026, 9, 29, 15, 50)), _job("B", U(2026, 9, 29, 15, 55)),
                 _job("C", U(2026, 9, 29, 16, 2))]
         w = tw.resolve_window("last", outlook_jobs=jobs)
-        self.assertEqual(tw.window_label(w, 3), "Last Outlook sync · Sep 29, 12:02 PM ET · 3 statements")
+        self.assertEqual(tw.window_label(w, 3), "Last sync · Sep 29, 12:02 PM ET · 3 statements")
 
     def test_last_run_label_still_processing(self):
-        jobs = [_job(None, U(2026, 9, 29, 16, 2)), _job("A", U(2026, 9, 29, 16, 0)),
+        jobs = [_job(None, U(2026, 9, 29, 16, 2), "PROCESSING"), _job("A", U(2026, 9, 29, 16, 0)),
                 _job("B", U(2026, 9, 29, 15, 58))]
         w = tw.resolve_window("last", outlook_jobs=jobs)
         self.assertEqual(tw.window_label(w, 2),
-                         "Last Outlook sync · Sep 29, 12:02 PM ET · 2 of 3 statements (1 still processing)")
+                         "Last sync · Sep 29, 12:02 PM ET · 3 statements (2 completed, 1 still processing)")
+
+    def test_last_run_label_oct1_sync_shape(self):
+        # The dev Oct 1 sync (Phase 3 snapshot): 572 jobs, newest queued
+        # 21:39:17Z = 5:39 PM ET, nothing in flight. 481 have a
+        # recon_summary row; 87 completed cache hits do not; 3 failed
+        # 0-row jobs kept a statement_id; 1 timed-out job has none.
+        # Read "481 of 572 statements (91 still processing)" until
+        # 2026-10-06.
+        newest = U(2026, 10, 1, 21, 39, 17)
+        jobs = ([_job(f"R{i}", newest) for i in range(481)]
+                + [_job(f"C{i}", newest) for i in range(87)]
+                + [_job(f"F{i}", newest, "FAILED") for i in range(3)]
+                + [_job(None, newest, "FAILED")])
+        w = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual(tw.window_label(w, 481),
+                         "Last sync · Oct 1, 5:39 PM ET · 572 statements (568 completed, 4 failed)")
+        options, _ = tw.outlook_sync_options(jobs)
+        self.assertEqual(options[0]["label"], "Oct 1, 5:39 PM ET · 572 statements (568 completed, 4 failed)")
+
+    def test_last_run_label_ignores_the_recon_summary_count(self):
+        # Every job completed, but only one has a recon_summary row (the
+        # other is a cache hit) -- still a plain, finished "2 statements".
+        jobs = [_job("A", U(2026, 9, 29, 16, 2)), _job("CACHE-HIT", U(2026, 9, 29, 16, 0))]
+        w = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual(tw.window_label(w, 1), "Last sync · Sep 29, 12:02 PM ET · 2 statements")
 
     def test_last_run_label_single_job(self):
         # 16:08Z UTC = 12:08 PM ET.
         w = tw.resolve_window("last", outlook_jobs=[_job("S1", U(2026, 9, 29, 16, 8))])
-        self.assertEqual(tw.window_label(w, 1), "Last Outlook sync · Sep 29, 12:08 PM ET · 1 statement")
+        self.assertEqual(tw.window_label(w, 1), "Last sync · Sep 29, 12:08 PM ET · 1 statement")
 
     def test_last_run_label_no_outlook_jobs_at_all(self):
         w = tw.resolve_window("last", outlook_jobs=[])
-        self.assertEqual(tw.window_label(w, 0), "Last Outlook sync · no runs")
+        self.assertEqual(tw.window_label(w, 0), "Last sync · no runs")
 
     def test_other_labels(self):
         now = datetime(2026, 9, 29, 13, tzinfo=timezone.utc)
@@ -407,7 +493,8 @@ class TestHomeDashboardQuery(unittest.TestCase):
         self.local = sqlite3.connect(":memory:", check_same_thread=False)
         self.local.row_factory = sqlite3.Row
         self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT)")
-        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT)")
+        self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT, "
+                           "status TEXT)")
         for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):
             patcher = mock.patch(target, _query_fn(conn))
             patcher.start()
@@ -439,10 +526,11 @@ class TestHomeDashboardQuery(unittest.TestCase):
     def _ids(self, data):
         return [r["statement_id"] for r in data["runs"]]
 
-    def _outlook_job(self, statement_id, submitted_at, source_blob_path="mailbox/2026/09/29/x__f.pdf"):
+    def _outlook_job(self, statement_id, submitted_at, source_blob_path="mailbox/2026/09/29/x__f.pdf",
+                     status="COMPLETED"):
         self.local.execute(
-            "INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
-            [statement_id, submitted_at, source_blob_path],
+            "INSERT INTO jobs (statement_id, submitted_at, source_blob_path, status) VALUES (?, ?, ?, ?)",
+            [statement_id, submitted_at, source_blob_path, status],
         )
 
     def test_last_run_covers_only_the_latest_outlook_sync(self):
@@ -472,12 +560,35 @@ class TestHomeDashboardQuery(unittest.TestCase):
     def test_last_run_label_reflects_a_still_processing_job(self):
         self._outlook_job("A1", "2026-09-29 12:08:00")
         self._outlook_job("A2", "2026-09-29 12:05:00")
-        self._outlook_job(None, "2026-09-29 12:03:00")  # queued, not yet through Silver/matching
+        self._outlook_job(None, "2026-09-29 12:03:00", status="PROCESSING")  # not yet through intake
         window = self._window("last")
         data = queries.get_home_dashboard(window)
         self.assertEqual(self._ids(data), ["A1", "A2"])
         self.assertEqual(tw.window_label(window, data["statement_count"]),
-                         "Last Outlook sync · Sep 29, 8:08 AM ET · 2 of 3 statements (1 still processing)")
+                         "Last sync · Sep 29, 8:08 AM ET · 3 statements (2 completed, 1 still processing)")
+
+    def test_outlook_synced_jobs_carry_their_status(self):
+        self._outlook_job("A1", "2026-09-29 12:08:00", status="FAILED")
+        self.assertEqual(queries.get_outlook_synced_jobs(),
+                         [{"submitted_at": "2026-09-29 12:08:00", "statement_id": "A1", "status": "FAILED"}])
+
+    def test_finished_sync_with_cache_hits_and_failures_is_not_still_processing(self):
+        # Oct 1 shape, scaled down: A1-A3 reached recon_summary; CACHE1
+        # completed as a cache hit (no recon_summary row of its own);
+        # FAIL1 failed after intake gave it a statement_id; one job
+        # failed before it got one. Nothing is PENDING/PROCESSING.
+        for sid, ts in (("A1", "2026-09-29 12:08:00"), ("A2", "2026-09-29 12:07:00"),
+                        ("A3", "2026-09-29 12:06:00"), ("CACHE1", "2026-09-29 12:05:00")):
+            self._outlook_job(sid, ts)
+        self._outlook_job("FAIL1", "2026-09-29 12:04:00", status="FAILED")
+        self._outlook_job(None, "2026-09-29 12:03:00", status="FAILED")
+        window = self._window("last")
+        data = queries.get_home_dashboard(window)
+        # The cards/"N of M"/table still cover only the recon_summary runs.
+        self.assertEqual(self._ids(data), ["A1", "A2", "A3"])
+        self.assertEqual(data["statement_count"], 3)
+        self.assertEqual(tw.window_label(window, data["statement_count"]),
+                         "Last sync · Sep 29, 8:08 AM ET · 6 statements (4 completed, 2 failed)")
 
     def test_no_outlook_jobs_gives_the_existing_empty_state(self):
         window = self._window("last")  # jobs table has no rows at all
@@ -569,13 +680,13 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
             "get_run_timestamps": lambda: [U(2026, 9, 29, 7, 36), U(2026, 9, 29, 9, 30), U(2026, 9, 29, 11, 0),
                                            U(2026, 9, 29, 12, 8), U(2026, 8, 20, 12)],
             # 4 jobs chained within OUTLOOK_SYNC_GAP -- one Outlook sync,
-            # newest at 12:08Z = 8:08 AM ET, matching self.result's
-            # statement_count of 4 (see window_label()'s "X of Y" branch).
+            # newest at 12:08Z = 8:08 AM ET, all completed (see
+            # window_label()'s sync_count_text()).
             "get_outlook_synced_jobs": lambda: [
-                {"submitted_at": U(2026, 9, 29, 12, 8), "statement_id": "S1"},
-                {"submitted_at": U(2026, 9, 29, 12, 4), "statement_id": "S2"},
-                {"submitted_at": U(2026, 9, 29, 12, 1), "statement_id": "S3"},
-                {"submitted_at": U(2026, 9, 29, 11, 58), "statement_id": "S4"},
+                {"submitted_at": U(2026, 9, 29, 12, 8), "statement_id": "S1", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 12, 4), "statement_id": "S2", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 12, 1), "statement_id": "S3", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 11, 58), "statement_id": "S4", "status": "COMPLETED"},
             ],
             "get_home_dashboard": get_home_dashboard,
             "get_active_jobs": lambda: [], "get_failed_jobs": lambda: [],
@@ -604,8 +715,41 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
     def test_default_is_last_run_with_label(self):
         html = self._get("/")
         self.assertEqual(self._window().range, "last")
-        self.assertIn("Last Outlook sync · Sep 29, 8:08 AM ET · 4 statements", html)
+        self.assertIn("Last sync · Sep 29, 8:08 AM ET · 4 statements", html)
         self.assertIn('href="/" class="filter-chip active">Last run', html)
+
+    def test_sync_wording_no_longer_names_outlook_except_the_top_bar_badge(self):
+        # 2026-10-06: "Past Outlook syncs"/"Last Outlook sync" became
+        # "Past syncs"/"Last sync"; the top bar's "Outlook: <time>" badge
+        # (the actual Outlook pull time) stays.
+        html = self._get("/")
+        self.assertRegex(html, r'id="window-sync-btn"[^>]*>\s*Past syncs<svg')
+        self.assertNotIn("Past Outlook syncs", html)
+        self.assertNotIn("Last Outlook sync", html)
+        self.assertIn("Outlook: never synced", html)
+
+    def test_label_counts_failed_jobs_not_missing_recon_rows(self):
+        # statement_count (recon_summary rows) is 4 in self.result; the
+        # sync's 5 jobs are 4 completed + 1 failed, none in flight.
+        jobs = [{"submitted_at": U(2026, 9, 29, 12, 9), "statement_id": None, "status": "FAILED"},
+                {"submitted_at": U(2026, 9, 29, 12, 8), "statement_id": "S1", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 12, 4), "statement_id": "S2", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 12, 1), "statement_id": "S3", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 11, 58), "statement_id": "S4", "status": "COMPLETED"}]
+        with mock.patch("web.queries.get_outlook_synced_jobs", lambda: jobs):
+            html = self._get("/")
+        self.assertIn("Last sync · Sep 29, 8:09 AM ET · 5 statements (4 completed, 1 failed)", html)
+        self.assertNotIn("still processing)", html)
+        # "N of M reconciled" is unchanged -- still the recon_summary runs.
+        self.assertIn("19 of 47 statements reconciled", html)
+
+    def test_no_syncs_yet_wording(self):
+        self.result["statement_count"] = 0  # an empty "last" window matches no runs
+        with mock.patch("web.queries.get_outlook_synced_jobs", lambda: []):
+            html = self._get("/")
+        self.assertIn("<option disabled>No syncs yet</option>", html)
+        self.assertIn("Last sync · no runs", html)
+        self.assertNotIn("No Outlook syncs yet", html)
 
     def test_cards_use_the_window_sub_labels(self):
         html = self._get("/")
@@ -745,9 +889,9 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
             "get_run_timestamps": lambda: [],
             # Two syncs: newest (Sep 29, 2 jobs) and older (Sep 28, 1 job).
             "get_outlook_synced_jobs": lambda: [
-                {"submitted_at": U(2026, 9, 29, 16, 2), "statement_id": "N1"},
-                {"submitted_at": U(2026, 9, 29, 15, 58), "statement_id": "N2"},
-                {"submitted_at": U(2026, 9, 28, 12, 0), "statement_id": "O1"},
+                {"submitted_at": U(2026, 9, 29, 16, 2), "statement_id": "N1", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 29, 15, 58), "statement_id": "N2", "status": "COMPLETED"},
+                {"submitted_at": U(2026, 9, 28, 12, 0), "statement_id": "O1", "status": "COMPLETED"},
             ],
             "get_home_dashboard": get_home_dashboard,
             "get_active_jobs": lambda: [], "get_failed_jobs": lambda: [],

@@ -267,37 +267,44 @@
     </div>
   </div>
 
+  {# Each chip's x (2026-10-06) is a sibling of the chip button, not inside
+     it (a button can't contain another button). app.js shows it only
+     while that filter is set and resets the filter to its "any" state:
+     Any vendor / Any amount / Any time / Any status. #}
   <div class="ns-modal-filters" id="nsFilters">
     <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipVendor" aria-expanded="false" aria-haspopup="true">
+      <button type="button" class="ns-chip" id="nsChipVendor" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopVendor">
         <span class="ns-chip-label">Vendor:</span> <span class="ns-chip-value" id="nsChipVendorValue">{{ vendor_display_name }}</span>
       </button>
+      <button type="button" class="ns-chip-clear" id="nsClearVendor" aria-label="Clear vendor filter" title="Clear vendor filter" hidden>&times;</button>
       <div class="ns-popover" id="nsPopVendor" hidden>
         <button type="button" class="ns-pop-opt" data-vendor="on">{{ vendor_display_name }}</button>
-        <button type="button" class="ns-pop-opt" data-vendor="off">All vendors</button>
+        <button type="button" class="ns-pop-opt" data-vendor="off">Any vendor</button>
       </div>
     </div>
 
     <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipAmount" aria-expanded="false" aria-haspopup="true">
-        <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Exact</span>
+      <button type="button" class="ns-chip" id="nsChipAmount" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopAmount">
+        <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Any amount</span>
       </button>
+      <button type="button" class="ns-chip-clear" id="nsClearAmount" aria-label="Clear amount filter" title="Clear amount filter" hidden>&times;</button>
       <div class="ns-popover" id="nsPopAmount" hidden>
-        <button type="button" class="ns-pop-opt" data-tol="exact">Exact</button>
-        <button type="button" class="ns-pop-opt" data-tol="up_to">Up to</button>
-        <button type="button" class="ns-pop-opt" data-tol="at_least">At least</button>
+        <button type="button" class="ns-pop-opt" data-tol="exact" aria-pressed="true">Exact</button>
+        <button type="button" class="ns-pop-opt" data-tol="up_to" aria-pressed="false">Up to</button>
+        <button type="button" class="ns-pop-opt" data-tol="at_least" aria-pressed="false">At least</button>
         <div class="ns-pop-custom">
           <label class="ns-search-label" for="nsAmountInput">Amount</label>
           <input type="text" id="nsAmountInput" class="ns-date-input" inputmode="decimal"
-                 placeholder="Any" aria-label="Amount (blank = any amount)">
+                 placeholder="Any amount" aria-label="Amount (blank = any amount)">
         </div>
       </div>
     </div>
 
     <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipDate" aria-expanded="false" aria-haspopup="true">
+      <button type="button" class="ns-chip" id="nsChipDate" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopDate">
         <span class="ns-chip-label">Date:</span> <span class="ns-chip-value" id="nsChipDateValue">Any time</span>
       </button>
+      <button type="button" class="ns-chip-clear" id="nsClearDate" aria-label="Clear date filter" title="Clear date filter" hidden>&times;</button>
       <div class="ns-popover" id="nsPopDate" hidden>
         <button type="button" class="ns-pop-opt" data-range="any">Any time</button>
         <button type="button" class="ns-pop-opt" data-range="30">Last 30 days</button>
@@ -314,9 +321,10 @@
     </div>
 
     <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipStatus" aria-expanded="false" aria-haspopup="true">
+      <button type="button" class="ns-chip" id="nsChipStatus" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopStatus">
         <span class="ns-chip-label">Status:</span> <span class="ns-chip-value" id="nsChipStatusValue">Open</span>
       </button>
+      <button type="button" class="ns-chip-clear" id="nsClearStatus" aria-label="Clear status filter" title="Clear status filter" hidden>&times;</button>
       <div class="ns-popover" id="nsPopStatus" hidden>
         <label class="ns-pop-check"><input type="checkbox" id="nsStatusOpen" checked> Open</label>
         <label class="ns-pop-check"><input type="checkbox" id="nsStatusPaid"> Paid</label>

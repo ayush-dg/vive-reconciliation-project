@@ -202,13 +202,15 @@ def get_outlook_synced_jobs() -> list:
     recent Outlook sync") never include anything but Outlook-sourced
     statements.
 
-    One row per job: submitted_at (when "Sync to Webapp" queued it) and
-    statement_id (NULL until Silver/matching has produced one -- see
-    outlook_last_sync()'s "still processing" handling). Used by both the
-    Home page and Validation's own "Last run" filter, so the two stay
-    scoped to the exact same definition."""
+    One row per job: submitted_at (when "Sync to Webapp" queued it),
+    statement_id (NULL until intake has produced one) and status (what
+    the sync's "568 completed, 4 failed" counts come from -- see
+    web/time_window.py's sync_status_counts()). Used by Home, Exceptions
+    and Validation's own "Last run" filter, so all three stay scoped to
+    the exact same definition."""
     return execute_query(
-        "SELECT submitted_at, statement_id FROM jobs WHERE source_blob_path IS NOT NULL ORDER BY submitted_at DESC"
+        "SELECT submitted_at, statement_id, status FROM jobs WHERE source_blob_path IS NOT NULL "
+        "ORDER BY submitted_at DESC"
     )
 
 
