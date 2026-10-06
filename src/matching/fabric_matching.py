@@ -412,7 +412,7 @@ def _build_invoice_shapes(lines: list) -> dict:
 
 _ORDINAL_REF_RE = re.compile(r"\*(\d+)$")
 
-# Lentini-confirmed 2026-10-05: a credit line's Reference reads
+# Lentini-confirmed 2026-10-05 (Bishop's 2026-10-06, bills too): a credit line's Reference reads
 # 'CR for #181513, DT#66583' -- the DT# number is the NetSuite vendorcredit
 # tranid (66583, $820, entity 123828), while the statement's own Invoice #
 # (182036) isn't in NetSuite at all.
@@ -744,12 +744,15 @@ def run_fabric_matching(statement_id: str) -> dict:
                     if cm_total is not None:
                         netsuite_total, is_exact = cm_total, cm_is_exact
 
-                if netsuite_total is None and table == "netsuite_vendorcredit":
-                    # Last resort for a credit whose own number missed: the
+                if netsuite_total is None and table:
+                    # Last resort for a line whose own number missed: the
                     # 'DT#<tranid>' its Reference column points at (see
                     # _DT_REF_RE). Exact amount only -- a DT# hit at a
                     # different amount stays Not Found rather than showing
-                    # an unrelated record as the closest candidate.
+                    # an unrelated record as the closest candidate. Bills
+                    # too since 2026-10-06: Bishop's (same statement system
+                    # as Lentini) posts its INVOICES under the DT# number as
+                    # well (11 of 12 traced lines, entity 49350).
                     dt = _DT_REF_RE.search(item.get("invoice_number_ref") or "")
                     if dt:
                         dt_total, dt_is_exact = _best_candidate(

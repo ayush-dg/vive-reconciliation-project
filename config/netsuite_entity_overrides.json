@@ -166,5 +166,29 @@
   "WHEELS_ON_SITE": {
     "entity_ids": ["138869"],
     "note": "Wheels on Site (138869). Derived 2026-10-06 by tranid trace of 5 stored statements: 33 of 33 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after), 3 of them without leading zeros (_alternate_tranids)."
+  },
+  "BISHOPS_USED_AUTO_PARTS": {
+    "entity_ids": ["49350"],
+    "note": "Bishop's Auto Parts Inc. (49350) -- BISHOP`S USED AUTO PARTS (10657) is inactive. Derived 2026-10-06 by tranid trace of 3 stored statements: the statement's own Invoice # is mostly NOT in NetSuite; the DT# number in its Reference column is ('PO#4102542 EDWIN, DT#443092'), 11 of 12 lines, bills and credits alike -- matched by fabric_matching's DT# fallback."
+  },
+  "CASCO_BAY_FORD": {
+    "entity_ids": ["8728"],
+    "note": "Casco Bay Ford (8728) -- Casco Bay Ford - Sublet (6685) is inactive. Derived 2026-10-06 by tranid trace of 3 stored statements (Tekion layout): 18 of 21 lines tie out verbatim."
+  },
+  "FAULKNER": {
+    "entity_ids": ["136016", "159420", "159092", "159744"],
+    "note": "Faulkner rooftops: INFINITI of Willow Grove (136016), Nissan Harrisburg (159420), Subaru (159092), Honda (159744). Derived 2026-10-06 by tranid trace of 6 stored statements (one shared layout): 38 of 38 lines tie out verbatim across ALL NetSuite entities only under these four. Faulkner has ~14 rooftop records (Alfa Romeo Maserati 200388, Dodge, Hyundai, Mazda, Toyota, ...) -- add one only on a confirmed hit."
+  },
+  "HEADLIGHTS_DEPOT": {
+    "entity_ids": ["6407"],
+    "note": "Headlights Depot (6407). Derived 2026-10-06 by tranid trace of 4 stored statements: 17 of 20 lines tie out as the token after '#' in Description (Invoice #CCC-6744261709 -> CCC-6744261709). HeadlightsDepot (26545) exists too -- add only on a confirmed hit."
+  },
+  "LEXUS_OF_EDISON": {
+    "entity_ids": ["82472"],
+    "note": "LEXUS OF EDISON (82472) -- Lexus Of Edison (26823) is inactive. Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 18 of 20 lines tie out verbatim."
+  },
+  "LEXUS_OF_WARWICK": {
+    "entity_ids": ["40605"],
+    "note": "Lexus of Warwick (40605). Derived 2026-10-06 by tranid trace of 1 stored statement: 5 of 5 lines tie out verbatim."
   }
 }

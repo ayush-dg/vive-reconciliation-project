@@ -262,5 +262,39 @@
     "GOYETTE'S INC",
     "Goyette's Inc",
     "GOYETTE'S INC PRP-NE"
+  ],
+  "BISHOPS_USED_AUTO_PARTS": [
+    "Bishop's Used Auto Parts Inc",
+    "Bishop's Used Auto Parts",
+    "Bishop's Auto Parts Inc.",
+    "Bishops Used Auto Parts"
+  ],
+  "CASCO_BAY_FORD": [
+    "Casco Bay Ford",
+    "Casco Bay Ford Inc."
+  ],
+  "FAULKNER": [
+    "Faulkner",
+    "Faulkner Alfa Romeo Maserati of Willow Grove",
+    "Faulkner INFINITI of Willow Grove",
+    "Faulkner Dodge",
+    "Faulkner Honda of Harrisburg",
+    "Faulkner Honda",
+    "Faulkner Nissan of Harrisburg",
+    "Faulkner Nissan Harrisburg",
+    "Faulkner Nissan",
+    "Faulkner Subaru of Harrisburg",
+    "Faulkner Subaru"
+  ],
+  "HEADLIGHTS_DEPOT": [
+    "Headlights Depot",
+    "Headlight Depot",
+    "HeadlightsDepot"
+  ],
+  "LEXUS_OF_EDISON": [
+    "Lexus of Edison"
+  ],
+  "LEXUS_OF_WARWICK": [
+    "Lexus of Warwick"
   ]
 }
