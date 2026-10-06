@@ -424,6 +424,8 @@ _DT_REF_RE = re.compile(r"DT#\s*(\d+)", re.IGNORECASE)
 # 18 genuine 5-digit tranids exist under the same NAPA entities -- so it is
 # a miss-only retry, exact amount only.
 _ZERO_PAD_VENDORS = {"NAPA_AUTO_PARTS": 6}
+_NODASH_VENDORS = {'DENT_WIZARD_INTERNATIONAL_CORP'}
+_LSTRIP0_VENDORS = {'ROBERTSON_AUTO_GLASS'}
 
 
 def _alternate_tranids(vendor_id: str, inv: str) -> list:
@@ -480,6 +482,12 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
         alts.append(inv.rsplit("_", 1)[1])
     if vendor_id == "TOWN_FAIR_TIRE" and "-" in inv:
         alts.append(inv.replace("-", ""))
+    # Batch onboarded 2026-10-06 from an automated tranid trace: these
+    # vendors' NetSuite tranids drop the dash / the leading zeros.
+    if vendor_id in _NODASH_VENDORS and "-" in inv:
+        alts.append(inv.replace("-", ""))
+    if vendor_id in _LSTRIP0_VENDORS and inv[:1] == "0":
+        alts.append(inv.lstrip("0"))
     return alts
 
 

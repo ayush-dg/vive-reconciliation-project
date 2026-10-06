@@ -29,3 +29,7 @@ CHUCK'S_DOUGLASSVILLE_-_AUTOLY,charge,exclude_by_transaction_code,PAYMENT,,,,202
 EL_M_AUTO_PARTS,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-06,,1,vaishali,"extract_autoly path, as for Bow: a Payment row carries the card / check number as its reference and is PAYMENT-typed; it is the statement's own payment bookkeeping."
 DOVER_DODGE,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
 DOVER_DODGE,credit,exclude_by_transaction_code,5,,,,2026-10-06,,1,vaishali,"Same legend as Blaise (source 5 = payment)."
+CONICELLI_HONDA,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
+CONICELLI_TOYOTA,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
+DEPAULA_MAZDA,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
+JAGUAR_LAND_ROVER_ALLENTOWN,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."

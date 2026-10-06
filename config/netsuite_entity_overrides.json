@@ -294,5 +294,273 @@
   "TOWN_FAIR_TIRE": {
     "entity_ids": ["2574"],
     "note": "Town Fair Tire - East Haven (2574) -- the Centers records (3995, 4951, 8888) are inactive. Derived 2026-10-06 by tracing 4 statements: '40315-537 PO 4203067' -> 40315-537 (verbatim) or 72838580 (undashed). Town Fair Tire (256863) holds other stores' bills -- add only on a confirmed hit."
+  },
+  "ADAS_CALIBRATION_EXPERTS": {
+    "entity_ids": ["68559"],
+    "note": "ADAS CALIBRATION EXPERTS (68559). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 44 of 48 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "ALBANY_AUTO_MANAGEMENT": {
+    "entity_ids": ["180580", "219783", "180579"],
+    "note": "BMW of South Albany (180580), Northway Toyota (219783), Audi Albany (180579). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 117 of 123 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "ALLOY_WHEEL_REPAIR_SPECIALIST": {
+    "entity_ids": ["115114"],
+    "note": "Alloy Wheel Repair (115114). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "AUDI_NASHUA": {
+    "entity_ids": ["39603"],
+    "note": "Audi of Nashua (39603). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "AUTO_VALUE_PARTS_STORES": {
+    "entity_ids": ["126690"],
+    "note": "Auto Value Parts Stores (126690). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 21 of 32 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "BMW_OF_BRIDGEWATER": {
+    "entity_ids": ["145501"],
+    "note": "BMW of Bridgewater (145501). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "BALISE_HONDA_OF_NORTH_ATTLEBOROUGH": {
+    "entity_ids": ["11977"],
+    "note": "Balise Honda of North Attleborough (11977). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "BERGEY_S": {
+    "entity_ids": ["134810"],
+    "note": "Bergey's Wholesale Parts (134810). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 38 of 41 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "CAPITOL_CDJR_SOUTH": {
+    "entity_ids": ["648959"],
+    "note": "Capitol South Chrysler Dodge Jeep Ram (648959). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 9 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "CHERRY_HILL_NISSAN": {
+    "entity_ids": ["147119"],
+    "note": "Cherry Hill Nissan (147119). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 20 of 20 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "CONICELLI_HONDA": {
+    "entity_ids": ["199713"],
+    "note": "Conicelli Honda (199713). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 38 of 39 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
+  },
+  "CONICELLI_TOYOTA": {
+    "entity_ids": ["81667"],
+    "note": "Conicelli Toyota (81667). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 36 of 38 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
+  },
+  "DAVIS_ACURA": {
+    "entity_ids": ["147913"],
+    "note": "Davis Acura (147913). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 17 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "DEPAULA_MAZDA": {
+    "entity_ids": ["186001"],
+    "note": "DePaula Mazda (186001). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
+  },
+  "DENT_WIZARD_INTERNATIONAL_CORP": {
+    "entity_ids": ["47735"],
+    "note": "Dent Wizard International Corp,LLC. (47735). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out with the dash removed (_alternate_tranids) across ALL NetSuite entities."
+  },
+  "DENT_X": {
+    "entity_ids": ["417579"],
+    "note": "Dent-X, LLC (417579). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "EAST_COAST_BEVERAGE": {
+    "entity_ids": ["130974"],
+    "note": "East Coast Beverage (130974). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "EMPIRE_RIM_FIX": {
+    "entity_ids": ["272781"],
+    "note": "Empire Rim Fix Corp (272781). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 9 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "EVERGREEN_SUBARU": {
+    "entity_ids": ["11083"],
+    "note": "EVERGREEN SUBARU (11083). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "FISHERS": {
+    "entity_ids": ["159417"],
+    "note": "Fisher Auto Parts (159417). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 9 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "FREIGHTLINER_OF_HARRISBURG": {
+    "entity_ids": ["160147"],
+    "note": "Freightliner Western Star Of Harrisburg (160147). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "GEAR_SIX_AUTO_PARTS": {
+    "entity_ids": ["417076"],
+    "note": "Gear Six Auto Parts (417076). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "GOLDSTEIN_SUBARU": {
+    "entity_ids": ["203121"],
+    "note": "Goldstein Subaru (203121). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 11 of 12 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "GOTCHA_COVERED_AUTO_GLASS": {
+    "entity_ids": ["182185"],
+    "note": "Gotcha Covered Auto Glass (182185). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "GRIECO_TOYOTA": {
+    "entity_ids": ["4949", "2331"],
+    "note": "Grieco Toyota (4949), Nucar Toyota of Norwood (2331). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "INTERSTATE_BATTERY_OF_PASSAIC_COUNTY": {
+    "entity_ids": ["141662"],
+    "note": "Interstate Battery (141662). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "JAGUAR_LAND_ROVER_ALLENTOWN": {
+    "entity_ids": ["145498"],
+    "note": "Bennett Jaguar Land Rover (145498). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
+  },
+  "JAGUAR_LAND_ROVER_MANHATTAN": {
+    "entity_ids": ["164737"],
+    "note": "Land Rover Manhattan (164737). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 5 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "KUNDERT_VOLVO": {
+    "entity_ids": ["138034"],
+    "note": "Kundert Volvo (138034). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "L_AND_M_ADAS_CALIBRATION_CENTER": {
+    "entity_ids": ["88283"],
+    "note": "L&M Adas Calibration Center LLC (88283). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 12 of 18 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "LINE_X_OF_BANGOR": {
+    "entity_ids": ["193492"],
+    "note": "LINE-X OF BANGOR (193492). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "M_AND_P_USED_AUTO_PARTS": {
+    "entity_ids": ["12209"],
+    "note": "M&amp;P USED AUTO PARTS-PARTS (12209). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MG_APPEARANCE_PRODUCTS": {
+    "entity_ids": ["147004"],
+    "note": "MG Appearance Products (147004). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "MALCO_PRODUCTS_OF_MAINE": {
+    "entity_ids": ["228486"],
+    "note": "Malco Products of Maine (228486). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "MALOUF_FORD_LINCOLN": {
+    "entity_ids": ["109222"],
+    "note": "Malouf Ford-Lincoln, Inc (109222). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 18 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MAZDA_OF_MILFORD": {
+    "entity_ids": ["48342"],
+    "note": "Mazda of Milford (48342). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MERCEDES_BENZ_OF_BROOKLYN": {
+    "entity_ids": ["81668"],
+    "note": "Mercedes Benz of Brooklyn (81668). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 5 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MERCEDES_BENZ_OF_CHERRY_HILL": {
+    "entity_ids": ["609408"],
+    "note": "Mercedes-Benz of Cherry Hill (609408). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 23 of 28 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MERCEDES_BENZ_OF_WILMINGTON": {
+    "entity_ids": ["408133"],
+    "note": "Mercedes-Benz of Wilmington (408133). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 6 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MORGAN_TIRE": {
+    "entity_ids": ["402002"],
+    "note": "Morgan's Tire Service (402002). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MORONG_FALMOUTH": {
+    "entity_ids": ["10270"],
+    "note": "Morong Falmouth (10270). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "MY_AUTO_STORE": {
+    "entity_ids": ["480497"],
+    "note": "My Auto Store LLC (480497). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 10 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "NEW_ENGLAND_TRUCK_CENTER": {
+    "entity_ids": ["396980"],
+    "note": "New England Truck Center dba Ray's Truck Service (396980). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "NOVUS_GLASS": {
+    "entity_ids": ["220732"],
+    "note": "Novus Glass (220732). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PATRIOT_ACURA": {
+    "entity_ids": ["327857"],
+    "note": "Patriot Acura (327857). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PATRIOT_SUBARU_OF_SACO": {
+    "entity_ids": ["6690"],
+    "note": "PATRIOT SUBARU (6690). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 10 of 12 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PAUL_MILLER_PORSCHE": {
+    "entity_ids": ["284273"],
+    "note": "Paul Miller Porsche (284273). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PENNSTONE_SUPPLY": {
+    "entity_ids": ["174703"],
+    "note": "PENNSTONE SUPPLY INC (174703). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PINE_BROOK_TIRE": {
+    "entity_ids": ["283671"],
+    "note": "Pine Brook Tire (283671). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PORTLAND_GLASS": {
+    "entity_ids": ["386452"],
+    "note": "Portland Glass (386452). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PRESTIGE_MITSUBISHI": {
+    "entity_ids": ["5341"],
+    "note": "PRESTIGE MITSUBISHI (5341). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "PRINCETON_BMW": {
+    "entity_ids": ["157477"],
+    "note": "Princeton BMW (157477). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "ROBERTSON_AUTO_GLASS": {
+    "entity_ids": ["85159"],
+    "note": "Robertson Auto Glass LLC (85159). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out without leading zeros (_alternate_tranids) across ALL NetSuite entities."
+  },
+  "SPEEDCRAFT_ACURA": {
+    "entity_ids": ["13021"],
+    "note": "SPEEDCRAFT ACURA (13021). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 15 of 17 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "STOYSTOWN_AUTO_WRECKERS": {
+    "entity_ids": ["159090"],
+    "note": "Stoystown Auto Wreckers (159090). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "SUNRISE_TOYOTA": {
+    "entity_ids": ["6412"],
+    "note": "Sunrise Toyota (6412). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 28 of 30 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "TECH_TIRE_SUPPLY": {
+    "entity_ids": ["131681"],
+    "note": "Tech Tire Supply LLC (131681). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "THE_WYNN_GROUP": {
+    "entity_ids": ["149582"],
+    "note": "Wynn Volkswagen (149582). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "TILGHMANS_AUTO_PARTS_II": {
+    "entity_ids": ["164147"],
+    "note": "Tilghman's Auto Parts (164147). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
+  },
+  "TULLEY_AUTOMOTIVE_GROUP": {
+    "entity_ids": ["254048"],
+    "note": "Tulley Mazda (254048). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "TWIN_CITY_TIRE_AND_SERVICE": {
+    "entity_ids": ["85162"],
+    "note": "Twin City Tire and Service (85162). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 14 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "VOLKSWAGEN_OF_SACO": {
+    "entity_ids": ["169450", "6698"],
+    "note": "Jack Volkswagen Of Saco (169450), Volkswagen Saco (6698). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 24 of 24 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "VOLVO_CARS_PRINCETON": {
+    "entity_ids": ["372450"],
+    "note": "Volvo Cars Princeton (372450). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "WELDON_TIRE": {
+    "entity_ids": ["22604"],
+    "note": "WELDON TIRE (22604). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 6 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "WHEEL_COLLISION_CENTER": {
+    "entity_ids": ["115114"],
+    "note": "Alloy Wheel Repair (115114). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 13 of 13 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "WILKIE_LEXUS": {
+    "entity_ids": ["147915"],
+    "note": "Wilkie Lexus (147915). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 31 of 39 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "YERTY_AUTO_SERVICE": {
+    "entity_ids": ["397880"],
+    "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
   }
 }

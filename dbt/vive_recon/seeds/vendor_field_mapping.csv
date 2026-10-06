@@ -485,3 +485,269 @@ TOWN_FAIR_TIRE,REFERENCE NUMBER,original_invoice_number,string,v1,1
 TOWN_FAIR_TIRE,CHARGES,charge_amount,decimal,v1,1
 TOWN_FAIR_TIRE,CREDITS,payment_amount,decimal,v1,1
 TOWN_FAIR_TIRE,BALANCE,amount_remaining,decimal,v1,1
+ADAS_CALIBRATION_EXPERTS,invoice_no,original_invoice_number,string,v1,1
+ADAS_CALIBRATION_EXPERTS,date,line_date,date,v1,1
+ADAS_CALIBRATION_EXPERTS,amount,charge_amount,decimal,v1,1
+ADAS_CALIBRATION_EXPERTS,open_amount,amount_remaining,decimal,v1,1
+ALBANY_AUTO_MANAGEMENT,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+ALBANY_AUTO_MANAGEMENT,DATE,line_date,date,v1,1
+ALBANY_AUTO_MANAGEMENT,PURCHASES,charge_amount,decimal,v1,1
+ALBANY_AUTO_MANAGEMENT,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+ALBANY_AUTO_MANAGEMENT,BALANCE,amount_remaining,decimal,v1,1
+ALLOY_WHEEL_REPAIR_SPECIALIST,Reference #,original_invoice_number,string,v1,1
+ALLOY_WHEEL_REPAIR_SPECIALIST,Date,line_date,date,v1,1
+ALLOY_WHEEL_REPAIR_SPECIALIST,Charge,charge_amount,decimal,v1,1
+ALLOY_WHEEL_REPAIR_SPECIALIST,Open Amt,amount_remaining,decimal,v1,1
+ALLOY_WHEEL_REPAIR_SPECIALIST,Balance,amount_remaining,decimal,v1,2
+AUDI_NASHUA,DOCUMENT,original_invoice_number,string,v1,1
+AUDI_NASHUA,DATE,line_date,date,v1,1
+AUDI_NASHUA,AMOUNT,charge_amount,decimal,v1,1
+AUTO_VALUE_PARTS_STORES,INVOICE NUMBER,original_invoice_number,string,v1,1
+AUTO_VALUE_PARTS_STORES,INVOICE DATE,line_date,date,v1,1
+AUTO_VALUE_PARTS_STORES,DEBITS,charge_amount,decimal,v1,1
+AUTO_VALUE_PARTS_STORES,CREDITS,payment_amount,decimal,v1,1
+BMW_OF_BRIDGEWATER,DOCUMENT,original_invoice_number,string,v1,1
+BMW_OF_BRIDGEWATER,DATE,line_date,date,v1,1
+BMW_OF_BRIDGEWATER,AMOUNT,charge_amount,decimal,v1,1
+BALISE_HONDA_OF_NORTH_ATTLEBOROUGH,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+BALISE_HONDA_OF_NORTH_ATTLEBOROUGH,DATE,line_date,date,v1,1
+BALISE_HONDA_OF_NORTH_ATTLEBOROUGH,PURCHASES,charge_amount,decimal,v1,1
+BERGEY_S,Invoice Number,original_invoice_number,string,v1,1
+BERGEY_S,Date,line_date,date,v1,1
+BERGEY_S,Amount,charge_amount,decimal,v1,1
+BERGEY_S,Invoice Balance,amount_remaining,decimal,v1,1
+BERGEY_S,Statement Balance,amount_remaining,decimal,v1,2
+CAPITOL_CDJR_SOUTH,REF NO.,original_invoice_number,string,v1,1
+CAPITOL_CDJR_SOUTH,DATE,line_date,date,v1,1
+CAPITOL_CDJR_SOUTH,CHARGES,charge_amount,decimal,v1,1
+CAPITOL_CDJR_SOUTH,CREDITS,payment_amount,decimal,v1,1
+CAPITOL_CDJR_SOUTH,BALANCE,amount_remaining,decimal,v1,1
+CHERRY_HILL_NISSAN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+CHERRY_HILL_NISSAN,DATE,line_date,date,v1,1
+CHERRY_HILL_NISSAN,PURCHASES,charge_amount,decimal,v1,1
+CONICELLI_HONDA,INVOICE,original_invoice_number,string,v1,1
+CONICELLI_HONDA,DATE,line_date,date,v1,1
+CONICELLI_HONDA,AMOUNT,charge_amount,decimal,v1,1
+CONICELLI_TOYOTA,INVOICE,original_invoice_number,string,v1,1
+CONICELLI_TOYOTA,DATE,line_date,date,v1,1
+CONICELLI_TOYOTA,AMOUNT,charge_amount,decimal,v1,1
+DAVIS_ACURA,DOCUMENT,original_invoice_number,string,v1,1
+DAVIS_ACURA,DATE,line_date,date,v1,1
+DAVIS_ACURA,AMOUNT,charge_amount,decimal,v1,1
+DEPAULA_MAZDA,INVOICE,original_invoice_number,string,v1,1
+DEPAULA_MAZDA,DATE,line_date,date,v1,1
+DEPAULA_MAZDA,AMOUNT,charge_amount,decimal,v1,1
+DENT_WIZARD_INTERNATIONAL_CORP,Invoice #,original_invoice_number,string,v1,1
+DENT_WIZARD_INTERNATIONAL_CORP,Date,line_date,date,v1,1
+DENT_WIZARD_INTERNATIONAL_CORP,Charge,charge_amount,decimal,v1,1
+DENT_WIZARD_INTERNATIONAL_CORP,Payments,payment_amount,decimal,v1,1
+DENT_WIZARD_INTERNATIONAL_CORP,Balance,amount_remaining,decimal,v1,1
+DENT_X,Description,original_invoice_number,string,v1,1
+DENT_X,Date,line_date,date,v1,1
+DENT_X,Amount,charge_amount,decimal,v1,1
+DENT_X,Balance,amount_remaining,decimal,v1,1
+EAST_COAST_BEVERAGE,Description,original_invoice_number,string,v1,1
+EAST_COAST_BEVERAGE,Date,line_date,date,v1,1
+EAST_COAST_BEVERAGE,Amount,charge_amount,decimal,v1,1
+EAST_COAST_BEVERAGE,Balance,amount_remaining,decimal,v1,1
+EMPIRE_RIM_FIX,DESCRIPTION,original_invoice_number,string,v1,1
+EMPIRE_RIM_FIX,DATE,line_date,date,v1,1
+EMPIRE_RIM_FIX,AMOUNT,charge_amount,decimal,v1,1
+EVERGREEN_SUBARU,REF NO.,original_invoice_number,string,v1,1
+EVERGREEN_SUBARU,DATE,line_date,date,v1,1
+EVERGREEN_SUBARU,CHARGES,charge_amount,decimal,v1,1
+EVERGREEN_SUBARU,BALANCE,amount_remaining,decimal,v1,1
+FISHERS,INVOICE NUMBER,original_invoice_number,string,v1,1
+FISHERS,INVOICE DATE,line_date,date,v1,1
+FISHERS,ORIGINAL INVOICE AMOUNT,charge_amount,decimal,v1,1
+FISHERS,PAYMENT APPLIED,payment_amount,decimal,v1,1
+FISHERS,UNPAID BALANCE,amount_remaining,decimal,v1,1
+FREIGHTLINER_OF_HARRISBURG,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+FREIGHTLINER_OF_HARRISBURG,DATE,line_date,date,v1,1
+FREIGHTLINER_OF_HARRISBURG,PURCHASES,charge_amount,decimal,v1,1
+FREIGHTLINER_OF_HARRISBURG,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+FREIGHTLINER_OF_HARRISBURG,BALANCE,amount_remaining,decimal,v1,1
+GEAR_SIX_AUTO_PARTS,Transaction Type,original_invoice_number,string,v1,1
+GEAR_SIX_AUTO_PARTS,Date,line_date,date,v1,1
+GEAR_SIX_AUTO_PARTS,Charged,charge_amount,decimal,v1,1
+GEAR_SIX_AUTO_PARTS,Paid,payment_amount,decimal,v1,1
+GEAR_SIX_AUTO_PARTS,Due,amount_remaining,decimal,v1,1
+GOLDSTEIN_SUBARU,REF NO.,original_invoice_number,string,v1,1
+GOLDSTEIN_SUBARU,DATE,line_date,date,v1,1
+GOLDSTEIN_SUBARU,CHARGES,charge_amount,decimal,v1,1
+GOLDSTEIN_SUBARU,CREDITS,payment_amount,decimal,v1,1
+GOLDSTEIN_SUBARU,BALANCE,amount_remaining,decimal,v1,1
+GOTCHA_COVERED_AUTO_GLASS,DESCRIPTION,original_invoice_number,string,v1,1
+GOTCHA_COVERED_AUTO_GLASS,DATE,line_date,date,v1,1
+GOTCHA_COVERED_AUTO_GLASS,AMOUNT,charge_amount,decimal,v1,1
+GRIECO_TOYOTA,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+GRIECO_TOYOTA,DATE,line_date,date,v1,1
+GRIECO_TOYOTA,PURCHASES,charge_amount,decimal,v1,1
+GRIECO_TOYOTA,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+INTERSTATE_BATTERY_OF_PASSAIC_COUNTY,INV.,original_invoice_number,string,v1,1
+INTERSTATE_BATTERY_OF_PASSAIC_COUNTY,DATE,line_date,date,v1,1
+INTERSTATE_BATTERY_OF_PASSAIC_COUNTY,CHARGES,charge_amount,decimal,v1,1
+JAGUAR_LAND_ROVER_ALLENTOWN,INVOICE,original_invoice_number,string,v1,1
+JAGUAR_LAND_ROVER_ALLENTOWN,DATE,line_date,date,v1,1
+JAGUAR_LAND_ROVER_ALLENTOWN,AMOUNT,charge_amount,decimal,v1,1
+JAGUAR_LAND_ROVER_MANHATTAN,INVOICE NUMBER,original_invoice_number,string,v1,1
+JAGUAR_LAND_ROVER_MANHATTAN,DATE,line_date,date,v1,1
+JAGUAR_LAND_ROVER_MANHATTAN,CHARGES,charge_amount,decimal,v1,1
+JAGUAR_LAND_ROVER_MANHATTAN,CREDITS,payment_amount,decimal,v1,1
+JAGUAR_LAND_ROVER_MANHATTAN,AMOUNT DUE,amount_remaining,decimal,v1,1
+KUNDERT_VOLVO,REFERENCE #,original_invoice_number,string,v1,1
+KUNDERT_VOLVO,DATE,line_date,date,v1,1
+KUNDERT_VOLVO,PURCHASES ($),charge_amount,decimal,v1,1
+L_AND_M_ADAS_CALIBRATION_CENTER,Invoice,original_invoice_number,string,v1,1
+L_AND_M_ADAS_CALIBRATION_CENTER,Invoice Date,line_date,date,v1,1
+L_AND_M_ADAS_CALIBRATION_CENTER,Invoice Amount,charge_amount,decimal,v1,1
+L_AND_M_ADAS_CALIBRATION_CENTER,Balance Due,amount_remaining,decimal,v1,1
+LINE_X_OF_BANGOR,Reference,original_invoice_number,string,v1,1
+LINE_X_OF_BANGOR,Date,line_date,date,v1,1
+LINE_X_OF_BANGOR,Amount,charge_amount,decimal,v1,1
+LINE_X_OF_BANGOR,Balance,amount_remaining,decimal,v1,1
+M_AND_P_USED_AUTO_PARTS,INVOICE NO.,original_invoice_number,string,v1,1
+M_AND_P_USED_AUTO_PARTS,TRANSACTION DATE,line_date,date,v1,1
+M_AND_P_USED_AUTO_PARTS,AMOUNT,charge_amount,decimal,v1,1
+M_AND_P_USED_AUTO_PARTS,BALANCE,amount_remaining,decimal,v1,1
+MG_APPEARANCE_PRODUCTS,DESCRIPTION,original_invoice_number,string,v1,1
+MG_APPEARANCE_PRODUCTS,DATE,line_date,date,v1,1
+MG_APPEARANCE_PRODUCTS,AMOUNT,charge_amount,decimal,v1,1
+MG_APPEARANCE_PRODUCTS,OPEN AMOUNT,amount_remaining,decimal,v1,1
+MALCO_PRODUCTS_OF_MAINE,Transaction,original_invoice_number,string,v1,1
+MALCO_PRODUCTS_OF_MAINE,Date,line_date,date,v1,1
+MALCO_PRODUCTS_OF_MAINE,Amount,charge_amount,decimal,v1,1
+MALCO_PRODUCTS_OF_MAINE,Balance,amount_remaining,decimal,v1,1
+MALOUF_FORD_LINCOLN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+MALOUF_FORD_LINCOLN,DATE,line_date,date,v1,1
+MALOUF_FORD_LINCOLN,PURCHASES,charge_amount,decimal,v1,1
+MALOUF_FORD_LINCOLN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+MAZDA_OF_MILFORD,Invoice#,original_invoice_number,string,v1,1
+MAZDA_OF_MILFORD,Invoice Date,line_date,date,v1,1
+MAZDA_OF_MILFORD,Purchases,charge_amount,decimal,v1,1
+MAZDA_OF_MILFORD,Balance,amount_remaining,decimal,v1,1
+MERCEDES_BENZ_OF_BROOKLYN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+MERCEDES_BENZ_OF_BROOKLYN,DATE,line_date,date,v1,1
+MERCEDES_BENZ_OF_BROOKLYN,PURCHASES,charge_amount,decimal,v1,1
+MERCEDES_BENZ_OF_BROOKLYN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+MERCEDES_BENZ_OF_BROOKLYN,BALANCE,amount_remaining,decimal,v1,1
+MERCEDES_BENZ_OF_CHERRY_HILL,INVOICE NUMBER,original_invoice_number,string,v1,1
+MERCEDES_BENZ_OF_CHERRY_HILL,DATE,line_date,date,v1,1
+MERCEDES_BENZ_OF_CHERRY_HILL,CHARGES,charge_amount,decimal,v1,1
+MERCEDES_BENZ_OF_CHERRY_HILL,CREDITS,payment_amount,decimal,v1,1
+MERCEDES_BENZ_OF_CHERRY_HILL,AMOUNT DUE,amount_remaining,decimal,v1,1
+MERCEDES_BENZ_OF_WILMINGTON,REFERENCE #,original_invoice_number,string,v1,1
+MERCEDES_BENZ_OF_WILMINGTON,DATE,line_date,date,v1,1
+MERCEDES_BENZ_OF_WILMINGTON,PURCHASES ($),charge_amount,decimal,v1,1
+MERCEDES_BENZ_OF_WILMINGTON,PAYMENTS & CREDITS ($),payment_amount,decimal,v1,1
+MORGAN_TIRE,Reference,original_invoice_number,string,v1,1
+MORGAN_TIRE,Date,line_date,date,v1,1
+MORGAN_TIRE,Amount,charge_amount,decimal,v1,1
+MORGAN_TIRE,Balance,amount_remaining,decimal,v1,1
+MORONG_FALMOUTH,REFERENCE #,original_invoice_number,string,v1,1
+MORONG_FALMOUTH,DATE,line_date,date,v1,1
+MORONG_FALMOUTH,PURCHASES ($),charge_amount,decimal,v1,1
+MY_AUTO_STORE,Transaction Type,original_invoice_number,string,v1,1
+MY_AUTO_STORE,Date,line_date,date,v1,1
+MY_AUTO_STORE,Charged,charge_amount,decimal,v1,1
+MY_AUTO_STORE,Paid,payment_amount,decimal,v1,1
+NEW_ENGLAND_TRUCK_CENTER,Transaction,original_invoice_number,string,v1,1
+NEW_ENGLAND_TRUCK_CENTER,Date,line_date,date,v1,1
+NEW_ENGLAND_TRUCK_CENTER,Amount,charge_amount,decimal,v1,1
+NEW_ENGLAND_TRUCK_CENTER,Balance,amount_remaining,decimal,v1,1
+NOVUS_GLASS,UNLABELED_TRANSACTION_CODE_2,original_invoice_number,string,v1,1
+NOVUS_GLASS,UNLABELED_TRANSACTION_CODE,line_date,date,v1,1
+NOVUS_GLASS,UNLABELED_TRANSACTION_CODE_3,charge_amount,decimal,v1,1
+PATRIOT_ACURA,REF NO.,original_invoice_number,string,v1,1
+PATRIOT_ACURA,DATE,line_date,date,v1,1
+PATRIOT_ACURA,CHARGES,charge_amount,decimal,v1,1
+PATRIOT_ACURA,BALANCE,amount_remaining,decimal,v1,1
+PATRIOT_SUBARU_OF_SACO,REF NO.,original_invoice_number,string,v1,1
+PATRIOT_SUBARU_OF_SACO,DATE,line_date,date,v1,1
+PATRIOT_SUBARU_OF_SACO,CHARGES,charge_amount,decimal,v1,1
+PATRIOT_SUBARU_OF_SACO,BALANCE,amount_remaining,decimal,v1,1
+PAUL_MILLER_PORSCHE,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+PAUL_MILLER_PORSCHE,DATE,line_date,date,v1,1
+PAUL_MILLER_PORSCHE,PURCHASES,charge_amount,decimal,v1,1
+PAUL_MILLER_PORSCHE,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+PENNSTONE_SUPPLY,Invoice,original_invoice_number,string,v1,1
+PENNSTONE_SUPPLY,Date,line_date,date,v1,1
+PENNSTONE_SUPPLY,Amount,charge_amount,decimal,v1,1
+PENNSTONE_SUPPLY,Balance,amount_remaining,decimal,v1,1
+PINE_BROOK_TIRE,Invoice or Refer.#\Apply To,original_invoice_number,string,v1,1
+PINE_BROOK_TIRE,Doc Date,line_date,date,v1,1
+PINE_BROOK_TIRE,Doc Type,transaction_code,string,v1,1
+PINE_BROOK_TIRE,Balance Due,charge_amount,decimal,v1,1
+PORTLAND_GLASS,Invoice,original_invoice_number,string,v1,1
+PORTLAND_GLASS,Date,line_date,date,v1,1
+PORTLAND_GLASS,Amount,charge_amount,decimal,v1,1
+PORTLAND_GLASS,Balance,amount_remaining,decimal,v1,1
+PRESTIGE_MITSUBISHI,DOCUMENT,original_invoice_number,string,v1,1
+PRESTIGE_MITSUBISHI,DATE,line_date,date,v1,1
+PRESTIGE_MITSUBISHI,AMOUNT,charge_amount,decimal,v1,1
+PRINCETON_BMW,INVOICE NUMBER,original_invoice_number,string,v1,1
+PRINCETON_BMW,DATE,line_date,date,v1,1
+PRINCETON_BMW,CHARGES,charge_amount,decimal,v1,1
+PRINCETON_BMW,CREDITS,payment_amount,decimal,v1,1
+PRINCETON_BMW,AMOUNT DUE,amount_remaining,decimal,v1,1
+ROBERTSON_AUTO_GLASS,Invoice #,original_invoice_number,string,v1,1
+ROBERTSON_AUTO_GLASS,Date,line_date,date,v1,1
+ROBERTSON_AUTO_GLASS,Charges,charge_amount,decimal,v1,1
+ROBERTSON_AUTO_GLASS,Balance,amount_remaining,decimal,v1,1
+SPEEDCRAFT_ACURA,REF NO.,original_invoice_number,string,v1,1
+SPEEDCRAFT_ACURA,DATE,line_date,date,v1,1
+SPEEDCRAFT_ACURA,CHARGES,charge_amount,decimal,v1,1
+SPEEDCRAFT_ACURA,CREDITS,payment_amount,decimal,v1,1
+SPEEDCRAFT_ACURA,BALANCE,amount_remaining,decimal,v1,1
+STOYSTOWN_AUTO_WRECKERS,Transaction Type,original_invoice_number,string,v1,1
+STOYSTOWN_AUTO_WRECKERS,Date,line_date,date,v1,1
+STOYSTOWN_AUTO_WRECKERS,Charged,charge_amount,decimal,v1,1
+STOYSTOWN_AUTO_WRECKERS,Paid,payment_amount,decimal,v1,1
+SUNRISE_TOYOTA,Invoice#,original_invoice_number,string,v1,1
+SUNRISE_TOYOTA,Invoice Date,line_date,date,v1,1
+SUNRISE_TOYOTA,Purchases,charge_amount,decimal,v1,1
+SUNRISE_TOYOTA,Balance,amount_remaining,decimal,v1,1
+TECH_TIRE_SUPPLY,Transaction,original_invoice_number,string,v1,1
+TECH_TIRE_SUPPLY,Date,line_date,date,v1,1
+TECH_TIRE_SUPPLY,Amount,charge_amount,decimal,v1,1
+TECH_TIRE_SUPPLY,Balance,amount_remaining,decimal,v1,1
+THE_WYNN_GROUP,REFERENCE #,original_invoice_number,string,v1,1
+THE_WYNN_GROUP,DATE,line_date,date,v1,1
+THE_WYNN_GROUP,PURCHASES($),charge_amount,decimal,v1,1
+TILGHMANS_AUTO_PARTS_II,Transaction Type,original_invoice_number,string,v1,1
+TILGHMANS_AUTO_PARTS_II,Date,line_date,date,v1,1
+TILGHMANS_AUTO_PARTS_II,Charged,charge_amount,decimal,v1,1
+TILGHMANS_AUTO_PARTS_II,Paid,payment_amount,decimal,v1,1
+TULLEY_AUTOMOTIVE_GROUP,INVOICE,original_invoice_number,string,v1,1
+TULLEY_AUTOMOTIVE_GROUP,DATE,line_date,date,v1,1
+TULLEY_AUTOMOTIVE_GROUP,ORIGINAL AMOUNT,charge_amount,decimal,v1,1
+TULLEY_AUTOMOTIVE_GROUP,BALANCE DUE,amount_remaining,decimal,v1,1
+TWIN_CITY_TIRE_AND_SERVICE,INV Number,original_invoice_number,string,v1,1
+TWIN_CITY_TIRE_AND_SERVICE,INV Date,line_date,date,v1,1
+TWIN_CITY_TIRE_AND_SERVICE,Total,charge_amount,decimal,v1,1
+VOLKSWAGEN_OF_SACO,DOCUMENT,original_invoice_number,string,v1,1
+VOLKSWAGEN_OF_SACO,DATE,line_date,date,v1,1
+VOLKSWAGEN_OF_SACO,AMOUNT,charge_amount,decimal,v1,1
+VOLVO_CARS_PRINCETON,DOCUMENT,original_invoice_number,string,v1,1
+VOLVO_CARS_PRINCETON,DATE,line_date,date,v1,1
+VOLVO_CARS_PRINCETON,AMOUNT,charge_amount,decimal,v1,1
+WELDON_TIRE,Ref#,original_invoice_number,string,v1,1
+WELDON_TIRE,Date,line_date,date,v1,1
+WELDON_TIRE,Charges,charge_amount,decimal,v1,1
+WELDON_TIRE,Credits,payment_amount,decimal,v1,1
+WELDON_TIRE,Balance,amount_remaining,decimal,v1,1
+WHEEL_COLLISION_CENTER,Invoice #,original_invoice_number,string,v1,1
+WHEEL_COLLISION_CENTER,Date,line_date,date,v1,1
+WHEEL_COLLISION_CENTER,Charge,charge_amount,decimal,v1,1
+WHEEL_COLLISION_CENTER,Open Amt,amount_remaining,decimal,v1,1
+WHEEL_COLLISION_CENTER,Balance,amount_remaining,decimal,v1,2
+WILKIE_LEXUS,INVOICE,original_invoice_number,string,v1,1
+WILKIE_LEXUS,DATE,line_date,date,v1,1
+WILKIE_LEXUS,PURCHASES,charge_amount,decimal,v1,1
+WILKIE_LEXUS,PAYMENTS CREDITS,payment_amount,decimal,v1,1
+WILKIE_LEXUS,BALANCE,amount_remaining,decimal,v1,1
+YERTY_AUTO_SERVICE,Invoice #,original_invoice_number,string,v1,1
+YERTY_AUTO_SERVICE,Date,line_date,date,v1,1
+YERTY_AUTO_SERVICE,Type,transaction_code,string,v1,1
+YERTY_AUTO_SERVICE,Original Amount,charge_amount,decimal,v1,1
+YERTY_AUTO_SERVICE,Amount Remain,amount_remaining,decimal,v1,1
