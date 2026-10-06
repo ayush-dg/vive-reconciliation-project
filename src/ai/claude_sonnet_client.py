@@ -1060,6 +1060,20 @@ class ClaudeSonnetClient(AIClient):
             if total_header is not None:
                 field_map["outstanding_amount"] = total_header
 
+        # A bare "Payment" header is a credit column only on a document that
+        # also has a balance/outstanding column (Headlights Depot: Charge /
+        # Payment / Balance, where the running balance proves each payment
+        # is netted). On an Amount / Payment layout with no balance column
+        # (Blue Sun Super Service) the printed total is the sum of Amount --
+        # its payments settle a previous balance -- so "Payment" stays
+        # unmapped there, exactly as before 2026-10-06 (mapping it broke two
+        # statements that passed on Oct 1).
+        credit_header = field_map.get("credit")
+        if (credit_header is not None and self._normalize_header(credit_header) in EXACT_CREDIT_HEADERS
+                and "outstanding_amount" not in field_map):
+            field_map.pop("credit", None)
+            field_map.pop("credits", None)
+
         return field_map
 
     @staticmethod

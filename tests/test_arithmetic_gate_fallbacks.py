@@ -85,6 +85,36 @@ class TestPrimaryAndGateFixes(unittest.TestCase):
         positive = row("G1", balance_forward=16.83, payment_applied=16.83)
         self.assertEqual(compute_statement_total_from_invoices([positive]), 0.0)
 
+    def test_keystone_settlement_both_negative_nets_to_zero(self):
+        # pdfplumber Keystone extractor: a credit settlement is bf -X, pa -X
+        # (256 such rows on Oct 1). abs(pa) alone turned these into -2X.
+        settled = row("79712661", balance_forward=-50.0, payment_applied=-50.0)
+        self.assertEqual(compute_statement_total_from_invoices([settled]), 0.0)
+        self.assertEqual(gate._row_net(settled), 0.0)
+
+    def test_keystone_settlement_both_positive_nets_to_zero(self):
+        settled = row("79712662", balance_forward=1623.49, payment_applied=1623.49)
+        self.assertEqual(compute_statement_total_from_invoices([settled]), 0.0)
+        self.assertEqual(gate._row_net(settled), 0.0)
+
+    def test_keystone_settlement_mixed_signs_net_to_zero(self):
+        for bf, pa in ((16.83, -16.83), (-16.83, 16.83)):
+            settled = row("G1", balance_forward=bf, payment_applied=pa)
+            self.assertEqual(compute_statement_total_from_invoices([settled]), 0.0, (bf, pa))
+
+    def test_keystone_partial_settlement_keeps_the_remainder(self):
+        self.assertEqual(compute_statement_total_from_invoices([row("G2", balance_forward=100.0, payment_applied=40.0)]), 60.0)
+        self.assertEqual(compute_statement_total_from_invoices([row("G3", balance_forward=-100.0, payment_applied=-40.0)]), -60.0)
+
+    def test_keystone_statement_mixing_conventions_reconciles(self):
+        rows = [
+            row("G4803890", 466.59),
+            row("79712661", balance_forward=1623.49, payment_applied=1623.49),
+            row("79712700", balance_forward=-50.0, payment_applied=-50.0),
+            row("G4795354", balance_forward=16.83, payment_applied=-16.83),
+        ]
+        self.assertEqual(run(466.59, rows)["method"], "primary")
+
     def test_vendor_column_matches_header_case_insensitively(self):
         with mock.patch.object(gate, "_load_total_columns", return_value={"FENIX_NE": "due"}):
             invoices = [{"_raw_row": {"Due": 315.0}}, {"_raw_row": {"Due": "1,095.00"}}]
@@ -209,6 +239,40 @@ class TestOpenBalance(unittest.TestCase):
     def test_off_by_two_cents_fails(self):
         result = run(2126.02, bishops_rows())
         assert_every_check_failed(self, result)
+
+    @staticmethod
+    def autoly_rows():
+        """Bow COLE 0826 shape: Due on every invoice row, blank on every
+        credit/payment row (fewer than half of ALL rows carry Due)."""
+        return [
+            row("816731", 180.0, due=180.0),
+            row("817139", credit=130.0),
+            row("817167", credit=205.0),
+            row("817671", 350.0, due=250.0),
+            row("817773", credit=230.0),
+            row("819051", credit=100.0),
+            row("820040", 470.0, due=370.0),
+            row("chris", credit=3325.0, unallocated=565.0),
+        ]
+
+    def test_coverage_counts_charge_rows_only(self):
+        # 3 of 8 rows carry Due, but 3 of 3 charge rows do.
+        result = run(235.0, self.autoly_rows())  # 180 + 250 + 370 - 565
+        self.assertEqual(result["method"], "open_balance")
+
+    def test_not_applicable_when_fewer_than_half_of_charge_rows_have_due(self):
+        rows = self.autoly_rows()
+        rows[3]["amount_due"] = None
+        rows[6]["amount_due"] = None
+        result = run(235.0, rows)
+        self.assertFalse(attempt(result, "open_balance")["applicable"])
+        self.assertIn("charge rows", attempt(result, "open_balance")["reason"])
+
+    def test_adversarial_due_value_placed_under_paid_still_fails(self):
+        # Bow SEB 0826 / Ding's 14869: an invoice's Due value read into Paid.
+        rows = self.autoly_rows()
+        rows[0] = row("816731", 180.0, credit=180.0, due=None)
+        assert_every_check_failed(self, run(235.0, rows))
 
 
 # ---------------------------------------------------------------------------

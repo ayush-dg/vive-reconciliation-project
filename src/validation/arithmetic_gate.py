@@ -10,6 +10,7 @@ in the same statement_metadata shape, so this one function covers both.
 """
 
 import json
+import math
 import os
 import re
 from typing import Optional
@@ -176,12 +177,7 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
         payment_applied = inv.get("payment_applied")
         if balance_forward and payment_applied:
             # Dual-value settlement row (Keystone) -- net together on this row.
-            # abs(): a payment always reduces the balance, whatever sign the
-            # source printed it with -- same reasoning as abs(credit) below.
-            # Keystone (First Choice) 2026-10-01 row G4795354 carried
-            # payment_applied=-16.83, which the old subtraction turned into
-            # +33.66 instead of 0.
-            total += (balance_forward or 0) - abs(payment_applied or 0)
+            total += _settlement_net(balance_forward, payment_applied)
             continue
         credit = abs(inv.get("credit") or 0)
         if credit:
@@ -189,6 +185,21 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
         else:
             total += inv.get("outstanding_amount") or 0
     return round(total, 2)
+
+
+def _settlement_net(balance_forward: float, payment_applied: float) -> float:
+    """A Keystone settlement row's net effect: the payment moves the balance
+    forward toward zero, whatever sign either value was printed with.
+
+    Both conventions exist (2026-10-06 replay of every Oct 1 statement):
+    the pdfplumber Keystone extractor writes a credit settlement as
+    balance_forward=-X, payment_applied=-X (256 rows -- plain bf - pa is
+    right there), while Claude returned Keystone (First Choice) row
+    G4795354 as balance_forward=16.83, payment_applied=-16.83 (where
+    bf - pa gave +33.66). Subtracting abs(pa) fixed the second but turned
+    the first into -2X, so the payment's magnitude takes balance_forward's
+    sign instead: 0 for (+,+), (-,-), (+,-) and (-,+) alike."""
+    return balance_forward - math.copysign(abs(payment_applied), balance_forward)
 
 
 def _load_total_columns() -> dict:
@@ -311,7 +322,7 @@ def _row_net(inv: dict) -> float:
     balance_forward = inv.get("balance_forward")
     payment_applied = inv.get("payment_applied")
     if balance_forward and payment_applied:
-        return (balance_forward or 0) - abs(payment_applied or 0)
+        return _settlement_net(balance_forward, payment_applied)
     credit = abs(inv.get("credit") or 0)
     if credit:
         return -credit
@@ -324,10 +335,6 @@ def _rows_for_checks(invoices: list) -> list:
 
 def _matches(printed: float, computed: float, tolerance: float) -> bool:
     return abs(round(printed - computed, 2)) <= tolerance
-
-
-def _has_amount(inv: dict) -> bool:
-    return any(inv.get(k) not in (None, 0, 0.0) for k in ("outstanding_amount", "credit", "amount_due", "charges"))
 
 
 def _is_running_balance(rows: list) -> bool:
@@ -363,14 +370,23 @@ def _invoice_group_key(invoice_number):
 
 
 def _open_balance_preconditions(rows: list):
-    """Returns (applicable, reason) for the open-balance check."""
-    amount_rows = [inv for inv in rows if _has_amount(inv)]
-    with_due = [inv for inv in amount_rows if inv.get("amount_due") is not None]
-    if not with_due:
+    """Returns (applicable, reason) for the open-balance check.
+
+    Coverage is measured over CHARGE rows only (a positive row amount):
+    credit and payment rows legitimately leave the open-balance column blank
+    on some layouts -- Autoly's Due column is empty on every credit/payment
+    row, so Bow COLE 0826 (Due on all 9 invoices, blank on 10 credits/
+    payments) fell just under "half of all rows" and was never checked even
+    though sum(Due) - Unalloc. equals its printed total exactly. This only
+    decides whether the check is attempted; the row and invoice guards in
+    _check_open_balance() are unchanged."""
+    charge_rows = [inv for inv in rows if (inv.get("outstanding_amount") or 0) > 0]
+    with_due = [inv for inv in charge_rows if inv.get("amount_due") is not None]
+    if not any(inv.get("amount_due") is not None for inv in rows):
         return False, "no open-balance (amount_due) column was extracted"
-    if len(with_due) * 2 < len(amount_rows):
-        return False, (f"open-balance column on only {len(with_due)} of {len(amount_rows)} "
-                       f"rows that carry an amount (needs at least half)")
+    if len(with_due) * 2 < len(charge_rows):
+        return False, (f"open-balance column on only {len(with_due)} of {len(charge_rows)} "
+                       f"charge rows (needs at least half)")
     if _is_running_balance(rows):
         return False, "the amount_due column is a running balance, not a per-row open balance"
     return True, ""

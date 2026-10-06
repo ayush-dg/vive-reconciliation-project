@@ -68,7 +68,10 @@ from src.ai.document_understanding_engine import (
 from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
-from src.validation.arithmetic_gate import compute_vendor_column_total, validate_with_fallbacks
+from src.validation.arithmetic_gate import (
+    compute_statement_total_from_invoices, compute_vendor_column_total, validate_with_fallbacks,
+)
+from src.validation.last_payment import mark_last_payment_notes
 from src.validation.previous_balance import resolve_previous_balance
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
@@ -1088,6 +1091,9 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
     in statement_metadata) for a freshly extracted statement. Returns the
     validation dict.
 
+    0. A row that is really an unlabelled "LAST PAYMENT" note (its amount
+       printed only on a LAST PAYMENT line of the text layer) keeps its row
+       but loses its amount, and the computed total is recomputed.
     1. Per-vendor gate column (config/validation_total_columns.json): for a
        listed vendor, the computed total is the sum of the one raw column
        the printed total adds up -- see compute_vendor_column_total().
@@ -1100,6 +1106,14 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
        validate_with_fallbacks() (primary check, then the fallback chain).
     """
     stmt_meta = schema_result.setdefault("statement_metadata", {})
+    # An unlabelled "LAST PAYMENT" note returned as a row: recognised from
+    # the PDF text layer and stripped of its amount (src/validation/
+    # last_payment.py), so the computed total is recomputed without it.
+    invoices = schema_result.get("invoices") or []
+    notes = mark_last_payment_notes(invoices, pdf_text)
+    if notes:
+        stmt_meta["statement_total_computed"] = compute_statement_total_from_invoices(invoices)
+        print(f"  {notes} row(s) recognised as an informational LAST PAYMENT note -- amount not counted")
     column_total = compute_vendor_column_total(
         resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")),
         schema_result.get("invoices") or [],

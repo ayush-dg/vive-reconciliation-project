@@ -116,6 +116,33 @@ class TestHeaderMapping(unittest.TestCase):
         self.assertEqual(field_map["credit"], "Payment")
         self.assertEqual(field_map["amount_due"], "Balance")
 
+    def test_payment_without_a_balance_column_stays_unmapped(self):
+        # Blue Sun Super Service: Amount / Payment, printed total = sum of
+        # Amount (payments settle a previous balance). Mapping Payment as a
+        # credit broke two statements that passed on Oct 1.
+        cols = ["Date", "Invoice#", "Description", "P.O.#", "Amount", "Payment"]
+        rows = [{"Date": "3-Aug-26", "Invoice#": "26-0730-7794", "Description": "Tow", "P.O.#": "3005916", "Amount": 250.0, "Payment": None},
+                {"Date": "6-Aug-26", "Invoice#": None, "Description": "Pymt", "P.O.#": None, "Amount": None, "Payment": 5666.5},
+                {"Date": "7-Aug-26", "Invoice#": "26-0806-7808", "Description": "Tow", "P.O.#": "3005922", "Amount": 569.5, "Payment": None}]
+        field_map = client()._map_columns(cols, rows)
+        self.assertNotIn("credit", field_map)
+        self.assertNotIn("credits", field_map)
+        invs = invoices_for(cols, rows)
+        self.assertEqual(compute_statement_total_from_invoices(invs), 819.5)
+
+    def test_payment_with_a_balance_column_is_a_credit(self):
+        cols = ["Date", "Description", "Charge", "Payment", "Balance"]
+        rows = [{"Date": "8/1/2026", "Description": "Invoice #A", "Charge": 500.0, "Payment": None, "Balance": 500.0},
+                {"Date": "8/9/2026", "Description": "Payment", "Charge": None, "Payment": 200.0, "Balance": 300.0}]
+        invs = invoices_for(cols, rows)
+        self.assertEqual(invs[1]["credit"], 200.0)
+        self.assertEqual(compute_statement_total_from_invoices(invs), 300.0)
+
+    def test_plural_payments_header_is_unaffected(self):
+        # CREDIT_KEYWORDS ("payments") behaved this way before 2026-10-06.
+        field_map = client()._map_columns(["Invoice #", "Charges", "Payments"], [])
+        self.assertEqual(field_map["credit"], "Payments")
+
     def test_payment_due_date_is_still_a_date(self):
         field_map = client()._map_columns(["Payment Due Date", "Invoice #", "Amount"], [])
         self.assertEqual(field_map.get("due_date"), "Payment Due Date")

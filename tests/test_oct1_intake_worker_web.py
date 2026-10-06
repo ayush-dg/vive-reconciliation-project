@@ -111,6 +111,16 @@ class TestApplyArithmeticValidation(unittest.TestCase):
         self.assertIsNone(s["statement_metadata"]["previous_balance"])
         self.assertTrue(s["statement_metadata"]["previous_balance_source"].startswith("rejected"))
 
+    def test_unlabelled_last_payment_row_is_dropped_from_the_total(self):
+        # MAINE OXY RP 0826: the note came back as a bare row and was counted.
+        rows = [inv("5000359406", 165.11), inv(None, 134.03)]
+        s = schema(rows, 165.11)
+        self.assertEqual(s["statement_metadata"]["statement_total_computed"], 299.14)
+        result = INTAKE.apply_arithmetic_validation(s, TEXT_LAYER + "\nLAST PAYMENT: 07/21/26 134.03")
+        self.assertEqual((result["status"], result["method"]), ("matches", "primary"))
+        self.assertTrue(s["invoices"][1]["informational"])
+        self.assertEqual(s["statement_metadata"]["statement_total_computed"], 165.11)
+
     def test_fenix_override_without_its_column_keeps_the_generic_total(self):
         # Claude-extracted Fenix rows carry "Charged", not the configured "due".
         rows = [inv("3358852", 315.0, raw={"Charged": 315.0}), inv("3397555", 115.0, raw={"Charged": 115.0})]
