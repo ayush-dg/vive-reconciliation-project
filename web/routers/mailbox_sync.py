@@ -29,15 +29,26 @@ without downloading anything first, and a file's fate never depends on
 its position in some other file's history. web/worker.py is the other
 half of this: it writes a job's outcome back onto its originating blob
 (jobs.source_blob_path) once the job finishes.
+
+A third, non-UI route (/mailbox-sync/auto) is the automatic version of
+"Sync to Webapp": the mailbox-sync Function's 30-minute timer calls it
+after every Graph pull. It has no login -- it's called by the Function,
+not a signed-in user -- so it requires a shared secret header instead
+(same fail-closed pattern as web/routers/intake_trigger.py). Unlike the
+button, it only queues blobs that have never been attempted: retrying a
+failed PDF re-runs AI/OCR extraction, and doing that unattended every
+30 minutes is left to a human clicking the button.
 """
 
+import hmac
 import os
 import re
 import threading
 import uuid
 
 import requests
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from src.storage.blob_client import BlobStorageClient
 from web.deps import render, require_login, sidebar_context
@@ -53,6 +64,10 @@ FUNCTION_KEY_ENV_VAR = "MAILBOX_SYNC_FUNCTION_KEY"
 MAILBOX_CONNECTION_STRING_ENV_VAR = "AZURE_BLOB_MAILBOX_CONNECTION_STRING"
 MAILBOX_CONTAINER = "raw"
 MAILBOX_SOURCE_PREFIX = "mailbox/"
+
+AUTOSYNC_SECRET_ENV_VAR = "MAILBOX_AUTOSYNC_SECRET"
+AUTOSYNC_SECRET_HEADER = "x-vive-autosync-secret"
+AUTOSYNC_SUBMITTED_BY = "mailbox-auto-sync"
 
 # After this many failed extraction attempts, "Sync to Webapp" stops
 # auto-retrying a file -- it stays a normal FAILED job (visible, with its
@@ -130,6 +145,48 @@ def sync_to_webapp(request: Request, user: str = Depends(require_login)):
         _webapp_sync_lock.release()
 
 
+@router.post("/mailbox-sync/auto")
+def auto_sync_to_webapp(request: Request):
+    """Called by the mailbox-sync Function's timer after every Graph pull.
+    Returns 202 straight away and queues in a background thread --
+    downloading a batch of PDFs can outlast App Service's ~230s request
+    limit, and the Function only needs to know the run was accepted.
+    Shares _webapp_sync_lock with the button, so a tick that lands while
+    a manual "Sync to Webapp" is running is skipped (409), not queued
+    behind it; the next tick picks up whatever it missed."""
+    if not _is_autosync_authorized(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not _webapp_sync_lock.acquire(blocking=False):
+        return JSONResponse({"status": "skipped", "reason": "Sync to Webapp already in progress"}, status_code=409)
+
+    threading.Thread(target=_run_auto_sync, name="mailbox-auto-sync", daemon=True).start()
+    return JSONResponse({"status": "accepted"}, status_code=202)
+
+
+def _is_autosync_authorized(request: Request) -> bool:
+    """Constant-time compare of the configured shared secret against the
+    caller's header. An unset secret rejects everything -- there is no
+    "unconfigured means open" mode."""
+    configured_secret = os.environ.get(AUTOSYNC_SECRET_ENV_VAR)
+    if not configured_secret:
+        return False
+    supplied_secret = request.headers.get(AUTOSYNC_SECRET_HEADER, "")
+    return hmac.compare_digest(configured_secret, supplied_secret)
+
+
+def _run_auto_sync() -> None:
+    """Background half of auto_sync_to_webapp. Owns _webapp_sync_lock
+    (acquired by the request handler) and always releases it."""
+    try:
+        queued_names = _queue_eligible_blobs(submitted_by=AUTOSYNC_SUBMITTED_BY, new_only=True)
+        print(f"[mailbox-auto-sync] Queued {len(queued_names)} PDF(s)")
+    except Exception as e:
+        print(f"[mailbox-auto-sync] Failed: {e}")
+    finally:
+        _webapp_sync_lock.release()
+
+
 def _call_sync_function() -> list:
     """Calls the vive-mailbox-sync Function App and returns the list of
     newly-written blob paths (relative to the raw container) from its
@@ -138,6 +195,9 @@ def _call_sync_function() -> list:
     function_url = os.environ[FUNCTION_URL_ENV_VAR]
     function_key = os.environ[FUNCTION_KEY_ENV_VAR]
     response = requests.post(function_url, headers={"x-functions-key": function_key}, timeout=120)
+    if response.status_code == 409:
+        # The Function's sync lock is held -- usually its 30-minute timer run.
+        raise RuntimeError("a mailbox sync is already running (likely the automatic one) -- try again in a minute")
     response.raise_for_status()
     return response.json().get("new_blob_paths", [])
 
@@ -159,20 +219,30 @@ def _original_filename_from_blob_path(blob_path: str) -> str:
     return _TIMESTAMP_SUFFIX_RE.sub(r"\1", original_filename)
 
 
-def _queue_eligible_blobs(submitted_by: str) -> list:
+def _is_eligible(metadata: dict, new_only: bool) -> bool:
+    """Eligible: no extraction_status yet (never attempted), or -- unless
+    new_only -- extraction_status=='failed' with attempt_count below
+    RETRY_CAP. Never eligible: 'completed' (done), 'processing' (already
+    in flight -- another run claimed it and hasn't finished), or 'failed'
+    at/over RETRY_CAP (stays a normal FAILED job, visible in
+    /jobs/history, just no longer auto-retried)."""
+    status = metadata.get("extraction_status")
+    if status is None:
+        return True
+    if status != "failed" or new_only:
+        return False
+    return int(metadata.get("attempt_count", "0")) < RETRY_CAP
+
+
+def _queue_eligible_blobs(submitted_by: str, new_only: bool = False) -> list:
     """Lists every PDF blob under the mailbox source prefix (metadata
     included, no downloads yet), decides what's eligible using each
-    blob's own extraction_status/attempt_count metadata -- never a
-    separate watermark file -- claims each eligible one (an atomic,
-    ETag-conditional metadata write, so two overlapping calls can't both
-    claim the same blob), then downloads and queues a job for it.
-
-    Eligible: no extraction_status yet (never attempted), or
-    extraction_status=='failed' with attempt_count below RETRY_CAP.
-    Skipped: extraction_status=='completed' (done), =='processing'
-    (already in flight -- another run claimed it and hasn't finished),
-    or =='failed' at/over RETRY_CAP (stays a normal FAILED job, visible
-    in /jobs/history, just no longer auto-retried)."""
+    blob's own extraction_status/attempt_count metadata (see
+    _is_eligible) -- never a separate watermark file -- claims each
+    eligible one (an atomic, ETag-conditional metadata write, so two
+    overlapping calls can't both claim the same blob), then downloads
+    and queues a job for it. new_only=True (the timer-driven
+    /mailbox-sync/auto path) skips previously-failed blobs entirely."""
     client = BlobStorageClient(
         container_name=MAILBOX_CONTAINER,
         connection_string_env_var=MAILBOX_CONNECTION_STRING_ENV_VAR,
@@ -184,14 +254,8 @@ def _queue_eligible_blobs(submitted_by: str) -> list:
     for blob_path, info in blob_map.items():
         metadata = info["metadata"]
         etag = info["etag"]
-        status = metadata.get("extraction_status")
-        attempt_count = int(metadata.get("attempt_count", "0"))
 
-        if status == "completed":
-            continue
-        if status == "processing":
-            continue
-        if status == "failed" and attempt_count >= RETRY_CAP:
+        if not _is_eligible(metadata, new_only):
             continue
 
         if not client.try_claim_blob_for_processing(blob_path, etag, metadata):

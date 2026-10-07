@@ -37,6 +37,21 @@ already done. A tie-break (processed_ids_at_last_timestamp) guards
 against two messages sharing the exact same receivedDateTime: without it,
 a `>` comparison against a watermark equal to both messages' timestamp
 would silently skip whichever one wasn't processed first.
+
+Triggers: the HTTP route (the web app's "Sync to Blob" button) and a
+30-minute timer both run the same run_sync(). The timer is off unless
+AUTO_SYNC_ENABLED=true, so deploying this code somewhere doesn't by itself
+start polling that mailbox. After each timer pull it POSTs to the web
+app's /mailbox-sync/auto (WEBAPP_AUTOSYNC_URL) so new PDFs get queued as
+jobs without anyone clicking "Sync to Webapp" -- on every tick, not only
+when this run found something, so PDFs the web app missed while it was
+down or restarting still get picked up on the next tick.
+
+Concurrency: run_sync() holds a blob lease on LOCK_BLOB_PATH for its whole
+run. Without it a timer tick and a button click could overlap, both read
+the same watermark, and write every new PDF twice. The lease is 60s and
+renewed before each message, so a crashed run frees the lock on its own
+within a minute instead of blocking every later run.
 """
 
 import base64
@@ -49,6 +64,7 @@ from datetime import datetime
 import azure.functions as func
 import msal
 import requests
+from azure.core.exceptions import HttpResponseError, ResourceExistsError
 from azure.storage.blob import BlobServiceClient
 
 app = func.FunctionApp()
@@ -57,6 +73,18 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 STORAGE_CONNECTION_ENV_VAR = "AzureWebJobsStorage"
 MAILBOX_CONTAINER = os.environ.get("MAILBOX_CONTAINER", "raw")
 WATERMARK_BLOB_PATH = os.environ.get("WATERMARK_BLOB_PATH", "watermark/mailbox.json")
+LOCK_BLOB_PATH = os.environ.get("SYNC_LOCK_BLOB_PATH", "watermark/mailbox.lock")
+LOCK_LEASE_SECONDS = 60
+
+# Every 30 minutes, on the hour and half hour. A literal rather than a
+# %APP_SETTING% reference: a missing app setting would stop the host from
+# indexing the timer, which also takes the HTTP route down with it.
+SYNC_SCHEDULE = "0 */30 * * * *"
+AUTO_SYNC_ENABLED_ENV_VAR = "AUTO_SYNC_ENABLED"
+WEBAPP_AUTOSYNC_URL_ENV_VAR = "WEBAPP_AUTOSYNC_URL"
+AUTOSYNC_SECRET_ENV_VAR = "MAILBOX_AUTOSYNC_SECRET"
+# Must match web/routers/mailbox_sync.py's AUTOSYNC_SECRET_HEADER.
+AUTOSYNC_SECRET_HEADER = "x-vive-autosync-secret"
 
 # This Function only ever handles the Outlook mailbox pull -- a future
 # ui-upload source (manually-uploaded PDFs) would be written by entirely
@@ -210,36 +238,117 @@ def write_to_raw_zone(container_client, pdf_bytes: bytes, filename: str, receive
     return blob_path
 
 
+def acquire_sync_lock(container_client):
+    """Returns a BlobLeaseClient holding LOCK_BLOB_PATH, or None if another
+    run already holds it. Creates the (empty) lock blob on first use."""
+    lock_blob = container_client.get_blob_client(LOCK_BLOB_PATH)
+    if not lock_blob.exists():
+        try:
+            lock_blob.upload_blob(b"", overwrite=False)
+        except ResourceExistsError:
+            pass  # another run created it between exists() and here
+    try:
+        return lock_blob.acquire_lease(lease_duration=LOCK_LEASE_SECONDS)
+    except HttpResponseError as e:
+        if e.status_code == 409:
+            return None
+        raise
+
+
+def release_sync_lock(lease) -> None:
+    """Best-effort: if the lease already expired, there's nothing to free."""
+    try:
+        lease.release()
+    except HttpResponseError:
+        logging.warning("mailbox sync lock was already released or expired")
+
+
+def pull_new_pdfs(container_client, lease) -> dict:
+    """The Graph -> raw-zone pull itself. Caller must hold the sync lock;
+    it is renewed before each message so a long backlog keeps it."""
+    token = get_graph_token()
+    watermark = read_watermark(container_client)
+    messages = list_new_messages(token, watermark)
+
+    new_blob_paths = []
+    for message in messages:
+        lease.renew()
+        for filename, pdf_bytes in extract_pdf_attachments(token, message["id"]):
+            new_blob_paths.append(
+                write_to_raw_zone(container_client, pdf_bytes, filename, message["receivedDateTime"])
+            )
+
+        # Advanced per message, right after its attachments are written --
+        # not once at the end of the loop -- so a failure on a later
+        # message never re-triggers a re-pull (and duplicate write) of
+        # messages already handled in this same run.
+        watermark = advance_watermark(watermark, message["id"], message["receivedDateTime"])
+        write_watermark(container_client, watermark)
+
+    return {"new_blob_paths": new_blob_paths, "messages_processed": len(messages)}
+
+
+def run_sync():
+    """Shared by the HTTP route and the timer. Returns pull_new_pdfs()'s
+    result, or None if another run holds the sync lock (nothing done)."""
+    container_client = BlobServiceClient.from_connection_string(
+        os.environ[STORAGE_CONNECTION_ENV_VAR]
+    ).get_container_client(MAILBOX_CONTAINER)
+
+    lease = acquire_sync_lock(container_client)
+    if lease is None:
+        return None
+    try:
+        return pull_new_pdfs(container_client, lease)
+    finally:
+        release_sync_lock(lease)
+
+
+def notify_webapp() -> None:
+    """Asks the web app to queue never-attempted mailbox PDFs as jobs.
+    Never raises: the PDFs are already safe in blob storage, and the next
+    tick (or the "Sync to Webapp" button) picks up anything this misses."""
+    url = os.environ.get(WEBAPP_AUTOSYNC_URL_ENV_VAR)
+    secret = os.environ.get(AUTOSYNC_SECRET_ENV_VAR)
+    if not url or not secret:
+        logging.warning("%s or %s not set -- web app not notified", WEBAPP_AUTOSYNC_URL_ENV_VAR, AUTOSYNC_SECRET_ENV_VAR)
+        return
+    try:
+        response = requests.post(url, headers={AUTOSYNC_SECRET_HEADER: secret}, timeout=30)
+        logging.info("web app auto-sync responded %s: %s", response.status_code, response.text[:200])
+    except requests.RequestException as e:
+        logging.warning("web app auto-sync call failed: %s", e)
+
+
 @app.route(route="sync", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
 def sync(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        token = get_graph_token()
-        container_client = BlobServiceClient.from_connection_string(
-            os.environ[STORAGE_CONNECTION_ENV_VAR]
-        ).get_container_client(MAILBOX_CONTAINER)
-
-        watermark = read_watermark(container_client)
-        messages = list_new_messages(token, watermark)
-
-        new_blob_paths = []
-        for message in messages:
-            for filename, pdf_bytes in extract_pdf_attachments(token, message["id"]):
-                new_blob_paths.append(
-                    write_to_raw_zone(container_client, pdf_bytes, filename, message["receivedDateTime"])
-                )
-
-            # Advanced per message, right after its attachments are written --
-            # not once at the end of the loop -- so a failure on a later
-            # message never re-triggers a re-pull (and duplicate write) of
-            # messages already handled in this same run.
-            watermark = advance_watermark(watermark, message["id"], message["receivedDateTime"])
-            write_watermark(container_client, watermark)
-
-        return func.HttpResponse(
-            json.dumps({"new_blob_paths": new_blob_paths, "messages_processed": len(messages)}),
-            mimetype="application/json",
-            status_code=200,
-        )
+        result = run_sync()
+        if result is None:
+            return func.HttpResponse(
+                json.dumps({"error": "a mailbox sync is already running -- try again in a minute"}),
+                mimetype="application/json",
+                status_code=409,
+            )
+        return func.HttpResponse(json.dumps(result), mimetype="application/json", status_code=200)
     except Exception as e:
         logging.exception("mailbox sync failed")
         return func.HttpResponse(json.dumps({"error": str(e)}), mimetype="application/json", status_code=500)
+
+
+@app.timer_trigger(schedule=SYNC_SCHEDULE, arg_name="timer", run_on_startup=False, use_monitor=True)
+def scheduled_sync(timer: func.TimerRequest) -> None:
+    if os.environ.get(AUTO_SYNC_ENABLED_ENV_VAR, "").lower() != "true":
+        logging.info("%s is not 'true' -- scheduled mailbox sync skipped", AUTO_SYNC_ENABLED_ENV_VAR)
+        return
+    try:
+        result = run_sync()
+        if result is None:
+            logging.info("scheduled mailbox sync skipped -- another sync holds the lock")
+        else:
+            logging.info("scheduled mailbox sync wrote %d PDF(s) from %d message(s)",
+                         len(result["new_blob_paths"]), result["messages_processed"])
+    finally:
+        # Every tick, even after a failed or skipped pull -- the web app
+        # may still have unqueued PDFs from an earlier run.
+        notify_webapp()

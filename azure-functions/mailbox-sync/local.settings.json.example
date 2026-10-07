@@ -7,7 +7,10 @@
     "AZURE_CLIENT_ID": "<graph app client id>",
     "AZURE_CLIENT_SECRET": "<graph app client secret>",
     "TARGET_MAILBOX": "ai_vendor_statements@vivecollision.com",
-    "MAILBOX_CONTAINER": "mailbox",
-    "WATERMARK_BLOB_PATH": "mailbox/_state/watermark.json"
+    "MAILBOX_CONTAINER": "raw",
+    "WATERMARK_BLOB_PATH": "watermark/mailbox.json",
+    "AUTO_SYNC_ENABLED": "false",
+    "WEBAPP_AUTOSYNC_URL": "http://localhost:8000/mailbox-sync/auto",
+    "MAILBOX_AUTOSYNC_SECRET": "<same value as the web app's MAILBOX_AUTOSYNC_SECRET>"
   }
 }
