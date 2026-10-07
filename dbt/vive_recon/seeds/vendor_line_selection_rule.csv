@@ -35,3 +35,7 @@ DEPAULA_MAZDA,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reyn
 JAGUAR_LAND_ROVER_ALLENTOWN,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
 DING'S_AUTO_PARTS,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-07,,1,vaishali,"extract_autoly path, as for Bow / Chuck's: Payment rows carry the check number as reference and are PAYMENT-typed."
 MATTHEWS_AUTO,charge,keep_earliest,,,,,2026-10-06,,1,vaishali,"Reynolds and Reynolds template: a still-open invoice reprints every cycle; keep one charge per invoice."
+GEAR_SIX_AUTO_PARTS,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-07,,1,vaishali,"extract_autoly path, as for Bow / Chuck's: Payment rows carry the check number as reference and are PAYMENT-typed."
+MY_AUTO_STORE,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-07,,1,vaishali,"extract_autoly path, as for Bow / Chuck's: Payment rows carry the check number as reference and are PAYMENT-typed."
+STOYSTOWN_AUTO_WRECKERS,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-07,,1,vaishali,"extract_autoly path, as for Bow / Chuck's: Payment rows carry the check number as reference and are PAYMENT-typed."
+TILGHMANS_AUTO_PARTS_II,charge,exclude_by_transaction_code,PAYMENT,,,,2026-10-07,,1,vaishali,"extract_autoly path, as for Bow / Chuck's: Payment rows carry the check number as reference and are PAYMENT-typed."
