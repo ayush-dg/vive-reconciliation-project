@@ -58,10 +58,13 @@ def main(argv=None, io=None, intake=None):
 
     intake = intake or in_place.load_intake()
     state = in_place.load_state(io, args.statement_id)
-    problems = in_place.refusals(state)
+    # Jobs in flight only refuse --apply; a dry run reports them as a warning.
+    problems = in_place.refusals(state, dry_run=not args.apply)
     if problems:
         print("REFUSED:", "; ".join(problems))
         return 2
+    for warning in in_place.warnings(state):
+        print("WARNING:", warning)
     pdf = args.pdf or io.download_pdf(state["intake"][0]["blob_storage_path"], tempfile.mkdtemp(prefix="rerun_"))
     try:
         new = in_place.reextract(io, intake, state, pdf)

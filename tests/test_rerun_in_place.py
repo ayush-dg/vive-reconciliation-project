@@ -323,6 +323,56 @@ class TestRefusals(RerunTestCase):
         seed(self.world, job_status="PROCESSING")
         self.assertTrue(any("in flight" in p for p in in_place.refusals(in_place.load_state(self.io, SID))))
 
+    def test_jobs_in_flight_only_warn_in_a_dry_run(self):
+        seed(self.world, job_status="PENDING")
+        before = self.world.snapshot()
+        state = in_place.load_state(self.io, SID)
+        self.assertEqual(in_place.refusals(state, dry_run=True), [])
+        new = in_place.reextract(self.io, self.intake, state, self.pdf)
+        the_plan = in_place.plan(state, new, in_place.silver_matching_decision(self.io, state, new))
+        self.assertEqual(the_plan["jobs_in_flight"], 1)
+        self.assertTrue(any("--apply will refuse" in w for w in the_plan["warnings"]))
+        self.assertEqual(the_plan["validation"]["to"]["status"], "matches")
+        self.assertEqual(self.world.snapshot(), before)
+
+    def test_apply_still_refuses_while_a_job_is_in_flight(self):
+        seed(self.world, job_status="PROCESSING")
+        state = in_place.load_state(self.io, SID)
+        new = in_place.reextract(self.io, self.intake, state, self.pdf)
+        decision = in_place.silver_matching_decision(self.io, state, new)
+        the_plan = in_place.plan(state, new, decision)
+        paths = in_place.backup(state, [os.path.join(self.world.dir, "b1")], the_plan)
+        self.assert_refused_untouched(lambda: in_place.apply(self.io, self.intake, state, new, decision,
+                                                             expected_fingerprint=the_plan["fingerprint"], backup_paths=paths),
+                                      "in flight")
+
+    def cli(self, *argv):
+        import importlib.util
+        import io as io_module
+        with mock.patch("dotenv.load_dotenv", lambda *a, **k: None):
+            spec = importlib.util.spec_from_file_location("rerun_cli", os.path.join(ROOT, "scripts", "rerun_in_place.py"))
+            cli = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cli)
+        out = io_module.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.main(list(argv), io=self.io, intake=self.intake)
+        return code, out.getvalue()
+
+    def test_cli_dry_run_warns_and_apply_refuses_while_jobs_are_in_flight(self):
+        seed(self.world, job_status="PROCESSING")
+        before = self.world.snapshot()
+        code, out = self.cli("--statement-id", SID, "--pdf", self.pdf)
+        self.assertEqual(code, 0)
+        self.assertIn("WARNING: 1 job(s) in flight", out)
+        self.assertIn("DRY RUN -- nothing written", out)
+        fp = re.search(r"--confirm (\w+)", out).group(1)
+        code, out = self.cli("--statement-id", SID, "--pdf", self.pdf, "--apply", "--confirm", fp,
+                             "--backup-dir", os.path.join(self.world.dir, "cli"))
+        self.assertEqual(code, 2)
+        self.assertIn("REFUSED: 1 job(s) in flight", out)
+        self.assertEqual(self.world.snapshot(), before)
+        self.assertFalse(os.path.exists(os.path.join(self.world.dir, "cli")))
+
     def test_apply_refuses_when_state_changed_since_the_dry_run(self):
         seed(self.world)
         state, new, decision, the_plan = self.dry_run()

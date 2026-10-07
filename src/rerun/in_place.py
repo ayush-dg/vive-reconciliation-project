@@ -205,18 +205,27 @@ def load_state(io, statement_id: str) -> dict:
     return state
 
 
-def refusals(state: dict) -> list:
-    """Reasons this statement must not be re-run now (empty list = OK)."""
+def refusals(state: dict, *, dry_run: bool = False) -> list:
+    """Reasons this statement must not be re-run now (empty list = OK).
+    Jobs in flight refuse an apply; a dry run (reads only) reports them as a
+    warning instead (warnings())."""
     out = []
     if len(state["intake"]) != 1:
         out.append(f"{len(state['intake'])} document_intake_log rows for this statement (expected exactly 1)")
-    if state["jobs_in_flight"]:
+    if state["jobs_in_flight"] and not dry_run:
         out.append(f"{state['jobs_in_flight']} job(s) in flight -- wait until none is PENDING/PROCESSING")
     closed = [e for e in state["warehouse"]["silver.recon_exceptions"]
               if (e.get("exception_status") or "OPEN") != "OPEN" or e.get("escalation_status")]
     if closed:
         out.append(f"{len(closed)} exception(s) not OPEN (resolved/escalated) -- re-matching would reset them")
     return out
+
+
+def warnings(state: dict) -> list:
+    """What a dry run reports but doesn't stop for."""
+    if state["jobs_in_flight"]:
+        return [f"{state['jobs_in_flight']} job(s) in flight -- --apply will refuse until none is PENDING/PROCESSING"]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +393,8 @@ def plan(state: dict, new: dict, decision: dict) -> dict:
     return {
         "statement_id": state["statement_id"],
         "fingerprint": fingerprint(state),
+        "warnings": warnings(state),
+        "jobs_in_flight": state["jobs_in_flight"],
         "validation": {"from": {k: row.get(f"validation_{k}") for k in ("status", "method", "difference")},
                        "to": {k: new["validation"].get(k) for k in ("status", "method", "difference")}},
         "document_intake_log (UPDATE, 1 row)": {k: {"from": row.get(k), "to": v} for k, v in new["intake_update"].items()
