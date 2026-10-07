@@ -495,8 +495,23 @@ class TestValidationPeriodFilter(unittest.TestCase):
     def test_filter_script_checks_period(self):
         self.assertIn("card.dataset.period === period", self.html)
 
-    def test_hero_summary_stays_unfiltered(self):
-        self.assertIn('<div class="report-hero-stat-num">3</div>', self.html)
+    def test_hero_counts_every_attempt_when_there_is_no_sync(self):
+        # No Outlook sync in this fixture, so the default window is every
+        # attempt: 3 checked, 2 passed (A, C), 1 failed (B). The top bar
+        # keeps the all-time count.
+        self.assertIn('id="hero-total">3</div>', self.html)
+        self.assertIn('id="hero-passed">2</div>', self.html)
+        self.assertIn('id="hero-failed">1</div>', self.html)
+        self.assertIn('id="hero-pct">67%</div>', self.html)
+        self.assertIn("3 intake attempts in total", self.html)
+
+    def test_no_syncs_yet_wording(self):
+        # No Outlook jobs in this fixture: the picker's placeholder option
+        # and the disabled Last run chip's tooltip ("No Outlook syncs yet"
+        # until 2026-10-06).
+        self.assertIn("<option disabled>No syncs yet</option>", self.html)
+        self.assertIn('disabled title="No syncs yet"', self.html)
+        self.assertNotIn("Outlook sync", self.html)
 
 
 class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
@@ -521,8 +536,8 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         # One Outlook sync (gap < 10 min) that produced statement A only;
         # B and C are NOT part of it (B predates it, C has no job at all).
         outlook_jobs = [
-            {"submitted_at": "2026-09-29 15:02:00", "statement_id": "A"},
-            {"submitted_at": "2026-09-29 14:58:00", "statement_id": None},
+            {"submitted_at": "2026-09-29 15:02:00", "statement_id": "A", "status": "COMPLETED"},
+            {"submitted_at": "2026-09-29 14:58:00", "statement_id": None, "status": "PROCESSING"},
         ]
         _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs],
                    get_outlook_synced_jobs=lambda: outlook_jobs, **_SIDEBAR)
@@ -537,12 +552,17 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', options)
         self.assertEqual(opts[0], ("", "None"))
         self.assertIn('<option value="2026-09-29T15:02:00Z" selected>', options)
-        # The sync's only real statement is A -- 1 of 2 jobs (B has no
-        # statement_id at all -- "still processing").
-        self.assertIn("1 of 2 statements", options)
+        # Counted by job status (2026-10-06): A completed, the other job
+        # is still PROCESSING (no statement_id yet).
+        self.assertIn("2 statements (1 completed, 1 still processing)", options)
         # On load Last run is the highlighted control, not the picker's button.
         self.assertIn('class="filter-chip active" id="time-last-run"', self.html)
         self.assertIn('class="filter-chip sync-picker-btn" id="sync-filter-btn"', self.html)
+
+    def test_past_syncs_button_wording(self):
+        # "Past Outlook syncs" until 2026-10-06.
+        self.assertRegex(self.html, r'id="sync-filter-btn"[^>]*>\s*Past syncs<svg')
+        self.assertNotIn("Outlook sync", self.html)
 
     def test_calendar_button_and_hidden_date_input(self):
         self.assertIn('id="validation-date-btn"', self.html)
@@ -558,8 +578,25 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         self.assertIn('card.dataset.sync === sync', self.html)
         self.assertIn('card.dataset.day === day', self.html)
 
-    def test_hero_summary_stays_unfiltered(self):
-        self.assertIn('<div class="report-hero-stat-num">3</div>', self.html)
+    def test_hero_starts_on_the_default_window_and_top_bar_stays_all_time(self):
+        # 2026-10-06: the hero follows the time window. Default = Last run
+        # (the newest sync), which holds only A (passed) -- not B or C.
+        self.assertIn('id="hero-total">1</div>', self.html)
+        self.assertIn('id="hero-passed">1</div>', self.html)
+        self.assertIn('id="hero-failed">0</div>', self.html)
+        self.assertIn('id="hero-pct">100%</div>', self.html)
+        self.assertIn('style="--pct:100"', self.html)
+        self.assertIn("3 intake attempts in total", self.html)
+
+    def test_hero_is_recounted_by_the_filter_script_ignoring_the_status_chip(self):
+        script = self.html[self.html.index("function applyFilters()"):]
+        script = script[:script.index("\n  }\n")]
+        # Counted from the time window + vendor/shop/period match only...
+        self.assertIn("if (inWindow) {", script)
+        self.assertIn("updateHero(heroCount, heroPassedCount);", script)
+        # ...while the Pass/Fail chip only decides which cards are shown.
+        self.assertIn('card.style.display = (matchesStatus && inWindow) ? "" : "none";', script)
+        self.assertNotIn("matchesStatus) {", script)
 
 
 if __name__ == "__main__":

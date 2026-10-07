@@ -428,7 +428,7 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
     STRICTLY READ-ONLY: this issues SELECTs against the Fabric Lakehouse
     and nothing else. It writes to NetSuite, Fabric and Azure SQL never,
     resolves no exception, and has no POST counterpart -- closing an
-    exception stays with the existing Accept/Dispute/Escalate forms.
+    exception stays with the existing Accept/Reject/Escalate forms.
 
     Returns an HTML fragment rather than a full page so changing a filter
     re-renders only the results, not the exception under review."""

@@ -8,37 +8,47 @@
     <h1>Validation Gate</h1>
   </div>
   <div class="topbar-actions">
-    <span style="font-size:12px;color:var(--text-muted)">{{ runs | length }} intake attempt{{ "s" if runs | length != 1 }}</span>
+    <span style="font-size:12px;color:var(--text-muted)">{{ "{:,}".format(runs | length) }} intake attempt{{ "s" if runs | length != 1 }} in total</span>
   </div>
 </div>
 {% endblock %}
 
 {% block content %}
 {% if runs %}
-{% set passed_runs = runs | selectattr('passed') | list %}
-{% set total_runs = runs | length %}
+{# Hero (2026-10-06): counts the attempts in the selected time window
+   (Today / Last run / Past syncs / a day) and vendor/shop/period filters
+   -- the same cards the grid shows -- but NOT the Pass/Fail chip, so
+   "Failed" never drops to 0 just because "Passed" is picked. The script
+   at the bottom recounts on every filter change; rendered here for the
+   default window (the newest sync, or every attempt when there is no
+   sync yet), so the first paint already matches. The top bar keeps the
+   all-time count. #}
+{% set default_sync = sync_options[0].value if sync_options else '' %}
+{% set hero_runs = (runs | selectattr('sync_time', 'equalto', default_sync) | list) if default_sync else runs %}
+{% set passed_runs = hero_runs | selectattr('passed') | list %}
+{% set total_runs = hero_runs | length %}
 {% set pct = ((passed_runs | length / total_runs) * 100) | round | int if total_runs else 0 %}
 
-<div class="report-hero">
-  <div class="report-donut" style="--pct:{{ pct }}">
+<div class="report-hero" id="validation-hero">
+  <div class="report-donut" id="hero-donut" style="--pct:{{ pct }}">
     <div class="report-donut-hole">
-      <div class="report-donut-pct">{{ pct }}%</div>
+      <div class="report-donut-pct" id="hero-pct">{{ pct }}%</div>
       <div class="report-donut-label">Pass rate</div>
     </div>
   </div>
   <div class="report-hero-stats">
     <div>
-      <div class="report-hero-stat-num">{{ total_runs }}</div>
+      <div class="report-hero-stat-num" id="hero-total">{{ "{:,}".format(total_runs) }}</div>
       <div class="report-hero-stat-label">Intake attempts checked</div>
     </div>
     <div class="report-hero-divider"></div>
     <div>
-      <div class="report-hero-stat-num success">{{ passed_runs | length }}</div>
+      <div class="report-hero-stat-num success" id="hero-passed">{{ "{:,}".format(passed_runs | length) }}</div>
       <div class="report-hero-stat-label">Passed</div>
     </div>
     <div class="report-hero-divider"></div>
     <div>
-      <div class="report-hero-stat-num warning">{{ total_runs - (passed_runs | length) }}</div>
+      <div class="report-hero-stat-num warning" id="hero-failed">{{ "{:,}".format(total_runs - (passed_runs | length)) }}</div>
       <div class="report-hero-stat-label">Failed</div>
     </div>
   </div>
@@ -48,7 +58,7 @@
    as Home's and Exceptions' #time-window row, but client-side like every
    other filter on this page. Like Home's, it is ONE window, not stacked
    filters: Today and the calendar pick a US Eastern day (matched against
-   each card's data-day), Last run and the "Past Outlook syncs" picker
+   each card's data-day), Last run and the "Past syncs" picker
    pick an Outlook sync (outlook_sync_options(), newest first, matched
    against data-sync), and picking either kind clears the other. Defaults
    to the newest sync, same as Home; the picker's "None" shows every
@@ -61,19 +71,19 @@
 <div class="filter-chips" style="flex-wrap:wrap;align-items:center;margin-bottom:8px" id="time-window" aria-label="Time window">
   <button type="button" class="filter-chip" id="time-today" data-today="{{ today_eastern }}">Today</button>
   <button type="button" class="filter-chip{{ ' active' if sync_options }}" id="time-last-run"
-          data-sync="{{ sync_options[0].value if sync_options else '' }}"{% if not sync_options %} disabled title="No Outlook syncs yet"{% endif %}>Last run</button>
+          data-sync="{{ sync_options[0].value if sync_options else '' }}"{% if not sync_options %} disabled title="No syncs yet"{% endif %}>Last run</button>
   <select id="sync-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
     <option value="">None</option>
     {% for opt in sync_options %}
     <option value="{{ opt.value }}" {{ 'selected' if loop.first }}>{{ opt.label }}</option>
     {% endfor %}
     {% if sync_truncated %}<option disabled>older syncs not shown</option>{% endif %}
-    {% if not sync_options %}<option disabled>No Outlook syncs yet</option>{% endif %}
+    {% if not sync_options %}<option disabled>No syncs yet</option>{% endif %}
   </select>
   <div class="ns-chip-wrap" data-sync-picker="sync-filter">
     <button type="button" class="filter-chip sync-picker-btn" id="sync-filter-btn"
             aria-haspopup="listbox" aria-expanded="false" aria-controls="sync-filter-list">
-      Past Outlook syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+      Past syncs<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
     </button>
     <ul class="ns-popover sync-picker-list" id="sync-filter-list" role="listbox" aria-labelledby="sync-filter-btn" hidden></ul>
   </div>
@@ -152,22 +162,46 @@
   var cards = document.querySelectorAll("#validation-card-grid .report-card");
   var currentStatus = "all";
 
+  var heroDonut = document.getElementById("hero-donut");
+  var heroPct = document.getElementById("hero-pct");
+  var heroTotal = document.getElementById("hero-total");
+  var heroPassed = document.getElementById("hero-passed");
+  var heroFailed = document.getElementById("hero-failed");
+
+  // The hero counts the cards in the time window + vendor/shop/period
+  // filters, ignoring the Pass/Fail chip -- see the template comment above
+  // #validation-hero.
+  function updateHero(total, passed) {
+    var pct = total ? Math.round(passed / total * 100) : 0;
+    heroTotal.textContent = total.toLocaleString("en-US");
+    heroPassed.textContent = passed.toLocaleString("en-US");
+    heroFailed.textContent = (total - passed).toLocaleString("en-US");
+    heroPct.textContent = pct + "%";
+    heroDonut.style.setProperty("--pct", pct);
+  }
+
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
     var period = periodFilter.value;
     var sync = syncFilter.value;
     var day = dateInput.value;
+    var heroCount = 0;
+    var heroPassedCount = 0;
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
-      var matchesVendor = !vendor || card.dataset.vendor === vendor;
-      var matchesShop = !shop || card.dataset.shop === shop;
-      var matchesPeriod = !period || card.dataset.period === period;
-      var matchesSync = !sync || card.dataset.sync === sync;
-      var matchesDay = !day || card.dataset.day === day;
-      card.style.display = (matchesStatus && matchesVendor && matchesShop && matchesPeriod
-        && matchesSync && matchesDay) ? "" : "none";
+      var inWindow = (!vendor || card.dataset.vendor === vendor)
+        && (!shop || card.dataset.shop === shop)
+        && (!period || card.dataset.period === period)
+        && (!sync || card.dataset.sync === sync)
+        && (!day || card.dataset.day === day);
+      if (inWindow) {
+        heroCount += 1;
+        if (card.dataset.status === "pass") { heroPassedCount += 1; }
+      }
+      card.style.display = (matchesStatus && inWindow) ? "" : "none";
     });
+    updateHero(heroCount, heroPassedCount);
   }
 
   statusChips.forEach(function (chip) {

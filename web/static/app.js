@@ -142,10 +142,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // An EMPTY amount box means "no amount filter" regardless of which
     // of the three tolerance buttons is selected -- there is no separate
-    // "Any amount" button any more.
+    // "Any amount" button any more; the chip's x empties the box.
     function amountChipText() {
       const raw = (state.amount || "").trim();
-      if (!raw) return "Any";
+      if (!raw) return "Any amount";
       const n = parseFloat(raw);
       const money = isNaN(n) ? raw : "$" + n.toFixed(2);
       const prefix = state.tolerance === "up_to" ? "Up to "
@@ -153,11 +153,10 @@ document.addEventListener("DOMContentLoaded", function () {
       return prefix + money;
     }
 
+    // Both ticked is the "any" state the Status chip's x resets to.
     function statusChipText() {
-      const labels = [];
-      if (state.statuses.indexOf("open") !== -1) labels.push("Open");
-      if (state.statuses.indexOf("paid") !== -1) labels.push("Paid");
-      return labels.join(", ") || "Open";
+      if (state.statuses.length !== 1) return "Any status";
+      return state.statuses[0] === "paid" ? "Paid" : "Open";
     }
 
     function dateChipText() {
@@ -167,20 +166,57 @@ document.addEventListener("DOMContentLoaded", function () {
       return DATE_LABELS[state.range] || "Any time";
     }
 
+    // The four filter chips: the chip button, its dropdown, and its x
+    // (clear) button -- a sibling of the chip, since a button can't nest
+    // inside another (2026-10-06).
+    const FILTERS = {
+      vendor: { chip: "nsChipVendor", pop: "nsPopVendor", clear: "nsClearVendor" },
+      amount: { chip: "nsChipAmount", pop: "nsPopAmount", clear: "nsClearAmount" },
+      date: { chip: "nsChipDate", pop: "nsPopDate", clear: "nsClearDate" },
+      status: { chip: "nsChipStatus", pop: "nsPopStatus", clear: "nsClearStatus" }
+    };
+
+    // Whether a chip is narrowing the search right now. Drives both its
+    // highlight and its x, which resets it to the opposite, "any" state
+    // (CLEAR_TO_ANY below).
+    function filterIsSet(name) {
+      if (name === "vendor") return state.useVendor;
+      if (name === "amount") return !!state.amount.trim();
+      if (name === "date") return state.range !== "any";
+      return state.statuses.length === 1;
+    }
+
+    // What each chip's x resets it to: Any vendor / Any amount (box
+    // emptied, tolerance back to Exact) / Any time / Any status (both
+    // ticked). Reset filters, by contrast, goes back to the opening
+    // defaults (defaultState()).
+    const CLEAR_TO_ANY = {
+      vendor: function () { state.useVendor = false; },
+      amount: function () { state.amount = ""; state.tolerance = "exact"; },
+      date: function () { state.range = "any"; state.dateFrom = ""; state.dateTo = ""; },
+      status: function () { state.statuses = ["open", "paid"]; }
+    };
+
     function renderChips() {
       document.getElementById("nsChipVendorValue").textContent =
-        state.useVendor ? (ctx.vendorDisplay || "This vendor") : "All vendors";
-      document.getElementById("nsChipVendor").classList.toggle("ns-chip-on", state.useVendor);
-
+        state.useVendor ? (ctx.vendorDisplay || "This vendor") : "Any vendor";
       document.getElementById("nsChipAmountValue").textContent = amountChipText();
-      document.getElementById("nsChipAmount").classList.toggle("ns-chip-on", !!state.amount.trim());
-
       document.getElementById("nsChipDateValue").textContent = dateChipText();
-      document.getElementById("nsChipDate").classList.toggle("ns-chip-on", state.range !== "any");
-
       document.getElementById("nsChipStatusValue").textContent = statusChipText();
-      document.getElementById("nsChipStatus").classList.toggle(
-        "ns-chip-on", state.statuses.length === 1 && state.statuses[0] === "paid");
+
+      Object.keys(FILTERS).forEach(function (name) {
+        const set = filterIsSet(name);
+        const clearBtn = document.getElementById(FILTERS[name].clear);
+        document.getElementById(FILTERS[name].chip).classList.toggle("ns-chip-on", set);
+        clearBtn.hidden = !set;
+        clearBtn.parentElement.classList.toggle("ns-chip-has-clear", set);
+      });
+
+      // Mark the chosen tolerance, so picking one with the box still
+      // empty (nothing on the chip changes yet) is visible in the list.
+      document.querySelectorAll("#nsPopAmount .ns-pop-opt").forEach(function (opt) {
+        opt.setAttribute("aria-pressed", String(opt.dataset.tol === state.tolerance));
+      });
 
       nsInvoiceHint.hidden = invoiceCharCount() === 0 || invoiceCharCount() >= MIN_INVOICE_CHARS;
     }
@@ -272,34 +308,47 @@ document.addEventListener("DOMContentLoaded", function () {
     nsStatusPaid.addEventListener("change", updateStatusesFromCheckboxes);
 
     function closePopovers(except) {
-      [["nsChipVendor", "nsPopVendor"], ["nsChipAmount", "nsPopAmount"],
-       ["nsChipDate", "nsPopDate"], ["nsChipStatus", "nsPopStatus"]].forEach(function (pair) {
-        if (pair[1] === except) return;
-        document.getElementById(pair[1]).hidden = true;
-        document.getElementById(pair[0]).setAttribute("aria-expanded", "false");
+      Object.keys(FILTERS).forEach(function (name) {
+        if (name === except) return;
+        document.getElementById(FILTERS[name].pop).hidden = true;
+        document.getElementById(FILTERS[name].chip).setAttribute("aria-expanded", "false");
       });
     }
 
-    function togglePopover(chipId, popId) {
-      const pop = document.getElementById(popId);
-      const chip = document.getElementById(chipId);
+    // Opening one dropdown closes any other.
+    function togglePopover(name) {
+      const pop = document.getElementById(FILTERS[name].pop);
       const willOpen = pop.hidden;
-      closePopovers(willOpen ? popId : null);
+      closePopovers(willOpen ? name : null);
       pop.hidden = !willOpen;
-      chip.setAttribute("aria-expanded", String(willOpen));
+      document.getElementById(FILTERS[name].chip).setAttribute("aria-expanded", String(willOpen));
     }
 
-    document.getElementById("nsChipVendor").addEventListener("click", function () {
-      togglePopover("nsChipVendor", "nsPopVendor");
-    });
-    document.getElementById("nsChipAmount").addEventListener("click", function () {
-      togglePopover("nsChipAmount", "nsPopAmount");
-    });
-    document.getElementById("nsChipDate").addEventListener("click", function () {
-      togglePopover("nsChipDate", "nsPopDate");
-    });
-    document.getElementById("nsChipStatus").addEventListener("click", function () {
-      togglePopover("nsChipStatus", "nsPopStatus");
+    // The filter whose dropdown is open, or null.
+    function openFilter() {
+      return Object.keys(FILTERS).find(function (name) {
+        return !document.getElementById(FILTERS[name].pop).hidden;
+      }) || null;
+    }
+
+    // The x: back to the "any" state, search again, and move focus to
+    // the chip, since the x itself disappears.
+    function clearFilter(name) {
+      CLEAR_TO_ANY[name]();
+      applyStateToInputs();
+      closePopovers(null);
+      renderChips();
+      runSearch();
+      document.getElementById(FILTERS[name].chip).focus();
+    }
+
+    Object.keys(FILTERS).forEach(function (name) {
+      document.getElementById(FILTERS[name].chip).addEventListener("click", function () {
+        togglePopover(name);
+      });
+      document.getElementById(FILTERS[name].clear).addEventListener("click", function () {
+        clearFilter(name);
+      });
     });
 
     document.querySelectorAll("#nsPopVendor .ns-pop-opt").forEach(function (opt) {
@@ -313,8 +362,15 @@ document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll("#nsPopAmount .ns-pop-opt").forEach(function (opt) {
       opt.addEventListener("click", function () {
         state.tolerance = opt.dataset.tol;
-        closePopovers(null);
         renderChips();
+        if (!state.amount.trim()) {
+          // Nothing to apply a tolerance to yet (and nothing to search
+          // differently): keep the dropdown open and put the cursor in
+          // the amount box instead of closing with no visible change.
+          nsAmountInput.focus();
+          return;
+        }
+        closePopovers(null);
         runSearch();
       });
     });
@@ -342,8 +398,8 @@ document.addEventListener("DOMContentLoaded", function () {
       nsAmountInput.value = state.amount;
       nsStatusOpen.checked = state.statuses.indexOf("open") !== -1;
       nsStatusPaid.checked = state.statuses.indexOf("paid") !== -1;
-      document.getElementById("nsDateFrom").value = "";
-      document.getElementById("nsDateTo").value = "";
+      document.getElementById("nsDateFrom").value = state.dateFrom;
+      document.getElementById("nsDateTo").value = state.dateTo;
     }
 
     document.getElementById("nsReset").addEventListener("click", function () {
@@ -371,6 +427,28 @@ document.addEventListener("DOMContentLoaded", function () {
     nsFindBtn.addEventListener("click", openModal);
     document.getElementById("nsModalClose").addEventListener("click", closeModal);
     document.getElementById("nsModalDone").addEventListener("click", closeModal);
+    // An open dropdown closes on a click anywhere outside its own chip,
+    // x and dropdown. Capture phase, so it still runs for controls that
+    // stop propagation (the results' Details toggles). Clicks inside it
+    // -- the amount box, the date inputs, the status checkboxes -- keep
+    // it open.
+    nsModal.addEventListener("click", function (ev) {
+      const open = openFilter();
+      if (open && !document.getElementById(FILTERS[open].pop).parentElement.contains(ev.target)) {
+        closePopovers(null);
+      }
+    }, true);
+    // Escape with a dropdown open closes only that dropdown and returns
+    // focus to its chip -- preventDefault() on the keydown keeps <dialog>
+    // from also treating it as "cancel". With none open, Escape closes
+    // the modal as before.
+    nsModal.addEventListener("keydown", function (ev) {
+      const open = openFilter();
+      if (ev.key !== "Escape" || !open) return;
+      ev.preventDefault();
+      closePopovers(null);
+      document.getElementById(FILTERS[open].chip).focus();
+    });
     // Clicking the backdrop: <dialog> reports clicks on the backdrop as
     // clicks on the dialog element itself, so anything landing directly
     // on it (rather than on a child) is a backdrop click.
@@ -381,7 +459,7 @@ document.addEventListener("DOMContentLoaded", function () {
     nsModal.addEventListener("close", function () { nsFindBtn.focus(); });
   }
 
-  // "Past Outlook syncs" picker (2026-10-01): a fixed-label button plus a
+  // "Past syncs" picker (2026-10-01): a fixed-label button plus a
   // role="listbox" popup (styled like the NetSuite modal's .ns-popover),
   // layered over a visually hidden native <select> -- the same bridge as
   // the calendar button over its hidden date input. The <select> stays the
