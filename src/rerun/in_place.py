@@ -125,9 +125,14 @@ class LiveIO:
     def delta_read(self, table, statement_id):
         """(rows, table version) read straight from the Delta files -- the SQL
         endpoint truncates raw_payload at 8000 characters."""
+        import pyarrow as pa
+        from deltalake import QueryBuilder
         dt_ = self._delta(table)
-        rows = dt_.to_pyarrow_table(filters=[("statement_id", "=", statement_id)]).to_pylist()
-        return rows, dt_.version()
+        # DataFusion filters inside the engine; pyarrow's dataset-based
+        # filters need a DLL some Windows policies block (_acero).
+        escaped = statement_id.replace("'", "''")
+        result = QueryBuilder().register("t", dt_).execute(f"SELECT * FROM t WHERE statement_id = '{escaped}'").read_all()
+        return pa.table(result).to_pylist(), dt_.version()
 
     def delta_delete(self, table, statement_id):
         from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
