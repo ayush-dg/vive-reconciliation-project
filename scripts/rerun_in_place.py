@@ -9,6 +9,10 @@ extractor (no AI), keeping its statement_id. See src/rerun/in_place.py.
   fingerprint; writes the backup to every --backup-dir FIRST and reads it
   back, then writes):
     python scripts/rerun_in_place.py --statement-id STMT-XXXXXXXX --apply --confirm <fingerprint>
+  Resume a half-applied statement (Azure SQL written, raw row left in staging,
+  Silver/matching not run) -- checks it against the backup's plan first:
+    python scripts/rerun_in_place.py --resume <backup.json>                       (dry run)
+    python scripts/rerun_in_place.py --resume <backup.json> --apply --confirm <fingerprint>
   Undo (dry run unless --apply):
     python scripts/rerun_in_place.py --undo scratchpad/rerun_backups/rerun_backup_<id>_<stamp>.json [--apply]
 
@@ -44,9 +48,23 @@ def main(argv=None, io=None, intake=None):
     parser.add_argument("--confirm", help="the fingerprint printed by the dry run")
     parser.add_argument("--backup-dir", action="append", help="repeatable; default scratchpad/rerun_backups")
     parser.add_argument("--undo", help="a backup file written by --apply")
+    parser.add_argument("--resume", help="a backup file of a half-applied statement: finish its Silver + matching")
     args = parser.parse_args(argv)
     io = io or in_place.LiveIO()
 
+    if args.resume:
+        if args.apply and not args.confirm:
+            parser.error("--resume --apply needs --confirm <fingerprint> from the resume dry run")
+        doc = json.load(open(args.resume, encoding="utf-8"))
+        try:
+            out = in_place.resume(io, doc, apply_changes=args.apply, expected_fingerprint=args.confirm)
+        except in_place.RefusedError as e:
+            print("REFUSED:", e)
+            return 2
+        print(json.dumps(out, indent=1, default=str))
+        if not args.apply:
+            print(f"\nRESUME DRY RUN -- nothing written. To apply: --resume {args.resume} --apply --confirm {out['fingerprint']}")
+        return 0
     if args.undo:
         doc = json.load(open(args.undo, encoding="utf-8"))
         print(json.dumps(in_place.undo(io, doc, apply_changes=args.apply), indent=1, default=str))

@@ -59,6 +59,7 @@ class World:
         self.lh = {t: [] for t in in_place.LAKEHOUSE_TABLES}
         self.calls = []
         self.visible_fields = None  # None = the endpoint shows what's in self.lh
+        self.fail_append = set()
 
     def sql(self, sql, params=()):
         conn = sqlite3.connect(self.db)
@@ -119,7 +120,12 @@ class FakeIO:
         self.w.lh[table] = [r for r in self.w.lh[table] if r["statement_id"] != statement_id]
 
     def delta_append(self, table, rows):
+        if table in self.w.fail_append:
+            raise OSError(f"simulated write failure on {table}")
         self.w.lh[table] += [dict(r) for r in rows]
+
+    def delta_columns(self, table):
+        return ["statement_id", "raw_payload", "ingestion_timestamp"] if table.startswith("raw_statement") else []
 
     def download_pdf(self, url, dest):
         raise AssertionError("tests pass --pdf")
@@ -598,6 +604,136 @@ class TestApply(RerunTestCase):
         self.assertFalse(in_place._wait_exact_visibility(self.io, SID, expected, timeout_seconds=0))
         self.world.visible_fields = [{"statement_id": SID, "line_number": 0, "raw_field_name": "Due", "raw_field_value": "100.00"}]
         self.assertTrue(in_place._wait_exact_visibility(self.io, SID, expected, timeout_seconds=0))
+
+
+class TestPromoteAndStop(RerunTestCase):
+
+    def az_and_wh(self):
+        snap = json.loads(self.world.snapshot())
+        return json.dumps({"az": snap["az"], "wh": snap["wh"]}, sort_keys=True)
+
+    def test_promote_moves_the_staged_row_through_io_and_clears_staging(self):
+        seed(self.world)
+        self.world.lh["raw_statement"] = []
+        self.world.lh["raw_statement_staging"] = [{"statement_id": SID, "raw_payload": "new", "ingestion_timestamp": None}]
+        self.assertEqual(in_place.promote_raw(self.io, SID), 1)
+        self.assertEqual([r["raw_payload"] for r in self.world.lh["raw_statement"]], ["new"])
+        self.assertEqual(self.world.lh["raw_statement_staging"], [])
+
+    def test_adversarial_promote_refuses_an_unknown_column_and_a_missing_row(self):
+        seed(self.world)
+        self.world.lh["raw_statement_staging"] = [{"statement_id": SID, "raw_payload": "new", "surprise": 1}]
+        with self.assertRaisesRegex(in_place.RefusedError, "surprise"):
+            in_place.promote_raw(self.io, SID)
+        self.world.lh["raw_statement_staging"] = []
+        with self.assertRaisesRegex(in_place.RefusedError, "no staged"):
+            in_place.promote_raw(self.io, SID)
+
+    def test_apply_stops_before_any_azure_sql_write_when_the_raw_row_cannot_be_promoted(self):
+        seed(self.world)
+        state, new, decision, the_plan = self.dry_run()
+        paths = in_place.backup(state, [os.path.join(self.world.dir, "b1")], the_plan)
+        before = self.az_and_wh()
+        self.world.fail_append = {"raw_statement"}
+        with self.assertRaisesRegex(in_place.RefusedError, "promoting the raw row failed.*stopped before any Azure SQL write"):
+            in_place.apply(self.io, self.intake, state, new, decision, expected_fingerprint=the_plan["fingerprint"], backup_paths=paths)
+        self.assertEqual(self.az_and_wh(), before)
+
+    def test_apply_stops_before_any_azure_sql_write_when_the_lakehouse_counts_are_wrong(self):
+        seed(self.world)
+        state, new, decision, the_plan = self.dry_run()
+        paths = in_place.backup(state, [os.path.join(self.world.dir, "b1")], the_plan)
+        before = self.az_and_wh()
+        real_unnest = sys.modules["src.lakehouse.bronze_unnest"].write_unnested_from_invoices
+        with mock.patch("src.lakehouse.bronze_unnest.write_unnested_from_invoices",
+                        lambda invoices, sid: real_unnest(invoices[:-1], sid)):  # one line short
+            with self.assertRaisesRegex(in_place.RefusedError, "unnested_statement_lines: 2 row"):
+                in_place.apply(self.io, self.intake, state, new, decision, expected_fingerprint=the_plan["fingerprint"], backup_paths=paths)
+        self.assertEqual(self.az_and_wh(), before)
+
+
+class TestResume(RerunTestCase):
+
+    def half_apply(self):
+        """The real 2026-10-07 STMT-004FB9CA state: Azure SQL written, raw row
+        left in staging, Silver + matching not run."""
+        seed(self.world)
+        state, new, decision, the_plan = self.dry_run()
+        paths = in_place.backup(state, [os.path.join(self.world.dir, "b1")], the_plan)
+        real_wait = in_place._wait_exact_visibility
+        with mock.patch.object(in_place, "promote_raw", lambda io, sid: 0), \
+                mock.patch.object(in_place, "_lakehouse_problems", lambda *a: []), \
+                mock.patch.object(in_place, "_wait_exact_visibility", lambda io, sid, f, **k: real_wait(io, sid, f, timeout_seconds=0)):
+            result = in_place.apply(self.io, self.intake, state, new, decision, expected_fingerprint=the_plan["fingerprint"], backup_paths=paths)
+        self.assertFalse(result["silver_built"])
+        self.assertEqual(len(self.world.lh["raw_statement_staging"]), 1)
+        self.assertEqual([r for r in self.world.lh["raw_statement"] if r["statement_id"] == SID], [])
+        self.world.calls.clear()
+        return json.load(open(paths[0], encoding="utf-8"))
+
+    def test_resume_dry_run_passes_and_writes_nothing(self):
+        doc = self.half_apply()
+        before = self.world.snapshot()
+        out = in_place.resume(self.io, doc)
+        self.assertTrue(out["dry_run"])
+        self.assertEqual((out["now"]["raw_statement"], out["now"]["raw_statement_staging"]), (0, 1))
+        self.assertEqual(self.world.snapshot(), before)
+
+    def test_resume_apply_promotes_then_builds_silver_and_matches(self):
+        doc = self.half_apply()
+        fp = in_place.resume(self.io, doc)["fingerprint"]
+        result = in_place.resume(self.io, doc, apply_changes=True, expected_fingerprint=fp)
+        self.assertEqual(result["raw_promoted"], 1)
+        self.assertEqual(len([r for r in self.world.lh["raw_statement"] if r["statement_id"] == SID]), 1)
+        self.assertEqual(self.world.lh["raw_statement_staging"], [])
+        self.assertTrue(result["silver_built"])
+        self.assertEqual([c for c in self.world.calls if c[0] in ("build_silver", "match")], [("build_silver", SID), ("match", SID)])
+
+    def assert_resume_refused(self, doc, message, **kw):
+        before = self.world.snapshot()
+        with self.assertRaisesRegex(in_place.RefusedError, message):
+            in_place.resume(self.io, doc, **kw)
+        self.assertEqual(self.world.snapshot(), before)
+
+    def test_adversarial_intake_row_not_as_planned(self):
+        doc = self.half_apply()
+        self.world.sql("UPDATE document_intake_log SET validation_status = 'mismatch' WHERE statement_id = ?", [SID])
+        self.assert_resume_refused(doc, "validation_status")
+
+    def test_adversarial_bronze_count_not_as_planned(self):
+        doc = self.half_apply()
+        self.world.sql("DELETE FROM bronze_vendor_statement_raw WHERE id = (SELECT MIN(id) FROM bronze_vendor_statement_raw WHERE statement_id = ?)", [SID])
+        self.assert_resume_refused(doc, "bronze_vendor_statement_raw: 2 rows")
+
+    def test_adversarial_no_staged_row_or_already_promoted(self):
+        doc = self.half_apply()
+        staged = self.world.lh["raw_statement_staging"]
+        self.world.lh["raw_statement_staging"] = []
+        self.assert_resume_refused(doc, "staging only")
+        self.world.lh["raw_statement"] += staged
+        self.assert_resume_refused(doc, "staging only")
+
+    def test_adversarial_new_lines_or_fields_missing(self):
+        doc = self.half_apply()
+        self.world.lh["unnested_statement_fields"] = [r for r in self.world.lh["unnested_statement_fields"]
+                                                     if not (r["statement_id"] == SID and r["line_number"] == 2)]
+        self.assert_resume_refused(doc, "unnested_statement_fields")
+
+    def test_adversarial_silver_or_recon_changed_since_the_backup(self):
+        doc = self.half_apply()
+        self.world.wh["silver.recon_matched_invoices"].append({"statement_id": SID, "match_id": "m9"})
+        self.assert_resume_refused(doc, "recon_matched_invoices changed")
+
+    def test_adversarial_wrong_backup_or_fingerprint_or_jobs_in_flight(self):
+        doc = self.half_apply()
+        other = dict(doc, statement_id="STMT-ZZZZ9999")
+        self.assert_resume_refused(other, "0 document_intake_log rows")  # resume only ever loads the backup's own statement
+        self.assert_resume_refused(doc, "changed since the resume dry run", apply_changes=True, expected_fingerprint="0" * 16)
+        self.world.insert("jobs", job_id="job-2", pdf_filename="x.pdf", pdf_path="x.pdf", submitted_at="2026-10-07T16:00:00",
+                          statement_id="STMT-NEW00001", status="PENDING")
+        self.assertTrue(in_place.resume(self.io, doc)["warnings"])  # dry run only warns
+        fp = in_place.resume(self.io, doc)["fingerprint"]
+        self.assert_resume_refused(doc, "in flight", apply_changes=True, expected_fingerprint=fp)
 
 
 class TestBackupAndUndo(RerunTestCase):

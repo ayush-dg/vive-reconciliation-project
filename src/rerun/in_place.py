@@ -140,6 +140,9 @@ class LiveIO:
         with fabric_pipeline_lock():
             self._delta(table).delete(predicate=f"statement_id = '{escaped}'")
 
+    def delta_columns(self, table):
+        return [f.name for f in self._delta(table).schema().to_arrow()]
+
     def delta_append(self, table, rows):
         import pyarrow as pa
         from deltalake import write_deltalake
@@ -497,6 +500,32 @@ def _wait_exact_visibility(io, statement_id, expected_fields, timeout_seconds=30
         time.sleep(poll)
 
 
+def promote_raw(io, statement_id: str) -> int:
+    """Moves this statement's staged raw row into bronze.raw_statement --
+    the tool's own version of bronze_raw.promote_staged_raw_statement(),
+    which reads the staging table through pyarrow.dataset (blocked by some
+    Windows policies). Reads through io.delta_read() instead, refuses a
+    staged row carrying a column bronze.raw_statement doesn't have (the
+    shared code would schema-merge it), appends, then clears staging."""
+    staged, _ = io.delta_read("raw_statement_staging", statement_id)
+    if not staged:
+        raise RefusedError("no staged raw_statement row to promote")
+    extra = sorted({k for r in staged for k in r} - set(io.delta_columns("raw_statement")))
+    if extra:
+        raise RefusedError(f"the staged raw row has columns bronze.raw_statement doesn't: {extra}")
+    io.delta_append("raw_statement", staged)
+    io.delta_delete("raw_statement_staging", statement_id)
+    return len(staged)
+
+
+def _lakehouse_problems(io, statement_id, expected_lines: int, expected_fields: int) -> list:
+    """What's wrong with the statement's Lakehouse Bronze rows (empty = landed)."""
+    counts = {t: len(io.delta_read(t, statement_id)[0]) for t in LAKEHOUSE_TABLES}
+    want = {"raw_statement": 1, "raw_statement_staging": 0,
+            "unnested_statement_lines": expected_lines, "unnested_statement_fields": expected_fields}
+    return [f"bronze.{t}: {counts[t]} row(s), expected {n}" for t, n in want.items() if counts[t] != n]
+
+
 def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_fingerprint: str,
           backup_paths: list, fresh_state: Optional[dict] = None) -> dict:
     """Writes the re-run. Refuses unless the state still has the dry run's
@@ -511,20 +540,28 @@ def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_finger
         raise RefusedError("no backup on disk -- refusing to write")
     sid = state["statement_id"]
     source_file = os.path.basename(state["intake"][0]["source_file"] or f"{sid}.pdf")
-    from src.lakehouse.bronze_raw import promote_staged_raw_statement, write_raw_statement
+    from src.lakehouse.bronze_raw import write_raw_statement
     from src.lakehouse.bronze_unnest import _explode, write_unnested_from_invoices
-    from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
     result = {"statement_id": sid}
 
     # 1. Lakehouse Bronze: delete the old rows first, then write the new ones.
+    #    If they don't all land, stop HERE -- before any Azure SQL write
+    #    (undo restores the Lakehouse from the backup).
+    stop = "-- stopped before any Azure SQL write; restore with --undo <backup>"
     for t in LAKEHOUSE_TABLES:
         io.delta_delete(t, sid)
     write_raw_statement(new["invoices"], new["vendor_id"], sid, source_file, new["provider"],
                         vendor_display_name=intake.display_name(new["vendor_name"]),
                         version_number=new["version_info"]["version_number"])
-    with fabric_pipeline_lock():
-        result["raw_promoted"] = promote_staged_raw_statement(sid)
+    try:
+        result["raw_promoted"] = promote_raw(io, sid)
+    except Exception as e:
+        raise RefusedError(f"promoting the raw row failed ({type(e).__name__}: {str(e)[:200]}) {stop}") from e
     result["lines_written"], result["fields_written"] = write_unnested_from_invoices(new["invoices"], sid)
+    expected_lines, expected_fields = _explode([{"_raw_row": inv.get("_raw_row")} for inv in new["invoices"]], sid)
+    problems = _lakehouse_problems(io, sid, len(expected_lines), len(expected_fields))
+    if problems:
+        raise RefusedError(f"Lakehouse Bronze didn't land ({'; '.join(problems)}) {stop}")
     from src.lakehouse.bronze_raw import _refresh_sql_endpoint_metadata
     _refresh_sql_endpoint_metadata()
 
@@ -547,19 +584,96 @@ def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_finger
     # 3. Silver + NetSuite matching, when decided.
     result["silver_and_matching"] = decision["reason"]
     if decision["run"]:
-        _, expected_fields = _explode([{"_raw_row": inv.get("_raw_row")} for inv in new["invoices"]], sid)
-        if not _wait_exact_visibility(io, sid, expected_fields):
-            result["silver_built"] = False
-            result["silver_and_matching"] = "NOT RUN: the new Bronze rows weren't visible in the SQL endpoint in time"
-            return result
-        if refusals(load_state(io, sid)):
-            raise RefusedError("an exception changed status during the re-run -- matching not run")
-        from src.lakehouse.silver_build import build_silver_direct
-        from src.matching.fabric_matching import run_fabric_matching
-        result["silver_built"] = build_silver_direct(sid)
-        if result["silver_built"]:
-            result["matching"] = run_fabric_matching(sid)
+        _silver_and_matching(io, sid, expected_fields, result)
     return result
+
+
+def _silver_and_matching(io, sid, expected_fields, result: dict) -> dict:
+    """Waits until the SQL endpoint shows exactly expected_fields, re-checks
+    that every exception is still OPEN, then builds Silver and re-matches."""
+    if not _wait_exact_visibility(io, sid, expected_fields):
+        result["silver_built"] = False
+        result["silver_and_matching"] = "NOT RUN: the new Bronze rows weren't visible in the SQL endpoint in time"
+        return result
+    if refusals(load_state(io, sid)):
+        raise RefusedError("an exception changed status (or a job started) during the re-run -- matching not run")
+    from src.lakehouse.silver_build import build_silver_direct
+    from src.matching.fabric_matching import run_fabric_matching
+    result["silver_built"] = build_silver_direct(sid)
+    if result["silver_built"]:
+        result["matching"] = run_fabric_matching(sid)
+    return result
+
+
+def _rows_key(rows):
+    return sorted(json.dumps(r, sort_keys=True, default=str) for r in rows)
+
+
+def resume_problems(state: dict, backup_doc: dict) -> list:
+    """Why a half-applied statement (Azure SQL written, raw row stuck in
+    staging, Silver/matching not run) can NOT be resumed from backup_doc."""
+    the_plan, out = backup_doc["plan"], []
+    if state["statement_id"] != backup_doc["statement_id"]:
+        return [f"backup is for {backup_doc['statement_id']}, not {state['statement_id']}"]
+    if not the_plan["silver_and_matching"]["run"]:
+        out.append("the plan never ran Silver + matching for this statement -- nothing to resume")
+    if len(state["intake"]) != 1:
+        return out + [f"{len(state['intake'])} document_intake_log rows (expected 1)"]
+    row = state["intake"][0]
+    for col, change in the_plan["document_intake_log (UPDATE, 1 row)"].items():
+        if not _same(row.get(col), change["to"]):
+            out.append(f"document_intake_log.{col} is {row.get(col)!r}, not the planned {change['to']!r}")
+    for table, key in (("bronze_vendor_statement_raw", "bronze_vendor_statement_raw (delete + insert)"),
+                       ("silver_reconciliation_standard", "silver_reconciliation_standard (legacy; delete + insert)")):
+        if len(state["azure"][table]) != the_plan[key]["to"]:
+            out.append(f"{table}: {len(state['azure'][table])} rows, planned {the_plan[key]['to']}")
+    lake = state["lakehouse"]
+    if len(lake["raw_statement_staging"]) != 1 or lake["raw_statement"]:
+        out.append(f"expected the new raw row in staging only: raw_statement {len(lake['raw_statement'])}, "
+                   f"staging {len(lake['raw_statement_staging'])}")
+    lines_plan = the_plan["bronze.unnested_statement_lines (Lakehouse; delete + write)"]["to"]
+    fields_plan = the_plan["bronze.unnested_statement_fields (Lakehouse; delete + write)"]
+    if len(lake["unnested_statement_lines"]) != lines_plan:
+        out.append(f"bronze.unnested_statement_lines: {len(lake['unnested_statement_lines'])} rows, planned {lines_plan}")
+    if len(lake["unnested_statement_fields"]) != fields_plan["to"] or \
+            sorted({r["raw_field_name"] for r in lake["unnested_statement_fields"]}) != fields_plan["field names to"]:
+        out.append("bronze.unnested_statement_fields aren't the planned new rows")
+    for t in SILVER_TABLES + RECON_TABLES:
+        if _rows_key(_encode_rows(state["warehouse"][t])) != _rows_key(backup_doc["warehouse"][t]):
+            out.append(f"{t} changed since the backup")
+    return out
+
+
+def resume(io, backup_doc: dict, *, apply_changes: bool = False, expected_fingerprint: str = None) -> dict:
+    """Finishes a half-applied statement: promote its staged raw row, wait
+    for exact visibility, build Silver, re-match. Dry run unless
+    apply_changes; refuses unless every resume_problems() check passes."""
+    sid = backup_doc["statement_id"]
+    state = load_state(io, sid)
+    problems = refusals(state, dry_run=not apply_changes) + resume_problems(state, backup_doc)
+    if problems:
+        raise RefusedError("; ".join(problems))
+    fp = fingerprint(state)
+    steps = ["promote the staged raw row into bronze.raw_statement", "wait until the SQL endpoint shows exactly the new fields",
+             "build Silver (silver.statement + statement_line)", "re-run NetSuite matching (silver.recon_*)"]
+    if not apply_changes:
+        return {"dry_run": True, "statement_id": sid, "fingerprint": fp, "checks": "all passed", "steps": steps,
+                "warnings": warnings(state), "jobs_in_flight": state["jobs_in_flight"],
+                "now": {"raw_statement": len(state["lakehouse"]["raw_statement"]),
+                        "raw_statement_staging": len(state["lakehouse"]["raw_statement_staging"]),
+                        **{t: len(state["warehouse"][t]) for t in SILVER_TABLES + RECON_TABLES}}}
+    if fp != expected_fingerprint:
+        raise RefusedError("the stored state changed since the resume dry run -- run it again")
+    result = {"statement_id": sid, "resumed": True, "raw_promoted": promote_raw(io, sid)}
+    expected_fields = state["lakehouse"]["unnested_statement_fields"]
+    lines = len(state["lakehouse"]["unnested_statement_lines"])
+    problems = _lakehouse_problems(io, sid, lines, len(expected_fields))
+    if problems:
+        raise RefusedError(f"the raw row didn't land ({'; '.join(problems)}) -- Silver + matching not run")
+    from src.lakehouse.bronze_raw import _refresh_sql_endpoint_metadata
+    _refresh_sql_endpoint_metadata()
+    result["silver_and_matching"] = backup_doc["plan"]["silver_and_matching"]["reason"]
+    return _silver_and_matching(io, sid, expected_fields, result)
 
 
 def undo(io, backup_doc: dict, *, apply_changes: bool = False) -> dict:
