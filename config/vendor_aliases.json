@@ -259,7 +259,9 @@
   ],
   "DING'S_AUTO_PARTS": [
     "Ding's Auto Parts",
-    "Ding's Auto Parts - Autoly CT05"
+    "Ding's Auto Parts - Autoly CT05",
+    "Ding's Auto Parts - Autoly",
+    "Ding's Auto Parts - AUTOLY"
   ],
   "GOYETTE'S_INC": [
     "GOYETTE'S INC",
@@ -667,5 +669,21 @@
   "YERTY_AUTO_SERVICE": [
     "YERTY AUTO SERVICE",
     "Yerty Auto Service"
+  ],
+  "LIA_AUTO_GROUP": [
+    "Lia Auto Group",
+    "LIA AUTO GROUP",
+    "Lia Group Payables",
+    "Lia Honda of Albany",
+    "Lia Toyota of Wilbraham",
+    "Lia Toyota"
+  ],
+  "WILBERTS": [
+    "Wilbert's Inc.",
+    "Wilbert's Inc",
+    "Wilbert's, Inc.",
+    "Wilbert's Premium Auto Parts",
+    "Wilberts PAP Hudson Valley LLC",
+    "Wilbert's"
   ]
 }

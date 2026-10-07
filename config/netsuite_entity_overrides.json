@@ -562,5 +562,17 @@
   "YERTY_AUTO_SERVICE": {
     "entity_ids": ["397880"],
     "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "LIA_AUTO_GROUP": {
+    "entity_ids": ["180149", "65555"],
+    "note": "Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
+  },
+  "WILBERTS": {
+    "entity_ids": ["240269", "346384"],
+    "note": "Wilbert's, Inc. - Team PRP (240269), Wilberts PAP Hudson Valley LLC (346384). Derived 2026-10-07 by tranid trace of 3 statements (extract_wilberts + one Claude run): 26 of 35 lines verbatim; misses are mostly 'CR for #' credits with no NetSuite record."
+  },
+  "DING'S_AUTO_PARTS": {
+    "entity_ids": ["30638"],
+    "note": "Ding's Auto Sales (30638). Derived 2026-10-07 by tranid trace of 2 statements through both extract_autoly and the stored Claude runs: 10 of 20 lines each way, all under 30638; the rest are payments and invoices not yet in NetSuite."
   }
 }

@@ -189,7 +189,11 @@ def extract(pdf_path):
                 date = dates[0]["text"]
                 document_transaction = " ".join(w["text"] for w in others)
 
-                money_cols = {"purchases": "", "payments_credits": "", "balance": ""}
+                # None, not "", for an empty column: Silver's sign-based
+                # line typing treats "" as a present value, which turned a
+                # credit (blank Purchases, amount in Payments & Credits) into
+                # a CHARGE with no amount.
+                money_cols = {"purchases": None, "payments_credits": None, "balance": None}
                 for w in moneys:
                     money_cols[classify_money(w["x1"])] = w["text"]
 

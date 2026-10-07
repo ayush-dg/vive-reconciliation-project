@@ -751,3 +751,35 @@ YERTY_AUTO_SERVICE,Date,line_date,date,v1,1
 YERTY_AUTO_SERVICE,Type,transaction_code,string,v1,1
 YERTY_AUTO_SERVICE,Original Amount,charge_amount,decimal,v1,1
 YERTY_AUTO_SERVICE,Amount Remain,amount_remaining,decimal,v1,1
+LIA_AUTO_GROUP,date,line_date,date,v1,1
+LIA_AUTO_GROUP,document_transaction,original_invoice_number,string,v1,1
+LIA_AUTO_GROUP,purchases,charge_amount,decimal,v1,1
+LIA_AUTO_GROUP,payments_credits,payment_amount,decimal,v1,1
+LIA_AUTO_GROUP,balance,amount_remaining,decimal,v1,1
+WILBERTS,date,line_date,date,v1,1
+WILBERTS,store,description_raw,string,v1,1
+WILBERTS,invoice_number,original_invoice_number,string,v1,1
+WILBERTS,reference,invoice_number_ref,string,v1,1
+WILBERTS,amount,charge_amount,decimal,v1,1
+WILBERTS,balance,amount_remaining,decimal,v1,1
+WILBERTS,Date,line_date,date,v1,1
+WILBERTS,Store,description_raw,string,v1,1
+WILBERTS,Invoice #,original_invoice_number,string,v1,1
+WILBERTS,Reference,invoice_number_ref,string,v1,1
+WILBERTS,Amount,charge_amount,decimal,v1,1
+WILBERTS,Balance,amount_remaining,decimal,v1,1
+DING'S_AUTO_PARTS,date,line_date,date,v1,1
+DING'S_AUTO_PARTS,type,transaction_code,string,v1,1
+DING'S_AUTO_PARTS,reference_number,original_invoice_number,string,v1,1
+DING'S_AUTO_PARTS,original_invoice_ref,invoice_number_ref,string,v1,1
+DING'S_AUTO_PARTS,po_chk_number,po_number,string,v1,1
+DING'S_AUTO_PARTS,description,description_raw,string,v1,1
+DING'S_AUTO_PARTS,charged,charge_amount,decimal,v1,1
+DING'S_AUTO_PARTS,paid,payment_amount,decimal,v1,1
+DING'S_AUTO_PARTS,due,amount_remaining,decimal,v1,1
+DING'S_AUTO_PARTS,Date,line_date,date,v1,1
+DING'S_AUTO_PARTS,Transaction Type,original_invoice_number,string,v1,1
+DING'S_AUTO_PARTS,Cust PO/Chk #,po_number,string,v1,1
+DING'S_AUTO_PARTS,Charged,charge_amount,decimal,v1,1
+DING'S_AUTO_PARTS,Paid,payment_amount,decimal,v1,1
+DING'S_AUTO_PARTS,Due,amount_remaining,decimal,v1,1
