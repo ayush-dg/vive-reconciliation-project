@@ -750,5 +750,9 @@
   "SOUND_WAVES": {
     "entity_ids": ["287386"],
     "note": "SOUND WAVES (287386). ACTIVITY reads 'Invoice #220000014981: Due ...'; the number after # is the tranid (one bill is keyed with an extra 0), confirmed 2026-10-07."
+  },
+  "ABINGTON_HYUNDAI_MAZDA": {
+    "entity_ids": ["145497"],
+    "note": "Mazda of Abington (145497). The PDF filed as 'Burlington Hyundai' (customerinvoice (10).pdf) is Abington's Hyundai statement -- confirmed by the user 2026-10-07; Claude reads it as 'Abington Auto Parts Hyundai'. 2 of 3 lines tie out verbatim (573534AY) under 145497. Hyundai Mazda of Abington (136017) also exists -- add it only on a confirmed hit."
   }
 }

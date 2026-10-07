@@ -966,3 +966,9 @@ SOUND_WAVES,DATE,line_date,date,v1,1
 SOUND_WAVES,ACTIVITY,original_invoice_number,string,v1,1
 SOUND_WAVES,AMOUNT,charge_amount,decimal,v1,1
 SOUND_WAVES,OPEN AMOUNT,amount_remaining,decimal,v1,1
+ABINGTON_HYUNDAI_MAZDA,DATE,line_date,date,v1,1
+ABINGTON_HYUNDAI_MAZDA,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+ABINGTON_HYUNDAI_MAZDA,INVOICE NUMBER,original_invoice_number,string,v1,1
+ABINGTON_HYUNDAI_MAZDA,CHARGES,charge_amount,decimal,v1,1
+ABINGTON_HYUNDAI_MAZDA,CREDITS,payment_amount,decimal,v1,1
+ABINGTON_HYUNDAI_MAZDA,AMOUNT DUE,amount_remaining,decimal,v1,1
