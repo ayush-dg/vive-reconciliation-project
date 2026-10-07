@@ -783,3 +783,141 @@ DING'S_AUTO_PARTS,Cust PO/Chk #,po_number,string,v1,1
 DING'S_AUTO_PARTS,Charged,charge_amount,decimal,v1,1
 DING'S_AUTO_PARTS,Paid,payment_amount,decimal,v1,1
 DING'S_AUTO_PARTS,Due,amount_remaining,decimal,v1,1
+ADAS_DIAGNOSTIC_SOLUTIONS,DESCRIPTION,original_invoice_number,string,v1,1
+ADAS_DIAGNOSTIC_SOLUTIONS,DATE,line_date,date,v1,1
+ADAS_DIAGNOSTIC_SOLUTIONS,AMOUNT,description_raw,string,v1,1
+ADAS_DIAGNOSTIC_SOLUTIONS,OPEN AMOUNT,charge_amount,decimal,v1,1
+ACERBO_S_AUTO_TRIM_AND_LETTERING,DESCRIPTION,original_invoice_number,string,v1,1
+ACERBO_S_AUTO_TRIM_AND_LETTERING,DATE,line_date,date,v1,1
+ACERBO_S_AUTO_TRIM_AND_LETTERING,AMOUNT,charge_amount,decimal,v1,1
+ACERBO_S_AUTO_TRIM_AND_LETTERING,BALANCE,amount_remaining,decimal,v1,1
+ACURA_OF_ABINGTON,INVOICE NUMBER,original_invoice_number,string,v1,1
+ACURA_OF_ABINGTON,DATE,line_date,date,v1,1
+ACURA_OF_ABINGTON,CHARGES,charge_amount,decimal,v1,1
+ACURA_OF_ABINGTON,CREDITS,payment_amount,decimal,v1,1
+ACURA_OF_ABINGTON,AMOUNT DUE,amount_remaining,decimal,v1,1
+AUDI_DEVON,REFERENCE #,original_invoice_number,string,v1,1
+AUDI_DEVON,DATE,line_date,date,v1,1
+AUDI_DEVON,PURCHASES ($),charge_amount,decimal,v1,1
+AUDI_DEVON,PAYMENTS & CREDITS ($),payment_amount,decimal,v1,1
+AUDI_WYNNEWOOD,INVOICE NUMBER,original_invoice_number,string,v1,1
+AUDI_WYNNEWOOD,DATE,line_date,date,v1,1
+AUDI_WYNNEWOOD,CHARGES,charge_amount,decimal,v1,1
+AUDI_WYNNEWOOD,CREDITS,payment_amount,decimal,v1,1
+AUDI_WYNNEWOOD,AMOUNT DUE,amount_remaining,decimal,v1,1
+AUTOZONE,Invoice #,original_invoice_number,string,v1,1
+AUTOZONE,Date,line_date,date,v1,1
+AUTOZONE,Invoice Amount,charge_amount,decimal,v1,1
+AUTOZONE,Amount Due,amount_remaining,decimal,v1,1
+BEST_CHEVROLET,Invoice Number,original_invoice_number,string,v1,1
+BEST_CHEVROLET,Date,line_date,date,v1,1
+BEST_CHEVROLET,Invoice Amount,charge_amount,decimal,v1,1
+BEST_CHEVROLET,Invoice Balance,amount_remaining,decimal,v1,1
+BMW_OF_MANHATTAN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+BMW_OF_MANHATTAN,DATE,line_date,date,v1,1
+BMW_OF_MANHATTAN,PURCHASES,charge_amount,decimal,v1,1
+BMW_OF_MANHATTAN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+BROADWAY_TIRE,Description,original_invoice_number,string,v1,1
+BROADWAY_TIRE,Date,line_date,date,v1,1
+BROADWAY_TIRE,Orig Amt,charge_amount,decimal,v1,1
+BROADWAY_TIRE,Amt Remain,amount_remaining,decimal,v1,2
+BROADWAY_TIRE,Balance,amount_remaining,decimal,v1,1
+BELL_MOTOR_CARS,Invoice#,original_invoice_number,string,v1,1
+BELL_MOTOR_CARS,Invoice Date,line_date,date,v1,1
+BELL_MOTOR_CARS,Purchases,charge_amount,decimal,v1,1
+BELL_MOTOR_CARS,Balance,amount_remaining,decimal,v1,1
+CAPITOL_CITY_IMPORTS,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+CAPITOL_CITY_IMPORTS,DATE,line_date,date,v1,1
+CAPITOL_CITY_IMPORTS,PURCHASES,charge_amount,decimal,v1,1
+CAPITOL_CITY_IMPORTS,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+CHERRY_HILL_IMPORTS,INVOICE NUMBER,original_invoice_number,string,v1,1
+CHERRY_HILL_IMPORTS,DATE,line_date,date,v1,1
+CHERRY_HILL_IMPORTS,CHARGES,charge_amount,decimal,v1,1
+CHERRY_HILL_IMPORTS,AMOUNT DUE,amount_remaining,decimal,v1,1
+COUNTRY_HYUNDAI,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+COUNTRY_HYUNDAI,DATE,line_date,date,v1,1
+COUNTRY_HYUNDAI,PURCHASES,charge_amount,decimal,v1,1
+COUNTRY_HYUNDAI,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+D_AND_M_BUMPER_EXCHANGE,DESCRIPTION,original_invoice_number,string,v1,1
+D_AND_M_BUMPER_EXCHANGE,DATE,line_date,date,v1,1
+D_AND_M_BUMPER_EXCHANGE,AMOUNT,charge_amount,decimal,v1,1
+D_AND_M_BUMPER_EXCHANGE,BALANCE,amount_remaining,decimal,v1,1
+DING_MASTER,Reference,original_invoice_number,string,v1,1
+DING_MASTER,Date,line_date,date,v1,1
+DING_MASTER,Amount,charge_amount,decimal,v1,1
+DING_MASTER,Balance,amount_remaining,decimal,v1,1
+DON_FOSHAY_S_TIRE_AND_ALIGNMENT_HALLOWEL,Document #,original_invoice_number,string,v1,1
+DON_FOSHAY_S_TIRE_AND_ALIGNMENT_HALLOWEL,Amount,charge_amount,decimal,v1,1
+FLYNN_S_TOWING,DESCRIPTION,original_invoice_number,string,v1,1
+FLYNN_S_TOWING,DATE,line_date,date,v1,1
+FLYNN_S_TOWING,AMOUNT,charge_amount,decimal,v1,1
+FLYNN_S_TOWING,OPEN AMOUNT,amount_remaining,decimal,v1,1
+IMPERIAL_SUBARU,REF NO.,original_invoice_number,string,v1,1
+IMPERIAL_SUBARU,DATE,line_date,date,v1,1
+IMPERIAL_SUBARU,CHARGES,charge_amount,decimal,v1,1
+IMPERIAL_SUBARU,BALANCE,amount_remaining,decimal,v1,1
+JACK_GIAMBALVO,DOCUMENT,original_invoice_number,string,v1,1
+JACK_GIAMBALVO,DATE,line_date,date,v1,1
+JACK_GIAMBALVO,AMOUNT,charge_amount,decimal,v1,1
+KELLEHER_TIRE,Description,original_invoice_number,string,v1,1
+KELLEHER_TIRE,Date,line_date,date,v1,1
+KELLEHER_TIRE,Orig Amount,charge_amount,decimal,v1,1
+KELLEHER_TIRE,Balance,amount_remaining,decimal,v1,1
+KEMPERLE,REFERENCE/DESCRIPTION,original_invoice_number,string,v1,1
+KEMPERLE,DATE,line_date,date,v1,1
+KEMPERLE,CHARGES,charge_amount,decimal,v1,1
+KEMPERLE,PAYMENT/CREDIT,payment_amount,decimal,v1,1
+KEMPERLE,AMOUNT DUE,amount_remaining,decimal,v1,1
+LANGWAY_TOYOTA_OF_NEWPORT,REFERENCE,original_invoice_number,string,v1,1
+LANGWAY_TOYOTA_OF_NEWPORT,DATE,line_date,date,v1,1
+LANGWAY_TOYOTA_OF_NEWPORT,CHARGES,charge_amount,decimal,v1,1
+LANGWAY_TOYOTA_OF_NEWPORT,CREDITS,payment_amount,decimal,v1,1
+LINDE_GAS_AND_EQUIPMENT,INVOICE NUMBER,original_invoice_number,string,v1,1
+LINDE_GAS_AND_EQUIPMENT,INVOICE DATE,line_date,date,v1,1
+LINDE_GAS_AND_EQUIPMENT,AMOUNT,charge_amount,decimal,v1,1
+MATTHEWS_AUTO,INVOICE,original_invoice_number,string,v1,1
+MATTHEWS_AUTO,DATE,line_date,date,v1,1
+MATTHEWS_AUTO,AMOUNT,charge_amount,decimal,v1,1
+NIPPON_SANSO_MATHESON,DOCUMENT #,original_invoice_number,string,v1,1
+NIPPON_SANSO_MATHESON,DATE,line_date,date,v1,1
+NIPPON_SANSO_MATHESON,CHARGES,charge_amount,decimal,v1,1
+NIPPON_SANSO_MATHESON,PAYMENTS,payment_amount,decimal,v1,1
+NIPPON_SANSO_MATHESON,BALANCE,amount_remaining,decimal,v1,1
+PRECISION_DIAGNOSTICS,description,original_invoice_number,string,v1,1
+PRECISION_DIAGNOSTICS,date,line_date,date,v1,1
+PRECISION_DIAGNOSTICS,charge,charge_amount,decimal,v1,1
+PRECISION_DIAGNOSTICS,balance,amount_remaining,decimal,v1,1
+REYNOLDS_AND_REYNOLDS,Invoice Number,original_invoice_number,string,v1,1
+REYNOLDS_AND_REYNOLDS,Transaction Date,line_date,date,v1,1
+REYNOLDS_AND_REYNOLDS,Credit Inv/ Reference,payment_amount,decimal,v1,1
+REYNOLDS_AND_REYNOLDS,Amount,charge_amount,decimal,v1,1
+REYNOLDS_AND_REYNOLDS,Balance,amount_remaining,decimal,v1,1
+SPINDLE_CITY_AUTO_GLASS,Transaction,original_invoice_number,string,v1,1
+SPINDLE_CITY_AUTO_GLASS,Date,line_date,date,v1,1
+SPINDLE_CITY_AUTO_GLASS,Amount,charge_amount,decimal,v1,1
+SPINDLE_CITY_AUTO_GLASS,Balance,amount_remaining,decimal,v1,1
+STEVE_SHANNON_TIRE_AND_AUTO_CENTER,Invoice No.,original_invoice_number,string,v1,1
+STEVE_SHANNON_TIRE_AND_AUTO_CENTER,Date,line_date,date,v1,1
+STEVE_SHANNON_TIRE_AND_AUTO_CENTER,Original Amount,charge_amount,decimal,v1,1
+STEVE_SHANNON_TIRE_AND_AUTO_CENTER,Total Due,amount_remaining,decimal,v1,1
+THE_WHEEL_RIM_GROUP,LIST,original_invoice_number,string,v1,1
+THE_WHEEL_RIM_GROUP,DATE,line_date,date,v1,1
+THE_WHEEL_RIM_GROUP,AMOUNT,charge_amount,decimal,v1,1
+THE_WHEEL_RIM_GROUP,OPEN AMOUNT,amount_remaining,decimal,v1,1
+TASCA_AUTOMOTIVE_GROUP,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+TASCA_AUTOMOTIVE_GROUP,DATE,line_date,date,v1,1
+TASCA_AUTOMOTIVE_GROUP,PURCHASES,charge_amount,decimal,v1,1
+TECHZONE_AIRBAG_SERVICE,SERVICE,original_invoice_number,string,v1,1
+TECHZONE_AIRBAG_SERVICE,DATE,line_date,date,v1,1
+TECHZONE_AIRBAG_SERVICE,AMOUNT,charge_amount,decimal,v1,1
+TECHZONE_AIRBAG_SERVICE,BALANCE,amount_remaining,decimal,v1,1
+U_S_A_WHEELS,DESCRIPTION,original_invoice_number,string,v1,1
+U_S_A_WHEELS,DATE,line_date,date,v1,1
+U_S_A_WHEELS,AMOUNT,charge_amount,decimal,v1,1
+U_S_A_WHEELS,OPEN AMOUNT,amount_remaining,decimal,v1,1
+UNIFIRST,Invoice #,original_invoice_number,string,v1,1
+UNIFIRST,Invoice Date,line_date,date,v1,1
+UNIFIRST,Amount,charge_amount,decimal,v1,1
+VOLVO_CARS_BRIDGEWATER,DOCUMENT,original_invoice_number,string,v1,1
+VOLVO_CARS_BRIDGEWATER,DATE,line_date,date,v1,1
+VOLVO_CARS_BRIDGEWATER,AMOUNT,charge_amount,decimal,v1,1
