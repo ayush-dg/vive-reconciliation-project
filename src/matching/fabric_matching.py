@@ -488,6 +488,25 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
         alts.append(inv.replace("-", ""))
     if vendor_id in _LSTRIP0_VENDORS and inv[:1] == "0":
         alts.append(inv.lstrip("0"))
+    # Recovered 2026-10-07 by probing NetSuite by amount under each vendor's
+    # own record: the statement number and the tranid differ by a fixed,
+    # vendor-specific transformation.
+    if vendor_id == "AUTOMOTIVE_COLLISION_CALIBRATIONS":   # 'RO#6405989 INV-261071 - due ...'
+        alts += re.findall(r"INV-\d+", inv, re.IGNORECASE)
+    if vendor_id == "MOMENTUM_TIRE_AND_WHEEL":             # 'Invoice # 588059 W-1376112 PO: ...'
+        alts += [w for t in re.findall(r"W-?\d{5,}", inv) for w in (t, t.replace("-", ""))]
+    if vendor_id == "ASCENDANCE" and ":" in inv:           # XA101076824:01 -> XA101076824.01
+        alts.append(inv.replace(":", "."))
+    if vendor_id == "BULLOCKS_TIRE_AND_AUTO" and inv.upper().startswith("ID-"):
+        alts.append("8763-" + inv[3:])                     # ID-142270 -> 8763-142270 (account no.)
+    if vendor_id == "CARQUEST" and inv.upper().startswith("ID-"):
+        alts += ["15962-" + inv[3:], "15962" + inv[3:]]    # ID-110464 -> 15962-110464 / 15962110464
+    if vendor_id == "COUNTRYSIDE_TOWING" and re.fullmatch(r"\d{2}-\d+", inv):
+        yy, n = inv.split("-"); alts += [f"{yy}-{n.zfill(5)}", n]   # 26-434 -> 26-00434
+    if vendor_id == "GILBERTSVILLE_AUTO_GLASS" and "-" in inv:
+        alts.append(inv.rsplit("-", 1)[1])                 # OMEGA-13940 -> 13940
+    if vendor_id == "SOUND_WAVES" and inv.isdigit():
+        alts.append(inv[:2] + "0" + inv[2:])               # one bill keyed with an extra 0
     return alts
 
 

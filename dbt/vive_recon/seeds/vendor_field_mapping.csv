@@ -921,3 +921,48 @@ UNIFIRST,Amount,charge_amount,decimal,v1,1
 VOLVO_CARS_BRIDGEWATER,DOCUMENT,original_invoice_number,string,v1,1
 VOLVO_CARS_BRIDGEWATER,DATE,line_date,date,v1,1
 VOLVO_CARS_BRIDGEWATER,AMOUNT,charge_amount,decimal,v1,1
+AUTOMOTIVE_COLLISION_CALIBRATIONS,Date,line_date,date,v1,1
+AUTOMOTIVE_COLLISION_CALIBRATIONS,Details,original_invoice_number,string,v1,1
+AUTOMOTIVE_COLLISION_CALIBRATIONS,Transactions,transaction_code,string,v1,1
+AUTOMOTIVE_COLLISION_CALIBRATIONS,Amount,charge_amount,decimal,v1,1
+AUTOMOTIVE_COLLISION_CALIBRATIONS,Payments,payment_amount,decimal,v1,1
+AUTOMOTIVE_COLLISION_CALIBRATIONS,Balance,amount_remaining,decimal,v1,1
+MOMENTUM_TIRE_AND_WHEEL,Date,line_date,date,v1,1
+MOMENTUM_TIRE_AND_WHEEL,Description,original_invoice_number,string,v1,1
+MOMENTUM_TIRE_AND_WHEEL,Store,description_raw,string,v1,1
+MOMENTUM_TIRE_AND_WHEEL,Orig Amt,charge_amount,decimal,v1,1
+MOMENTUM_TIRE_AND_WHEEL,Amt Remain,amount_remaining,decimal,v1,1
+ASCENDANCE,DATE,line_date,date,v1,1
+ASCENDANCE,INVOICE,original_invoice_number,string,v1,1
+ASCENDANCE,PO/REF,po_number,string,v1,1
+ASCENDANCE,ORIGINAL AMOUNT,charge_amount,decimal,v1,1
+ASCENDANCE,BALANCE DUE,amount_remaining,decimal,v1,1
+BULLOCKS_TIRE_AND_AUTO,INVOICE DATE,line_date,date,v1,1
+BULLOCKS_TIRE_AND_AUTO,INVOICE NO.,original_invoice_number,string,v1,1
+BULLOCKS_TIRE_AND_AUTO,PO NUMBER,po_number,string,v1,1
+BULLOCKS_TIRE_AND_AUTO,CHARGES,charge_amount,decimal,v1,1
+BULLOCKS_TIRE_AND_AUTO,CREDITS,charge_amount,decimal,v1,2
+BULLOCKS_TIRE_AND_AUTO,AMOUNT DUE,amount_remaining,decimal,v1,1
+CARQUEST,INVOICE DATE,line_date,date,v1,1
+CARQUEST,INVOICE NUMBER,original_invoice_number,string,v1,1
+CARQUEST,PO NUMBER,po_number,string,v1,1
+CARQUEST,Orig Amt,charge_amount,decimal,v1,1
+CARQUEST,Inv Bal,amount_remaining,decimal,v1,1
+COUNTRYSIDE_TOWING,Date,line_date,date,v1,1
+COUNTRYSIDE_TOWING,Invoice,original_invoice_number,string,v1,1
+COUNTRYSIDE_TOWING,Vehicle,description_raw,string,v1,1
+COUNTRYSIDE_TOWING,Subtotal,charge_amount,decimal,v1,1
+COUNTRYSIDE_TOWING,Balance,amount_remaining,decimal,v1,1
+GILBERTSVILLE_AUTO_GLASS,DATE,line_date,date,v1,1
+GILBERTSVILLE_AUTO_GLASS,DESCRIPTION,original_invoice_number,string,v1,1
+GILBERTSVILLE_AUTO_GLASS,AMOUNT,charge_amount,decimal,v1,1
+GILBERTSVILLE_AUTO_GLASS,OPEN AMOUNT,amount_remaining,decimal,v1,1
+RANDYS_AUTO_PARTS,Date,line_date,date,v1,1
+RANDYS_AUTO_PARTS,Invoice #,original_invoice_number,string,v1,1
+RANDYS_AUTO_PARTS,Reference,invoice_number_ref,string,v1,1
+RANDYS_AUTO_PARTS,Amount,charge_amount,decimal,v1,1
+RANDYS_AUTO_PARTS,Balance,amount_remaining,decimal,v1,1
+SOUND_WAVES,DATE,line_date,date,v1,1
+SOUND_WAVES,ACTIVITY,original_invoice_number,string,v1,1
+SOUND_WAVES,AMOUNT,charge_amount,decimal,v1,1
+SOUND_WAVES,OPEN AMOUNT,amount_remaining,decimal,v1,1

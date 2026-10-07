@@ -714,5 +714,41 @@
   "VOLVO_CARS_BRIDGEWATER": {
     "entity_ids": ["113076"],
     "note": "Volvo Cars Bridgewater (113076). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 5 lines tie out verbatim across ALL NetSuite entities."
+  },
+  "AUTOMOTIVE_COLLISION_CALIBRATIONS": {
+    "entity_ids": ["280791"],
+    "note": "Automotive Collision Calibrations (280791). Details reads 'RO#6405989 INV-261071 - due on ...'; NetSuite's tranid is the INV- token (INV-261071), confirmed 2026-10-07 by amount probe (4 of 4)."
+  },
+  "MOMENTUM_TIRE_AND_WHEEL": {
+    "entity_ids": ["125676"],
+    "note": "Momentum Tire and Wheel (125676). Description reads 'Invoice # 588059 W-1376112 PO: ...'; NetSuite's tranid is the second number, the W- ticket (W-1381387), confirmed 2026-10-07 by amount probe."
+  },
+  "ASCENDANCE": {
+    "entity_ids": ["162826"],
+    "note": "Ascendance Truck Centers (162826). The statement prints XA101076824:01, NetSuite holds XA101076824.01 (colon -> dot), confirmed 2026-10-07 by amount probe."
+  },
+  "BULLOCKS_TIRE_AND_AUTO": {
+    "entity_ids": ["240270"],
+    "note": "BULLOCK'S TIRE & AUTO PARTS (240270). The statement prints ID-142270; NetSuite holds 8763-142270 (8763 = this account's customer number), confirmed 2026-10-07 by amount probe. 'PB-Statement' previous-balance rows are not documents."
+  },
+  "CARQUEST": {
+    "entity_ids": ["192734"],
+    "note": "CARQUEST OF PLEASANT VALLEY (192734). The statement prints ID-110464; NetSuite holds the store-prefixed number, 15962-110464 or 15962110533, confirmed 2026-10-07 by amount probe."
+  },
+  "COUNTRYSIDE_TOWING": {
+    "entity_ids": ["501577"],
+    "note": "COUNTRYSIDE TOWING (501577). The statement prints 26-434; NetSuite holds 26-00434 (zero-padded to 5 after the dash), confirmed 2026-10-07 by amount probe."
+  },
+  "GILBERTSVILLE_AUTO_GLASS": {
+    "entity_ids": ["465531"],
+    "note": "GILBERTSVILLE AUTO GLASS LLC (465531). DESCRIPTION reads 'Invoice #OMEGA-13940: Due ...'; NetSuite holds the number without OMEGA- (13940), confirmed 2026-10-07 by amount probe."
+  },
+  "RANDYS_AUTO_PARTS": {
+    "entity_ids": ["6959"],
+    "note": "Randy's Used Auto Parts (6959). Same statement system as Lentini / Bishop's: NetSuite holds the DT# number from Reference (DT#44390 -> 44390), confirmed 2026-10-07."
+  },
+  "SOUND_WAVES": {
+    "entity_ids": ["287386"],
+    "note": "SOUND WAVES (287386). ACTIVITY reads 'Invoice #220000014981: Due ...'; the number after # is the tranid (one bill is keyed with an extra 0), confirmed 2026-10-07."
   }
 }

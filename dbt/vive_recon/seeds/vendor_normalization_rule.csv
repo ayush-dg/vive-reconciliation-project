@@ -65,3 +65,7 @@ SPINDLE_CITY_AUTO_GLASS,token_after,both,#,,,2026-10-06,,1,vaishali,"number afte
 THE_WHEEL_RIM_GROUP,token_after,both,#,,,2026-10-06,,1,vaishali,"number after '#' in the text column; confirmed 2026-10-06 by automated tranid trace (17 of 18)."
 TECHZONE_AIRBAG_SERVICE,token_after,both,#,,,2026-10-06,,1,vaishali,"number after '#' in the text column; confirmed 2026-10-06 by automated tranid trace (3 of 4)."
 U_S_A_WHEELS,token_after,both,#,,,2026-10-06,,1,vaishali,"number after '#' in the text column; confirmed 2026-10-06 by automated tranid trace (6 of 7)."
+GILBERTSVILLE_AUTO_GLASS,token_after,both,#,,,2026-10-07,,1,vaishali,"Number after # in DESCRIPTION (OMEGA-13940); NetSuite drops OMEGA- -- fabric_matching._alternate_tranids retries that."
+SOUND_WAVES,token_after,both,#,,,2026-10-07,,1,vaishali,"Number after # in ACTIVITY ('Invoice #220000014981: Due ...')."
+BULLOCKS_TIRE_AND_AUTO,token_after,both,#,PB-,,2026-10-07,,1,vaishali,"'PB-Statement' previous-balance rows carry no document; scoped by prefix, they become NULL and stay out of matching."
+LANGWAY_TOYOTA_OF_NEWPORT,strip_first_n_chars,both,3,TOW,CM{invoice},2026-10-07,,1,vaishali,"Reynolds and Reynolds: TOW163723 -> 163723 under 3701, confirmed 2026-10-07 by amount probe (the earlier verbatim mapping matched nothing)."
