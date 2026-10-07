@@ -180,30 +180,13 @@ def get_recent_runs(limit: int = 10) -> list:
 RECON_RUN_STATUS_FILTERS = ("all", "reconciled", "exceptions")
 
 
-# Runs with no invoices at all (2026-10-06): a silver.recon_summary row
-# with total_invoice_count = 0 means not one statement line reached
-# matching. On dev every such row (332 of 920; 297 of the Oct 1 sync's
-# 481) had its lines extracted into Bronze but dropped by the Silver
-# build's vendor_field_mapping join -- vendor not onboarded yet,
-# onboarded since under a newer vendor_id, mapping seed not loaded yet, or
-# AI field names the mapping doesn't cover -- and fabric_matching.py
-# still stores it as RECONCILED with 0 matched. Per the user, these runs
-# are left out of Home (runs table, "N of M reconciled", KPI cards,
-# vendor count, Month options) and the Exceptions overview (no card)
-# instead of counting as reconciled. Query-side only: matching and the
-# stored rows are unchanged, and a run that gains lines on a re-run shows
-# up again by itself. NULL counts are excluded too.
-HAS_INVOICES_SQL = " AND total_invoice_count > 0"
-
-
 def get_run_timestamps() -> list:
     """Every run's reconciliation_timestamp (one narrow column), for the
     Home page's Month dropdown options (web/time_window.py's
     month_options()). Unrelated to "Last run" since 2026-09-30 -- see
-    get_outlook_synced_jobs(). Runs with no invoices are left out (see
-    HAS_INVOICES_SQL), so no month is offered that only they fill."""
+    get_outlook_synced_jobs()."""
     rows = recon_query(
-        "SELECT reconciliation_timestamp FROM silver.recon_summary WHERE is_latest_version = 1" + HAS_INVOICES_SQL
+        "SELECT reconciliation_timestamp FROM silver.recon_summary WHERE is_latest_version = 1"
     )
     return [r["reconciliation_timestamp"] for r in rows if r.get("reconciliation_timestamp")]
 
@@ -244,8 +227,7 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
     unbound (None/"all" = all time).
 
     Returns {"kpis", "runs", "total", "reconciled", "period_options",
-    "statement_count"}. Every one of them leaves out runs with no
-    invoices (HAS_INVOICES_SQL, 2026-10-06):
+    "statement_count"}:
 
     - "kpis": the four cards, summed from the window's rows only -- status
       and period do NOT narrow them. open_exceptions is SUM(exception_count)
@@ -280,7 +262,7 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
                total_invoice_count, matched_count, exception_count,
                statement_total, overall_status, reconciliation_timestamp
         FROM silver.recon_summary
-        WHERE is_latest_version = 1{HAS_INVOICES_SQL}{window_sql}
+        WHERE is_latest_version = 1{window_sql}
         ORDER BY reconciliation_timestamp DESC
         """,
         window_params,
@@ -723,15 +705,16 @@ def get_exception_runs(window: TimeWindow = None) -> list:
     window_sql, window_params = window.sql() if window else ("", [])
     # "WHERE 1 = 1" (rather than the bare, condition-less FROM this had
     # before window support existed) so a calendar window's "AND ..."
-    # fragment always has something to attach to. Runs with no invoices
-    # get no card at all (HAS_INVOICES_SQL, 2026-10-06).
+    # fragment always has something to attach to; harmless no-op when
+    # window_sql is empty (None/"all"), so unwindowed callers see the
+    # exact same rows as before.
     runs = recon_query(
         f"""
         SELECT statement_id, vendor_name, total_invoice_count,
                matched_count, exception_count, statement_total, overall_status,
                reconciliation_timestamp
         FROM silver.recon_summary
-        WHERE 1 = 1{HAS_INVOICES_SQL}{window_sql}
+        WHERE 1 = 1{window_sql}
         ORDER BY reconciliation_timestamp DESC
         """,
         window_params,
