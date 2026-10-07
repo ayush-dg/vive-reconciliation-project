@@ -118,13 +118,11 @@ def main():
     # new and returned the existing statement_id (see run_intake()'s
     # allow_duplicate), so there is nothing to build or match again.
     if intake_result.get("duplicate_of"):
-        print(f"
-{'#'*65}")
+        print(f"\n{'#'*65}")
         print(f"  PIPELINE STOPPED — duplicate of {intake_result['duplicate_of']}")
         print(f"  This exact PDF was already processed; nothing new was written.")
         print(f"  Rerun with --allow-duplicate to reprocess it as a new statement.")
-        print(f"{'#'*65}
-")
+        print(f"{'#'*65}\n")
         return
 
     # RESEARCH_MODE_EXTRACTION_ONLY (local .env only -- see
