@@ -769,23 +769,12 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
     return count
 
 
-def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
-                     schema_result: dict, statement_id: str, statement_period: str,
-                     invoice_count: int, routing_decision: str):
-    """Write one row to document_intake_log.
-
-    TEMPORARY (2026-08-29): document_intake_log is pointed back at Azure
-    SQL via execute_sql() -- the Fabric SQL Database item this used to
-    write (get_fabric_connection() in src/lakehouse/connection.py) is
-    unreachable in production right now (the FABRIC_CLIENT_ID service
-    principal lacks Read permission on it). Revert to
-    execute_sql_fabric()/execute_query_fabric() once that permission is
-    granted. Azure SQL's real schema for this table has a genuine
-    IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
-    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
-    assignment this replaces. `id` is no longer in the INSERT at all;
-    Azure SQL assigns it.
-    """
+def intake_log_values(document_id: str, pdf_path: str, document_hash: str,
+                      schema_result: dict, statement_id: str, statement_period: str,
+                      invoice_count: int, routing_decision: str) -> dict:
+    """The document_intake_log column values for one extraction -- written
+    by write_intake_log(), and by src/rerun/in_place.py as an UPDATE of a
+    re-run statement's existing row (2026-10-07)."""
     now = datetime.now(timezone.utc).isoformat()
     meta = schema_result.get("document_metadata", {})
     vendor = schema_result.get("vendor_metadata", {})
@@ -819,62 +808,73 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     billing_location_source = vendor.get("billing_location_source")
     statement_month = normalize_statement_month(stmt.get("statement_date"))
 
+    values = {
+        "document_id": document_id,
+        "document_hash": document_hash,
+        "source_file": os.path.basename(pdf_path),
+        "ingestion_timestamp": now,
+        "document_type": meta.get("document_type"),
+        "document_type_confidence": meta.get("document_type_confidence"),
+        "vendor_name": vendor.get("vendor_name"),
+        "shop_or_entity": json.dumps(vendor.get("shop_or_entity", [])),
+        "statement_date": stmt.get("statement_date"),
+        "statement_period": statement_period,
+        "currency": stmt.get("currency"),
+        "statement_total_as_printed": stmt.get("statement_total_as_printed"),
+        "extraction_confidence_overall": conf.get("overall"),
+        "extraction_model": schema_result.get("_model_used"),
+        "extraction_method": schema_result.get("_provider_used"),
+        "routing_decision": routing_decision,
+        "statement_id": statement_id,
+        "invoice_count": invoice_count,
+        "warnings": json.dumps(warnings),
+        "schema_version": "1.0",
+        "raw_aging_summary": raw_aging_summary,
+        "validation_status": validation.get("status"),
+        "validation_difference": validation.get("difference"),
+        "billing_location": billing_location,
+        "statement_month": statement_month,
+        "billing_location_source": billing_location_source,
+        # migrations/019_add_validation_fallback_columns.sql -- which
+        # check passed ("primary", "open_balance", ...; NULL when none
+        # did), the fallback attempts as JSON, and the fallback inputs.
+        "validation_method": validation.get("method"),
+        "validation_detail": json.dumps(validation["detail"]) if validation.get("detail") is not None else None,
+        "previous_balance": stmt.get("previous_balance"),
+        "previous_balance_source": stmt.get("previous_balance_source"),
+        "section_totals": json.dumps(stmt["section_totals"]) if stmt.get("section_totals") else None,
+    }
+    return values
+
+
+def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
+                     schema_result: dict, statement_id: str, statement_period: str,
+                     invoice_count: int, routing_decision: str):
+    """Write one row to document_intake_log (values: intake_log_values()).
+
+    TEMPORARY (2026-08-29): document_intake_log is pointed back at Azure
+    SQL via execute_sql() -- the Fabric SQL Database item this used to
+    write (get_fabric_connection() in src/lakehouse/connection.py) is
+    unreachable in production right now (the FABRIC_CLIENT_ID service
+    principal lacks Read permission on it). Revert to
+    execute_sql_fabric()/execute_query_fabric() once that permission is
+    granted. Azure SQL's real schema for this table has a genuine
+    IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
+    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
+    assignment this replaces. `id` is no longer in the INSERT at all;
+    Azure SQL assigns it.
+    """
+    values = intake_log_values(document_id, pdf_path, document_hash, schema_result,
+                               statement_id, statement_period, invoice_count, routing_decision)
+
     execute_sql(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
         [statement_id]
     )
 
     execute_sql(
-        """
-        INSERT INTO document_intake_log (
-            document_id, document_hash, source_file, ingestion_timestamp,
-            document_type, document_type_confidence,
-            vendor_name, shop_or_entity, statement_date, statement_period,
-            currency, statement_total_as_printed,
-            extraction_confidence_overall, extraction_model, extraction_method,
-            routing_decision, statement_id, invoice_count, warnings, schema_version,
-            raw_aging_summary, validation_status, validation_difference,
-            billing_location, statement_month, billing_location_source,
-            validation_method, validation_detail, previous_balance,
-            previous_balance_source, section_totals
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            document_id,
-            document_hash,
-            os.path.basename(pdf_path),
-            now,
-            meta.get("document_type"),
-            meta.get("document_type_confidence"),
-            vendor.get("vendor_name"),
-            json.dumps(vendor.get("shop_or_entity", [])),
-            stmt.get("statement_date"),
-            statement_period,
-            stmt.get("currency"),
-            stmt.get("statement_total_as_printed"),
-            conf.get("overall"),
-            schema_result.get("_model_used"),
-            schema_result.get("_provider_used"),
-            routing_decision,
-            statement_id,
-            invoice_count,
-            json.dumps(warnings),
-            "1.0",
-            raw_aging_summary,
-            validation.get("status"),
-            validation.get("difference"),
-            billing_location,
-            statement_month,
-            billing_location_source,
-            # migrations/019_add_validation_fallback_columns.sql -- which
-            # check passed ("primary", "open_balance", ...; NULL when none
-            # did), the fallback attempts as JSON, and the fallback inputs.
-            validation.get("method"),
-            json.dumps(validation["detail"]) if validation.get("detail") is not None else None,
-            stmt.get("previous_balance"),
-            stmt.get("previous_balance_source"),
-            json.dumps(stmt["section_totals"]) if stmt.get("section_totals") else None,
-        ]
+        f"INSERT INTO document_intake_log ({', '.join(values)}) VALUES ({', '.join('?' * len(values))})",
+        list(values.values()),
     )
 
 

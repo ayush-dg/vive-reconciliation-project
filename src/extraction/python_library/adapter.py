@@ -117,7 +117,7 @@ _PRINTED_TOTAL_KEY = {
 # Modules that serve many vendors: vendor_name is the letterhead name the
 # module reads off the PDF (summary["vendor_name"]), not one fixed name.
 # config/vendor_aliases.json folds each vendor's name variants to one id.
-_VENDOR_NAME_FROM_DOCUMENT = {"extract_autoly"}
+_VENDOR_NAME_FROM_DOCUMENT = {"extract_autoly", "extract_keystone"}
 
 # Which summary key holds the statement date, per module -- these
 # genuinely differ in both key name and printed format (DDMonYY, MM/DD/YY,
