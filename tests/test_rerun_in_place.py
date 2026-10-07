@@ -419,6 +419,30 @@ class TestDryRun(RerunTestCase):
                                                       "is_latest_version": 1})
         self.assertTrue(decision["run"])
 
+    def billing_change(self, stored, extracted):
+        self.world.sql("UPDATE document_intake_log SET billing_location = ?, billing_location_source = 'printed' "
+                       "WHERE statement_id = ?", [stored, SID])
+        state = in_place.load_state(self.io, SID)
+        with mock.patch.object(self.intake, "resolve_billing_location", lambda loc, shops: (extracted, "printed_new")):
+            new = in_place.reextract(self.io, self.intake, state, self.pdf)
+        return new["intake_update"]
+
+    def test_billing_location_formatting_only_keeps_the_stored_value(self):
+        seed(self.world)
+        for extracted in ("MECHANIC FALLS ME", "mechanic falls, me", "Mechanic  Falls ,ME"):
+            with self.subTest(extracted=extracted):
+                update = self.billing_change("Mechanic Falls, ME", extracted)
+                self.assertEqual((update["billing_location"], update["billing_location_source"]),
+                                 ("Mechanic Falls, ME", "printed"))
+
+    def test_adversarial_a_different_place_still_updates(self):
+        seed(self.world)
+        for stored, extracted in (("Mechanic Falls, ME", "AUBURN ME"), ("Mechanic Falls, ME", "MECHANIC FALLS NH"),
+                                  (None, "MECHANIC FALLS ME"), ("", "MECHANIC FALLS ME")):
+            with self.subTest(stored=stored, extracted=extracted):
+                update = self.billing_change(stored, extracted)
+                self.assertEqual((update["billing_location"], update["billing_location_source"]), (extracted, "printed_new"))
+
     def test_fingerprint_ignores_other_statements_delta_versions_but_not_own_rows(self):
         seed(self.world)
         state = in_place.load_state(self.io, SID)

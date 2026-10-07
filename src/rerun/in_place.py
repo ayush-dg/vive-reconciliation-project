@@ -248,6 +248,13 @@ def _version_info(io, state, vendor_id, statement_period):
     return {"version_number": 1, "previous_statement_id": None, "is_latest_version": 0 if other else 1}
 
 
+def _same_place(a, b) -> bool:
+    """True when two billing locations differ only in case, punctuation or spacing."""
+    def squash(s):
+        return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+    return bool(squash(a)) and squash(a) == squash(b)
+
+
 def reextract(io, intake, state: dict, pdf_path: str) -> dict:
     """Runs the deterministic extractor and the intake's own validation on
     the archived PDF. Raises RefusedError for an AI route or 0 rows."""
@@ -293,6 +300,12 @@ def reextract(io, intake, state: dict, pdf_path: str) -> dict:
     values = intake.intake_log_values(row.get("document_id"), pdf_path, row["document_hash"], schema_result,
                                       statement_id, statement_period, len(valid),
                                       "RECONCILIATION" if doc_type == "VENDOR_STATEMENT" else "PARKED")
+    # Same place, different formatting ("Mechanic Falls, ME" vs "MECHANIC
+    # FALLS ME"): keep the stored value and its source, so the statement
+    # still groups with the others; a genuinely different place updates.
+    if row.get("billing_location") and _same_place(row["billing_location"], values["billing_location"]):
+        values["billing_location"] = row["billing_location"]
+        values["billing_location_source"] = row.get("billing_location_source")
     raw_fields = sorted({k for inv in invoices for k in (inv.get("_raw_row") or {})})
     return {
         "module": route.get("matched_vendor") or route.get("reason"),
