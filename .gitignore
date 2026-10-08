@@ -16,6 +16,7 @@ lakehouse/ai_call_slots/
 lakehouse/fabric_token_cache.json
 sample_data/
 logs/*.log
+logs/netsuite_writeback/
 *.egg-info/
 .venv/
 venv/

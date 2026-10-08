@@ -1435,6 +1435,23 @@ def get_user_by_email(email: str):
     return rows[0] if rows else None
 
 
+def get_archived_pdf_for_document_hash(document_hash: str):
+    """The archived blob URL and original filename for a statement PDF,
+    looked up by its SHA-256 document_hash -- or None if that file was
+    never archived. A hash can have several intake rows (a re-run), so the
+    most recent one that actually has a blob path wins. Backs the
+    /statements/<hash>/pdf link the NetSuite write-back puts on bills."""
+    rows = execute_query(
+        """
+        SELECT blob_storage_path, original_filename FROM document_intake_log
+        WHERE document_hash = ? AND blob_storage_path IS NOT NULL
+        ORDER BY uploaded_at DESC
+        """,
+        [document_hash],
+    )
+    return rows[0] if rows else None
+
+
 def list_users() -> list:
     return execute_query(
         "SELECT id, name, email, is_active, created_at, created_by FROM users ORDER BY created_at"

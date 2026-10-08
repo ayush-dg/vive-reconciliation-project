@@ -61,7 +61,7 @@ DOCUMENT_HASH_RE = re.compile(r"Document Hash:\s*(\S+)")
 # added 2026-09-28) ride the same path so per-step durations are visible
 # for every job, not just failures.
 FABRIC_STATUS_RE = re.compile(
-    r"^ {4}(Fabric Silver build:.*|Fabric Silver build reason:.*|NetSuite matching:.*|Step timing:.*)$",
+    r"^ {4}(Fabric Silver build:.*|Fabric Silver build reason:.*|NetSuite matching:.*|NetSuite write-back:.*|Step timing:.*)$",
     re.MULTILINE,
 )
 
