@@ -1008,3 +1008,9 @@ TILGHMANS_AUTO_PARTS_II,description,description_raw,string,v1,1
 TILGHMANS_AUTO_PARTS_II,charged,charge_amount,decimal,v1,1
 TILGHMANS_AUTO_PARTS_II,paid,payment_amount,decimal,v1,1
 TILGHMANS_AUTO_PARTS_II,due,amount_remaining,decimal,v1,1
+LKQ,reference_date,line_date,date,v1,1
+LKQ,reference_number,original_invoice_number,string,v1,1
+LKQ,purchase_order_number,po_number,string,v1,1
+LKQ,period_activity,charge_amount,decimal,v1,1
+LKQ,credit_applied,charge_amount,decimal,v1,2
+LKQ,balance_due,amount_remaining,decimal,v1,1

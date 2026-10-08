@@ -119,10 +119,10 @@ with_line_type as (
     -- same known limitation the prior bronze-driven model had.
     select
         p.*,
-        try_cast(replace(p.charge_amount_raw, ',', '') as decimal(18, 2)) as charge_amount,
-        try_cast(replace(p.payment_amount_raw, ',', '') as decimal(18, 2)) as payment_amount,
+        {{ parse_amount('p.charge_amount_raw') }} as charge_amount,
+        {{ parse_amount('p.payment_amount_raw') }} as payment_amount,
         case
-            when try_cast(replace(coalesce(p.charge_amount_raw, p.payment_amount_raw), ',', '') as decimal(18, 2)) < 0 then 'CREDIT'
+            when {{ parse_amount('coalesce(p.charge_amount_raw, p.payment_amount_raw)') }} < 0 then 'CREDIT'
             when p.charge_amount_raw is not null then 'CHARGE'
             when p.payment_amount_raw is not null then 'PAYMENT'
             else null
@@ -194,7 +194,7 @@ select
     cast(null as decimal(18, 2))                         as core_charge_amount,
     cast(null as decimal(18, 2))                         as line_net_amount,
     cast(null as decimal(18, 2))                         as running_balance,
-    cast(try_cast(replace(w.amount_remaining_raw, ',', '') as decimal(18, 2)) as float) as amount_remaining,
+    cast({{ parse_amount('w.amount_remaining_raw') }} as float) as amount_remaining,
     try_cast(w.due_date_raw as date)                     as due_date,
     try_cast(w.age_in_days_raw as int)                   as age_in_days,
     cast(null as varchar(50))                            as vendor_group_code,
