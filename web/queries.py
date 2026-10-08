@@ -749,7 +749,8 @@ def get_exception_runs(window: TimeWindow = None) -> list:
         # column, same parse pattern get_statement_report() already uses.
         intake_rows = execute_query(
             f"""
-            SELECT statement_id, billing_location, statement_period, shop_or_entity
+            SELECT statement_id, billing_location, statement_period, shop_or_entity,
+                   original_filename, source_file
             FROM document_intake_log
             WHERE statement_id IN ({placeholders})
             """,
@@ -772,6 +773,9 @@ def get_exception_runs(window: TimeWindow = None) -> list:
             except (TypeError, ValueError):
                 shop_list = []
             run["shop"] = ", ".join(shop_list) if shop_list else None
+            # The statement's PDF name (2026-10-08), shown when hovering the
+            # vendor name on the exceptions vendor cards.
+            run["pdf_name"] = _pdf_name(intake_row)
 
     runs.extend(_get_exceptions_only_vendors())
     _attach_aging_summaries(runs)
@@ -780,7 +784,18 @@ def get_exception_runs(window: TimeWindow = None) -> list:
         run.setdefault("billing_location", None)
         run.setdefault("shop", None)
         run.setdefault("statement_period", None)
+        run.setdefault("pdf_name", None)
     return runs
+
+
+def _pdf_name(intake_row) -> str:
+    """The uploaded PDF's file name for a document_intake_log row:
+    original_filename when set, else source_file; just the file name, no
+    folder. None when there is no row or neither is set."""
+    if not intake_row:
+        return None
+    name = intake_row.get("original_filename") or intake_row.get("source_file")
+    return os.path.basename(str(name).replace("\\", "/")) if name else None
 
 
 def _attach_aging_summaries(vendors: list) -> None:
@@ -878,6 +893,7 @@ def _get_exceptions_only_vendors() -> list:
         vendors.append({
             "statement_id": None,
             "source_file": source_file,
+            "pdf_name": source_file if source_file != "Unknown source" else None,
             "vendor_name": _vendor_name_from_source_file(source_file),
             "statement_period": None,
             "total_invoice_count": 0,

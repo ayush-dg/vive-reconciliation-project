@@ -73,7 +73,8 @@ class TestGetExceptionRunsWindow(unittest.TestCase):
         )
         self.local = sqlite3.connect(":memory:", check_same_thread=False)
         self.local.row_factory = sqlite3.Row
-        self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, billing_location TEXT, statement_period TEXT, shop_or_entity TEXT)")
+        self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, billing_location TEXT, statement_period TEXT, shop_or_entity TEXT, "
+                           "original_filename TEXT, source_file TEXT)")
         self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT, "
                            "status TEXT DEFAULT 'COMPLETED')")
         for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):

@@ -101,7 +101,7 @@
       <div class="vendor-card-id">
         <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--matched-tint);color:var(--matched)"{% endif %}>{{ v.vendor_display_name | initials }}</div>
         <div class="vendor-card-title-block">
-          <div class="vendor-card-name" title="{{ v.vendor_name }}">{{ v.vendor_display_name }}</div>
+          <div class="vendor-card-name" title="{{ v.vendor_name }}{% if v.pdf_name %}&#10;PDF: {{ v.pdf_name }}{% endif %}">{{ v.vendor_display_name }}</div>
           {% if v.shop %}<div class="vendor-card-shop" title="{{ v.shop }}">{{ v.shop }}</div>{% endif %}
           {%- set meta_parts = [] -%}
           {%- if v.billing_location %}{% set _ = meta_parts.append(v.billing_location) %}{% endif -%}
