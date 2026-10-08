@@ -32,6 +32,9 @@ CONFIG_PATH = os.path.join(
 _lookup_cache = None
 
 
+_COMPANY_SUFFIXES = {"INC", "INCORPORATED", "LLC", "CO", "CORP", "CORPORATION", "LTD", "COMPANY"}
+
+
 def _normalize(name: str) -> str:
     """Strips punctuation, uppercases, and sorts words alphabetically --
     the sort makes matching insensitive to word order, which real
@@ -43,7 +46,13 @@ def _normalize(name: str) -> str:
     Chrysler Jeep Kia") -- those still need an explicit alias entry."""
     cleaned = re.sub(r"[^A-Za-z0-9 ]", "", name).upper()
     words = re.sub(r"\s+", " ", cleaned).strip().split(" ")
-    return " ".join(sorted(words))
+    # Company-type suffixes are ignored (2026-10-08): a scanned Keystone
+    # statement read "Keystone Automotive Industries, Inc." while the alias
+    # is "Keystone Automotive Industries", so it got an unmapped fallback
+    # vendor_id and 0 lines (prod, "No lines read"). Checked: no two
+    # vendor_ids' aliases collide once these are dropped.
+    kept = [w for w in words if w not in _COMPANY_SUFFIXES]
+    return " ".join(sorted(kept or words))
 
 
 def _load_lookup() -> dict:
