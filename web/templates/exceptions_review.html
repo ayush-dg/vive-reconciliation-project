@@ -5,7 +5,7 @@
 <div class="topbar">
   <div class="topbar-title">
     <div class="eyebrow"><a href="/exceptions" style="color:var(--navy-2)">Exceptions</a> / {{ vendor_display_name }}</div>
-    <h1 title="{{ vendor_name }}">{{ vendor_display_name }}</h1>
+    <h1 title="{{ vendor_name }}">{{ vendor_display_name }}{% if shop %}<span class="topbar-shop" title="{{ shop }}">· {{ shop }}</span>{% endif %}</h1>
   </div>
   {% if not not_found %}
   <div class="topbar-actions">

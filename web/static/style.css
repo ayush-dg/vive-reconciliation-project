@@ -254,6 +254,7 @@ svg { display: block; }
 }
 .topbar-title h1 { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin: 0; }
 .topbar-title .eyebrow { margin-bottom: 3px; }
+.topbar-shop { display: inline-block; max-width: 420px; margin-left: 10px; vertical-align: baseline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-body, inherit); font-size: 15px; font-weight: 500; color: var(--text-secondary); }
 .topbar-actions, .topbar-right { display: flex; align-items: center; gap: 12px; }
 .intake-tabs {
   display: flex; flex-wrap: nowrap; gap: 28px; padding: 0 32px;

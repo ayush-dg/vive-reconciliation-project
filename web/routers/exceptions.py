@@ -286,6 +286,8 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "vendor_url_name": quote(vendor_name, safe=""),
         "not_found": False,
         "statement": statement,
+        # Exceptions-only vendors have no statement_id to look up.
+        "shop": None if exceptions_only else queries.get_statement_shop(statement_id),
         "exceptions": open_list,
         "selected": selected_exc,
         "total": total,

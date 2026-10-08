@@ -926,6 +926,18 @@ def get_statement_by_id(statement_id: str):
     return rows[0] if rows else None
 
 
+def get_statement_shop(statement_id: str):
+    """Shop name(s) for one statement, comma-joined, from
+    document_intake_log.shop_or_entity -- the same source and format as the
+    run/vendor cards (see _attach_intake_period_and_shop()). Used by the
+    exceptions review header. None when the intake log has no shop."""
+    if not statement_id:
+        return None
+    row = {"statement_id": statement_id, "statement_period": None}
+    _attach_intake_period_and_shop([row], [statement_id])
+    return row.get("shop")
+
+
 def get_vendor_latest_statement(vendor_name: str):
     # is_latest_version = 1 (migrations/011_add_version_tracking.sql) so a
     # superseded duplicate upload can never win this lookup just because
