@@ -64,6 +64,15 @@ def _run_matching(statement_id):
     see migrations/013_add_recon_tables.sql). Best-effort, same as
     everything else here."""
     print(f"    Fabric Silver build: OK")
+    # A statement whose lines didn't come through the field mapping fails
+    # here instead of matching to 0 / 0 / 0 (src/lakehouse/silver_check.py).
+    from src.lakehouse.silver_check import check_silver_lines
+    from src.pipeline_markers import SILVER_CHECK_MARKER
+    problem = check_silver_lines(statement_id)
+    if problem:
+        print(f"    Fabric Silver build reason: {problem}")
+        print(f"{SILVER_CHECK_MARKER} {problem} (statement_id {statement_id})")
+        sys.exit(3)
     from src.matching.fabric_matching import run_fabric_matching
     with timed_step("matching"):
         match_result = run_fabric_matching(statement_id)
