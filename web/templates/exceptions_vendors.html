@@ -111,7 +111,9 @@
           <div class="vendor-card-meta">{{ meta_parts | join(" · ") }}</div>
         </div>
       </div>
-      {% if v.exception_count > 0 %}
+      {% if not v.total_invoice_count %}
+      <span class="badge badge-warning" title="No statement lines reached matching -- check Extracted data"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>No lines read</span>
+      {% elif v.exception_count > 0 %}
       <span class="badge badge-exception">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
       {% else %}
       <span class="badge badge-matched"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>

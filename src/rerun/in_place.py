@@ -593,6 +593,8 @@ def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_finger
     stop = "-- stopped before any Azure SQL write; restore with --undo <backup>"
     for t in LAKEHOUSE_TABLES:
         io.delta_delete(t, sid)
+    from src.extraction.ai_raw_row_aliases import normalize_raw_rows
+    normalize_raw_rows(new["invoices"], new["vendor_id"])
     write_raw_statement(new["invoices"], new["vendor_id"], sid, source_file, new["provider"],
                         vendor_display_name=intake.display_name(new["vendor_name"]),
                         version_number=new["version_info"]["version_number"])

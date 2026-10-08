@@ -296,7 +296,9 @@
         <td class="mono" style="color:{{ 'var(--matched)' if run.exception_count == 0 else 'inherit' }}">{{ run.matched_count }}</td>
         <td class="mono" style="color:{{ 'var(--matched)' if run.exception_count == 0 else 'var(--exception)' }}">{{ run.exception_count }}</td>
         <td>
-          {% if run.overall_status == 'RECONCILED' %}
+          {% if not run.total_invoice_count %}
+          <span class="badge badge-warning" title="No statement lines reached matching -- check Extracted data"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>No lines read</span>
+          {% elif run.overall_status == 'RECONCILED' %}
           <span class="badge badge-matched"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
           {% else %}
           <span class="badge badge-exception"><svg class="icon" style="width:12px;height:12px"><use href="#i-alert"/></svg>Exceptions</span>

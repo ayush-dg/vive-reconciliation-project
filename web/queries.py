@@ -290,14 +290,16 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
     period_options = sorted({r["statement_period"] for r in rows if r.get("statement_period")}, reverse=True)
 
     filtered = rows
+    # A run with no lines (total_invoice_count 0) matched nothing -- not
+    # "reconciled" (2026-10-08, see fabric_matching's NO_LINES).
     if status == "reconciled":
-        filtered = [r for r in filtered if (r.get("exception_count") or 0) == 0]
+        filtered = [r for r in filtered if (r.get("exception_count") or 0) == 0 and r.get("total_invoice_count")]
     elif status == "exceptions":
         filtered = [r for r in filtered if (r.get("exception_count") or 0) > 0]
     if period:
         filtered = [r for r in filtered if r.get("statement_period") == period]
 
-    reconciled = sum(1 for r in filtered if (r.get("exception_count") or 0) == 0)
+    reconciled = sum(1 for r in filtered if (r.get("exception_count") or 0) == 0 and r.get("total_invoice_count"))
     shown = filtered[:int(limit)]
     _attach_job_ids_and_display_names(shown)
     return {

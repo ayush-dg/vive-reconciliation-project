@@ -1537,6 +1537,12 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # validation/skip logic runs, regardless of RESEARCH_MODE_EXTRACTION_ONLY.
     # See src/lakehouse/bronze_raw.py's docstring.
     research_only = _research_mode_extraction_only()
+    # AI rows -> the parser's field names for vendors whose seed mapping
+    # only knows those (see src/extraction/ai_raw_row_aliases.py).
+    from src.extraction.ai_raw_row_aliases import normalize_raw_rows
+    renamed = normalize_raw_rows(invoices, vendor_id)
+    if renamed:
+        print(f"  Renamed AI fields to {vendor_id}'s parser names on {renamed} rows")
     with timed_step("bronze_raw_write"):
         raw_written = write_raw_statement(
             invoices, vendor_id, statement_id,

@@ -845,8 +845,12 @@ def run_fabric_matching(statement_id: str) -> dict:
 
         total_count = matched_count + exception_count
         match_pct = round(100.0 * matched_count / total_count, 1) if total_count else 0.0
+        # NO_LINES (2026-10-08): nothing reached Silver to match -- e.g. a
+        # scanned Fred Beans statement whose AI field names mapped to
+        # nothing (prod STMT-3C9D4BBB). Showing that as RECONCILED hid it.
         overall_status = (
-            "RECONCILED" if exception_count == 0
+            "NO_LINES" if total_count == 0
+            else "RECONCILED" if exception_count == 0
             else "MINOR_EXCEPTIONS" if exception_count <= 3
             else "EXCEPTIONS_PRESENT"
         )
