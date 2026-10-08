@@ -736,6 +736,60 @@ class TestResume(RerunTestCase):
         self.assert_resume_refused(doc, "in flight", apply_changes=True, expected_fingerprint=fp)
 
 
+class TestDeltaRetry(unittest.TestCase):
+    """LiveIO's Lakehouse Delta calls retry transient OneLake errors -- never a
+    refusal, a schema/protocol problem or a programming error."""
+
+    def setUp(self):
+        patcher = mock.patch.object(in_place.time, "sleep", lambda s: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def flaky_io(self, *errors):
+        """A LiveIO whose Delta table raises `errors` in turn, then works."""
+        from deltalake.exceptions import DeltaError  # noqa: F401
+        calls = {"n": 0}
+        queue = list(errors)
+
+        class Field:
+            name = "statement_id"
+
+        class Table:
+            def schema(self):
+                return mock.Mock(to_arrow=lambda: [Field()])
+
+        class IO(in_place.LiveIO):
+            def _delta(self, table):
+                calls["n"] += 1
+                if queue:
+                    raise queue.pop(0)
+                return Table()
+        return IO(), calls
+
+    def test_transient_onelake_errors_are_retried_until_success(self):
+        from deltalake.exceptions import DeltaError
+        io, calls = self.flaky_io(DeltaError("Generic MicrosoftAzure error: Error performing GET"), OSError("reset"))
+        self.assertEqual(io.delta_columns("raw_statement"), ["statement_id"])
+        self.assertEqual(calls["n"], 3)
+
+    def test_gives_up_after_three_attempts(self):
+        from deltalake.exceptions import DeltaError
+        io, calls = self.flaky_io(*[DeltaError("Error performing GET")] * 3)
+        with self.assertRaises(DeltaError):
+            io.delta_columns("raw_statement")
+        self.assertEqual(calls["n"], 3)
+
+    def test_adversarial_never_retries_refusals_schema_or_programming_errors(self):
+        from deltalake.exceptions import SchemaMismatchError, TableNotFoundError
+        for error in (in_place.RefusedError("no"), SchemaMismatchError("schema"), TableNotFoundError("gone"),
+                      TypeError("bug"), KeyError("bug")):
+            with self.subTest(error=type(error).__name__):
+                io, calls = self.flaky_io(error)
+                with self.assertRaises(type(error)):
+                    io.delta_columns("raw_statement")
+                self.assertEqual(calls["n"], 1)
+
+
 class TestBackupAndUndo(RerunTestCase):
 
     def test_backup_written_to_every_dir_with_exact_types(self):

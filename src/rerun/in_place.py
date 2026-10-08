@@ -75,6 +75,45 @@ class RefusedError(Exception):
     """The statement can't be re-run in place; nothing was written."""
 
 
+# Lakehouse Delta reads/writes go to OneLake, which fails transiently now and
+# then (2026-10-07: "Generic MicrosoftAzure error: Error performing GET
+# .../_delta_log/...checkpoint" stopped a batch). Those are retried; a
+# refusal, a schema/protocol problem or a programming error never is. A
+# retried append that had in fact committed would leave a duplicate -- the
+# post-write count check (_lakehouse_problems) then stops before Azure SQL.
+DELTA_ATTEMPTS = 3
+DELTA_RETRY_WAITS = (5, 15)
+
+
+def _transient(e: Exception) -> bool:
+    """OneLake/Delta I/O failures only -- so never a RefusedError or a programming error."""
+    try:
+        from deltalake.exceptions import DeltaError, DeltaProtocolError, SchemaMismatchError, TableNotFoundError
+    except ImportError:  # pragma: no cover
+        return isinstance(e, (OSError, TimeoutError, ConnectionError))
+    if isinstance(e, (DeltaProtocolError, SchemaMismatchError, TableNotFoundError)):
+        return False
+    return isinstance(e, (DeltaError, OSError, TimeoutError, ConnectionError))
+
+
+def _retried(fn):
+    """Retries fn on transient OneLake/Delta errors (see _transient)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        for attempt in range(1, DELTA_ATTEMPTS + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if attempt == DELTA_ATTEMPTS or not _transient(e):
+                    raise
+                print(f"    {fn.__name__}: transient {type(e).__name__} (attempt {attempt}/{DELTA_ATTEMPTS}) "
+                      f"-- retrying in {DELTA_RETRY_WAITS[attempt - 1]}s: {str(e)[:160]}", flush=True)
+                time.sleep(DELTA_RETRY_WAITS[attempt - 1])
+    return wrapper
+
+
 # ---------------------------------------------------------------------------
 # IO -- every read and write the tool makes
 # ---------------------------------------------------------------------------
@@ -122,6 +161,7 @@ class LiveIO:
         from src.lakehouse import bronze_unnest
         return DeltaTable(bronze_unnest._table_uri(table), storage_options=bronze_unnest._storage_options())
 
+    @_retried
     def delta_read(self, table, statement_id):
         """(rows, table version) read straight from the Delta files -- the SQL
         endpoint truncates raw_payload at 8000 characters."""
@@ -134,15 +174,18 @@ class LiveIO:
         result = QueryBuilder().register("t", dt_).execute(f"SELECT * FROM t WHERE statement_id = '{escaped}'").read_all()
         return pa.table(result).to_pylist(), dt_.version()
 
+    @_retried
     def delta_delete(self, table, statement_id):
         from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
         escaped = statement_id.replace("'", "''")
         with fabric_pipeline_lock():
             self._delta(table).delete(predicate=f"statement_id = '{escaped}'")
 
+    @_retried
     def delta_columns(self, table):
         return [f.name for f in self._delta(table).schema().to_arrow()]
 
+    @_retried
     def delta_append(self, table, rows):
         import pyarrow as pa
         from deltalake import write_deltalake
