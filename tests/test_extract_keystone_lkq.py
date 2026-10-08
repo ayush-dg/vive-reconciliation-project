@@ -28,12 +28,12 @@ SAMPLE = os.path.join(os.path.dirname(__file__), "..", "src", "extraction", "pyt
 HEADER = "Purchase Order Balance Forward Period Activity Credit Applied Payment Applied Balance Due"
 
 
-def lkq_pdf(rows, header=True, letterhead="LKQ Test Auto"):
+def lkq_pdf(rows, header=True, letterhead="LKQ Test Auto", statement_date="09/30/2026"):
     """One page laid out like LKQ Broadway Auto's statement (x positions from the real PDF)."""
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.insert_text((40, 40), f"{letterhead} MONTHLY STATEMENT", fontsize=9)
-    page.insert_text((40, 60), "Statement Date: 09/30/2026", fontsize=9)
+    page.insert_text((40, 60), f"Statement Date: {statement_date}", fontsize=9)
     page.insert_text((40, 80), "AMOUNT DUE: $708.00", fontsize=9)
     if header:
         page.insert_text((40, 340), "Reference Reference " + HEADER, fontsize=7)
@@ -100,6 +100,43 @@ class TestLkqLedger(unittest.TestCase):
     def test_adversarial_lkq_letterhead_without_the_ledger_header_does_not_route(self):
         with self.assertRaises(extract_all.UnknownVendorError):
             extract_all.detect_vendor(lkq_pdf(ROWS, header=False))
+
+
+class TestFourDigitYears(unittest.TestCase):
+    """LKQ prints "09/30/2026" (statement and reference dates), Keystone "09/30/26".
+    Before 2026-10-08 the statement date regex stopped at "09/30/20" and the
+    period became 2020-09 (STMT-926A9067); both now come out as MM/DD/YY."""
+
+    def test_lkq_four_digit_statement_date_is_september_2026(self):
+        path = lkq_pdf(ROWS)
+        self.assertEqual(extract_keystone.extract(path)["summary"]["statement_date"], "09/30/26")
+        meta = adapter.PythonLibraryExtractionEngine().understand("", path)["statement_metadata"]
+        self.assertEqual(str(meta["statement_date"])[:7], "2026-09")
+
+    def test_lkq_four_digit_reference_dates_are_read_and_shortened(self):
+        rows = [(d[:6] + "20" + d[6:],) + r[1:] for r in ROWS for d in (r[0],)]
+        items = extract_keystone.extract(lkq_pdf(rows))["line_items"]
+        self.assertEqual(len(items), 7)
+        self.assertEqual([i["reference_date"] for i in items], [r[0] for r in ROWS])
+        self.assertEqual(items, extract_keystone.extract(lkq_pdf(ROWS))["line_items"])
+
+    def test_keystone_two_digit_dates_unchanged(self):
+        r = extract_keystone.extract(lkq_pdf(ROWS, statement_date="09/30/26"))
+        self.assertEqual(r["summary"]["statement_date"], "09/30/26")
+        self.assertEqual(len(r["line_items"]), 7)
+        self.assertEqual(extract_keystone.extract(SAMPLE)["summary"]["statement_date"], "07/31/26")
+
+    def test_short_year(self):
+        self.assertEqual(extract_keystone._short_year("09/30/2026"), "09/30/26")
+        self.assertEqual(extract_keystone._short_year("09/30/26"), "09/30/26")
+
+    def test_adversarial_dates(self):
+        # 3 or 5 year digits are not a date: no statement_date, row skipped.
+        for bad in ("09/30/202", "09/30/20261"):
+            self.assertNotIn("statement_date", extract_keystone.parse_header_info(f"Statement Date: {bad}\n"))
+            self.assertIsNone(extract_keystone.DATE_RE.match(bad))
+        rows = [("09/15/202",) + ROWS[0][1:]] + ROWS[1:]
+        self.assertEqual(len(extract_keystone.extract(lkq_pdf(rows))["line_items"]), 6)
 
 
 class TestKeystoneUnchanged(unittest.TestCase):

@@ -53,7 +53,14 @@ VENDOR_SIGNATURE = ["Keystone Automotive Industries",
 
 ROW_TOLERANCE = 3.0
 
-DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{2}$")
+# Keystone prints 2-digit years ("09/30/26"); LKQ-branded copies print 4 ("09/30/2026").
+# Both are read; the output stays MM/DD/YY (_short_year).
+DATE_RE = re.compile(r"^\d{2}/\d{2}/(?:\d{4}|\d{2})$")
+
+
+def _short_year(date):
+    """ "09/30/2026" -> "09/30/26"; a 2-digit date is returned unchanged."""
+    return date[:6] + date[8:] if len(date) == 10 else date
 
 # Column boundaries (x0), measured from this document's header word
 # positions (e.g. "Balance Forward" header spans x0 260.6-317.0, "Period
@@ -105,9 +112,9 @@ def group_rows(words):
 
 def parse_header_info(page1_text):
     info = {}
-    m = re.search(r"Statement Date:\s*(\d{2}/\d{2}/\d{2})", page1_text)
+    m = re.search(r"Statement Date:\s*(\d{2}/\d{2}/(?:\d{4}|\d{2}))(?!\d)", page1_text)
     if m:
-        info["statement_date"] = m.group(1)
+        info["statement_date"] = _short_year(m.group(1))
     m = re.search(r"Customer Terms:\s*(.+)", page1_text)
     if m:
         info["terms"] = m.group(1).strip()
@@ -198,7 +205,7 @@ def extract(pdf_path):
                 balance_due = "".join(w["text"] for w in cols["balance_due"])
 
                 line_items.append({
-                    "reference_date": reference_date,
+                    "reference_date": _short_year(reference_date),
                     "reference_number": reference_number,
                     "purchase_order_number": purchase_order_number,
                     "balance_forward": balance_forward,
