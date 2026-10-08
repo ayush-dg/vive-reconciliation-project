@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
-from web.routers import auth, batches, dashboard, exceptions, intake_trigger, jobs, mailbox_sync, reports, review_queue, upload, users, validation
+from web.routers import auth, batches, dashboard, exceptions, intake_trigger, jobs, mailbox_sync, reports, review_queue, statements, upload, users, validation
 from web.worker import start_worker, stop_workers
 
 
@@ -48,6 +48,11 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.exception_handler(LoginRequired)
 async def login_required_handler(request: Request, exc: LoginRequired):
+    # Remember the page they were trying to open (GETs only, a path taken
+    # from the request itself -- never client-supplied) so login can send
+    # them there, e.g. from a NetSuite statement-PDF link.
+    if request.method == "GET":
+        request.session["next"] = request.url.path
     return RedirectResponse("/login", status_code=303)
 
 
@@ -63,3 +68,4 @@ app.include_router(users.router)
 app.include_router(jobs.router)
 app.include_router(intake_trigger.router)
 app.include_router(batches.router)
+app.include_router(statements.router)

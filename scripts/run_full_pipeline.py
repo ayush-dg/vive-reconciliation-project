@@ -72,6 +72,25 @@ def _run_matching(statement_id):
     else:
         print(f"    NetSuite matching: {match_result['matched']} matched, "
               f"{match_result['exceptions']} exceptions")
+        _run_netsuite_writeback(statement_id)
+
+
+def _run_netsuite_writeback(statement_id):
+    """Writes this statement's reconciliation result back into NetSuite
+    (sandbox only, off unless NETSUITE_WRITEBACK_ENABLED=true). Best-effort:
+    only runs after matching succeeded, and a failure never stops the
+    pipeline."""
+    from src.netsuite.pipeline_hook import run_netsuite_writeback
+    with timed_step("netsuite_writeback"):
+        result = run_netsuite_writeback(statement_id)
+    if result.get("skipped"):
+        print(f"    NetSuite write-back: skipped ({result['reason']})")
+    elif "error" in result:
+        print(f"    NetSuite write-back: failed ({result['error']}, see logs)")
+    else:
+        not_written = ", ".join(f"{n} {reason}" for reason, n in result["not_written"].items())
+        print(f"    NetSuite write-back: {result['written']} written, {result['failed']} failed"
+              f"{', not written: ' + not_written if not_written else ''}. Log: {result['log']}")
 
 
 def main():

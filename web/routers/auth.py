@@ -40,6 +40,14 @@ def _authenticate(email: str, password: str):
     return None
 
 
+def _post_login_destination(request: Request) -> str:
+    """Where to send a user after login: the page that bounced them to
+    /login (stored server-side by the LoginRequired handler), else the
+    dashboard. Only a same-site absolute path is ever honoured."""
+    target = request.session.pop("next", None) or "/"
+    return target if target.startswith("/") and not target.startswith("//") else "/"
+
+
 @router.get("/login")
 def login_form(request: Request):
     if request.session.get("user"):
@@ -57,7 +65,7 @@ def login_submit(request: Request, email: str = Form(...), password: str = Form(
         # in web/routers/users.py).
         request.session["user"] = email.strip().lower()
         request.session["user_name"] = name
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(_post_login_destination(request), status_code=303)
     return render(request, "login.html", {"error": "Invalid email or password."}, status_code=401)
 
 
