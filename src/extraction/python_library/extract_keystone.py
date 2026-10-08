@@ -46,11 +46,21 @@ import sys
 
 import pdfplumber
 
-VENDOR_SIGNATURE = ["Keystone Automotive Industries"]
+VENDOR_SIGNATURE = ["Keystone Automotive Industries",
+                    # LKQ-branded copy of the same ledger (e.g. LKQ Broadway Auto), matched on its
+                    # exact column-header line so only this layout routes here.
+                    "Purchase Order Balance Forward Period Activity Credit Applied Payment Applied Balance Due"]
 
 ROW_TOLERANCE = 3.0
 
-DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{2}$")
+# Keystone prints 2-digit years ("09/30/26"); LKQ-branded copies print 4 ("09/30/2026").
+# Both are read; the output stays MM/DD/YY (_short_year).
+DATE_RE = re.compile(r"^\d{2}/\d{2}/(?:\d{4}|\d{2})$")
+
+
+def _short_year(date):
+    """ "09/30/2026" -> "09/30/26"; a 2-digit date is returned unchanged."""
+    return date[:6] + date[8:] if len(date) == 10 else date
 
 # Column boundaries (x0), measured from this document's header word
 # positions (e.g. "Balance Forward" header spans x0 260.6-317.0, "Period
@@ -68,6 +78,13 @@ COLUMN_BOUNDS = [
 ]
 
 FIELDNAMES = [name for name, _, _ in COLUMN_BOUNDS]
+
+
+def _amount(token):
+    """LKQ-branded copies print "$1,279.50" and "($259.50)": drop the "$" and turn
+    parentheses into the trailing minus adapter._parse_money() reads."""
+    t = token.replace("$", "")
+    return t[1:-1] + "-" if len(t) > 2 and t.startswith("(") and t.endswith(")") else t
 
 
 def bucket_column(x0):
@@ -95,9 +112,9 @@ def group_rows(words):
 
 def parse_header_info(page1_text):
     info = {}
-    m = re.search(r"Statement Date:\s*(\d{2}/\d{2}/\d{2})", page1_text)
+    m = re.search(r"Statement Date:\s*(\d{2}/\d{2}/(?:\d{4}|\d{2}))(?!\d)", page1_text)
     if m:
-        info["statement_date"] = m.group(1)
+        info["statement_date"] = _short_year(m.group(1))
     m = re.search(r"Customer Terms:\s*(.+)", page1_text)
     if m:
         info["terms"] = m.group(1).strip()
@@ -128,14 +145,15 @@ def extract(pdf_path):
     current_past_due_pay = None
 
     with pdfplumber.open(pdf_path) as pdf:
-        page1_text = pdf.pages[0].extract_text() or ""
+        # LKQ-branded copies print "$" on every amount; dropped for the regexes below.
+        page1_text = (pdf.pages[0].extract_text() or "").replace("$", "")
         header_info = parse_header_info(page1_text)
         m = re.search(r"AMOUNT DUE:\s*([\d,.\-]+)", page1_text)
         if m:
             amount_due_printed = m.group(1)
 
         for page_num, page in enumerate(pdf.pages, start=1):
-            page_text = page.extract_text() or ""
+            page_text = (page.extract_text() or "").replace("$", "")
 
             m = re.search(
                 r"Month Totals\s+([\d,.\-]+)\s+([\d,.\-]+)\s+([\d,.\-]+)\s+([\d,.\-]+)\s+([\d,.\-]+)",
@@ -161,7 +179,7 @@ def extract(pdf_path):
                     "pay_this_amount": m.group(3),
                 }
 
-            words = page.extract_words()
+            words = [{**w, "text": _amount(w["text"])} for w in page.extract_words()]
             rows = group_rows(words)
 
             for row in rows:
@@ -187,7 +205,7 @@ def extract(pdf_path):
                 balance_due = "".join(w["text"] for w in cols["balance_due"])
 
                 line_items.append({
-                    "reference_date": reference_date,
+                    "reference_date": _short_year(reference_date),
                     "reference_number": reference_number,
                     "purchase_order_number": purchase_order_number,
                     "balance_forward": balance_forward,
@@ -198,7 +216,8 @@ def extract(pdf_path):
                 })
 
     def to_float(s):
-        return float(s.replace(",", "")) if s else 0.0
+        s = (s or "").replace(",", "")
+        return (-float(s[:-1]) if s.endswith("-") else float(s)) if s else 0.0
 
     # Balance Due is the only column populated on every row, and it
     # already nets Balance Forward + Period Activity - Credit Applied -
@@ -210,6 +229,12 @@ def extract(pdf_path):
     printed_total = round(to_float(amount_due_printed or "0"), 2)
 
     summary = dict(header_info)
+    # LKQ-branded copies name the issuing branch in the letterhead; Keystone's own statements
+    # keep the module's fixed display name (adapter._VENDOR_NAME_FROM_DOCUMENT).
+    if "Keystone Automotive Industries" not in page1_text:
+        m = re.match(r"\s*(.+?)\s+MONTHLY STATEMENT", page1_text)
+        if m:
+            summary["vendor_name"] = m.group(1).strip()
     summary["amount_due_printed"] = amount_due_printed
     summary["total_computed"] = f"{computed_total:,.2f}"
     summary["total_printed"] = f"{printed_total:,.2f}"

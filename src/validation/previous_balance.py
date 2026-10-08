@@ -112,7 +112,8 @@ def find_labelled_previous_balances(pdf_text: Optional[str]) -> list:
     return found
 
 
-def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: Optional[str]) -> dict:
+def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: Optional[str],
+                             text_source: str = "text_layer") -> dict:
     """Returns {"value": float|None, "source": str|None, "label": str|None}.
 
     source is one of "text_layer" (value read from the PDF text),
@@ -120,7 +121,11 @@ def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: 
     "model_label_only" (scan: model value with its printed balance-forward
     label), or "rejected: ..." when a model value could not be accepted.
     A rejected scan value that came with a non-balance-forward label is
-    also returned as "chain_opening" (running_balance check only)."""
+    also returned as "chain_opening" (running_balance check only).
+
+    text_source="ocr" (2026-10-07): pdf_text is a scan's OCR text
+    (ocr_text.py), read with exactly the same labelled-line rules; the
+    sources are then reported as "ocr" / "model+ocr" instead."""
     value = None
     if model_value is not None:
         try:
@@ -134,8 +139,9 @@ def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: 
     if value is not None:
         if text_layer:
             if any(abs(c - value) < 0.005 for c in candidates):
-                return {"value": value, "source": "model+text_layer", "label": label}
-            return {"value": None, "source": "rejected: not on a labelled line in the text layer", "label": label}
+                return {"value": value, "source": f"model+{text_source}", "label": label}
+            return {"value": None, "source": f"rejected: not on a labelled line in the {text_source.replace('_', ' ')}",
+                    "label": label}
         if label and is_balance_forward_label(label):
             return {"value": value, "source": "model_label_only", "label": label}
         if label:
@@ -145,5 +151,5 @@ def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: 
 
     distinct = sorted(set(candidates))
     if len(distinct) == 1:
-        return {"value": distinct[0], "source": "text_layer", "label": None}
+        return {"value": distinct[0], "source": text_source, "label": None}
     return {"value": None, "source": None, "label": None}

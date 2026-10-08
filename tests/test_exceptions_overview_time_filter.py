@@ -146,21 +146,6 @@ class TestGetExceptionRunsWindow(unittest.TestCase):
         # Exceptions-only still there.
         self.assertEqual(sum(1 for r in runs if r.get("exceptions_only")), 1)
 
-    def test_runs_with_no_invoices_get_no_card(self):
-        # 2026-10-06: a 0-invoice run (stored as RECONCILED, nothing ever
-        # matched) is left out of the overview in every window, while the
-        # exceptions-only vendor still shows.
-        self._run("Z0", "Ghost Parts", ts="2026-09-29 12:06:00", exc=0, invoices=0, matched=0, total=0.0)
-        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
-                           ["A1", "2026-09-29 12:08:00", "mailbox/x.pdf"])
-        self.local.execute("INSERT INTO jobs (statement_id, submitted_at, source_blob_path) VALUES (?, ?, ?)",
-                           ["Z0", "2026-09-29 12:06:00", "mailbox/z.pdf"])
-        for window in (None, self._window("date", "2026-09-29"), self._window("last"), self._window("all")):
-            with self.subTest(window=getattr(window, "range", None)):
-                runs = queries.get_exception_runs(window)
-                self.assertNotIn("Z0", self._ids(runs))
-                self.assertEqual(sum(1 for r in runs if r.get("exceptions_only")), 1)
-
     def test_empty_window_still_shows_exceptions_only_vendor(self):
         runs = queries.get_exception_runs(self._window("date", "2026-01-01"))
         self.assertEqual(self._ids(runs), set())

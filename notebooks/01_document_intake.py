@@ -69,10 +69,13 @@ from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
 from src.validation.arithmetic_gate import (
-    compute_statement_total_from_invoices, compute_vendor_column_total, validate_with_fallbacks,
+    compute_arithmetic_validation, compute_statement_total_from_invoices, compute_vendor_column_total,
+    validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
-from src.validation.previous_balance import resolve_previous_balance
+from src.validation.ocr_text import ocr_pdf_text
+from src.validation.previous_balance import has_text_layer, resolve_previous_balance
+from src.validation.printed_total import find_printed_total
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -766,23 +769,12 @@ def normalize_to_silver(bronze_statement_id: str, silver_statement_id: str, vend
     return count
 
 
-def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
-                     schema_result: dict, statement_id: str, statement_period: str,
-                     invoice_count: int, routing_decision: str):
-    """Write one row to document_intake_log.
-
-    TEMPORARY (2026-08-29): document_intake_log is pointed back at Azure
-    SQL via execute_sql() -- the Fabric SQL Database item this used to
-    write (get_fabric_connection() in src/lakehouse/connection.py) is
-    unreachable in production right now (the FABRIC_CLIENT_ID service
-    principal lacks Read permission on it). Revert to
-    execute_sql_fabric()/execute_query_fabric() once that permission is
-    granted. Azure SQL's real schema for this table has a genuine
-    IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
-    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
-    assignment this replaces. `id` is no longer in the INSERT at all;
-    Azure SQL assigns it.
-    """
+def intake_log_values(document_id: str, pdf_path: str, document_hash: str,
+                      schema_result: dict, statement_id: str, statement_period: str,
+                      invoice_count: int, routing_decision: str) -> dict:
+    """The document_intake_log column values for one extraction -- written
+    by write_intake_log(), and by src/rerun/in_place.py as an UPDATE of a
+    re-run statement's existing row (2026-10-07)."""
     now = datetime.now(timezone.utc).isoformat()
     meta = schema_result.get("document_metadata", {})
     vendor = schema_result.get("vendor_metadata", {})
@@ -816,62 +808,73 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     billing_location_source = vendor.get("billing_location_source")
     statement_month = normalize_statement_month(stmt.get("statement_date"))
 
+    values = {
+        "document_id": document_id,
+        "document_hash": document_hash,
+        "source_file": os.path.basename(pdf_path),
+        "ingestion_timestamp": now,
+        "document_type": meta.get("document_type"),
+        "document_type_confidence": meta.get("document_type_confidence"),
+        "vendor_name": vendor.get("vendor_name"),
+        "shop_or_entity": json.dumps(vendor.get("shop_or_entity", [])),
+        "statement_date": stmt.get("statement_date"),
+        "statement_period": statement_period,
+        "currency": stmt.get("currency"),
+        "statement_total_as_printed": stmt.get("statement_total_as_printed"),
+        "extraction_confidence_overall": conf.get("overall"),
+        "extraction_model": schema_result.get("_model_used"),
+        "extraction_method": schema_result.get("_provider_used"),
+        "routing_decision": routing_decision,
+        "statement_id": statement_id,
+        "invoice_count": invoice_count,
+        "warnings": json.dumps(warnings),
+        "schema_version": "1.0",
+        "raw_aging_summary": raw_aging_summary,
+        "validation_status": validation.get("status"),
+        "validation_difference": validation.get("difference"),
+        "billing_location": billing_location,
+        "statement_month": statement_month,
+        "billing_location_source": billing_location_source,
+        # migrations/019_add_validation_fallback_columns.sql -- which
+        # check passed ("primary", "open_balance", ...; NULL when none
+        # did), the fallback attempts as JSON, and the fallback inputs.
+        "validation_method": validation.get("method"),
+        "validation_detail": json.dumps(validation["detail"]) if validation.get("detail") is not None else None,
+        "previous_balance": stmt.get("previous_balance"),
+        "previous_balance_source": stmt.get("previous_balance_source"),
+        "section_totals": json.dumps(stmt["section_totals"]) if stmt.get("section_totals") else None,
+    }
+    return values
+
+
+def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
+                     schema_result: dict, statement_id: str, statement_period: str,
+                     invoice_count: int, routing_decision: str):
+    """Write one row to document_intake_log (values: intake_log_values()).
+
+    TEMPORARY (2026-08-29): document_intake_log is pointed back at Azure
+    SQL via execute_sql() -- the Fabric SQL Database item this used to
+    write (get_fabric_connection() in src/lakehouse/connection.py) is
+    unreachable in production right now (the FABRIC_CLIENT_ID service
+    principal lacks Read permission on it). Revert to
+    execute_sql_fabric()/execute_query_fabric() once that permission is
+    granted. Azure SQL's real schema for this table has a genuine
+    IDENTITY(1,1) id column (see azure_sql_migrations.py) -- unlike
+    Fabric's copy, which had none, hence the old manual MAX(id)+1 id
+    assignment this replaces. `id` is no longer in the INSERT at all;
+    Azure SQL assigns it.
+    """
+    values = intake_log_values(document_id, pdf_path, document_hash, schema_result,
+                               statement_id, statement_period, invoice_count, routing_decision)
+
     execute_sql(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
         [statement_id]
     )
 
     execute_sql(
-        """
-        INSERT INTO document_intake_log (
-            document_id, document_hash, source_file, ingestion_timestamp,
-            document_type, document_type_confidence,
-            vendor_name, shop_or_entity, statement_date, statement_period,
-            currency, statement_total_as_printed,
-            extraction_confidence_overall, extraction_model, extraction_method,
-            routing_decision, statement_id, invoice_count, warnings, schema_version,
-            raw_aging_summary, validation_status, validation_difference,
-            billing_location, statement_month, billing_location_source,
-            validation_method, validation_detail, previous_balance,
-            previous_balance_source, section_totals
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            document_id,
-            document_hash,
-            os.path.basename(pdf_path),
-            now,
-            meta.get("document_type"),
-            meta.get("document_type_confidence"),
-            vendor.get("vendor_name"),
-            json.dumps(vendor.get("shop_or_entity", [])),
-            stmt.get("statement_date"),
-            statement_period,
-            stmt.get("currency"),
-            stmt.get("statement_total_as_printed"),
-            conf.get("overall"),
-            schema_result.get("_model_used"),
-            schema_result.get("_provider_used"),
-            routing_decision,
-            statement_id,
-            invoice_count,
-            json.dumps(warnings),
-            "1.0",
-            raw_aging_summary,
-            validation.get("status"),
-            validation.get("difference"),
-            billing_location,
-            statement_month,
-            billing_location_source,
-            # migrations/019_add_validation_fallback_columns.sql -- which
-            # check passed ("primary", "open_balance", ...; NULL when none
-            # did), the fallback attempts as JSON, and the fallback inputs.
-            validation.get("method"),
-            json.dumps(validation["detail"]) if validation.get("detail") is not None else None,
-            stmt.get("previous_balance"),
-            stmt.get("previous_balance_source"),
-            json.dumps(stmt["section_totals"]) if stmt.get("section_totals") else None,
-        ]
+        f"INSERT INTO document_intake_log ({', '.join(values)}) VALUES ({', '.join('?' * len(values))})",
+        list(values.values()),
     )
 
 
@@ -1086,10 +1089,64 @@ def resolve_version_info(vendor_id: str, statement_period: str) -> dict:
     }
 
 
-def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
+def _validation_text(pdf_text: str, pdf_path, stmt_meta: dict, is_statement: bool):
+    """(text, source) for the gate's text-based checks (2026-10-07): the
+    PDF's own text layer ("text_layer"), or -- for a scan whose primary check
+    cannot already pass -- its OCR text ("ocr", src/validation/ocr_text.py).
+    ("", None) when there is neither. OCR is never run for a document that
+    is not a statement or whose printed and computed totals already match."""
+    if has_text_layer(pdf_text):
+        return pdf_text, "text_layer"
+    primary = compute_arithmetic_validation(
+        stmt_meta.get("statement_total_as_printed"), stmt_meta.get("statement_total_computed"))
+    if not is_statement or primary["status"] == "matches":
+        return "", None
+    ocr = ocr_pdf_text(pdf_path)
+    return (ocr, "ocr") if has_text_layer(ocr) else ("", None)
+
+
+def _fill_printed_total(stmt_meta: dict, text: str, source) -> str:
+    """The printed total read from the text (printed_total.py) when the
+    extraction returned none. Returns the text's source when a total was
+    filled in, else None -- an extracted printed total is never replaced."""
+    if stmt_meta.get("statement_total_as_printed") is not None or not text:
+        return None
+    found = find_printed_total(text)
+    if found is None:
+        return None
+    stmt_meta["statement_total_as_printed"] = found
+    print(f"  Printed total read from the {source.replace('_', ' ')}: {found:,.2f}")
+    return source
+
+
+def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source) -> tuple:
+    """(resolved, from_ocr): resolve_previous_balance() on the PDF's own
+    text, and -- for a scan whose value could not be accepted that way --
+    the same rules once more on its OCR text (labelled balance-forward line
+    only), or None when that yields no value. The scan's chain opening is
+    kept on both."""
+    model_value, model_label = stmt_meta.get("previous_balance"), stmt_meta.get("previous_balance_label")
+    resolved = resolve_previous_balance(model_value, model_label, pdf_text)
+    if resolved["value"] is not None or source != "ocr":
+        return resolved, None
+    from_ocr = resolve_previous_balance(model_value, model_label, text, text_source="ocr")
+    if from_ocr["value"] is None:
+        return resolved, None
+    return resolved, {**from_ocr, "chain_opening": resolved.get("chain_opening")}
+
+
+def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
     validation dict.
+
+    Text-based checks (2026-10-07) read the PDF's text layer, or for a scan
+    whose totals don't already match, its OCR text (pdf_path is needed for
+    that): a missing printed total is read from a total-labelled line
+    (printed_total.py) and the previous balance from a labelled
+    balance-forward line. Both are still checked against the extracted rows
+    with the same exact-match rules; the validation detail records
+    "text_source": "ocr" and "printed_total_source" when they were used.
 
     0. A row that is really an unlabelled "LAST PAYMENT" note (its amount
        printed only on a LAST PAYMENT line of the text layer) keeps its row
@@ -1103,6 +1160,8 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
        printed balance-forward label); see src/validation/previous_balance.py.
        A scan's value under any other label (e.g. only the opening line's
        date) is passed to the running_balance check alone, as its opening.
+       A value read from a scan's OCR text is tried only if the gate fails
+       without it, so it can never undo a pass.
     3. A document with no line-item table at all is "not_a_statement", not
        a validation failure; anything else goes through
        validate_with_fallbacks() (primary check, then the fallback chain).
@@ -1122,26 +1181,42 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str) -> dict:
     )
     if column_total is not None:
         stmt_meta["statement_total_computed"] = column_total
-    previous_balance = resolve_previous_balance(
-        stmt_meta.get("previous_balance"), stmt_meta.get("previous_balance_label"), pdf_text,
-    )
-    stmt_meta["previous_balance"] = previous_balance["value"]
-    stmt_meta["previous_balance_source"] = previous_balance["source"]
-    if schema_result.get("document_metadata", {}).get("document_type") == NOT_A_STATEMENT:
+    is_statement = schema_result.get("document_metadata", {}).get("document_type") != NOT_A_STATEMENT
+    text, text_source = _validation_text(pdf_text, pdf_path, stmt_meta, is_statement)
+    printed_source = _fill_printed_total(stmt_meta, text, text_source) if is_statement else None
+    previous_balance, ocr_previous_balance = _resolve_previous_balance(stmt_meta, pdf_text, text, text_source)
+    if not is_statement:
         validation = {
             "status": "not_a_statement", "printed": stmt_meta.get("statement_total_as_printed"),
             "computed": None, "difference": None, "method": None, "detail": None,
         }
         print(f"  {NOT_A_STATEMENT_MARKER} no line-item table found -- this PDF does not look like a vendor statement.")
     else:
-        validation = validate_with_fallbacks(
-            stmt_meta.get("statement_total_as_printed"),
-            stmt_meta.get("statement_total_computed"),
-            schema_result.get("invoices") or [],
-            previous_balance=previous_balance["value"],
-            section_totals=stmt_meta.get("section_totals"),
-            chain_opening_balance=previous_balance.get("chain_opening"),
-        )
+        def validate(previous):
+            return validate_with_fallbacks(
+                stmt_meta.get("statement_total_as_printed"),
+                stmt_meta.get("statement_total_computed"),
+                schema_result.get("invoices") or [],
+                previous_balance=previous["value"],
+                section_totals=stmt_meta.get("section_totals"),
+                chain_opening_balance=previous.get("chain_opening"),
+            )
+
+        validation = validate(previous_balance)
+        # A previous balance read from a scan's OCR text is only tried once
+        # the gate has failed without it: it would also become the
+        # running_balance check's opening, so trying it first could undo a
+        # running_balance pass. It can add a pass, never take one away.
+        if validation["status"] == "mismatch" and ocr_previous_balance:
+            with_ocr = validate(ocr_previous_balance)
+            if with_ocr["status"] == "matches":
+                validation, previous_balance = with_ocr, ocr_previous_balance
+        sources = {k: v for k, v in (("printed_total_source", printed_source),
+                                       ("text_source", "ocr" if text_source == "ocr" else None)) if v}
+        if sources:
+            validation["detail"] = {**(validation.get("detail") or {}), **sources}
+    stmt_meta["previous_balance"] = previous_balance["value"]
+    stmt_meta["previous_balance_source"] = previous_balance["source"]
     schema_result["validation"] = validation
     print(f"  Validation: {validation.get('status')} (method: {validation.get('method') or '-'})")
     return validation
@@ -1395,7 +1470,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Python-library extractor returned 0 line items — retrying with the Document Understanding Engine...")
         schema_result = DocumentUnderstandingEngine().understand(pdf_text, pdf_path, statement_id=statement_id)
 
-    apply_arithmetic_validation(schema_result, pdf_text)
+    apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
 
     # Three-tier billing_location fallback (src/validation/location_lookup.py)
     # -- a printed address always wins (tier 1); when extraction found none

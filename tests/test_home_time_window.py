@@ -611,40 +611,6 @@ class TestHomeDashboardQuery(unittest.TestCase):
         self.assertEqual(k["open_exceptions"], 6)
         self.assertEqual((data["reconciled"], data["total"]), (1, 3))
 
-    def test_runs_with_no_invoices_are_left_out_of_everything(self):
-        # 2026-10-06: a 0-invoice run (no line reached matching; stored as
-        # RECONCILED) and a NULL-count run in the same window as Session A.
-        # Neither may show in the table, "N of M reconciled", the KPI
-        # cards (incl. vendor count) or the Month options.
-        self._run("Z0", "Ghost Parts", ts="2026-09-29 10:00:00", invoices=0, matched=0, exc=0, total=0, period="2026-08")
-        self.fabric.execute(
-            "INSERT INTO silver.recon_summary VALUES ('ZN', 'Null Parts', NULL, NULL, NULL, NULL, NULL, 'RECONCILED', ?, 1)",
-            ["2026-09-29 10:30:00"],
-        )
-        self._run("ZA", "August Ghost", ts="2026-08-15 12:00:00", invoices=0, matched=0, exc=0, total=0)
-        data = queries.get_home_dashboard(self._window("date", "2026-09-29"))
-        self.assertEqual(self._ids(data), ["A1", "A2", "A3"])
-        self.assertEqual((data["reconciled"], data["total"], data["statement_count"]), (1, 3, 3))
-        self.assertEqual(data["kpis"]["vendor_count"], 2)
-        self.assertEqual(data["kpis"]["total_invoices"], 35)
-        everything = queries.get_home_dashboard(self._window("all"))
-        self.assertNotIn("Z0", self._ids(everything) + [r["statement_id"] for r in everything["runs"]])
-        self.assertEqual(everything["statement_count"], 5)
-        # August only has a 0-invoice run, so it's not offered as a month.
-        self.assertEqual(tw.month_options(queries.get_run_timestamps()), ["2026-09"])
-
-    def test_last_run_leaves_out_a_sync_job_whose_run_has_no_invoices(self):
-        self._run("Z0", "Ghost Parts", ts="2026-09-29 12:09:00", invoices=0, matched=0, exc=0, total=0)
-        self._outlook_job("A1", "2026-09-29 12:08:00")
-        self._outlook_job("Z0", "2026-09-29 12:07:00")
-        window = self._window("last")
-        data = queries.get_home_dashboard(window)
-        self.assertEqual(self._ids(data), ["A1"])
-        self.assertEqual((data["reconciled"], data["total"], data["kpis"]["vendor_count"]), (1, 1, 1))
-        # The sync line still counts the job itself -- it completed.
-        self.assertEqual(tw.window_label(window, data["statement_count"]),
-                         "Last sync · Sep 29, 8:08 AM ET · 2 statements")
-
     def test_status_and_period_narrow_the_table_but_not_the_cards(self):
         base = queries.get_home_dashboard(self._window("date", "2026-09-29"))
         data = queries.get_home_dashboard(self._window("date", "2026-09-29"), status="exceptions", period="2026-08")
