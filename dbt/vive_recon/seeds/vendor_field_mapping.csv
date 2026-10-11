@@ -1014,3 +1014,36 @@ LKQ,purchase_order_number,po_number,string,v1,1
 LKQ,period_activity,charge_amount,decimal,v1,1
 LKQ,credit_applied,charge_amount,decimal,v1,2
 LKQ,balance_due,amount_remaining,decimal,v1,1
+ASTECH,Invoice #,original_invoice_number,string,v1,1
+ASTECH,Invoice Date,line_date,date,v1,1
+ASTECH,Outstanding Amount,amount_remaining,decimal,v1,1
+ASTECH,Outstanding Amount,charge_amount,decimal,v1,1
+ASTECH,Work Order #,work_order_number,string,v1,1
+ASTECH,RO#,ro_number,string,v1,1
+ASTECH,Due Date,due_date,date,v1,1
+EMPIRE_AUTO_PARTS,Doc #,original_invoice_number,string,v1,1
+EMPIRE_AUTO_PARTS,Transaction date,line_date,date,v1,1
+EMPIRE_AUTO_PARTS,Amount,charge_amount,decimal,v1,1
+EMPIRE_AUTO_PARTS,Balance,amount_remaining,decimal,v1,1
+EMPIRE_AUTO_PARTS,Your PO #,po_number,string,v1,1
+EMPIRE_AUTO_PARTS,Orig inv #,invoice_number_ref,string,v1,1
+EMPIRE_AUTO_PARTS,Due,due_date,date,v1,1
+EMPIRE_AUTO_PARTS,Transaction,description_raw,string,v1,1
+QUIRK_AUTO_GROUP,Invoice Number,original_invoice_number,string,v1,1
+QUIRK_AUTO_GROUP,Date,line_date,date,v1,1
+QUIRK_AUTO_GROUP,Amount,charge_amount,decimal,v1,1
+QUIRK_AUTO_GROUP,Invoice Balance,amount_remaining,decimal,v1,1
+QUIRK_AUTO_GROUP,Due Date,due_date,date,v1,1
+QUIRK_AUTO_GROUP,Description,description_raw,string,v1,1
+ABC_PARTS_INTERNATIONAL,Description,original_invoice_number,string,v1,1
+ABC_PARTS_INTERNATIONAL,Description,description_raw,string,v1,1
+ABC_PARTS_INTERNATIONAL,Date,line_date,date,v1,1
+ABC_PARTS_INTERNATIONAL,Original Amount,charge_amount,decimal,v1,1
+ABC_PARTS_INTERNATIONAL,Credit,payment_amount,decimal,v1,1
+ABC_PARTS_INTERNATIONAL,Remaining Balance,amount_remaining,decimal,v1,1
+ABC_PARTS_INTERNATIONAL,PO Number,po_number,string,v1,1
+FENIX_NE,Transaction Type,original_invoice_number,string,v1,1
+FENIX_NE,Date,line_date,date,v1,1
+FENIX_NE,Charged,charge_amount,decimal,v1,1
+FENIX_NE,Paid,payment_amount,decimal,v1,1
+FENIX_NE,Cust PO/Chk #,po_number,string,v1,1
