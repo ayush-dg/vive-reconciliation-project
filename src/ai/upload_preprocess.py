@@ -204,9 +204,11 @@ def _split(data: bytes, first: int, last: int, max_bytes: int, max_pages: int, g
 
 
 def plan_upload(pdf_path: str, *, max_bytes: int = MAX_REQUEST_PDF_BYTES, max_pages: int = MAX_PAGES_PER_REQUEST,
-                gate: Callable = legibility_check) -> UploadPlan:
+                gate: Optional[Callable] = None) -> UploadPlan:
     """The parts to send for pdf_path (see the module docstring). Reads the
-    file; never writes it."""
+    file; never writes it. gate defaults to legibility_check (looked up at
+    call time)."""
+    gate = gate or legibility_check
     with open(pdf_path, "rb") as f:
         data = f.read()
     pymupdf = _fitz()

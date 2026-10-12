@@ -528,10 +528,17 @@ class ClaudeSonnetClient(AIClient):
                 latency_ms=latency_ms, attempt_count=1, error=error,
             )
 
+        # Token usage of every API response and the upload plan, returned in
+        # raw_response so a caller can price the run (scripts/rerun_in_place.py
+        # --allow-ai records it; the intake ignores raw_response).
+        self._usage_log = []
+        run_info = {"usage": self._usage_log, "upload_plan": None}
+
         def failed(error, attempt=1):
             return AIResponse(
                 success=False, provider="claude_sonnet", model=self.model,
                 latency_ms=(time.monotonic() - start) * 1000, attempt_count=attempt, error=error,
+                raw_response=run_info,
             )
 
         try:
@@ -542,6 +549,9 @@ class ClaudeSonnetClient(AIClient):
         except Exception as e:
             return failed(self._clean_error(str(e)))
         print(f"  [ClaudeSonnetClient] Upload path: {plan.describe()}")
+        run_info["upload_plan"] = {"path": plan.path, "describe": plan.describe(), "notes": list(plan.notes),
+                                   "parts": [{"first_page": p.first_page, "last_page": p.last_page,
+                                              "bytes": len(p.data), "reduced": p.reduced} for p in plan.parts]}
         for note in plan.notes:
             print(f"  [ClaudeSonnetClient]   {note}")
 
@@ -576,7 +586,9 @@ class ClaudeSonnetClient(AIClient):
                 print(f"  [ClaudeSonnetClient]   merge: {note}")
 
         try:
-            return self._finish_parsed(parsed, pdf_path, start, attempts, plan)
+            response = self._finish_parsed(parsed, pdf_path, start, attempts, plan)
+            response.raw_response = run_info
+            return response
         except Exception as e:
             return failed(self._clean_error(str(e)), attempts)
 
@@ -777,6 +789,11 @@ class ClaudeSonnetClient(AIClient):
                 resp.raise_for_status()
                 data = resp.json()
             self._last_stop_reason = data.get("stop_reason")
+            usage = data.get("usage") or {}
+            if not hasattr(self, "_usage_log"):
+                self._usage_log = []
+            self._usage_log.append({"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens"),
+                                    "stop_reason": data.get("stop_reason")})
             text = "\n".join(
                 block.get("text", "") for block in data.get("content", [])
                 if block.get("type") == "text"

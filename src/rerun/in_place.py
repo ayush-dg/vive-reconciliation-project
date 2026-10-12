@@ -2,7 +2,9 @@
 src/rerun/in_place.py
 
 Re-runs ONE stored statement in place with a deterministic (python-library)
-extractor -- no AI -- keeping its statement_id (2026-10-07). For stored
+extractor -- no AI -- keeping its statement_id (2026-10-07). An explicit AI
+mode (--allow-ai, one statement at a time, extract-only -> dry run from the
+saved file -> apply; see "AI mode" at the end) was added 2026-10-12. For stored
 statements whose extraction was wrong but whose PDF a deterministic
 extractor now reads correctly (e.g. Autoly rows without Due/Unalloc.,
 Wilbert's 0-row statements). Driven by scripts/rerun_in_place.py.
@@ -313,9 +315,19 @@ def reextract(io, intake, state: dict, pdf_path: str) -> dict:
         raise RefusedError(f"route is {route['engine']!r}, not a deterministic extractor -- this tool never calls AI")
     pdf_text, _ = intake.extract_pdf_text(pdf_path)
     schema_result = intake.PythonLibraryExtractionEngine().understand(pdf_text, pdf_path, statement_id=statement_id)
-    invoices = schema_result.get("invoices") or []
-    if not invoices:
+    if not (schema_result.get("invoices") or []):
         raise RefusedError("the deterministic extractor returned 0 rows (the intake would fall back to AI)")
+    return new_from_schema(io, intake, state, pdf_path, pdf_text, schema_result, route)
+
+
+def new_from_schema(io, intake, state: dict, pdf_path: str, pdf_text: str, schema_result: dict, route: dict) -> dict:
+    """Everything the intake does between extraction and the writes --
+    validation (the current gate), billing location, vendor, period, the
+    skip/valid/invalid split -- for a schema_result from either route (the
+    deterministic extractor, or an AI extraction saved by extract_only())."""
+    statement_id = state["statement_id"]
+    row = state["intake"][0]
+    invoices = schema_result.get("invoices") or []
     intake.apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
     vendor_meta = schema_result.setdefault("vendor_metadata", {})
     vendor_meta["billing_location"], vendor_meta["billing_location_source"] = intake.resolve_billing_location(
@@ -451,7 +463,9 @@ def plan(state: dict, new: dict, decision: dict) -> dict:
     new_field_count = sum(len(inv.get("_raw_row") or {}) for inv in new["invoices"])
     return {
         "statement_id": state["statement_id"],
-        "fingerprint": fingerprint(state),
+        "fingerprint": (ai_fingerprint(state, new["ai_extraction"]["sha256"]) if new.get("ai_extraction")
+                        else fingerprint(state)),
+        "ai_extraction": new.get("ai_extraction"),
         "warnings": warnings(state),
         "jobs_in_flight": state["jobs_in_flight"],
         "validation": {"from": {k: row.get(f"validation_{k}") for k in ("status", "method", "difference")},
@@ -574,8 +588,11 @@ def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_finger
     """Writes the re-run. Refuses unless the state still has the dry run's
     fingerprint, nothing is refused, and a backup was written."""
     fresh = fresh_state if fresh_state is not None else load_state(io, state["statement_id"])
-    if fingerprint(fresh) != expected_fingerprint:
-        raise RefusedError("the stored state changed since the dry run -- run the dry run again")
+    ai = new.get("ai_extraction")
+    current = ai_fingerprint(fresh, ai["sha256"]) if ai else fingerprint(fresh)
+    if current != expected_fingerprint:
+        raise RefusedError("the stored state (or the saved AI extraction) changed since the dry run -- "
+                           "run the dry run again")
     problems = refusals(fresh)
     if problems:
         raise RefusedError("; ".join(problems))
@@ -617,6 +634,8 @@ def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_finger
                                                     new["statement_period"], new["vendor_id"], new["version_info"])
     if new["invalid"]:
         intake.write_to_review_queue(new["invalid"], new["invalid_reasons"], sid, source_file, "AI_EXTRACTION")
+    if ai:
+        write_ai_audit(sid, new)
     result["legacy_silver_count"] = intake.normalize_to_silver(sid, sid, new["vendor_id"], new["version_info"])
     cols = list(new["intake_update"])
     io.az_exec(f"UPDATE document_intake_log SET {', '.join(c + ' = ?' for c in cols)} WHERE statement_id = ?",
@@ -760,3 +779,216 @@ def undo(io, backup_doc: dict, *, apply_changes: bool = False) -> dict:
         io.az_exec(f"UPDATE extraction_cache SET {', '.join(x + ' = ?' for x in CACHE_COLUMNS)} WHERE id = ?",
                    [c[x] for x in CACHE_COLUMNS] + [c["id"]])
     return {"dry_run": False, "steps": steps}
+
+
+# ---------------------------------------------------------------------------
+# AI mode (2026-10-12): --allow-ai, one statement at a time, in three steps
+# ---------------------------------------------------------------------------
+#
+#   1. extract_only(): the normal intake extraction route (the Document
+#      Understanding Engine with the upload planner) on the statement's
+#      hash-checked PDF. Writes NOTHING to any database -- every DB entry
+#      point raises while it runs, and the engine's ai_audit_log row is
+#      captured instead (written on apply). Saves the full schema_result, the
+#      upload plan, the token usage of every API response and its cost to a
+#      local JSON file, and adds the cost to the task's ledger.
+#   2. the dry run reads that file (never calls the AI again), runs the
+#      current gate and skip rules via new_from_schema(), and prints the usual
+#      plan; the fingerprint includes the file's SHA-256.
+#   3. apply uses the same file and the existing backup/undo machinery.
+
+AI_INPUT_USD_PER_MTOK = 3.00     # Claude Sonnet 4.6 (Foundry bills at the standard API rates)
+AI_OUTPUT_USD_PER_MTOK = 15.00
+AI_TASK_COST_CAP_USD = 3.00
+# Pre-run estimate only (refuses before spending). The real usage comes from
+# each API response and is what the ledger records.
+AI_EST_INPUT_TOKENS_PER_PAGE = 1600
+AI_EST_OUTPUT_TOKENS_PER_PAGE = 2500
+AI_EST_PROMPT_TOKENS = 3900      # EXTRACTION_PROMPT, ~15.6k characters, sent once per request part
+AI_LEDGER_NAME = "ai_cost_ledger.json"
+
+
+def ai_cost_usd(usage: list) -> float:
+    """Cost of a list of API usage dicts (input_tokens / output_tokens)."""
+    tokens_in = sum(int(u.get("input_tokens") or 0) for u in usage)
+    tokens_out = sum(int(u.get("output_tokens") or 0) for u in usage)
+    return round(tokens_in / 1e6 * AI_INPUT_USD_PER_MTOK + tokens_out / 1e6 * AI_OUTPUT_USD_PER_MTOK, 4)
+
+
+def estimate_ai_cost(plan) -> dict:
+    pages = plan.pages
+    tokens_in = pages * AI_EST_INPUT_TOKENS_PER_PAGE + len(plan.parts) * AI_EST_PROMPT_TOKENS
+    tokens_out = pages * AI_EST_OUTPUT_TOKENS_PER_PAGE
+    usd = round(tokens_in / 1e6 * AI_INPUT_USD_PER_MTOK + tokens_out / 1e6 * AI_OUTPUT_USD_PER_MTOK, 4)
+    return {"pages": pages, "requests": len(plan.parts), "input_tokens": tokens_in, "output_tokens": tokens_out,
+            "usd": usd}
+
+
+def read_ledger(path: str) -> dict:
+    if not os.path.exists(path):
+        return {"cap_usd": AI_TASK_COST_CAP_USD, "runs": [], "total_usd": 0.0}
+    return json.load(open(path, encoding="utf-8"))
+
+
+def _write_ledger(path: str, ledger: dict) -> None:
+    ledger["total_usd"] = round(sum(r["usd"] for r in ledger["runs"]), 4)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(ledger, f, indent=1)
+
+
+class _NoDatabase:
+    """While active, every database entry point raises: execute_sql /
+    execute_query / execute_query_fabric / recon_query in every loaded module,
+    pyodbc.connect and sqlite3.connect. The engine's log_ai_call is replaced
+    by a recorder (its row is written on apply)."""
+
+    NAMES = ("execute_sql", "execute_query", "execute_query_fabric", "recon_query")
+
+    def __init__(self):
+        self.audit = []
+        self._undo = []
+
+    @staticmethod
+    def _blocked(*_a, **_k):
+        raise RuntimeError("database access blocked during --extract-only")
+
+    def _patch(self, owner, name, value):
+        self._undo.append((owner, name, getattr(owner, name)))
+        setattr(owner, name, value)
+
+    def __enter__(self):
+        import sqlite3
+        import sys
+        for module in list(sys.modules.values()):
+            for name in self.NAMES:
+                if module is not None and callable(getattr(module, name, None)):
+                    self._patch(module, name, self._blocked)
+        try:
+            import pyodbc
+            self._patch(pyodbc, "connect", self._blocked)
+        except ImportError:
+            pass
+        self._patch(sqlite3, "connect", self._blocked)
+        from src.ai import document_understanding_engine as engine
+
+        def record(response, **kwargs):
+            self.audit.append({"response": response, "kwargs": kwargs})
+            return "not-written"
+        self._patch(engine, "log_ai_call", record)
+        return self
+
+    def __exit__(self, *exc):
+        for owner, name, value in reversed(self._undo):
+            setattr(owner, name, value)
+        return False
+
+
+def extract_only(intake, statement_id: str, pdf_path: str, expected_sha256: str, out_dir: str,
+                 ledger_path: Optional[str] = None, cap_usd: float = AI_TASK_COST_CAP_USD) -> dict:
+    """Step 1 of AI mode (see above). Returns {"path", "sha256", "cost_usd",
+    "ledger_total_usd", ...}. Refuses (RefusedError) on a hash mismatch, a
+    deterministic route, a cost estimate that would take the ledger over the
+    cap, or an AI failure (a pdfplumber fallback is never saved)."""
+    from src.ai import upload_preprocess
+    if not statement_id:
+        raise RefusedError("--allow-ai needs an explicit --statement-id (one statement at a time)")
+    if intake.compute_file_hash(pdf_path) != expected_sha256:
+        raise RefusedError("the PDF's SHA-256 doesn't match the statement's document_hash")
+    ledger_path = ledger_path or os.path.join(out_dir, AI_LEDGER_NAME)
+    ledger = read_ledger(ledger_path)
+    plan = upload_preprocess.plan_upload(pdf_path)
+    estimate = estimate_ai_cost(plan)
+    if ledger["total_usd"] + estimate["usd"] > cap_usd:
+        raise RefusedError(f"cost cap: ${ledger['total_usd']:.2f} spent + ${estimate['usd']:.2f} estimated "
+                           f"> ${cap_usd:.2f} for this task")
+    started = dt.datetime.now(dt.timezone.utc)
+    with _NoDatabase() as guard:
+        pdf_text, _ = intake.extract_pdf_text(pdf_path)
+        route = intake._determine_extraction_route(pdf_path)
+        if route["engine"] == "python_library":
+            raise RefusedError("this PDF routes to a deterministic extractor -- use the normal (no-AI) re-run")
+        schema_result = intake.DocumentUnderstandingEngine().understand(pdf_text, pdf_path, statement_id=statement_id)
+    responses = [a["response"] for a in guard.audit]
+    usage = [u for r in responses for u in ((r.raw_response or {}).get("usage") or [])] if responses else []
+    cost = ai_cost_usd(usage)
+    ledger["runs"].append({"statement_id": statement_id, "at_utc": started.isoformat(timespec="seconds"),
+                           "usd": cost, "requests": len(usage), "estimate_usd": estimate["usd"]})
+    _write_ledger(ledger_path, ledger)
+    if schema_result.get("_provider_used") != "claude_sonnet":
+        raise RefusedError(f"the AI extraction failed ({responses[-1].error if responses else 'no response'}) -- "
+                           f"the engine fell back to {schema_result.get('_provider_used')}; nothing saved "
+                           f"(cost ${cost:.4f} recorded)")
+    last = responses[-1]
+    doc = {
+        "what": "AI re-extraction saved by scripts/rerun_in_place.py --allow-ai --extract-only; no database was written",
+        "statement_id": statement_id, "document_hash": expected_sha256, "pdf": os.path.basename(pdf_path),
+        "extracted_at_utc": started.isoformat(timespec="seconds"),
+        "route": {k: route.get(k) for k in ("engine", "pdf_type", "reason", "matched_vendor", "new_vendor_warning")},
+        "upload_plan": (last.raw_response or {}).get("upload_plan") or {"path": plan.path, "describe": plan.describe()},
+        "usage": usage, "cost_usd": cost, "estimate": estimate,
+        "ai_audit": {"provider": last.provider, "model": last.model, "latency_ms": last.latency_ms,
+                     "attempt_count": last.attempt_count, "success": last.success,
+                     "kwargs": {k: v for k, v in guard.audit[-1]["kwargs"].items()}},
+        "schema_result": schema_result,
+    }
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"ai_extraction_{statement_id}_{started.strftime('%Y%m%dT%H%M%SZ')}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, indent=1, default=str)
+    return {"path": path, "sha256": file_sha256(path), "cost_usd": cost, "ledger_total_usd": read_ledger(ledger_path)["total_usd"],
+            "rows": len(schema_result.get("invoices") or []), "upload_plan": doc["upload_plan"]}
+
+
+def file_sha256(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def load_extraction(path: str, state: dict) -> dict:
+    """The saved AI extraction for this statement, checked against the stored
+    state: same statement_id and the same document_hash."""
+    if not path or not os.path.exists(path):
+        raise RefusedError("no saved AI extraction file -- run --allow-ai --extract-only first")
+    doc = json.load(open(path, encoding="utf-8"))
+    if doc.get("statement_id") != state["statement_id"]:
+        raise RefusedError(f"the extraction file is for {doc.get('statement_id')}, not {state['statement_id']}")
+    if doc.get("document_hash") != state["intake"][0]["document_hash"]:
+        raise RefusedError("the extraction file's document_hash doesn't match the statement's")
+    doc["_sha256"] = file_sha256(path)
+    return doc
+
+
+def new_from_extraction(io, intake, state: dict, pdf_path: str, doc: dict) -> dict:
+    """Step 2/3: the saved extraction through the current gate and skip rules
+    (new_from_schema), never calling the AI. Works on a deep copy, so the
+    plan is the same every time it is built from the same file."""
+    import copy
+    if intake.compute_file_hash(pdf_path) != state["intake"][0]["document_hash"]:
+        raise RefusedError("the PDF's SHA-256 doesn't match document_intake_log.document_hash")
+    pdf_text, _ = intake.extract_pdf_text(pdf_path)
+    route = dict(doc.get("route") or {})
+    new = new_from_schema(io, intake, state, pdf_path, pdf_text, copy.deepcopy(doc["schema_result"]), route)
+    new["ai_extraction"] = {"sha256": doc["_sha256"], "cost_usd": doc.get("cost_usd"),
+                            "upload_plan": doc.get("upload_plan"), "ai_audit": doc.get("ai_audit")}
+    return new
+
+
+def ai_fingerprint(state: dict, extraction_sha256: str) -> str:
+    """The dry run's fingerprint for an AI re-run: the stored state AND the
+    exact saved extraction file."""
+    return hashlib.sha256(f"{fingerprint(state)}:{extraction_sha256}".encode()).hexdigest()[:16]
+
+
+def write_ai_audit(sid: str, new: dict) -> None:
+    """The ai_audit_log row extract_only() held back, written on apply."""
+    from src.ai.audit_logger import log_ai_call
+    from src.ai.base_client import AIResponse
+    a = (new.get("ai_extraction") or {}).get("ai_audit") or {}
+    response = AIResponse(success=bool(a.get("success")), provider=a.get("provider") or "claude_sonnet",
+                          model=a.get("model") or "", latency_ms=float(a.get("latency_ms") or 0.0),
+                          attempt_count=int(a.get("attempt_count") or 1))
+    kwargs = dict(a.get("kwargs") or {})
+    kwargs["statement_id"] = sid
+    kwargs.setdefault("interaction_type", "DOCUMENT_UNDERSTANDING")
+    log_ai_call(response, **kwargs)

@@ -27,8 +27,10 @@ Tekion), every row verified, at least one store complete (printed row numbers
 1..N with no duplicates. The printed total there is the group's, so it is
 recorded, not reconciled.
 
-check_rows_only: for a statement with no printed total -- rows verified both
-ways, no equation, never a pass (validation_status "rows_verified_no_total").
+check_rows_only: for a statement with no printed total anywhere on the PDF --
+rows verified both ways, no equation. Passing it is the statement's pass
+(validation_method "pdf_rows_no_total", set by the intake); any row problem,
+an unreadable PDF, the page cap or the OCR budget is a fail.
 
 Rules each forced by a false pass of the 2026-10-09 prototype (see
 scratchpad/oct1_report and the replay notes):
@@ -995,7 +997,7 @@ def _analyse(rows, pdf_path, budget_seconds, allow_balance_only=False):
     except NotVerified:
         raise
     except Exception as e:
-        raise NotVerified(f"PDF unreadable ({type(e).__name__}: {e})")
+        raise NotVerified(f"PDF unreadable ({type(e).__name__}: {e})") from None
     table = build_table(pages)
     deadline = started + budget_seconds
     reread = _Rereader(pdf_path, deadline) if any(p["source"] == "ocr" for p in pages) else None
@@ -1134,24 +1136,39 @@ def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, bu
     return result
 
 
-def check_rows_only(rows, pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS):
-    """For a statement with no printed total: every extracted row against its
-    PDF line and every PDF transaction line against a row, with no equation.
-    Returns {"status": "rows_verified_no_total" | "rows_do_not_match" |
-    "not_verified", ...} -- never a pass."""
+# Labels of a printed statement total. A PDF that prints any of them next to
+# an amount has a total, so the no-total rule must not apply to it -- even
+# when the extraction missed that total (NYE 9-4-26 prints a NEW BALANCE per
+# account).
+_PRINTED_TOTAL_LABELS = ("total", "balance due", "amount due", "new balance", "pay this amount", "please pay")
+
+
+def check_rows_only(rows, pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, printed=None):
+    """For a statement with NO printed total: every extracted row against its
+    PDF line and every PDF transaction line against a row, with no equation
+    (2026-10-12, user decision: this is the statement's pass/fail).
+    Returns {"status": "rows_verified" | "rows_do_not_match" | "not_verified"
+    | "has_printed_total", ...}; only "rows_verified" is a pass. Same 30 s
+    OCR budget and 12-page cap as the other PDF checks."""
     started = time.monotonic()
+    if printed is not None:
+        return {"status": "has_printed_total", "reason": f"the extraction has a printed total ({printed})"}
     if not pdf_path or not rows:
         return {"status": "not_verified", "reason": "no PDF" if not pdf_path else "no rows"}
     try:
         pages, table, matches, failures, rereads = _analyse(rows, pdf_path, budget_seconds, allow_balance_only=True)
     except NotVerified as e:
         return {"status": "not_verified", "reason": str(e), "seconds": round(time.monotonic() - started, 2)}
+    total_lines = [l for l in table if l["money"] and any(k in l["text"].lower() for k in _PRINTED_TOTAL_LABELS)]
     result = _row_result(pages, table, rows, matches, failures, rereads, started)
     result.pop("passed", None)
     result.pop("computed", None)
     result.pop("applicable", None)
-    if failures:
+    if total_lines:
+        result.update(status="has_printed_total",
+                      reason=f"the PDF prints a total (p{total_lines[0]['page']}: {total_lines[0]['text'][:80]})")
+    elif failures:
         result.update(status="rows_do_not_match", offending_rows=failures[:10])
     else:
-        result.update(status="rows_verified_no_total", reason="")
+        result.update(status="rows_verified", reason="")
     return result

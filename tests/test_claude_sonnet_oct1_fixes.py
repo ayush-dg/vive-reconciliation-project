@@ -351,7 +351,11 @@ class TestOversizedPdf(unittest.TestCase):
         path = self._image_pdf()
         size = os.path.getsize(path)
         c = client()
-        with mock.patch.object(ClaudeSonnetClient, "MAX_UPLOAD_PDF_BYTES", size - 1):
+        # The page is random noise, so the legibility gate (tested on its own
+        # in test_upload_preprocess.py) is pinned here: OCR of noise is not
+        # deterministic. This test is about the size path only.
+        with mock.patch.object(ClaudeSonnetClient, "MAX_UPLOAD_PDF_BYTES", size - 1), \
+             mock.patch("src.ai.upload_preprocess.legibility_check", return_value={"ok": True, "recall": 1.0}):
             sent = c._pdf_bytes_for_upload(path)
         self.assertLess(len(sent), size)
         self.assertTrue(sent.startswith(b"%PDF"))

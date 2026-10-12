@@ -1144,24 +1144,31 @@ def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source)
     return resolved, {**from_ocr, "chain_opening": resolved.get("chain_opening")}
 
 
+PDF_ROWS_NO_TOTAL_METHOD = "pdf_rows_no_total"
+
+
 def _rows_only_status(validation: dict, invoices: list, pdf_path) -> dict:
-    """A statement with no printed total anywhere (status total_not_found)
-    can still have its rows checked against the PDF both ways, with no total
-    equation (src/validation/pdf_row_match.py check_rows_only, 2026-10-12).
-    When every row is verified the status becomes "rows_verified_no_total" --
-    its own state, never "matches", never a pass (web/queries.py counts only
-    "matches" as passed). Otherwise the status stays total_not_found and the
-    detail records "rows_do_not_match" (or why the rows could not be read)."""
+    """A statement whose PDF prints no total anywhere (status total_not_found)
+    passes or fails on its rows alone (user decision, 2026-10-12): every
+    extracted row verified on its PDF line AND every PDF transaction line
+    extracted (src/validation/pdf_row_match.py check_rows_only) -> status
+    "matches", method "pdf_rows_no_total", difference None. Any row problem,
+    an unreadable PDF, more than 12 pages, the OCR time budget, or a total the
+    PDF does print -> it stays "total_not_found" (a fail). Either way the
+    detail records the check under "rows_only"."""
+    if validation.get("printed") is not None:
+        return validation  # a statement with a printed total never takes this path
     rows = [inv for inv in invoices if not inv.get("informational")]
     if not pdf_path or not rows:
         return validation
     from src.validation.pdf_row_match import check_rows_only
-    outcome = check_rows_only(rows, pdf_path)
-    detail = {**(validation.get("detail") or {}), "rows_only": outcome}
-    if outcome["status"] == "rows_verified_no_total":
-        print(f"  Rows-only check: all {outcome['rows']} rows verified on the PDF; no printed total to reconcile.")
-        return {**validation, "status": "rows_verified_no_total", "detail": detail}
-    print(f"  Rows-only check: {outcome['status']} ({outcome.get('reason', '')})")
+    outcome = check_rows_only(rows, pdf_path, printed=validation.get("printed"))
+    detail = {**(validation.get("detail") or {}), "rows_only": outcome, "no_printed_total": True}
+    if outcome["status"] == "rows_verified":
+        print(f"  Rows-only check: all {outcome['rows']} rows verified on the PDF, no printed total -- passes.")
+        return {**validation, "status": "matches", "method": PDF_ROWS_NO_TOTAL_METHOD,
+                "difference": None, "detail": detail}
+    print(f"  Rows-only check: {outcome['status']} ({outcome.get('reason', '')}) -- stays total_not_found")
     return {**validation, "detail": detail}
 
 

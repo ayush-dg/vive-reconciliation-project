@@ -407,8 +407,15 @@ class TestRowsOnly(_PdfCase):
     def test_all_rows_verified_without_a_total(self):
         path = self.pdf([statement_page(HEALEY_LINES)])
         result = m.check_rows_only(healey_rows(), path)
-        self.assertEqual(result["status"], "rows_verified_no_total")
-        self.assertNotIn("passed", result)
+        self.assertEqual(result["status"], "rows_verified")
+
+    def test_a_pdf_that_prints_a_total_is_refused_even_if_the_extraction_missed_it(self):
+        path = self.pdf([statement_page(HEALEY_LINES, total="304.17")])
+        self.assertEqual(m.check_rows_only(healey_rows(), path)["status"], "has_printed_total")
+
+    def test_an_extracted_printed_total_is_refused(self):
+        path = self.pdf([statement_page(HEALEY_LINES)])
+        self.assertEqual(m.check_rows_only(healey_rows(), path, printed=304.17)["status"], "has_printed_total")
 
     def test_a_wrong_row_is_rows_do_not_match(self):
         path = self.pdf([statement_page(HEALEY_LINES)])
@@ -463,21 +470,49 @@ def schema(invoices, printed, **stmt):
 
 class TestIntakeRowsOnly(_PdfCase):
 
-    def test_no_printed_total_with_verified_rows_gets_its_own_status(self):
-        path = self.pdf([statement_page(HEALEY_LINES)])
+    def _validate(self, rows, pdf, printed=None):
         with mock.patch.object(intake(), "_fill_printed_total", return_value=None):
-            result = intake().apply_arithmetic_validation(schema(healey_rows(), None), "", path)
-        self.assertEqual(result["status"], "rows_verified_no_total")
-        self.assertNotEqual(result["status"], "matches")
-        self.assertIsNone(result["method"])
-        self.assertEqual(result["detail"]["rows_only"]["status"], "rows_verified_no_total")
+            return intake().apply_arithmetic_validation(schema(rows, printed), "", pdf)
+
+    def test_no_printed_total_and_every_row_verified_passes(self):
+        result = self._validate(healey_rows(), self.pdf([statement_page(HEALEY_LINES)]))
+        self.assertEqual((result["status"], result["method"]), ("matches", "pdf_rows_no_total"))
+        self.assertIsNone(result["difference"])
+        self.assertTrue(result["detail"]["no_printed_total"])
+        self.assertEqual(result["detail"]["rows_only"]["status"], "rows_verified")
+
+    def test_unreadable_pdf_stays_total_not_found(self):
+        f = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        f.write(b"not a pdf")
+        f.close()
+        self.addCleanup(os.remove, f.name)
+        # The intake's OCR-text helper is not under test; stubbed so its log
+        # record (kept by pytest's log capture) cannot hold the file open.
+        with mock.patch.object(intake(), "ocr_pdf_text", return_value=""):
+            result = self._validate(healey_rows(), f.name)
+        self.assertEqual(result["status"], "total_not_found")
+        self.assertEqual(result["detail"]["rows_only"]["status"], "not_verified")
+
+    def test_over_the_page_cap_stays_total_not_found(self):
+        result = self._validate(healey_rows(), self.pdf([statement_page(HEALEY_LINES)] * (m.MAX_PAGES + 1)))
+        self.assertEqual(result["status"], "total_not_found")
+
+    def test_a_pdf_printing_a_total_never_takes_the_no_total_path(self):
+        result = self._validate(healey_rows(), self.pdf([statement_page(HEALEY_LINES, total="304.17")]))
+        self.assertEqual(result["status"], "total_not_found")
+        self.assertEqual(result["detail"]["rows_only"]["status"], "has_printed_total")
+
+    def test_an_extracted_printed_total_never_takes_the_no_total_path(self):
+        with mock.patch("src.validation.pdf_row_match.check_rows_only") as rows_only:
+            result = self._validate(healey_rows(), self.pdf([statement_page(HEALEY_LINES)]), printed=999.0)
+        rows_only.assert_not_called()
+        self.assertNotEqual(result["method"], "pdf_rows_no_total")
 
     def test_no_printed_total_with_a_wrong_row_stays_total_not_found(self):
         path = self.pdf([statement_page(HEALEY_LINES)])
         rows = healey_rows()
         rows[1]["outstanding_amount"] = 5.74
-        with mock.patch.object(intake(), "_fill_printed_total", return_value=None):
-            result = intake().apply_arithmetic_validation(schema(rows, None), "", path)
+        result = self._validate(rows, path)
         self.assertEqual(result["status"], "total_not_found")
         self.assertEqual(result["detail"]["rows_only"]["status"], "rows_do_not_match")
 
@@ -581,32 +616,35 @@ class TestValidationPageBadge(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def test_list_shows_rows_verified_as_its_own_badge_and_not_a_pass(self):
+    def test_list_card_shows_the_method_badge_and_no_printed_total(self):
         run = {"statement_id": "H", "source_file": "h.pdf", "vendor_name": "Healey", "statement_period": "2026-09",
-               "statement_total_as_printed": None, "validation_status": "rows_verified_no_total",
-               "validation_difference": None, "validation_method": None,
-               "ingestion_timestamp": "2026-10-01T21:00:00+00:00", "shop": None, "passed": False}
+               "statement_total_as_printed": None, "validation_status": "matches",
+               "validation_difference": None, "validation_method": "pdf_rows_no_total",
+               "ingestion_timestamp": "2026-10-01T21:00:00+00:00", "shop": None, "passed": True}
         self._patch(get_validation_report=lambda: [dict(run)])
         html = self._client().get("/validation").text
-        self.assertIn("Rows verified · no printed total", html)
-        self.assertIn('data-status="fail"', html)
-        self.assertIn('id="hero-passed">0<', html)
+        self.assertIn("PDF rows, no printed total", html)
+        self.assertIn("No printed total", html)
+        self.assertNotIn("Diff ", html)
+        self.assertIn('data-status="pass"', html)
 
-    def test_detail_shows_info_badge_not_matches(self):
+    def test_detail_shows_matches_with_the_method(self):
         intake_row = {"statement_id": "H", "source_file": "h.pdf", "vendor_name": "Healey", "statement_period": "2026-09",
-                      "statement_total_as_printed": None, "validation_status": "rows_verified_no_total",
-                      "validation_difference": None, "validation_method": None, "previous_balance": None,
+                      "statement_total_as_printed": None, "validation_status": "matches",
+                      "validation_difference": None, "validation_method": "pdf_rows_no_total", "previous_balance": None,
                       "previous_balance_source": None, "ingestion_timestamp": "2026-10-01T21:00:00+00:00",
-                      "passed": False, "primary_computed": None, "validation_attempts": []}
+                      "passed": True, "primary_computed": None, "validation_attempts": []}
         self._patch(get_extraction_validation_detail=lambda sid: {"intake": intake_row, "computed_total": None, "lines": []})
         html = self._client().get("/validation/H").text
-        self.assertIn("Rows verified · no printed total", html)
-        self.assertNotIn("✓ Matches", html)
+        self.assertIn("Matches", html)
+        self.assertIn("PDF rows, no printed total", html)
+        self.assertNotIn("rows_verified_no_total", html)
 
     def test_method_labels(self):
         from web.deps import validation_method_label
         self.assertEqual(validation_method_label("pdf_row_match"), "PDF row-by-row match")
         self.assertEqual(validation_method_label("pdf_store_sections"), "PDF store sections")
+        self.assertEqual(validation_method_label("pdf_rows_no_total"), "PDF rows, no printed total")
 
 
 if __name__ == "__main__":
