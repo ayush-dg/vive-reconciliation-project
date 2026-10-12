@@ -49,6 +49,7 @@ import requests
 
 from .base_client import AIClient, AIResponse
 from .concurrency_limiter import ai_call_slot
+from .upload_preprocess import UploadPart, UploadTooLarge, merge_chunk_results, page_range_bytes, plan_upload
 from src.validation.arithmetic_gate import compute_statement_total_from_invoices
 
 ROW_CONFIDENCE = 0.75
@@ -488,11 +489,20 @@ class ClaudeSonnetClient(AIClient):
 
     def generate_with_file(self, pdf_path: str, prompt: str) -> AIResponse:
         """
-        Send the whole PDF once as a base64 document block, via ONE
-        streaming messages call — no page splitting (see module docstring).
-        `prompt` is accepted for AIClient interface parity but unused — this
-        client always sends its own EXTRACTION_PROMPT (same convention as
-        GeminiClient/MistralClient).
+        Send the PDF to the model as base64 document block(s) and return the
+        parsed statement. `prompt` is accepted for AIClient interface parity
+        but unused — this client always sends its own EXTRACTION_PROMPT
+        (same convention as GeminiClient/MistralClient).
+
+        What is sent is decided by src/ai/upload_preprocess.py plan_upload()
+        (2026-10-12): the original bytes in one request ("as_is", every PDF
+        up to 20 MiB and 16 pages -- unchanged), a legibility-gated
+        grayscale re-render ("compressed"), or consecutive page ranges
+        ("split"), each its own request, merged in page order. The original
+        PDF is never modified. A part whose response is cut off (stop_reason
+        "max_tokens") is split in half and re-sent, down to one page; ANY
+        part that still fails fails the whole statement -- never a silent
+        partial.
         """
         missing = self._missing_config_error()
         if missing:
@@ -500,10 +510,6 @@ class ClaudeSonnetClient(AIClient):
 
         temperature = self.config.get("temperature", 0.1)
         max_tokens = self.config.get("max_output_tokens", 64000)
-        retry_policy = self.config.get("retry_policy", {})
-        max_retries = retry_policy.get("max_retries", 2)
-        backoff = retry_policy.get("backoff_seconds", 2)
-        multiplier = retry_policy.get("backoff_multiplier", 2)
 
         start = time.monotonic()
 
@@ -522,20 +528,90 @@ class ClaudeSonnetClient(AIClient):
                 latency_ms=latency_ms, attempt_count=1, error=error,
             )
 
-        try:
-            import base64
-            pdf_bytes = self._pdf_bytes_for_upload(pdf_path)
-            pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
-        except Exception as e:
-            latency_ms = (time.monotonic() - start) * 1000
+        def failed(error, attempt=1):
             return AIResponse(
                 success=False, provider="claude_sonnet", model=self.model,
-                latency_ms=latency_ms, attempt_count=1, error=self._clean_error(str(e)),
+                latency_ms=(time.monotonic() - start) * 1000, attempt_count=attempt, error=error,
             )
 
+        try:
+            plan = self._upload_plan(pdf_path)
+        except UploadTooLarge as e:
+            print(f"  [ClaudeSonnetClient] PDF too large to send without losing legibility — {e}")
+            return failed(f"PDF too large to send: {e}")
+        except Exception as e:
+            return failed(self._clean_error(str(e)))
+        print(f"  [ClaudeSonnetClient] Upload path: {plan.describe()}")
+        for note in plan.notes:
+            print(f"  [ClaudeSonnetClient]   {note}")
+
+        attempts = 0
+        parsed_parts, sent_parts = [], []
+        queue = list(plan.parts)
+        while queue:
+            part = queue.pop(0)
+            outcome = self._request_parsed(part.data, temperature, max_tokens)
+            attempts += outcome["attempts"]
+            if outcome["error"] is not None:
+                if outcome["error"] == "truncated" and part.last_page > part.first_page:
+                    middle = (part.first_page + part.last_page) // 2
+                    print(f"  [ClaudeSonnetClient] Response for pages {part.first_page}-{part.last_page} was cut off "
+                          f"— re-sending as pages {part.first_page}-{middle} and {middle + 1}-{part.last_page}")
+                    queue = self._split_part(pdf_path, part, middle) + queue
+                    continue
+                error = ("Response appears truncated — falling back" if outcome["error"] == "truncated"
+                         else outcome["error"])
+                if len(plan.parts) > 1 or sent_parts or queue:
+                    error = f"part pages {part.first_page}-{part.last_page} failed: {error} — whole statement failed"
+                return failed(error, attempts)
+            parsed_parts.append(outcome["parsed"])
+            sent_parts.append(part)
+
+        if len(parsed_parts) == 1 and sent_parts[0].first_page == 1 and sent_parts[0].last_page == plan.pages:
+            parsed = parsed_parts[0]
+        else:
+            order = sorted(range(len(sent_parts)), key=lambda i: sent_parts[i].first_page)
+            parsed = merge_chunk_results([sent_parts[i] for i in order], [parsed_parts[i] for i in order])
+            for note in parsed.get("_merge_notes") or []:
+                print(f"  [ClaudeSonnetClient]   merge: {note}")
+
+        try:
+            return self._finish_parsed(parsed, pdf_path, start, attempts, plan)
+        except Exception as e:
+            return failed(self._clean_error(str(e)), attempts)
+
+    def _upload_plan(self, pdf_path: str):
+        return plan_upload(pdf_path, max_bytes=self.MAX_UPLOAD_PDF_BYTES)
+
+    @staticmethod
+    def _split_part(pdf_path, part, middle):
+        """Two halves of a part whose response was cut off: lossless page
+        ranges of the original, or of the part's own bytes if it was reduced."""
+        if part.reduced:
+            source, offset = part.data, part.first_page - 1
+        else:
+            with open(pdf_path, "rb") as f:
+                source, offset = f.read(), 0
+        first = UploadPart(page_range_bytes(source, part.first_page - offset, middle - offset),
+                           part.first_page, middle, part.reduced)
+        second = UploadPart(page_range_bytes(source, middle + 1 - offset, part.last_page - offset),
+                            middle + 1, part.last_page, part.reduced)
+        return [first, second]
+
+    def _request_parsed(self, pdf_bytes: bytes, temperature, max_tokens) -> dict:
+        """One part: request + JSON parse, with the configured retries.
+        Returns {"parsed", "attempts", "error"}; error "truncated" when the
+        API reports stop_reason "max_tokens" (the response was cut off)."""
+        import base64
+        retry_policy = self.config.get("retry_policy", {})
+        max_retries = retry_policy.get("max_retries", 2)
+        backoff = retry_policy.get("backoff_seconds", 2)
+        multiplier = retry_policy.get("backoff_multiplier", 2)
+        pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
         last_error = None
         for attempt in range(1, max_retries + 2):
             try:
+                self._last_stop_reason = None
                 success, text, error = self._real_file_call(pdf_b64, temperature, max_tokens)
                 if not success and error == READ_TIMEOUT_ERROR:
                     # A read timeout on one document is systematic (the
@@ -545,99 +621,108 @@ class ClaudeSonnetClient(AIClient):
                     # 1800 s job cap, so on 2026-10-01 customerinvoice
                     # (15).pdf (17 pages, ~416 rows) was most likely killed
                     # inside this loop before the pdfplumber fallback could
-                    # run. Same fail-fast reasoning as the truncation check
-                    # below.
+                    # run. Same fail-fast reasoning as the truncation check.
                     print(f"  [ClaudeSonnetClient] Read timeout — not retrying, falling back")
-                    last_error = "request timed out (not retried)"
-                    latency_ms = (time.monotonic() - start) * 1000
-                    return AIResponse(
-                        success=False, provider="claude_sonnet", model=self.model,
-                        latency_ms=latency_ms, attempt_count=attempt, error=last_error,
-                    )
+                    return {"parsed": None, "attempts": attempt, "error": "request timed out (not retried)"}
                 if not success:
                     raise RuntimeError(error)
-
                 parsed = self._try_parse_json(text)
                 if parsed is None:
                     raise ValueError("response did not contain parseable JSON")
-
-                rows = parsed.get("rows", []) or []
-                columns_found = parsed.get("columns_found", []) or []
-                vendor_name = parsed.get("vendor_name") or None
-                statement_date = parsed.get("statement_date") or None
-                shop_or_entity_raw = parsed.get("shop_or_entity") or None
-                billing_location = parsed.get("billing_location") or None
-                statement_total_as_printed = parsed.get("statement_total_as_printed")
-                if statement_total_as_printed is not None:
-                    try:
-                        statement_total_as_printed = float(statement_total_as_printed)
-                    except (TypeError, ValueError):
-                        statement_total_as_printed = None
-
-                # RH Long Motor's vision-based total detection is
-                # confirmed inconsistent (same file, different Foundry
-                # calls, sometimes null) despite the PDF having a real
-                # text layer with the total reliably printed after an
-                # "UNAPPLIED CREDITS" label on the last page. Recover it
-                # from the text layer directly rather than relying on
-                # another (possibly non-deterministic) vision call.
-                if statement_total_as_printed is None and vendor_name and "RH LONG MOTOR" in vendor_name.upper():
-                    statement_total_as_printed = self._find_total_after_anchor(pdf_path, "UNAPPLIED CREDITS")
-
-                previous_balance = self._to_float(parsed.get("previous_balance"))
-                previous_balance_label = parsed.get("previous_balance_label") or None
-                section_totals = self._parse_section_totals(parsed.get("section_totals"))
-
-                print(f"  [ClaudeSonnetClient] Columns found: {columns_found}")
-
-                truncation_reason = self._detect_truncation(parsed, rows, columns_found, pdf_path)
-                if truncation_reason:
-                    print(f"  [ClaudeSonnetClient] Truncation detected — {truncation_reason}")
-                    latency_ms = (time.monotonic() - start) * 1000
-                    return AIResponse(
-                        success=False, provider="claude_sonnet", model=self.model,
-                        latency_ms=latency_ms, attempt_count=attempt,
-                        error="Response appears truncated — falling back",
-                    )
-
-                invoices, fallback_warnings = self._rows_to_invoices(rows, columns_found)
-                result = self._build_schema(
-                    pdf_path, invoices, columns_found,
-                    bool(parsed.get("_salvaged")), fallback_warnings,
-                    vendor_name=vendor_name, statement_date=statement_date,
-                    statement_total_as_printed=statement_total_as_printed,
-                    shop_or_entity=shop_or_entity_raw, billing_location=billing_location,
-                    previous_balance=previous_balance, previous_balance_label=previous_balance_label,
-                    section_totals=section_totals,
-                )
-                if not rows and not columns_found:
-                    # The model found no line-item table at all (e.g. a
-                    # printed email thread -- Jack Daniels Porsche,
-                    # 2026-10-01). That's a correct answer about a document
-                    # that isn't a statement, not an extraction failure.
-                    result["document_metadata"]["document_type"] = NOT_A_STATEMENT
-                    result["warnings"].append({
-                        "code": NOT_A_STATEMENT,
-                        "message": "No line-item table found -- this PDF does not look like a vendor statement.",
-                        "severity": "HIGH",
-                    })
-
-                latency_ms = (time.monotonic() - start) * 1000
-                text_out = json.dumps(result)
-                return AIResponse(
-                    success=True, text=text_out, parsed_json=result,
-                    model=self.model, provider="claude_sonnet",
-                    latency_ms=latency_ms, attempt_count=attempt,
-                )
+                if getattr(self, "_last_stop_reason", None) == "max_tokens":
+                    print(f"  [ClaudeSonnetClient] Response cut off at max_tokens "
+                          f"({len(parsed.get('rows') or [])} row(s) read)")
+                    return {"parsed": parsed, "attempts": attempt, "error": "truncated"}
+                return {"parsed": parsed, "attempts": attempt, "error": None}
             except Exception as e:
                 last_error = self._clean_error(str(e))
                 if attempt <= max_retries:
                     time.sleep(backoff * (multiplier ** (attempt - 1)))
+        return {"parsed": None, "attempts": max_retries + 1, "error": last_error}
+
+    def _finish_parsed(self, parsed: dict, pdf_path: str, start: float, attempt: int, plan=None) -> AIResponse:
+        """Turns one parsed response (or the merge of a split statement's
+        parts) into the statement schema -- the same steps the single-call
+        path ran before 2026-10-12."""
+        rows = parsed.get("rows", []) or []
+        columns_found = parsed.get("columns_found", []) or []
+        vendor_name = parsed.get("vendor_name") or None
+        statement_date = parsed.get("statement_date") or None
+        shop_or_entity_raw = parsed.get("shop_or_entity") or None
+        billing_location = parsed.get("billing_location") or None
+        statement_total_as_printed = parsed.get("statement_total_as_printed")
+        if statement_total_as_printed is not None:
+            try:
+                statement_total_as_printed = float(statement_total_as_printed)
+            except (TypeError, ValueError):
+                statement_total_as_printed = None
+
+        # RH Long Motor's vision-based total detection is
+        # confirmed inconsistent (same file, different Foundry
+        # calls, sometimes null) despite the PDF having a real
+        # text layer with the total reliably printed after an
+        # "UNAPPLIED CREDITS" label on the last page. Recover it
+        # from the text layer directly rather than relying on
+        # another (possibly non-deterministic) vision call.
+        if statement_total_as_printed is None and vendor_name and "RH LONG MOTOR" in vendor_name.upper():
+            statement_total_as_printed = self._find_total_after_anchor(pdf_path, "UNAPPLIED CREDITS")
+
+        previous_balance = self._to_float(parsed.get("previous_balance"))
+        previous_balance_label = parsed.get("previous_balance_label") or None
+        section_totals = self._parse_section_totals(parsed.get("section_totals"))
+
+        print(f"  [ClaudeSonnetClient] Columns found: {columns_found}")
+
+        truncation_reason = self._detect_truncation(parsed, rows, columns_found, pdf_path)
+        if truncation_reason:
+            print(f"  [ClaudeSonnetClient] Truncation detected — {truncation_reason}")
+            latency_ms = (time.monotonic() - start) * 1000
+            return AIResponse(
+                success=False, provider="claude_sonnet", model=self.model,
+                latency_ms=latency_ms, attempt_count=attempt,
+                error="Response appears truncated — falling back",
+            )
+
+        invoices, fallback_warnings = self._rows_to_invoices(rows, columns_found)
+        result = self._build_schema(
+            pdf_path, invoices, columns_found,
+            bool(parsed.get("_salvaged")), fallback_warnings,
+            vendor_name=vendor_name, statement_date=statement_date,
+            statement_total_as_printed=statement_total_as_printed,
+            shop_or_entity=shop_or_entity_raw, billing_location=billing_location,
+            previous_balance=previous_balance, previous_balance_label=previous_balance_label,
+            section_totals=section_totals,
+        )
+        if plan is not None and plan.path != "as_is":
+            # A row's page is the first page of the part it came from (the
+            # model is not asked for a per-row page number).
+            for invoice, row in zip(result.get("invoices") or [], rows):
+                if row.get("_page"):
+                    invoice["page_number"] = row["_page"]
+            result.setdefault("warnings", []).append({
+                "code": "UPLOAD_PREPROCESSED",
+                "message": plan.describe() + ("" if not parsed.get("_merge_notes")
+                                              else " | " + "; ".join(parsed["_merge_notes"])),
+                "severity": "LOW",
+            })
+        if not rows and not columns_found:
+            # The model found no line-item table at all (e.g. a
+            # printed email thread -- Jack Daniels Porsche,
+            # 2026-10-01). That's a correct answer about a document
+            # that isn't a statement, not an extraction failure.
+            result["document_metadata"]["document_type"] = NOT_A_STATEMENT
+            result["warnings"].append({
+                "code": NOT_A_STATEMENT,
+                "message": "No line-item table found -- this PDF does not look like a vendor statement.",
+                "severity": "HIGH",
+            })
 
         latency_ms = (time.monotonic() - start) * 1000
+        text_out = json.dumps(result)
         return AIResponse(
-            success=False, provider="claude_sonnet", model=self.model,
-            latency_ms=latency_ms, attempt_count=max_retries + 1, error=last_error,
+            success=True, text=text_out, parsed_json=result,
+            model=self.model, provider="claude_sonnet",
+            latency_ms=latency_ms, attempt_count=attempt,
         )
 
     def _real_file_call(self, pdf_b64: str, temperature, max_tokens):
@@ -684,8 +769,14 @@ class ClaudeSonnetClient(AIClient):
                     url, headers=headers, json=payload,
                     timeout=self.config.get("timeout_seconds", 600),
                 )
+                if resp.status_code >= 400:
+                    # The body says WHY (e.g. request too large); before
+                    # 2026-10-12 only "400 Client Error: Bad Request" was kept.
+                    body = (resp.text or "").strip().replace("\n", " ")[:300]
+                    print(f"  [ClaudeSonnetClient] HTTP {resp.status_code} body: {body}")
                 resp.raise_for_status()
                 data = resp.json()
+            self._last_stop_reason = data.get("stop_reason")
             text = "\n".join(
                 block.get("text", "") for block in data.get("content", [])
                 if block.get("type") == "text"
@@ -700,7 +791,17 @@ class ClaudeSonnetClient(AIClient):
     _RASTER_DPI_STEPS = (150, 110, 80)
 
     def _pdf_bytes_for_upload(self, pdf_path: str) -> bytes:
-        """The PDF's own bytes, unless the file is over MAX_UPLOAD_PDF_BYTES:
+        """The bytes of a single-request upload plan (as_is or compressed,
+        see src/ai/upload_preprocess.py); raises UploadTooLarge when the PDF
+        has to be split into several requests."""
+        plan = self._upload_plan(pdf_path)
+        if len(plan.parts) != 1:
+            raise UploadTooLarge(f"{plan.pages}-page PDF needs {len(plan.parts)} requests")
+        return plan.parts[0].data
+
+    def _pdf_bytes_for_upload_unchecked(self, pdf_path: str) -> bytes:
+        """Before 2026-10-12 (no longer called -- kept for comparison runs):
+        the PDF's own bytes, unless the file is over MAX_UPLOAD_PDF_BYTES:
         then every page is re-rendered as a JPEG at the first DPI step that
         brings it under the limit. A very high-resolution scan otherwise
         exceeds the API's request size once base64-encoded -- Fred Beans-
