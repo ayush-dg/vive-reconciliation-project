@@ -299,6 +299,8 @@ VALIDATION_METHOD_LABELS = {
     "statement_equation": "Previous balance + activity",
     "running_balance": "Running balance",
     "section_subtotal": "Section subtotals",
+    "pdf_row_match": "PDF row-by-row match",
+    "pdf_store_sections": "PDF store sections",
 }
 
 

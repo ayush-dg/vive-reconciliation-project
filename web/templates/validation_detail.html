@@ -30,6 +30,8 @@
       {% if intake.passed %}
       <span class="badge success">✓ Matches</span>
       {% if intake.validation_method %}<span class="badge {{ 'neutral' if intake.validation_method == 'primary' else 'info' }}">{{ intake.validation_method | validation_method_label }}</span>{% endif %}
+      {% elif intake.validation_status == 'rows_verified_no_total' %}
+      <span class="badge info" title="Every extracted row was found on the PDF, but the PDF prints no total to reconcile -- not a pass">Rows verified · no printed total</span>
       {% else %}
       <span class="badge warning">⚠ {{ intake.validation_status | replace("_", " ") | title if intake.validation_status else "Mismatch" }}</span>
       {% endif %}

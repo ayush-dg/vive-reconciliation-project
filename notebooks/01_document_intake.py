@@ -276,7 +276,9 @@ def validate_invoice(invoice: dict, rules: dict):
     # this required_fields check (confirmed missing from Bronze for BERLIN
     # HEW 0726 2026-08-29 before this carve-out existed).
     required = rules.get("required_fields", ["invoice_number", "outstanding_amount"])
-    has_other_content = has_value("description") or has_value("amount") or has_value("outstanding_amount")
+    # Same content fields as get_skip_reason() (2026-10-12) -- a credit-only
+    # row with no reference must not be diverted to the review queue either.
+    has_other_content = any(has_value(field) for field in _ROW_CONTENT_FIELDS)
     for field in required:
         if field == "invoice_number" and has_other_content:
             continue
@@ -409,6 +411,12 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
     return count
 
 
+_ROW_CONTENT_FIELDS = (
+    "description", "amount", "outstanding_amount", "credit", "credits", "charges", "amount_due",
+    "payment", "payment_applied", "credit_applied", "balance_forward", "period_activity",
+)
+
+
 def get_skip_reason(invoice: dict) -> str:
     """
     A row is genuinely unusable — not just low-confidence — when it has
@@ -437,11 +445,12 @@ def get_skip_reason(invoice: dict) -> str:
         return val is not None and str(val).strip() != ""
 
     has_identifier = has_value("invoice_number") or has_value("ro_number")
-    has_other_content = (
-        has_value("description")
-        or has_value("amount")
-        or has_value("outstanding_amount")
-    )
+    # Any money field is real content (2026-10-12): a credit-only row with
+    # no reference -- Northeast Coffee STMT-5D1050A6's "08/17/26 credit
+    # 80.40" -- only fills credit/credits, so it was skipped to
+    # gold_exceptions as EXTRACTION_INCOMPLETE and never reached Bronze,
+    # although the gate had already counted it.
+    has_other_content = any(has_value(field) for field in _ROW_CONTENT_FIELDS)
     if not has_identifier and not has_other_content:
         return "no invoice identifier found"
 
@@ -1135,6 +1144,27 @@ def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source)
     return resolved, {**from_ocr, "chain_opening": resolved.get("chain_opening")}
 
 
+def _rows_only_status(validation: dict, invoices: list, pdf_path) -> dict:
+    """A statement with no printed total anywhere (status total_not_found)
+    can still have its rows checked against the PDF both ways, with no total
+    equation (src/validation/pdf_row_match.py check_rows_only, 2026-10-12).
+    When every row is verified the status becomes "rows_verified_no_total" --
+    its own state, never "matches", never a pass (web/queries.py counts only
+    "matches" as passed). Otherwise the status stays total_not_found and the
+    detail records "rows_do_not_match" (or why the rows could not be read)."""
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    if not pdf_path or not rows:
+        return validation
+    from src.validation.pdf_row_match import check_rows_only
+    outcome = check_rows_only(rows, pdf_path)
+    detail = {**(validation.get("detail") or {}), "rows_only": outcome}
+    if outcome["status"] == "rows_verified_no_total":
+        print(f"  Rows-only check: all {outcome['rows']} rows verified on the PDF; no printed total to reconcile.")
+        return {**validation, "status": "rows_verified_no_total", "detail": detail}
+    print(f"  Rows-only check: {outcome['status']} ({outcome.get('reason', '')})")
+    return {**validation, "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
@@ -1200,6 +1230,7 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
                 previous_balance=previous["value"],
                 section_totals=stmt_meta.get("section_totals"),
                 chain_opening_balance=previous.get("chain_opening"),
+                pdf_path=pdf_path,
             )
 
         validation = validate(previous_balance)
@@ -1211,6 +1242,8 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
             with_ocr = validate(ocr_previous_balance)
             if with_ocr["status"] == "matches":
                 validation, previous_balance = with_ocr, ocr_previous_balance
+        if validation["status"] == "total_not_found":
+            validation = _rows_only_status(validation, schema_result.get("invoices") or [], pdf_path)
         sources = {k: v for k, v in (("printed_total_source", printed_source),
                                        ("text_source", "ocr" if text_source == "ocr" else None)) if v}
         if sources:

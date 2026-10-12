@@ -138,6 +138,8 @@
       <span>{{ "Diff " + (run.validation_difference | money_signed) if run.validation_difference is not none else "No printed total" }}</span>
       {% if run.passed and run.validation_method %}
       <span class="badge {{ 'neutral' if run.validation_method == 'primary' else 'info' }}" title="Check that matched the printed total">{{ run.validation_method | validation_method_label }}</span>
+      {% elif run.validation_status == 'rows_verified_no_total' %}
+      <span class="badge info" title="Every extracted row was found on the PDF, but the PDF prints no total to reconcile -- not a pass">Rows verified · no printed total</span>
       {% endif %}
     </div>
 
