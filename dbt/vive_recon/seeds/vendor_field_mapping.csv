@@ -1047,3 +1047,8 @@ FENIX_NE,Date,line_date,date,v1,1
 FENIX_NE,Charged,charge_amount,decimal,v1,1
 FENIX_NE,Paid,payment_amount,decimal,v1,1
 FENIX_NE,Cust PO/Chk #,po_number,string,v1,1
+THOMPSON_VOLKSWAGEN,DATE,line_date,date,v1,1
+THOMPSON_VOLKSWAGEN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+THOMPSON_VOLKSWAGEN,PURCHASES,charge_amount,decimal,v1,1
+THOMPSON_VOLKSWAGEN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+THOMPSON_VOLKSWAGEN,BALANCE,amount_remaining,decimal,v1,1

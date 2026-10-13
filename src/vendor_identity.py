@@ -46,6 +46,18 @@ def _normalize(name: str) -> str:
     return " ".join(sorted(words))
 
 
+def _normalize_split(name: str) -> str:
+    """_normalize() with hyphens and slashes read as word breaks
+    (2026-10-13): "Goodwin's Chevrolet-Mazda" must match the alias
+    "Goodwins Chevrolet Mazda" -- _normalize() drops the hyphen outright and
+    glues it into one word, CHEVROLETMAZDA, so the prod job got an unmapped
+    fallback vendor_id ("No lines read"). Used ALONGSIDE _normalize(), never
+    instead of it: aliases are registered under both forms and a name is
+    tried in both, so every name that matched before still does (e.g.
+    "1800 Radiator" vs the alias "1-800 Radiator")."""
+    return _normalize(re.sub(r"[-/]", " ", name))
+
+
 def _load_lookup() -> dict:
     global _lookup_cache
     if _lookup_cache is not None:
@@ -55,11 +67,15 @@ def _load_lookup() -> dict:
             raw = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         raw = {}
-    _lookup_cache = {
-        _normalize(alias): vendor_id
-        for vendor_id, aliases in raw.items()
-        for alias in aliases
-    }
+    lookup = {}
+    for vendor_id, aliases in raw.items():
+        for alias in aliases:
+            lookup.setdefault(_normalize(alias), vendor_id)
+    # Hyphen/slash-split forms second, so they never override a plain key.
+    for vendor_id, aliases in raw.items():
+        for alias in aliases:
+            lookup.setdefault(_normalize_split(alias), vendor_id)
+    _lookup_cache = lookup
     return _lookup_cache
 
 
@@ -69,7 +85,8 @@ def resolve_vendor_id(vendor_name) -> str:
     known alias entry."""
     if not vendor_name or not str(vendor_name).strip():
         return None
-    return _load_lookup().get(_normalize(vendor_name))
+    lookup = _load_lookup()
+    return lookup.get(_normalize(vendor_name)) or lookup.get(_normalize_split(vendor_name))
 
 
 def display_name(vendor_name) -> str:
