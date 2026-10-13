@@ -46,5 +46,29 @@ class TestHyphensAndSlashes(unittest.TestCase):
         self.assertIsNone(resolve_vendor_id("Some-New Vendor / Shop"))
 
 
+
+class TestNameFallbacks(unittest.TestCase):
+    """Fallback forms (2026-10-13), tried only after the plain ones miss --
+    the vendor names below are exactly what prod extracted."""
+
+    def test_company_suffix_dropped(self):
+        self.assertEqual(resolve_vendor_id("Lia Group Payables LLC"), "LIA_AUTO_GROUP")
+
+    def test_bracketed_text_dropped(self):
+        self.assertEqual(resolve_vendor_id("nucar (The Reynolds and Reynolds Company)"), "NUCAR")
+
+    def test_text_after_dash_dropped(self):
+        self.assertEqual(resolve_vendor_id("Techzone - NOTE OUR NEW ADDRESS"), "TECHZONE_AIRBAG_SERVICE")
+
+    def test_lia_stores(self):
+        for name in ("Lia Hyundai of Hartford", "Lia Hyundai", "LIA VOLKSWAGEN", "LIA HONDA OF ENFIELD"):
+            with self.subTest(name=name):
+                self.assertEqual(resolve_vendor_id(name), "LIA_AUTO_GROUP")
+
+    def test_new_vendors_still_unresolved(self):
+        for name in ("SCHALLER HONDA / SUBARU", "Columbia Ford", "EZ AUTO GLASS INSTALLERS, INC", "Mercedes-Benz of Boston"):
+            with self.subTest(name=name):
+                self.assertIsNone(resolve_vendor_id(name))
+
 if __name__ == "__main__":
     unittest.main()

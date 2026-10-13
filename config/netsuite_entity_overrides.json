@@ -24,8 +24,8 @@
     "note": "Long Automotive Group (1760), per user 2026-09-18. NOT independently confirmed: entity 1760 has ~2,958 bills (a large consolidated parent account, same shape as NuCar's DCD_AUTOMOTIVE_HOLDINGS/NUCAR parent-vs-child-entity split), but none of RH Long's 3 real invoice numbers from statement STMT-F7126B55 (482646, 220688, 486976) were found under it by tranid, unscoped by amount. User elected to use 1760 anyway rather than trace a child entity. All 3 invoices will likely surface as 'Not Found' exceptions until/unless a more specific child entity is identified, the same way NuCar's real entities (2330/2331/287097/2399) turned out to be sub-brand accounts under the 'Long Automotive Group'-style parent, not the parent id itself."
   },
   "KSI_TRADING_CORP": {
-    "entity_ids": ["8726"],
-    "note": "Plain 'KSI' (8726, active) -- derived 2026-08-26 by tracing all 69 invoice_numbers from a real statement (local bronze_vendor_statement_raw, statement_id TEST-WIRING-KSI-003) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 67 of 69 matched, all under entity 8726, amounts tying out correctly (e.g. a -15.0 credit line matches NetSuite's 15 before sign). 'KSI Auto Parts' (1759, also active, a plausible name match) got zero hits -- not the right entity despite the name similarity. Two other candidates ('KSI TRADING CORP - Clarkstown' 5662, 'KSI Auto Parts - Rockland' 5857) are both inactive and weren't tested, but 8726 alone already accounts for 67/69 -- no reason to expect them relevant."
+    "entity_ids": ["8726", "1759"],
+    "note": "KSI Auto Parts (1759) added 2026-10-13: prod KSI (MidNJ) statement STMT-F5444483 ties out under 1759 (4 of 5 lines, M-prefixed returns), while KSI (First Choice) STMT-44C4A145 ties out under 8726 (35 of 42). Earlier note: Plain 'KSI' (8726, active) -- derived 2026-08-26 by tracing all 69 invoice_numbers from a real statement (local bronze_vendor_statement_raw, statement_id TEST-WIRING-KSI-003) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 67 of 69 matched, all under entity 8726, amounts tying out correctly (e.g. a -15.0 credit line matches NetSuite's 15 before sign). 'KSI Auto Parts' (1759, also active, a plausible name match) got zero hits -- not the right entity despite the name similarity. Two other candidates ('KSI TRADING CORP - Clarkstown' 5662, 'KSI Auto Parts - Rockland' 5857) are both inactive and weren't tested, but 8726 alone already accounts for 67/69 -- no reason to expect them relevant."
   },
   "RIVIAN_LLC": {
     "entity_ids": ["117788"],
@@ -568,8 +568,8 @@
     "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
   },
   "LIA_AUTO_GROUP": {
-    "entity_ids": ["180149", "65555"],
-    "note": "Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
+    "entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854"],
+    "note": "Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
   },
   "WILBERTS": {
     "entity_ids": ["240269", "346384"],

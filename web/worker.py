@@ -69,7 +69,7 @@ FABRIC_STATUS_RE = re.compile(
 # identifies "extraction succeeded, matching had no real ERP data to
 # compare against" specifically, as opposed to any other non-zero exit.
 NO_VOUCHER_DATA_MARKER = "No real voucher-sourced INTERNAL_ERP rows"
-from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER  # noqa: E402
+from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER, SILVER_CHECK_MARKER  # noqa: E402
 
 # Dropzone auto-intake, polling variant -- see _dropzone_watcher_loop()'s
 # docstring for why this exists alongside (not instead of)
@@ -174,6 +174,13 @@ def _run_job(job: dict) -> None:
 
             print(f"[worker] Job {job_id} FAILED (exit {result.returncode})")
             error_message = output.strip()[-4000:] or "Pipeline exited with no output."
+            check_line = next((l for l in output.splitlines() if l.startswith(SILVER_CHECK_MARKER)), None)
+            if check_line:
+                # src/lakehouse/silver_check.py: lines didn't come through the
+                # field mapping. Explanation LAST (friendly_error() shows the
+                # final line); stderr is appended after stdout, so it can't be
+                # relied on to already be last.
+                error_message = f"{output.strip()[-3500:]}\n\n{check_line[len(SILVER_CHECK_MARKER):].strip()}"
             queries.update_job_status(
                 job_id,
                 status="FAILED",

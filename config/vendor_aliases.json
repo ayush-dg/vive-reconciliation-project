@@ -679,7 +679,13 @@
     "Lia Group Payables",
     "Lia Honda of Albany",
     "Lia Toyota of Wilbraham",
-    "Lia Toyota"
+    "Lia Toyota",
+    "Lia Hyundai of Hartford",
+    "Lia Hyundai",
+    "Lia Hyundai of Enfield",
+    "Lia Volkswagen",
+    "Lia Honda of Enfield",
+    "Lia Honda Enfield"
   ],
   "WILBERTS": [
     "Wilbert's Inc.",
@@ -803,7 +809,8 @@
     "Tasca Automotive Group Inc."
   ],
   "TECHZONE_AIRBAG_SERVICE": [
-    "TechZone Airbag Service"
+    "TechZone Airbag Service",
+    "TechZone"
   ],
   "U_S_A_WHEELS": [
     "U.S.A Wheels",

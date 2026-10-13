@@ -86,7 +86,46 @@ def resolve_vendor_id(vendor_name) -> str:
     if not vendor_name or not str(vendor_name).strip():
         return None
     lookup = _load_lookup()
-    return lookup.get(_normalize(vendor_name)) or lookup.get(_normalize_split(vendor_name))
+    for key in _candidate_keys(str(vendor_name)):
+        if key in lookup:
+            return lookup[key]
+    return None
+
+
+# Company-type words dropped by the fallback forms below (whole words only).
+_COMPANY_SUFFIXES = {"INC", "INCORPORATED", "LLC", "CO", "CORP", "CORPORATION", "LTD", "COMPANY"}
+
+
+def _without_suffixes(key: str) -> str:
+    words = [w for w in key.split(" ") if w not in _COMPANY_SUFFIXES]
+    return " ".join(words) if words else key
+
+
+def _candidate_keys(name: str):
+    """Lookup keys to try for a printed vendor name, in order. The first two
+    are what resolve_vendor_id() has always tried (plain, then hyphen/slash
+    split); the rest are fallbacks added 2026-10-13 for prod statements that
+    printed extra text around a known vendor's name -- they're only reached
+    when everything before them missed, so no name that resolved before
+    resolves differently:
+      - without company suffixes: "Lia Group Payables LLC" -> "Lia Group Payables"
+      - without bracketed text: "Nucar (The Reynolds and Reynolds Company)" -> "Nucar"
+      - only the part before " - ": "TechZone - Note our new address" -> "TechZone"
+    """
+    forms = [name]
+    no_brackets = re.sub(r"\([^)]*\)", " ", name).strip()
+    if no_brackets and no_brackets != name:
+        forms.append(no_brackets)
+    before_dash = re.split(r"\s+-\s+", name)[0].strip()
+    if before_dash and before_dash != name:
+        forms.append(before_dash)
+    seen = []
+    for i, form in enumerate(forms):
+        keys = [_normalize(form), _normalize_split(form)]
+        for key in keys + [_without_suffixes(k) for k in keys]:
+            if key not in seen:
+                seen.append(key)
+                yield key
 
 
 def display_name(vendor_name) -> str:

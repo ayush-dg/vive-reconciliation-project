@@ -1052,3 +1052,21 @@ THOMPSON_VOLKSWAGEN,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
 THOMPSON_VOLKSWAGEN,PURCHASES,charge_amount,decimal,v1,1
 THOMPSON_VOLKSWAGEN,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
 THOMPSON_VOLKSWAGEN,BALANCE,amount_remaining,decimal,v1,1
+LIA_AUTO_GROUP,DATE,line_date,date,v1,1
+LIA_AUTO_GROUP,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+LIA_AUTO_GROUP,PURCHASES,charge_amount,decimal,v1,1
+LIA_AUTO_GROUP,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+LIA_AUTO_GROUP,BALANCE,amount_remaining,decimal,v1,1
+RIVIAN_LLC,Invoice#,original_invoice_number,string,v1,1
+RIVIAN_LLC,Doc. Date,line_date,date,v1,1
+RIVIAN_LLC,Invoice Amount,charge_amount,decimal,v1,1
+RIVIAN_LLC,Balance,amount_remaining,decimal,v1,1
+RIVIAN_LLC,Order#,po_number,string,v1,1
+RIVIAN_LLC,Net Due Date,due_date,date,v1,1
+KSI_TRADING_CORP,Document No.,original_invoice_number,string,v1,1
+KSI_TRADING_CORP,Posting Date,line_date,date,v1,1
+KSI_TRADING_CORP,Remaining Amount,charge_amount,decimal,v1,1
+KSI_TRADING_CORP,Remaining Amount,amount_remaining,decimal,v1,1
+KSI_TRADING_CORP,PO No.,po_number,string,v1,1
+KSI_TRADING_CORP,Due Date,due_date,date,v1,1
+KSI_TRADING_CORP,Description,description_raw,string,v1,1
