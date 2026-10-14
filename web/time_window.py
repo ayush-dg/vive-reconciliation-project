@@ -54,7 +54,10 @@ EASTERN = ZoneInfo("America/New_York")
 OUTLOOK_SYNC_GAP = timedelta(minutes=10)
 
 RANGES = ("last", "today", "month_current", "all", "date", "month")
-DEFAULT_RANGE = "last"
+# "all" since 2026-10-14 (was "last" since 2026-10-01): with auto-sync every
+# 30 minutes the most recent sync is usually empty, so Home and Exceptions
+# opened on an empty page. "Last run" stays one click away as a chip.
+DEFAULT_RANGE = "all"
 
 
 @dataclass(frozen=True)
@@ -262,7 +265,7 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
                    timestamps=(), outlook_jobs=(), now: datetime = None, sync_: str = None) -> TimeWindow:
     """URL params -> TimeWindow. ?date= alone implies range=date and
     ?month= alone range=month. Anything unknown or malformed falls back to
-    the default ("last"). `now` is injectable for tests only.
+    the default (DEFAULT_RANGE, "all" since 2026-10-14). `now` is injectable for tests only.
 
     `timestamps` (silver.recon_summary run timestamps, via
     queries.get_run_timestamps()) drives the Month dropdown's options
@@ -278,7 +281,9 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
     matching no known sync all fall back to the latest sync with no
     error -- same permissive posture as an unknown `range_`."""
     if not range_:
-        range_ = "date" if date_ else "month" if month_ else DEFAULT_RANGE
+        # A bare ?sync= (a sync-picker link or bookmark) still means that
+        # sync, i.e. "last", now that the default range is "all".
+        range_ = "date" if date_ else "month" if month_ else "last" if sync_ else DEFAULT_RANGE
     if range_ not in RANGES:
         range_ = DEFAULT_RANGE
     now_et = (now or datetime.now(timezone.utc)).astimezone(EASTERN)

@@ -219,20 +219,22 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
     def _window(self):
         return self.windows[-1]
 
-    def test_default_is_last_run(self):
-        """Same default as Home's since 2026-10-01 (was "all")."""
-        self._get("/exceptions")
-        self.assertEqual(self._window().range, "last")
+    def test_default_is_all(self):
+        """Same default as Home's: "all" since 2026-10-14 (was "last" from
+        2026-10-01, "all" before that)."""
+        html = self._get("/exceptions")
+        self.assertEqual(self._window().range, "all")
+        self.assertIn('href="/exceptions" class="filter-chip active">All', html)
 
     def test_header_counts_both_the_run_and_the_exceptions_only_vendor(self):
         html = self._get("/exceptions")
         self.assertIn("5 open across 2 vendors", html)
 
-    def test_only_last_run_and_today_are_chips(self):
+    def test_range_chips_are_all_today_last_run(self):
         html = self._get("/exceptions")
         time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
         chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
-        self.assertEqual(chip_labels, ["Today", "Last run"])
+        self.assertEqual(chip_labels, ["All", "Today", "Last run"])
 
     def test_no_month_select_or_all_time_option(self):
         # Removed 2026-10-01 -- the Month select's blank "All time" option
@@ -252,10 +254,10 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self._get("/exceptions?month=2026-09")
         self.assertEqual((self._window().range, self._window().month), ("month", "2026-09"))
 
-    def test_unknown_range_falls_back_to_last(self):
-        """Same fallback as Home's since 2026-10-01 (was "all")."""
+    def test_unknown_range_falls_back_to_the_default(self):
+        """Same fallback as Home's: the default range, "all" since 2026-10-14."""
         self._get("/exceptions?range=bogus")
-        self.assertEqual(self._window().range, "last")
+        self.assertEqual(self._window().range, "all")
 
     def test_no_outlook_syncs_yet_defaults_to_all_time(self):
         # Found on dev 2026-10-01: with no Outlook syncs at all, the "last"
@@ -273,9 +275,9 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
     def test_last_run_reachable_via_the_chip(self):
         html = self._get("/exceptions?range=last")
         self.assertEqual(self._window().range, "last")
-        # "last" is this page's own default too since 2026-10-01, so (like
-        # Home's) its "Last run" chip link leaves range= out entirely.
-        self.assertIn('href="/exceptions" class="filter-chip active">Last run', html)
+        # "all" is the default since 2026-10-14, so the Last run chip link
+        # spells range=last out.
+        self.assertIn('href="/exceptions?range=last" class="filter-chip active">Last run', html)
 
     def test_calendar_button_and_hidden_date_input(self):
         html = self._get("/exceptions?date=2026-09-28")
@@ -287,8 +289,8 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.runs = [dict(self.orphan_row)]  # no summary-backed run in this window
         html = self._get("/exceptions?range=today")
         self.assertIn("No reconciliation runs today yet.", html)
-        # "last" is this page's own default, so its URL omits range=.
-        self.assertIn('href="/exceptions" class="link">Last run</a>', html)
+        # The default is "all" since 2026-10-14, so the Last run link spells range=last out.
+        self.assertIn('href="/exceptions?range=last" class="link">Last run</a>', html)
         # No "All time" link since 2026-10-01 (the All time option is gone).
         self.assertNotIn('class="link">All time</a>', html)
 
@@ -299,7 +301,7 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         jobs = [_job("S1", U(2026, 9, 29, 12, 8)), _job("CACHE-HIT", U(2026, 9, 29, 12, 6)),
                 _job(None, U(2026, 9, 29, 12, 4), "FAILED")]
         with mock.patch("web.queries.get_outlook_synced_jobs", lambda: jobs):
-            html = self._get("/exceptions")
+            html = self._get("/exceptions?range=last")
         self.assertIn("Last sync · Sep 29, 8:08 AM ET · 3 statements (2 completed, 1 failed)", html)
         self.assertNotIn("still processing", html)
         self.assertNotIn("Last Outlook sync", html)
@@ -374,10 +376,10 @@ class TestExceptionsSyncDropdown(unittest.TestCase):
         self.assertEqual(self.windows[-1].statement_ids, frozenset({"O1"}))
         self.assertIn('href="/exceptions?range=today"', html)
 
-    def test_default_exceptions_page_load_selects_the_newest_sync(self):
-        # Exceptions' default range is "last" since 2026-10-01 (same as
-        # Home's), so a plain page load pre-selects the NEWEST sync.
-        html = self._get("/exceptions")
+    def test_last_run_selects_the_newest_sync(self):
+        # Last run (no explicit ?sync=) pre-selects the NEWEST sync. Since
+        # 2026-10-14 it's a chip, not the page's default.
+        html = self._get("/exceptions?range=last")
         self.assertEqual(self._window().range, "last")
         self.assertEqual(self._window().statement_ids, frozenset({"N1"}))
         select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
@@ -389,7 +391,7 @@ class TestExceptionsSyncDropdown(unittest.TestCase):
         options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', select)
         self.assertEqual(options[0], ("", "None"))
         self.assertNotIn('<option value="" selected>', select)
-        self.assertIn('href="/exceptions" class="filter-chip active">Last run', html)
+        self.assertIn('href="/exceptions?range=last" class="filter-chip active">Last run', html)
         self.assertRegex(html, r'class="filter-chip sync-picker-btn\s*" id="window-sync-btn"')
 
     def _window(self):

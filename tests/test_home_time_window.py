@@ -85,8 +85,15 @@ class TestResolveWindow(unittest.TestCase):
 
     NOW = datetime(2026, 9, 29, 13, 0, tzinfo=timezone.utc)  # 9:00 AM ET
 
-    def test_default_is_last_run(self):
+    def test_default_is_all(self):
+        # "all" since 2026-10-14 (was "last"): the latest 30-minute sync is
+        # usually empty, so the pages opened empty.
         w = tw.resolve_window(outlook_jobs=[{"submitted_at": U(2026, 9, 29, 12), "statement_id": "S1"}], now=self.NOW)
+        self.assertEqual(w.range, "all")
+
+    def test_bare_sync_param_still_means_last(self):
+        jobs = [{"submitted_at": U(2026, 9, 29, 12), "statement_id": "S1"}]
+        w = tw.resolve_window(outlook_jobs=jobs, sync_="2026-09-29T12:00:00Z", now=self.NOW)
         self.assertEqual(w.range, "last")
 
     def test_date_alone_implies_range_date(self):
@@ -98,12 +105,12 @@ class TestResolveWindow(unittest.TestCase):
         self.assertEqual((w.range, w.month, w.start_utc, w.end_utc),
                          ("month", "2026-11", U(2026, 11, 1, 4), U(2026, 12, 1, 5)))
 
-    def test_bad_values_fall_back_to_last(self):
+    def test_bad_values_fall_back_to_the_default(self):
         jobs = [{"submitted_at": U(2026, 9, 29), "statement_id": "S1"}]
         for args in (("date", "2026-13-40", None), ("date", "", None), ("month", None, "2026-9x"),
                      ("month", None, None), ("bogus", None, None), (None, "not-a-date", None)):
             with self.subTest(args=args):
-                self.assertEqual(tw.resolve_window(*args, outlook_jobs=jobs).range, "last")
+                self.assertEqual(tw.resolve_window(*args, outlook_jobs=jobs).range, tw.DEFAULT_RANGE)
 
     def test_today_uses_the_eastern_calendar_day(self):
         # 02:00Z on Sep 29 is still 10 PM on Sep 28 in New York.
@@ -712,11 +719,17 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
     def _window(self):
         return self.windows[-1][0]
 
-    def test_default_is_last_run_with_label(self):
+    def test_default_is_all(self):
         html = self._get("/")
+        self.assertEqual(self._window().range, "all")
+        self.assertIn("All time · 4 statements", html)
+        self.assertIn('href="/" class="filter-chip active">All', html)
+
+    def test_last_run_chip_with_label(self):
+        html = self._get("/?range=last")
         self.assertEqual(self._window().range, "last")
         self.assertIn("Last sync · Sep 29, 8:08 AM ET · 4 statements", html)
-        self.assertIn('href="/" class="filter-chip active">Last run', html)
+        self.assertIn('href="/?range=last" class="filter-chip active">Last run', html)
 
     def test_sync_wording_no_longer_names_outlook_except_the_top_bar_badge(self):
         # 2026-10-06: "Past Outlook syncs"/"Last Outlook sync" became
@@ -737,7 +750,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
                 {"submitted_at": U(2026, 9, 29, 12, 1), "statement_id": "S3", "status": "COMPLETED"},
                 {"submitted_at": U(2026, 9, 29, 11, 58), "statement_id": "S4", "status": "COMPLETED"}]
         with mock.patch("web.queries.get_outlook_synced_jobs", lambda: jobs):
-            html = self._get("/")
+            html = self._get("/?range=last")
         self.assertIn("Last sync · Sep 29, 8:09 AM ET · 5 statements (4 completed, 1 failed)", html)
         self.assertNotIn("still processing)", html)
         # "N of M reconciled" is unchanged -- still the recon_summary runs.
@@ -746,13 +759,13 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
     def test_no_syncs_yet_wording(self):
         self.result["statement_count"] = 0  # an empty "last" window matches no runs
         with mock.patch("web.queries.get_outlook_synced_jobs", lambda: []):
-            html = self._get("/")
+            html = self._get("/?range=last")
         self.assertIn("<option disabled>No syncs yet</option>", html)
         self.assertIn("Last sync · no runs", html)
         self.assertNotIn("No Outlook syncs yet", html)
 
     def test_cards_use_the_window_sub_labels(self):
-        html = self._get("/")
+        html = self._get("/?range=last")
         self.assertIn("across 5 vendors · last run", html)
         self.assertIn("85.5% matched · last run", html)
         self.assertIn("needs review · last run", html)
@@ -789,24 +802,24 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         self.assertNotIn(">All time</option>", html)
         self.assertNotIn('id="window-month"', html)
 
-    def test_bad_params_fall_back_to_last_run(self):
+    def test_bad_params_fall_back_to_the_default(self):
         for url in ("/?range=bogus", "/?range=date&date=nope", "/?month=2026-99", "/?date=2026-02-30"):
             with self.subTest(url=url):
                 self._get(url)
-                self.assertEqual(self._window().range, "last")
+                self.assertEqual(self._window().range, "all")
 
-    def test_only_last_run_and_today_are_chips(self):
-        # "This month"/"All time" chips were removed 2026-09-30, and the
-        # Month select (whose blank option was "All time") 2026-10-01 --
-        # Today and Last run are the only chips, Today first.
+    def test_range_chips_are_all_today_last_run(self):
+        # "All" chip added 2026-10-14 with the new "all" default (the old
+        # "All time" chip / Month-select option were removed 2026-09-30 / -10-01).
         html = self._get("/")
         time_window = re.search(r'id="time-window".*?</div>', html, re.S).group(0)
         chip_labels = re.findall(r'class="filter-chip[^"]*">([^<]+)</a>', time_window)
-        self.assertEqual(chip_labels, ["Today", "Last run"])
+        self.assertEqual(chip_labels, ["All", "Today", "Last run"])
 
     def test_range_chips_keep_status_and_clear_period(self):
         html = self._get("/?range=date&date=2026-09-28&status=exceptions&period=2026-08")
-        self.assertIn('href="/?status=exceptions" class="filter-chip ">Last run', html)
+        self.assertIn('href="/?status=exceptions" class="filter-chip ">All', html)
+        self.assertIn('href="/?range=last&status=exceptions" class="filter-chip ">Last run', html)
         self.assertIn('href="/?range=today&status=exceptions" class="filter-chip ">Today', html)
 
     def test_calendar_button_and_hidden_date_input(self):
@@ -849,7 +862,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
                                 "statement_total": 0, "vendor_count": 0, "match_rate": None}}
         html = self._get("/?range=today&status=exceptions")
         self.assertIn("No reconciliation runs today yet.", html)
-        self.assertIn('<a href="/?status=exceptions" class="link">Last run</a>', html)
+        self.assertIn('<a href="/?range=last&status=exceptions" class="link">Last run</a>', html)
         # No "All time" link since 2026-10-01 (the All time option is gone).
         self.assertNotIn('class="link">All time</a>', html)
         self.assertIn("—% matched · today", html)
@@ -914,8 +927,8 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         return resp.text.replace("&amp;", "&")
 
-    def test_default_selects_the_latest_sync_with_no_sync_param_in_the_url(self):
-        html = self._get("/")
+    def test_last_run_selects_the_latest_sync_with_no_sync_param_in_the_url(self):
+        html = self._get("/?range=last")
         self.assertEqual(self.windows[-1].statement_ids, frozenset({"N1", "N2"}))
         select = re.search(r'<select name="sync".*?</select>', html, re.S).group(0)
         # Custom picker (2026-10-01): "None" (= the Last run chip) comes
@@ -927,7 +940,7 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
         self.assertIn("Sep 28, 8:00 AM ET · 1 statement", select)
         # No explicit ?sync=, so Last run is the highlighted control and the
         # picker's button is not.
-        self.assertIn('href="/" class="filter-chip active">Last run', html)
+        self.assertIn('href="/?range=last" class="filter-chip active">Last run', html)
         self.assertRegex(html, r'class="filter-chip sync-picker-btn\s*" id="window-sync-btn"')
 
     def test_choosing_an_older_sync_narrows_the_window(self):

@@ -23,7 +23,7 @@ router = APIRouter()
 # all/month/month_current stay valid resolve_window() values, so an old
 # bookmarked ?range=all, ?month= or ?range=month_current link still works
 # -- it just has no control.
-RANGE_CHIPS = (("today", "Today"), ("last", "Last run"))
+RANGE_CHIPS = (("all", "All"), ("today", "Today"), ("last", "Last run"))
 
 
 def home_url(filters: dict, **changes) -> str:

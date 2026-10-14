@@ -61,7 +61,7 @@ BULK_APPROVE_THRESHOLD = 0.99
 # Exceptions overview's time filter (2026-09-30) -- same controls, the
 # same web/time_window.py definitions and (since 2026-10-01) the same
 # "last" default as Home (see dashboard.py's own RANGE_CHIPS).
-EXCEPTIONS_RANGE_CHIPS = (("today", "Today"), ("last", "Last run"))
+EXCEPTIONS_RANGE_CHIPS = (("all", "All"), ("today", "Today"), ("last", "Last run"))
 
 
 def exceptions_url(filters: dict, **changes) -> str:
@@ -101,7 +101,8 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     # dev, which had no Outlook syncs yet). ?date=/?month= alone still
     # imply their own range, same as Home; anything else unrecognised
     # falls back to the same default.
-    default_range = "last" if sync_options else "all"
+    # Default "all" since 2026-10-14 (tw.DEFAULT_RANGE) -- see web/time_window.py.
+    default_range = tw.DEFAULT_RANGE
     range_param = range or None
     if range_param and range_param not in tw.RANGES:
         range_param = default_range
