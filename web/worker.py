@@ -299,6 +299,9 @@ def _worker_loop(worker_name: str) -> None:
 
     while not _shutdown_event.is_set():
         try:
+            requeued = queries.requeue_stale_processing_jobs()
+            if requeued:
+                print(f"[worker] {worker_name}: requeued {requeued} job(s) left 'Processing' by a previous container")
             job = queries.claim_next_pending_job()
             if job:
                 _run_job(job)

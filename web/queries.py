@@ -13,7 +13,7 @@ import os
 import re
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -1505,6 +1505,33 @@ def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
         """,
         [job_id, pdf_filename, pdf_path, submitted_by, now, batch_id, source_blob_path],
     )
+
+
+# A job still PROCESSING this long after it started can't be running: the
+# worker kills the pipeline subprocess at 30 minutes (web/worker.py).
+STALE_PROCESSING_MINUTES = 40
+
+
+def requeue_stale_processing_jobs(max_age_minutes: int = STALE_PROCESSING_MINUTES) -> int:
+    """Puts jobs left PROCESSING by a container that died (App Service
+    restart, host move, deploy) back to PENDING so a worker picks them up
+    again (added 2026-10-13: prod had 4 jobs stuck "Processing..." since an
+    Oct 13 restart). Only jobs started more than max_age_minutes ago, so a
+    job the previous container is still finishing during a deploy swap is
+    left alone. Their PDFs are fetched back from blob storage when the local
+    copy is gone (worker._restore_missing_pdf). Returns how many were reset."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+    stale = execute_query(
+        "SELECT job_id FROM jobs WHERE status = 'PROCESSING' AND started_at IS NOT NULL AND started_at < ?",
+        [cutoff],
+    )
+    for row in stale:
+        execute_sql(
+            "UPDATE jobs SET status = 'PENDING', claim_token = NULL, started_at = NULL "
+            "WHERE job_id = ? AND status = 'PROCESSING' AND started_at < ?",
+            [row["job_id"], cutoff],
+        )
+    return len(stale)
 
 
 def claim_next_pending_job():
