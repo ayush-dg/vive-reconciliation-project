@@ -94,7 +94,7 @@
 <div class="section-header">
   <div class="section-title">Exceptions ({{ exceptions | length }})</div>
   {% if summary or intake %}
-  <a href="/exceptions/{{ (summary.vendor_name if summary else intake.vendor_name) | urlname }}" class="link">Review exceptions →</a>
+  <a href="/exceptions/{{ (summary.vendor_name if summary else intake.vendor_name) | urlname }}{{ ('?statement_id=' ~ summary.statement_id) if summary and summary.statement_id }}" class="link">Review exceptions →</a>
   {% endif %}
 </div>
 {% if exceptions %}

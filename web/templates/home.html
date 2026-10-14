@@ -309,7 +309,7 @@
             Extracted data <svg class="icon"><use href="#i-arrow-right"/></svg>
           </a>
           {% endif %}
-          <a href="/exceptions/{{ run.vendor_name | urlname }}" class="link-arrow" style="white-space:nowrap">
+          <a href="/exceptions/{{ run.vendor_name | urlname }}{{ ('?statement_id=' ~ run.statement_id) if run.statement_id }}" class="link-arrow" style="white-space:nowrap">
             {{ "View" if run.exception_count == 0 else "Review" }} exceptions <svg class="icon"><use href="#i-arrow-right"/></svg>
           </a>
         </td>

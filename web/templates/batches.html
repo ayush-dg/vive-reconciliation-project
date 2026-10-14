@@ -83,7 +83,7 @@
       </td>
       <td>
         {% if job.vendor_name %}
-        <a href="/exceptions/{{ job.vendor_name | urlname }}" class="link">{{ job.vendor_name }}</a>
+        <a href="/exceptions/{{ job.vendor_name | urlname }}{{ ('?statement_id=' ~ job.statement_id) if job.status == 'COMPLETED' and job.statement_id }}" class="link">{{ job.vendor_name }}</a>
         {% else %}
         <span style="color:var(--text-secondary)">—</span>
         {% endif %}
