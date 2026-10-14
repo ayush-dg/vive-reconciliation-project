@@ -568,8 +568,8 @@
     "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
   },
   "LIA_AUTO_GROUP": {
-    "entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854"],
-    "note": "Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
+    "entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854", "46057"],
+    "note": "Lia Honda of Brewster (46057) added 2026-10-13 from prod Lia Group Prestige 093026.pdf (STMT-64B08361): its HB-suffixed invoices are stored in NetSuite under 46057, mostly lowercase (151605hb) -- matching compares case-insensitively. Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
   },
   "WILBERTS": {
     "entity_ids": ["240269", "346384"],

@@ -113,6 +113,33 @@ def _write_blob_outcome(job: dict, status: str, error_message: str = None) -> No
         print(f"[worker] Failed to write blob outcome for {source_blob_path}: {e}")
 
 
+def _restore_missing_pdf(job: dict) -> None:
+    """Re-downloads a queued job's PDF from its source blob when the local
+    copy is gone (added 2026-10-13). Queued PDFs live on the container's own
+    disk (sample_data/...), so an App Service restart or host move wipes
+    them and every still-queued job failed "PDF not found" (prod, Oct 13,
+    10:00 AM ET: 5 mailbox PDFs). Mailbox-synced jobs still have the
+    original in blob storage (jobs.source_blob_path), so fetch it back to
+    the same path. No-op when the file exists or the job has no blob (manual
+    uploads); never raises -- if the download fails, the pipeline reports
+    "PDF not found" exactly as before."""
+    pdf_path = job.get("pdf_path")
+    source_blob_path = job.get("source_blob_path")
+    if not pdf_path or os.path.exists(pdf_path) or not source_blob_path:
+        return
+    try:
+        from src.storage.blob_client import BlobStorageClient
+        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        client = BlobStorageClient(
+            container_name="raw",
+            connection_string_env_var="AZURE_BLOB_MAILBOX_CONNECTION_STRING",
+        )
+        if client.download_blob_by_name(source_blob_path, pdf_path):
+            print(f"[worker] Job {job['job_id']}: re-downloaded missing PDF from {source_blob_path}")
+    except Exception as e:
+        print(f"[worker] Job {job['job_id']}: could not re-download {source_blob_path}: {e}")
+
+
 def _run_job(job: dict) -> None:
     from web import queries
 
@@ -120,6 +147,7 @@ def _run_job(job: dict) -> None:
     pdf_path = job["pdf_path"]
 
     print(f"[worker] Starting job {job_id} ({job['pdf_filename']})")
+    _restore_missing_pdf(job)
 
     python_exe = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
     relative_pdf_path = os.path.relpath(pdf_path, PROJECT_ROOT)
