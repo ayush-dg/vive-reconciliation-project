@@ -428,7 +428,7 @@ _NODASH_VENDORS = {'DENT_WIZARD_INTERNATIONAL_CORP'}
 _LSTRIP0_VENDORS = {'ROBERTSON_AUTO_GLASS'}
 
 
-def _alternate_tranids(vendor_id: str, inv: str) -> list:
+def _alternate_tranids(vendor_id: str, inv: str, line_date=None) -> list:
     """Vendor-specific alternate spellings of a statement invoice number,
     tried only after the number as normalized missed (exact amount only).
     Each is a convention NetSuite holds alongside the plain one, so it
@@ -507,6 +507,12 @@ def _alternate_tranids(vendor_id: str, inv: str) -> list:
         alts.append(inv.rsplit("-", 1)[1])                 # OMEGA-13940 -> 13940
     if vendor_id == "SOUND_WAVES" and inv.isdigit():
         alts.append(inv[:2] + "0" + inv[2:])               # one bill keyed with an extra 0
+    # Confirmed 2026-10-14 by tranid trace of prod's two Bennetts statements
+    # (98 of 112 lines, exact amount, entity 152957): NetSuite holds the
+    # Call # behind the 2-digit year of the line's date (36498 on 9/2/2026
+    # -> 26-36498).
+    if vendor_id == "BENNETTS_AUTO_RECOVERY" and inv.isdigit() and line_date:
+        alts.append(f"{str(line_date)[2:4]}-{inv}")
     return alts
 
 
@@ -806,7 +812,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                             netsuite_total, is_exact = dt_total, dt_is_exact
 
                 if netsuite_total is None and table:
-                    for alt in _alternate_tranids(vendor_id, inv):
+                    for alt in _alternate_tranids(vendor_id, inv, item.get("line_date")):
                         alt_total, alt_is_exact = _best_candidate(
                             netsuite_by_table.get(table, {}).get(alt.lower(), []), stmt_amount
                         )

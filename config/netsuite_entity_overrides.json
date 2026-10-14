@@ -794,5 +794,17 @@
   "WEBER_BROTHERS_AUTO": {
     "entity_ids": ["206427"],
     "note": "WEBER BROS. AUTO PARTS (206427). Added 2026-10-13 from prod Weber Brothers (Lamon).pdf: the number after 'Invoice #' in Transaction Type ties out (489548)."
+  },
+  "CHERRY_HILL_TRIPLEX": {
+    "entity_ids": ["369649", "147511"],
+    "note": "Cherry Hill Kia (369649), Cherry Hill Triplex (147511, older bills). Added 2026-10-14 from prod Cherry Hill Triplex (M3 Hwy35).pdf: REF NO. ties out 2 of 2 under 369649, exact amount."
+  },
+  "L_&_M_AUTO_CENTER": {
+    "entity_ids": ["85979"],
+    "note": "L&M Auto Center (85979). Added 2026-10-14 from prod L&M Auto (M3 S Main).pdf: its columns print no headers, so Claude names them UNLABELED_TRANSACTION_CODE[_n]; the first ties out 18 of 18."
+  },
+  "BENNETTS_AUTO_RECOVERY": {
+    "entity_ids": ["152957"],
+    "note": "Bennett's Auto Recovery (152957). Added 2026-10-14 from prod Bennetts (M3 Hwy35) / (M3 S Main): NetSuite holds Call # as yy-<call> (26-36498), see fabric_matching._alternate_tranids; 98 of 112 lines tie out, exact amount."
   }
 }

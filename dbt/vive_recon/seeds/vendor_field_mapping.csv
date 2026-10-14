@@ -1125,3 +1125,18 @@ SULLIVAN_TIRE,Balance Remaining,amount_remaining,decimal,v1,1
 SULLIVAN_TIRE,PO Number,po_number,string,v1,1
 SULLIVAN_TIRE,Due Date,due_date,date,v1,1
 SULLIVAN_TIRE,Type,transaction_code,string,v1,1
+CHERRY_HILL_TRIPLEX,REF NO.,original_invoice_number,string,v1,1
+CHERRY_HILL_TRIPLEX,DATE,line_date,date,v1,1
+CHERRY_HILL_TRIPLEX,CHARGES,charge_amount,decimal,v1,1
+CHERRY_HILL_TRIPLEX,CREDITS,payment_amount,decimal,v1,1
+CHERRY_HILL_TRIPLEX,APPLY TO,invoice_number_ref,string,v1,1
+CHERRY_HILL_TRIPLEX,SRC,transaction_code,string,v1,1
+L_&_M_AUTO_CENTER,UNLABELED_TRANSACTION_CODE,original_invoice_number,string,v1,1
+L_&_M_AUTO_CENTER,UNLABELED_TRANSACTION_CODE_2,line_date,date,v1,1
+L_&_M_AUTO_CENTER,UNLABELED_TRANSACTION_CODE_3,description_raw,string,v1,1
+L_&_M_AUTO_CENTER,UNLABELED_TRANSACTION_CODE_5,charge_amount,decimal,v1,1
+BENNETTS_AUTO_RECOVERY,Call #,original_invoice_number,string,v1,1
+BENNETTS_AUTO_RECOVERY,Date,line_date,date,v1,1
+BENNETTS_AUTO_RECOVERY,Subtotal,charge_amount,decimal,v1,1
+BENNETTS_AUTO_RECOVERY,Balance,amount_remaining,decimal,v1,1
+BENNETTS_AUTO_RECOVERY,Vehicle,description_raw,string,v1,1
