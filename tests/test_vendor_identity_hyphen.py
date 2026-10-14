@@ -65,8 +65,16 @@ class TestNameFallbacks(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(resolve_vendor_id(name), "LIA_AUTO_GROUP")
 
-    def test_new_vendors_still_unresolved(self):
-        for name in ("SCHALLER HONDA / SUBARU", "Columbia Ford", "EZ AUTO GLASS INSTALLERS, INC", "Mercedes-Benz of Boston"):
+    def test_vendors_set_up_2026_10_13(self):
+        for name, vendor_id in (("SCHALLER HONDA / SUBARU", "SCHALLER_SUBARU"), ("Columbia Ford", "COLUMBIA_FORD"),
+                                ("EZ AUTO GLASS INSTALLERS, INC", "EZ_AUTO_GLASS_INSTALLERS"),
+                                ("Mercedes-Benz of Boston", "MERCEDES_BENZ_OF_BOSTON"),
+                                ("WEBER BROTHERS AUTO, INC", "WEBER_BROTHERS_AUTO")):
+            with self.subTest(name=name):
+                self.assertEqual(resolve_vendor_id(name), vendor_id)
+
+    def test_vendors_not_set_up_stay_unresolved(self):
+        for name in ("Asbury Automotive Group", "Cherry Hill Triplex", "Bennetts Auto Recovery"):
             with self.subTest(name=name):
                 self.assertIsNone(resolve_vendor_id(name))
 
