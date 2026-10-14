@@ -877,5 +877,40 @@
     "Thompson Volkswagen",
     "Thompson Volkswagen, Inc.",
     "Thompson VW"
+  ],
+  "COLUMBIA_FORD": [
+    "Columbia Ford",
+    "Columbia Kia"
+  ],
+  "MERCEDES_BENZ_OF_BOSTON": [
+    "Mercedes-Benz of Boston"
+  ],
+  "BMW_OF_NORTH_HAVEN": [
+    "BMW of North Haven"
+  ],
+  "MERCEDES_BENZ_OF_NORTH_HAVEN": [
+    "Mercedes-Benz of North Haven",
+    "Mercedes Benz of North Haven"
+  ],
+  "FISHER_AUTO_PARTS": [
+    "Fisher Auto Parts"
+  ],
+  "SCHALLER_SUBARU": [
+    "Schaller Honda / Subaru",
+    "Schaller Subaru",
+    "Schaller Honda"
+  ],
+  "BERTERA_MITSUBISHI": [
+    "Bertera Mitsubishi"
+  ],
+  "EZ_AUTO_GLASS_INSTALLERS": [
+    "EZ Auto Glass Installers, Inc",
+    "EZ Auto Glass Installers",
+    "EZ Auto Glass"
+  ],
+  "WEBER_BROTHERS_AUTO": [
+    "Weber Brothers Auto, Inc",
+    "Weber Brothers Auto",
+    "Weber Bros. Auto Parts"
   ]
 }

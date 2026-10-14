@@ -1070,3 +1070,50 @@ KSI_TRADING_CORP,Remaining Amount,amount_remaining,decimal,v1,1
 KSI_TRADING_CORP,PO No.,po_number,string,v1,1
 KSI_TRADING_CORP,Due Date,due_date,date,v1,1
 KSI_TRADING_CORP,Description,description_raw,string,v1,1
+COLUMBIA_FORD,INV#,original_invoice_number,string,v1,1
+COLUMBIA_FORD,TRANSACTION DATE,line_date,date,v1,1
+COLUMBIA_FORD,TRANS. AMOUNT,charge_amount,decimal,v1,1
+COLUMBIA_FORD,BALANCE DUE,amount_remaining,decimal,v1,1
+COLUMBIA_FORD,MEMO/PO#,po_number,string,v1,1
+COLUMBIA_FORD,TRANSACTION,description_raw,string,v1,1
+COLUMBIA_FORD,JR,transaction_code,string,v1,1
+MERCEDES_BENZ_OF_BOSTON,TRANSACTION,original_invoice_number,string,v1,1
+MERCEDES_BENZ_OF_BOSTON,DATE,line_date,date,v1,1
+MERCEDES_BENZ_OF_BOSTON,PURCHASES,charge_amount,decimal,v1,1
+MERCEDES_BENZ_OF_BOSTON,CREDITS,payment_amount,decimal,v1,1
+MERCEDES_BENZ_OF_BOSTON,SOURCE,transaction_code,string,v1,1
+BMW_OF_NORTH_HAVEN,DOCUMENT,original_invoice_number,string,v1,1
+BMW_OF_NORTH_HAVEN,DATE,line_date,date,v1,1
+BMW_OF_NORTH_HAVEN,AMOUNT,charge_amount,decimal,v1,1
+BMW_OF_NORTH_HAVEN,DESCRIPTION,description_raw,string,v1,1
+MERCEDES_BENZ_OF_NORTH_HAVEN,DOCUMENT,original_invoice_number,string,v1,1
+MERCEDES_BENZ_OF_NORTH_HAVEN,DATE,line_date,date,v1,1
+MERCEDES_BENZ_OF_NORTH_HAVEN,AMOUNT,charge_amount,decimal,v1,1
+MERCEDES_BENZ_OF_NORTH_HAVEN,DESCRIPTION,description_raw,string,v1,1
+FISHER_AUTO_PARTS,INVOICE NUMBER,original_invoice_number,string,v1,1
+FISHER_AUTO_PARTS,INVOICE DATE,line_date,date,v1,1
+FISHER_AUTO_PARTS,ORIGINAL INVOICE AMOUNT,charge_amount,decimal,v1,1
+FISHER_AUTO_PARTS,UNPAID BALANCE,amount_remaining,decimal,v1,1
+FISHER_AUTO_PARTS,REFERENCE NUMBER,invoice_number_ref,string,v1,1
+SCHALLER_SUBARU,DATE,line_date,date,v1,1
+SCHALLER_SUBARU,SOURCE,transaction_code,string,v1,1
+SCHALLER_SUBARU,INVOICE,original_invoice_number,string,v1,1
+SCHALLER_SUBARU,REFERENCE,invoice_number_ref,string,v1,1
+SCHALLER_SUBARU,DESCRIPTION,description_raw,string,v1,1
+SCHALLER_SUBARU,AMOUNT,charge_amount,decimal,v1,1
+SCHALLER_SUBARU,AGE IN DAYS,age_in_days,string,v1,1
+BERTERA_MITSUBISHI,REFERENCE,original_invoice_number,string,v1,1
+BERTERA_MITSUBISHI,DATE,line_date,date,v1,1
+BERTERA_MITSUBISHI,CHARGES,charge_amount,decimal,v1,1
+BERTERA_MITSUBISHI,CREDITS,payment_amount,decimal,v1,1
+BERTERA_MITSUBISHI,BALANCE,amount_remaining,decimal,v1,1
+BERTERA_MITSUBISHI,SOURCE,transaction_code,string,v1,1
+EZ_AUTO_GLASS_INSTALLERS,DESCRIPTION,original_invoice_number,string,v1,1
+EZ_AUTO_GLASS_INSTALLERS,DATE,line_date,date,v1,1
+EZ_AUTO_GLASS_INSTALLERS,AMOUNT,charge_amount,decimal,v1,1
+EZ_AUTO_GLASS_INSTALLERS,OPEN AMOUNT,amount_remaining,decimal,v1,1
+WEBER_BROTHERS_AUTO,Transaction Type,original_invoice_number,string,v1,1
+WEBER_BROTHERS_AUTO,Date,line_date,date,v1,1
+WEBER_BROTHERS_AUTO,Charged,charge_amount,decimal,v1,1
+WEBER_BROTHERS_AUTO,Paid,payment_amount,decimal,v1,1
+WEBER_BROTHERS_AUTO,Cust PO/Chk #,po_number,string,v1,1

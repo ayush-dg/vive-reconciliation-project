@@ -758,5 +758,41 @@
   "ABINGTON_HYUNDAI_MAZDA": {
     "entity_ids": ["145497"],
     "note": "Mazda of Abington (145497). The PDF filed as 'Burlington Hyundai' (customerinvoice (10).pdf) is Abington's Hyundai statement -- confirmed by the user 2026-10-07; Claude reads it as 'Abington Auto Parts Hyundai'. 2 of 3 lines tie out verbatim (573534AY) under 145497. Hyundai Mazda of Abington (136017) also exists -- add it only on a confirmed hit."
+  },
+  "COLUMBIA_FORD": {
+    "entity_ids": ["46932", "52380"],
+    "note": "Columbia Ford (46932), Columbia Kia (52380). Added 2026-10-13 from 5 prod statements (20261012113727, COLWorc0926, LBP0926, COLLund0926, COLNat0926): INV# ties out under these two, 51 of 54 lines (LBP0926's are all Columbia Kia)."
+  },
+  "MERCEDES_BENZ_OF_BOSTON": {
+    "entity_ids": ["477553"],
+    "note": "Mercedes-Benz of Boston (477553). Added 2026-10-13 from prod Benz 10-12-26 / MBBNatick0926: TRANSACTION ties out 5 of 5."
+  },
+  "BMW_OF_NORTH_HAVEN": {
+    "entity_ids": ["112743"],
+    "note": "BMW of North Haven (112743). Added 2026-10-13 from prod BMW.pdf: DOCUMENT ties out 8 of 8."
+  },
+  "MERCEDES_BENZ_OF_NORTH_HAVEN": {
+    "entity_ids": ["128704"],
+    "note": "Mercedes Benz of North Haven (128704). Added 2026-10-13 from prod Mercedes Benz.pdf: DOCUMENT ties out 2 of 2."
+  },
+  "FISHER_AUTO_PARTS": {
+    "entity_ids": ["159417"],
+    "note": "Fisher Auto Parts (159417). Added 2026-10-13 from prod Fisher Auto Parts.pdf: INVOICE NUMBER (333-433833 style) ties out 12 of 15."
+  },
+  "SCHALLER_SUBARU": {
+    "entity_ids": ["13403"],
+    "note": "Schaller Subaru (13403). Added 2026-10-13 from prod Schaller Subaru West Hartford.pdf: INVOICE ties out 11 of 12 (Reynolds layout, same as Goodwins)."
+  },
+  "BERTERA_MITSUBISHI": {
+    "entity_ids": ["71706"],
+    "note": "Bertera Mitsubishi (71706). Added 2026-10-13 from prod Bertera Mitsu.pdf: REFERENCE (MIW73609) ties out 8 of 10 after the 3-char MIW prefix is stripped."
+  },
+  "EZ_AUTO_GLASS_INSTALLERS": {
+    "entity_ids": ["518721"],
+    "note": "EZ Auto Glass Installers Inc (518721). Added 2026-10-13 from prod EZ Auto, Lees, Oct 26.pdf: the number after 'Invoice #' in DESCRIPTION ties out 13 of 16."
+  },
+  "WEBER_BROTHERS_AUTO": {
+    "entity_ids": ["206427"],
+    "note": "WEBER BROS. AUTO PARTS (206427). Added 2026-10-13 from prod Weber Brothers (Lamon).pdf: the number after 'Invoice #' in Transaction Type ties out (489548)."
   }
 }
