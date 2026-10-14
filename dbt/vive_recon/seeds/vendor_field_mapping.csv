@@ -1117,3 +1117,11 @@ WEBER_BROTHERS_AUTO,Date,line_date,date,v1,1
 WEBER_BROTHERS_AUTO,Charged,charge_amount,decimal,v1,1
 WEBER_BROTHERS_AUTO,Paid,payment_amount,decimal,v1,1
 WEBER_BROTHERS_AUTO,Cust PO/Chk #,po_number,string,v1,1
+SULLIVAN_TIRE,Invoice Number,original_invoice_number,string,v1,1
+SULLIVAN_TIRE,Date,line_date,date,v1,1
+SULLIVAN_TIRE,Invoice Amount,charge_amount,decimal,v1,1
+SULLIVAN_TIRE,Paid Amount,payment_amount,decimal,v1,1
+SULLIVAN_TIRE,Balance Remaining,amount_remaining,decimal,v1,1
+SULLIVAN_TIRE,PO Number,po_number,string,v1,1
+SULLIVAN_TIRE,Due Date,due_date,date,v1,1
+SULLIVAN_TIRE,Type,transaction_code,string,v1,1
