@@ -98,7 +98,7 @@ class FakeIO:
             return [{"statement_id": r["statement_id"]} for r in self.w.wh["silver.recon_summary"] if r["statement_id"] in params]
         if "FROM silver.vendor_field_mapping" in sql:
             return [{"raw_field_name": r["raw_field_name"], "canonical_field_name": r["canonical_field_name"]}
-                    for r in self.w.wh["silver.vendor_field_mapping"] if r["vendor_id"] == params[0] and r["raw_field_name"] in params[1:]]
+                    for r in self.w.wh["silver.vendor_field_mapping"] if r["vendor_id"] == params[0]]
         raise AssertionError(f"unexpected warehouse query: {sql}")
 
     def wh_restore(self, table, statement_id, rows):

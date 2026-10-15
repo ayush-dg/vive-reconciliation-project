@@ -368,9 +368,12 @@ def reextract(io, intake, state: dict, pdf_path: str) -> dict:
 
 def silver_matching_decision(io, state: dict, new: dict) -> dict:
     """Whether Silver + matching run for this statement, and why."""
-    mapped = io.wh_query(
-        f"SELECT raw_field_name, canonical_field_name FROM silver.vendor_field_mapping WHERE vendor_id = ? "
-        f"AND raw_field_name IN ({','.join('?' * len(new['raw_fields']))})", [new["vendor_id"], *new["raw_fields"]])
+    # Same name comparison as the Silver build (src/lakehouse/field_names.py).
+    from src.lakehouse.field_names import normalize_field_name
+    extracted = {normalize_field_name(f) for f in new["raw_fields"]}
+    mapped = [m for m in io.wh_query(
+        "SELECT raw_field_name, canonical_field_name FROM silver.vendor_field_mapping WHERE vendor_id = ?",
+        [new["vendor_id"]]) if normalize_field_name(m["raw_field_name"]) in extracted]
     if not any(m["canonical_field_name"] in AMOUNT_FIELDS for m in mapped):
         return {"run": False, "reason": f"no Fabric field mapping for vendor_id {new['vendor_id']!r} covers an amount field "
                                         f"of the extracted columns -- Silver + matching skipped"}

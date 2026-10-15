@@ -49,8 +49,14 @@ header as (
 
 ),
 
-mapped_fields as (
+mapping_candidates as (
 
+    -- Field names are matched case- and punctuation-insensitively (see
+    -- macros/normalize_field_name.sql), so a parser's reference_number,
+    -- Claude's 'Reference Number' and 'DOCUMENT / TRANSACTION' read as
+    -- 'DOCUMENT/TRANSACTION' all find their mapping row. match_rank keeps
+    -- the exact-name rows whenever a field has any, so every exact match
+    -- behaves as before (incl. one raw field mapped to two canonical fields).
     select
         f.statement_id,
         f.line_number,
@@ -58,12 +64,25 @@ mapped_fields as (
         f.raw_field_name,
         f.raw_field_value,
         m.canonical_field_name,
-        coalesce(m.mapping_priority, 1) as mapping_priority
+        coalesce(m.mapping_priority, 1) as mapping_priority,
+        dense_rank() over (
+            partition by f.statement_id, f.line_number, f.raw_field_name
+            order by case when m.raw_field_name = f.raw_field_name then 0 else 1 end
+        ) as match_rank
     from {{ source('bronze', 'unnested_statement_fields') }} f
     inner join header h on h.statement_id = f.statement_id
     left join {{ ref('vendor_field_mapping') }} m
         on m.vendor_id = h.vendor_id
-        and m.raw_field_name = f.raw_field_name
+        and {{ normalize_field_name('m.raw_field_name') }} = {{ normalize_field_name('f.raw_field_name') }}
+
+),
+
+mapped_fields as (
+
+    select statement_id, line_number, vendor_id, raw_field_name, raw_field_value,
+           canonical_field_name, mapping_priority
+    from mapping_candidates
+    where match_rank = 1
 
 ),
 

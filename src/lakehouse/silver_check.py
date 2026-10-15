@@ -25,6 +25,8 @@ import csv
 import logging
 import os
 
+from src.lakehouse.field_names import normalize_field_name
+
 logger = logging.getLogger(__name__)
 
 # Statements with at least this many Silver lines must have an invoice
@@ -42,8 +44,9 @@ _mapped_cache = None
 
 
 def _mapped_names() -> dict:
-    """vendor_id -> raw_field_names that map to a canonical field, from the
-    vendor_field_mapping seed CSV shipped with the app."""
+    """vendor_id -> normalized raw_field_names (see field_names.py) that map
+    to a canonical field, from the vendor_field_mapping seed CSV shipped with
+    the app."""
     global _mapped_cache
     if _mapped_cache is None:
         mapped = {}
@@ -51,7 +54,7 @@ def _mapped_names() -> dict:
             with open(_SEED, newline="", encoding="utf-8") as f:
                 for r in csv.DictReader(f):
                     if (r.get("canonical_field_name") or "").strip():
-                        mapped.setdefault(r["vendor_id"], set()).add(r["raw_field_name"])
+                        mapped.setdefault(r["vendor_id"], set()).add(normalize_field_name(r["raw_field_name"]))
         except OSError:
             pass
         _mapped_cache = mapped
@@ -64,7 +67,7 @@ def _unmapped_fields(statement_id: str, vendor_id: str) -> list:
     cur.execute("SELECT DISTINCT raw_field_name FROM bronze.unnested_statement_fields WHERE statement_id = ?",
                 [statement_id])
     mapped = _mapped_names().get(vendor_id, set())
-    return sorted(r[0] for r in cur.fetchall() if r[0] not in mapped and r[0] not in _IGNORED_FIELDS)
+    return sorted(r[0] for r in cur.fetchall() if normalize_field_name(r[0]) not in mapped and r[0] not in _IGNORED_FIELDS)
 
 
 def describe_problem(lines: int, with_invoice: int, with_amount: int, bronze_lines: int):

@@ -82,7 +82,10 @@ class TestCheckSilverLines(unittest.TestCase):
             [[(135,)], [("Invoice No.",), ("Balance Owed",), ("confidence",), ("invoice_no",)]],
         )
         self.assertTrue(problem.startswith("No lines read: 135 lines were extracted but none matched ASTECH's field mapping"))
-        self.assertIn("Unmapped fields: 'Balance Owed', 'Invoice No.'", problem)
+        # 'Invoice No.' is mapped since 2026-10-15: names compare
+        # case/punctuation-insensitively, so it matches ASTECH's invoice_no.
+        self.assertIn("Unmapped fields: 'Balance Owed'", problem)
+        self.assertNotIn("Invoice No.", problem)
         self.assertNotIn("confidence", problem)
         self.assertNotIn("'invoice_no'", problem)
 
