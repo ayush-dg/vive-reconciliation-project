@@ -547,10 +547,10 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         self.assertIn('id="sync-filter"', self.html)
         options = re.findall(r'<select id="sync-filter".*?</select>', self.html, re.DOTALL)[0]
         # The blank "every attempt" option ("All syncs" until 2026-10-01,
-        # "None" since the custom picker) comes first but isn't the default:
-        # the newest sync is pre-selected instead, same as Home.
+        # "None" since the custom picker, "All" since 2026-10-15) comes first
+        # but isn't the default: the newest sync is pre-selected instead.
         opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', options)
-        self.assertEqual(opts[0], ("", "None"))
+        self.assertEqual(opts[0], ("", "All"))
         self.assertIn('<option value="2026-09-29T15:02:00Z" selected>', options)
         # Counted by job status (2026-10-06): A completed, the other job
         # is still PROCESSING (no statement_id yet).

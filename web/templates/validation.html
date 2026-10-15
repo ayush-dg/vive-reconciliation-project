@@ -61,8 +61,9 @@
    each card's data-day), Last run and the "Past syncs" picker
    pick an Outlook sync (outlook_sync_options(), newest first, matched
    against data-sync), and picking either kind clears the other. Defaults
-   to the newest sync, same as Home; the picker's "None" shows every
-   attempt. The picker is the same fixed-label button + listbox as Home's
+   to the newest sync; the picker's "All" (no sync, labelled "None" until
+   2026-10-15 -- unlike Home's/Exceptions' "None", which means Last run)
+   shows every attempt. The picker is the same fixed-label button + listbox as Home's
    (static/app.js) over the hidden #sync-filter select, and as on Home
    exactly one of Last run / the picker is highlighted: Last run while the
    newest sync came from the chip (or the default), the picker while a
@@ -73,7 +74,7 @@
   <button type="button" class="filter-chip{{ ' active' if sync_options }}" id="time-last-run"
           data-sync="{{ sync_options[0].value if sync_options else '' }}"{% if not sync_options %} disabled title="No syncs yet"{% endif %}>Last run</button>
   <select id="sync-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
-    <option value="">None</option>
+    <option value="">All</option>
     {% for opt in sync_options %}
     <option value="{{ opt.value }}" {{ 'selected' if loop.first }}>{{ opt.label }}</option>
     {% endfor %}
