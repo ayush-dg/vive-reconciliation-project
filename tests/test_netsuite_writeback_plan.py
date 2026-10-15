@@ -263,6 +263,118 @@ class PdfLinkSwitchTests(unittest.TestCase):
         self.assertNotIn("custrecord_sl_statement_link", line.fields)
 
 
+class LockedPeriodRunControlTests(unittest.TestCase):
+    LOCKED_BODY = ('{"o:errorDetails":[{"detail":"Error while accessing a resource. You cannot make changes '
+                   'to this period without the Allow Non-G/L Changes permission."}]}')
+
+    def _plans(self, n):
+        return [wb.plan_matched(_row(invoice=f"INV{i}"), [dict(_txn("-100"), id=str(500 + i), tranid=f"INV{i}")], _ctx())
+                for i in range(n)]
+
+    def _run(self, errors):
+        """errors: one entry per write -- None for success, else an exception."""
+        from src.netsuite.client import NetSuiteAPIError  # noqa: F401  (used by callers building errors)
+        ns = mock.Mock()
+        ns.patch_record.side_effect = errors
+        with mock.patch.object(wb, "_read_back_bill", return_value=""):
+            return wb.apply_plans(ns, self._plans(len(errors))), ns
+
+    def _locked(self):
+        from src.netsuite.client import NetSuiteAPIError
+        return NetSuiteAPIError(400, "Bad Request", self.LOCKED_BODY)
+
+    def test_a_locked_period_on_the_first_write_does_not_stop_the_run(self):
+        results, ns = self._run([self._locked(), None, None])
+        self.assertEqual([r.ok for r in results], [False, True, True])
+        self.assertEqual(results[0].category, wb.CAT_PERIOD_LOCKED)
+        self.assertEqual(ns.patch_record.call_count, 3)
+
+    def test_locked_periods_in_the_middle_do_not_stop_it_either(self):
+        results, _ = self._run([None, self._locked(), self._locked(), None])
+        self.assertEqual([r.ok for r in results], [True, False, False, True])
+
+    def test_any_other_failure_on_the_first_write_still_stops_the_run(self):
+        from src.netsuite.client import NetSuiteAPIError
+        results, ns = self._run([NetSuiteAPIError(400, "Bad Request", "Invalid field value"), None, None])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].category, wb.CAT_WRITE_FAILED)
+        self.assertEqual(ns.patch_record.call_count, 1)
+
+    def test_an_auth_or_permission_error_stops_the_run_even_mid_way(self):
+        from src.netsuite.client import NetSuiteAPIError
+        results, _ = self._run([None, NetSuiteAPIError(403, "Forbidden", "Permission violation"), None, None])
+        self.assertEqual([r.ok for r in results], [True, False])
+
+    def test_a_non_locked_failure_after_the_first_write_does_not_stop_the_run(self):
+        from src.netsuite.client import NetSuiteAPIError
+        results, _ = self._run([None, NetSuiteAPIError(400, "Bad Request", "Record not found"), None])
+        self.assertEqual([r.ok for r in results], [True, False, True])
+
+    def test_failure_counts_separate_locked_periods_from_other_failures(self):
+        from src.netsuite.client import NetSuiteAPIError
+        results, _ = self._run([None, self._locked(), NetSuiteAPIError(400, "Bad Request", "x"), self._locked()])
+        self.assertEqual(wb.failure_counts(results), {wb.CAT_PERIOD_LOCKED: 2, wb.CAT_WRITE_FAILED: 1})
+
+    def test_the_log_records_each_writes_category_and_the_failure_totals(self):
+        import json, tempfile
+        results, _ = self._run([None, self._locked()])
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+            path = wb.write_apply_log(mock.Mock(domain_id="x-sb1"), STMT, results, [])
+            log = json.load(open(path, encoding="utf-8"))
+        self.assertEqual([w["category"] for w in log["writes"]], ["written", "period locked"])
+        self.assertEqual(log["failed_counts"], {"period locked": 1})
+
+
+class StatementLineDateTests(unittest.TestCase):
+    def _line_ctx(self, lines):
+        ctx = _ctx()
+        ctx.line_dates = wb._index_line_dates(lines)
+        return ctx
+
+    def _line(self, invoice, day, charge):
+        from datetime import date
+        return {"invoice_number": invoice, "line_date": date.fromisoformat(day),
+                "charge_amount": charge, "payment_amount": None}
+
+    def _plan(self, ctx, amount="75.00", invoice="INV1"):
+        (plan,) = wb.plan_exception_row(_row(amount, wb.REASON_NOT_FOUND, invoice=invoice), [], ctx, set())
+        return plan
+
+    def test_statement_line_gets_the_invoice_date(self):
+        plan = self._plan(self._line_ctx([self._line("INV1", "2026-08-13", -75.0)]))
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-08-13")
+        self.assertIn("invoice date", plan.note)
+
+    def test_falls_back_to_the_run_date_when_the_statement_has_no_date(self):
+        plan = self._plan(self._line_ctx([]))
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-10-07")
+        self.assertIn("run date", plan.note)
+
+    def test_several_lines_pick_the_one_whose_amount_matches(self):
+        lines = [self._line("INV1", "2026-07-03", 832.14), self._line("INV1", "2026-08-13", -75.0)]
+        plan = self._plan(self._line_ctx(lines), amount="75.00")
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-08-13")
+
+    def test_several_lines_with_no_amount_match_take_the_earliest(self):
+        lines = [self._line("INV1", "2026-08-13", -10.0), self._line("INV1", "2026-07-03", 20.0)]
+        plan = self._plan(self._line_ctx(lines), amount="999.00")
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-07-03")
+
+    def test_invoice_lookup_ignores_case(self):
+        plan = self._plan(self._line_ctx([self._line("inv1", "2026-08-13", 75.0)]))
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-08-13")
+
+    def test_reconciled_starts_unchecked_and_its_date_is_not_sent(self):
+        plan = self._plan(self._line_ctx([]))
+        self.assertIs(plan.fields["custrecord_sl_reconciled"], False)
+        self.assertNotIn("custrecord_sl_reconciled_date", plan.fields)
+
+    def test_bills_are_left_alone(self):
+        matched = wb.plan_matched(_row(), [_txn("-100")], _ctx())
+        self.assertNotIn("custrecord_sl_date", matched.fields)
+        self.assertNotIn("custrecord_sl_reconciled", matched.fields)
+
+
 class StatementLineLocationTests(unittest.TestCase):
     def test_all_records_at_one_location_gives_that_location(self):
         sandbox = {"a": [_txn("-1", location="19")], "b": [_txn("-2", location="19")]}

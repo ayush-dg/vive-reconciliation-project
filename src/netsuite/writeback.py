@@ -67,6 +67,10 @@ CAT_UP_TO_DATE = "already up to date"
 CAT_RECONCILED_EARLIER = "reconciled by an earlier statement"
 CAT_NEEDS_REVIEW = "needs review"
 
+# Why a WRITE that was attempted did not succeed.
+CAT_PERIOD_LOCKED = "period locked"
+CAT_WRITE_FAILED = "failed"
+
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
 EXCEPTION_DUPLICATE = "Duplicate"
 
@@ -93,6 +97,7 @@ class StatementContext:
     exception_ids: dict = field(default_factory=dict)
     primary_entity: str = None
     primary_location: str = None
+    line_dates: dict = field(default_factory=dict)
 
     @property
     def reference(self) -> str:
@@ -142,9 +147,15 @@ def load_statement_results(statement_id: str) -> dict:
             "exception_reason, shop FROM silver.recon_exceptions WHERE statement_id = ?",
             [statement_id])
         exceptions = _rows_as_dicts(cur)
+        cur.execute(
+            "SELECT invoice_number, line_date, charge_amount, payment_amount "
+            "FROM silver.statement_line WHERE statement_id = ? AND line_date IS NOT NULL",
+            [statement_id])
+        lines = _rows_as_dicts(cur)
     finally:
         conn.close()
-    return {"header": headers[0] if headers else None, "matched": matched, "exceptions": exceptions}
+    return {"header": headers[0] if headers else None, "matched": matched,
+            "exceptions": exceptions, "lines": lines}
 
 
 def resolve_pdf_link(statement_id: str) -> tuple:
@@ -389,6 +400,34 @@ def _plan_one_exception(row, txn, ctx, exception_name: str) -> Plan:
                           note=exception_name)
 
 
+def _index_line_dates(lines: list) -> dict:
+    """{lowercased invoice number: [(ISO date, abs amount or None), ...]}
+    from the statement's own lines (silver.statement_line.line_date)."""
+    index = {}
+    for line in lines:
+        amount = line.get("charge_amount")
+        amount = line.get("payment_amount") if amount is None else amount
+        date_value = line["line_date"]
+        iso = date_value.isoformat() if hasattr(date_value, "isoformat") else str(date_value)[:10]
+        index.setdefault(line["invoice_number"].lower(), []).append((iso, _amount(amount)))
+    return index
+
+
+def _invoice_date(ctx: StatementContext, invoice: str, amount) -> tuple:
+    """(ISO date, source) for a Statement Line. The invoice's own date from
+    the statement; if the invoice has several lines (e.g. a charge and a
+    credit), the line whose amount matches, else the earliest. When the
+    statement carries no date for it, the run date (the line's creation
+    date) is used instead."""
+    candidates = ctx.line_dates.get(invoice.lower(), [])
+    if not candidates:
+        return ctx.today, "run date (no invoice date on the statement)"
+    target = _amount(amount)
+    tying = [d for d, a in candidates if target is not None and a is not None
+             and abs(a - target) <= AMOUNT_EPSILON]
+    return min(tying or [d for d, _ in candidates]), "invoice date"
+
+
 def plan_not_found(row, ctx, existing_lines: set) -> Plan:
     """The only case that creates a Statement Line: the matcher found no
     NetSuite record for this line. The matcher's result is taken as given;
@@ -411,12 +450,15 @@ def plan_not_found(row, ctx, existing_lines: set) -> Plan:
     }
     if fields["custrecord_sl_statement_amount"] is None:
         del fields["custrecord_sl_statement_amount"]
+    date_iso, date_source = _invoice_date(ctx, invoice, amount)
+    fields["custrecord_sl_date"] = date_iso
+    fields["custrecord_sl_reconciled"] = False
     if ctx.primary_location:
         fields["custrecord_sl_location"] = {"id": ctx.primary_location}
     if ctx.link:
         fields["custrecord_sl_statement_link"] = ctx.link
     return Plan(invoice_number=invoice, statement_amount=_amount(amount),
-                action=CREATE_STATEMENT_LINE, fields=fields)
+                action=CREATE_STATEMENT_LINE, fields=fields, note=f"date: {date_source}")
 
 
 def plan_exception_row(row, candidates, ctx, existing_lines: set) -> list:
@@ -467,6 +509,7 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
         entity_ids=[str(e) for e in entity_ids], link=link, link_note=link_note,
         today=today or date.today().isoformat(),
         exception_ids=fetch_exception_list_ids(ns),
+        line_dates=_index_line_dates(results.get("lines", [])),
     )
     if not ctx.entity_ids:
         return ctx, [_skip(r["invoice_number"], r["statement_amount"], "vendor not resolved to NetSuite entities",
@@ -499,6 +542,8 @@ class ApplyResult:
     detail: str = ""
     new_record_id: str = None
     seconds: float = 0.0
+    status_code: int = None
+    category: str = ""
 
 
 def _read_back_bill(ns, plan: Plan) -> str:
@@ -540,7 +585,18 @@ def apply_plan(ns, plan: Plan) -> ApplyResult:
     started = time.monotonic()
     result = _apply_plan_untimed(ns, plan)
     result.seconds = round(time.monotonic() - started, 2)
+    if not result.ok and not result.category:
+        result.category = CAT_WRITE_FAILED
     return result
+
+
+def _is_period_locked(exc) -> bool:
+    """True for NetSuite's refusal to change a transaction in a locked or
+    closed accounting period ("You cannot make changes to this period
+    without the Allow Non-G/L Changes permission"). That is a property of
+    ONE record's period, not a systematic problem with the run."""
+    text = f"{exc} {getattr(exc, 'body', '') or ''}".lower()
+    return "non-g/l" in text or "cannot make changes to this period" in text
 
 
 def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
@@ -554,19 +610,45 @@ def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
         return ApplyResult(plan, not problem, problem or "updated", plan.record_id)
     except Exception as exc:  # report and move on -- one bad record must not stop the batch
         body = getattr(exc, "body", "") or ""
-        return ApplyResult(plan, False, f"{type(exc).__name__}: {exc} {body[:300]}")
+        return ApplyResult(
+            plan, False, f"{type(exc).__name__}: {exc} {body[:300]}",
+            status_code=getattr(exc, "status_code", None),
+            category=CAT_PERIOD_LOCKED if _is_period_locked(exc) else "",
+        )
+
+
+_AUTH_STATUS_CODES = (401, 403)
+
+
+def _stops_the_run(result: ApplyResult, attempts_so_far: int) -> bool:
+    """Whether this failed write should end the run. A locked period never
+    does: it only affects that record (a statement always carries some
+    older invoices), so the rest must still be written. The run still stops
+    early for failures that would repeat on every record: an authentication
+    or permission error at any point, or any other failure on the very
+    first write (a bad field or format)."""
+    if result.category == CAT_PERIOD_LOCKED:
+        return False
+    return result.status_code in _AUTH_STATUS_CODES or attempts_so_far == 1
+
+
+def failure_counts(results: list) -> dict:
+    """{category: count} over the writes that did not succeed."""
+    counts = {}
+    for result in results:
+        if not result.ok:
+            counts[result.category] = counts.get(result.category, 0) + 1
+    return counts
 
 
 def apply_plans(ns, plans: list) -> list:
-    """Applies every write plan in order. If the VERY FIRST write fails the
-    run stops there: a first failure usually means a systematic problem
-    (permissions, a field format) that would otherwise repeat on every
-    record."""
+    """Applies every write plan in order, carrying on past a locked-period
+    failure (see _stops_the_run for what does end the run early)."""
     results = []
     for plan in (p for p in plans if p.action in WRITE_ACTIONS):
         result = apply_plan(ns, plan)
         results.append(result)
-        if not result.ok and len(results) == 1:
+        if not result.ok and _stops_the_run(result, len(results)):
             break
     return results
 
@@ -697,6 +779,7 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
         "record_id": r.new_record_id or r.plan.record_id,
         "fields_sent": r.plan.fields, "previous": r.plan.previous,
         "ok": r.ok, "detail": r.detail, "seconds": r.seconds,
+        "category": r.category or ("written" if r.ok else CAT_WRITE_FAILED),
     } for r in results]
     not_written = [{
         "action": p.action, "invoice_number": p.invoice_number,
@@ -707,6 +790,7 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
                    "applied_at": datetime.now().isoformat(timespec="seconds"),
-                   "writes": entries, "not_written": not_written,
+                   "writes": entries, "failed_counts": failure_counts(results),
+                   "not_written": not_written,
                    "not_written_counts": skip_counts(plans or [])}, f, indent=2, default=str)
     return path

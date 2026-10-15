@@ -98,7 +98,8 @@ def _run_netsuite_writeback(statement_id):
         print(f"    NetSuite write-back: failed ({result['error']}, see logs)")
     else:
         not_written = ", ".join(f"{n} {reason}" for reason, n in result["not_written"].items())
-        print(f"    NetSuite write-back: {result['written']} written, {result['failed']} failed"
+        locked = f", {result['period_locked']} period locked" if result["period_locked"] else ""
+        print(f"    NetSuite write-back: {result['written']} written, {result['failed']} failed{locked}"
               f"{', not written: ' + not_written if not_written else ''}. Log: {result['log']}")
 
 

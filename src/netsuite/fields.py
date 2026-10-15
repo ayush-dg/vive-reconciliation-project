@@ -33,4 +33,7 @@ STATEMENT_LINE_FIELDS = (
     "custrecord_sl_shop",
     "custrecord_sl_statement_link",
     "custrecord_sl_location",
+    "custrecord_sl_date",
+    "custrecord_sl_reconciled",
+    "custrecord_sl_reconciled_date",
 )
