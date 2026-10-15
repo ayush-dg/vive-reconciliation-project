@@ -49,6 +49,15 @@ def _sha256(path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
+def _unwrap(element):
+    """One raw_payload element -> the extracted row. src/lakehouse/bronze_raw.py
+    stores each row wrapped as {"_raw_row": <the model's row>,
+    "_extraction_confidence", "_shop_name"}; a plain row is accepted as is."""
+    if isinstance(element, dict) and "_raw_row" in element:
+        return element["_raw_row"]
+    return element
+
+
 def load_target(io, statement_id: str) -> dict:
     """The intake row (exactly one), the stored extraction rows and the job
     output for one statement -- reads only."""
@@ -59,7 +68,7 @@ def load_target(io, statement_id: str) -> dict:
     rows = []
     for r in raw:
         payload = r.get("raw_payload")
-        rows += json.loads(payload) if isinstance(payload, str) else (payload or [])
+        rows += [_unwrap(e) for e in (json.loads(payload) if isinstance(payload, str) else (payload or []))]
     jobs = io.az_query("SELECT job_id, status, error_message FROM jobs WHERE statement_id = ?", [statement_id])
     return {"statement_id": statement_id, "intake": intake[0], "rows": [r for r in rows if r is not None],
             "raw_statement_rows": len(raw), "jobs": jobs}

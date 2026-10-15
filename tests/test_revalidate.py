@@ -156,6 +156,44 @@ class TestNotAStatement(RevalidateCase):
         self.assertIn("no job output", p["unchanged"][0]["reason"])
 
 
+def bronze_raw_payload(rows):
+    """raw_payload exactly as src/lakehouse/bronze_raw.py writes it: the
+    client's invoices, each wrapped as {"_raw_row", "_extraction_confidence",
+    "_shop_name"}, then json.dumps(default=str)."""
+    from src.ai.claude_sonnet_client import ClaudeSonnetClient
+    columns = [k for k in rows[0] if k != "confidence"]
+    invoices = ClaudeSonnetClient.__new__(ClaudeSonnetClient)._rows_to_invoices([dict(r) for r in rows], columns)[0]
+    return json.dumps([{"_raw_row": inv.get("_raw_row"), "_extraction_confidence": inv.get("line_confidence"),
+                        "_shop_name": inv.get("shop")} for inv in invoices], default=str)
+
+
+class TestRealRawPayloadShape(RevalidateCase):
+    """2026-10-15: the Part B dry run against dev failed with "unhashable type:
+    'dict'" -- load_target() took each wrapped element for the row itself."""
+
+    def setUp(self):
+        super().setUp()
+        self.plain = self.plan()["rows"][0]["new"]
+        self.world.lh["raw_statement"] = [r for r in self.world.lh["raw_statement"] if r["statement_id"] != SID]
+        self.world.lh["raw_statement"].append({"statement_id": SID, "raw_payload": bronze_raw_payload(RAW_ROWS)})
+
+    def test_wrapped_payload_is_unwrapped_to_the_model_rows(self):
+        payload = json.loads(self.world.lh["raw_statement"][-1]["raw_payload"])
+        self.assertEqual(sorted(payload[0]), ["_extraction_confidence", "_raw_row", "_shop_name"])
+        self.assertEqual(revalidate.load_target(self.io, SID)["rows"], RAW_ROWS)
+
+    def test_wrapped_payload_gives_the_same_result_as_plain_rows(self):
+        new = self.plan()["rows"][0]["new"]
+        self.assertEqual((new["validation_status"], new["validation_method"]), ("matches", "pdf_rows_no_total"))
+        def untimed(values):  # validation_detail records how long the PDF checks took
+            def strip(v):
+                if isinstance(v, dict):
+                    return {k: strip(x) for k, x in v.items() if "second" not in k}
+                return [strip(x) for x in v] if isinstance(v, list) else v
+            return {**values, "validation_detail": strip(json.loads(values["validation_detail"]))}
+        self.assertEqual(untimed(new), untimed(self.plain))
+
+
 class TestCli(RevalidateCase):
 
     def test_cli_dry_run_writes_the_plan_file_only(self):
