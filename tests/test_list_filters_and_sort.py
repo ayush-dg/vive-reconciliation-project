@@ -548,16 +548,19 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         options = re.findall(r'<select id="sync-filter".*?</select>', self.html, re.DOTALL)[0]
         # The blank "every attempt" option ("All syncs" until 2026-10-01,
         # "None" since the custom picker, "All" since 2026-10-15) comes first
-        # but isn't the default: the newest sync is pre-selected instead.
+        # and is the default since 2026-10-15 (the newest sync was before):
+        # the page opens on every attempt, Last run not highlighted.
         opts = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', options)
         self.assertEqual(opts[0], ("", "All"))
-        self.assertIn('<option value="2026-09-29T15:02:00Z" selected>', options)
+        self.assertIn('<option value="" selected>All</option>', options)
+        self.assertIn('<option value="2026-09-29T15:02:00Z">', options)
+        self.assertIn('class="filter-chip" id="time-last-run"', self.html)
         # Counted by job status (2026-10-06): A completed, the other job
         # is still PROCESSING (no statement_id yet).
         self.assertIn("2 statements (1 completed, 1 still processing)", options)
-        # On load Last run is the highlighted control, not the picker's button.
-        self.assertIn('class="filter-chip active" id="time-last-run"', self.html)
-        self.assertIn('class="filter-chip sync-picker-btn" id="sync-filter-btn"', self.html)
+        # On load the picker's button (its "All") is the highlighted control
+        # since 2026-10-15, not Last run.
+        self.assertIn('class="filter-chip sync-picker-btn active" id="sync-filter-btn"', self.html)
 
     def test_past_syncs_button_wording(self):
         # "Past Outlook syncs" until 2026-10-06.
@@ -579,13 +582,14 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
         self.assertIn('card.dataset.day === day', self.html)
 
     def test_hero_starts_on_the_default_window_and_top_bar_stays_all_time(self):
-        # 2026-10-06: the hero follows the time window. Default = Last run
-        # (the newest sync), which holds only A (passed) -- not B or C.
-        self.assertIn('id="hero-total">1</div>', self.html)
-        self.assertIn('id="hero-passed">1</div>', self.html)
-        self.assertIn('id="hero-failed">0</div>', self.html)
-        self.assertIn('id="hero-pct">100%</div>', self.html)
-        self.assertIn('style="--pct:100"', self.html)
+        # 2026-10-06: the hero follows the time window. Default since
+        # 2026-10-15 = Past syncs "All" (Last run before): A, B and C --
+        # 2 passed, 1 failed.
+        self.assertIn('id="hero-total">3</div>', self.html)
+        self.assertIn('id="hero-passed">2</div>', self.html)
+        self.assertIn('id="hero-failed">1</div>', self.html)
+        self.assertIn('id="hero-pct">67%</div>', self.html)
+        self.assertIn('style="--pct:67"', self.html)
         self.assertIn("3 intake attempts in total", self.html)
 
     def test_hero_is_recounted_by_the_filter_script_ignoring_the_status_chip(self):
