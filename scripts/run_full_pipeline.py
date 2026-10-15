@@ -172,8 +172,10 @@ def main():
 
     # Validation gate (2026-10-15): only a statement whose printed total
     # matches its extracted lines goes on to Silver + reconciliation; any
-    # other result fails the job here (src/validation/gate.py). Bronze
-    # keeps the extraction either way.
+    # other result stops here (src/validation/gate.py). Extraction itself
+    # succeeded, so this is a normal exit: web/worker.py marks the job
+    # COMPLETED with the reason as a note, not FAILED (that is for failed
+    # extractions). Bronze keeps the extraction either way.
     from src.validation.gate import describe_failure, gate_enabled
     from src.pipeline_markers import VALIDATION_GATE_MARKER
     validation_problem = describe_failure(intake_result.get("validation"))
@@ -185,7 +187,7 @@ def main():
         print(f"  Silver and NetSuite matching.")
         print(f"{'#'*65}\n")
         print(f"{VALIDATION_GATE_MARKER} {validation_problem} (statement_id {statement_id})")
-        sys.exit(4)
+        return
 
     # Fabric Silver build (dbt/) -- additive to Phase 1, scoped to this
     # statement. Best-effort: a skip/failure here never stops the pipeline

@@ -3,9 +3,10 @@ tests/test_validation_gate.py
 
 Only a statement that passes the Arithmetic Validation Gate 100% ("matches")
 goes on to Silver + reconciliation (src/validation/gate.py). Every other
-result stops scripts/run_full_pipeline.py right after intake with exit 4 and
-VALIDATION_GATE_MARKER, and web/worker.py makes the reason the failed job's
-final line. VALIDATION_GATE_ENABLED=false turns the gate off.
+result stops scripts/run_full_pipeline.py right after intake -- a normal exit
+printing VALIDATION_GATE_MARKER -- and web/worker.py marks the job COMPLETED
+with a "Not reconciled -- <reason>" note, not FAILED (failed jobs are for
+failed extractions). VALIDATION_GATE_ENABLED=false turns the gate off.
 """
 
 import os
@@ -66,22 +67,21 @@ class TestPipelineStopsBeforeSilver(unittest.TestCase):
         build = mock.Mock(side_effect=_StopAfterSilver)
         with mock.patch.object(rfp, "load_notebook", return_value=intake), \
                 mock.patch.object(sys, "argv", ["run_full_pipeline.py", "--pdf", "x.pdf"]), \
-                mock.patch.dict(os.environ, {"RESEARCH_MODE_EXTRACTION_ONLY": "false", "SILVER_BUILD_MODE": "direct",
-                                             **(env or {})}), \
+                mock.patch.dict(os.environ, {"RESEARCH_MODE_EXTRACTION_ONLY": "false", **(env or {})}), \
                 mock.patch("src.lakehouse.silver_build.build_silver_direct", build), \
                 mock.patch("src.lakehouse.silver_build.silver_build_mode", return_value="direct"):
             try:
                 rfp.main()
             except SystemExit as e:
-                return e.code, build
+                return ("exit", e.code), build
             except _StopAfterSilver:
                 return "silver", build
-        return None, build
+        return "stopped", build
 
-    def test_mismatch_exits_4_without_building_silver(self):
+    def test_mismatch_stops_normally_without_building_silver(self):
         with mock.patch("builtins.print") as printed:
-            code, build = self._run({"status": "mismatch", "printed": 10.0, "computed": 9.0, "difference": 1.0})
-        self.assertEqual(code, 4)
+            outcome, build = self._run({"status": "mismatch", "printed": 10.0, "computed": 9.0, "difference": 1.0})
+        self.assertEqual(outcome, "stopped")
         build.assert_not_called()
         lines = [" ".join(str(a) for a in c.args) for c in printed.call_args_list]
         self.assertIn(f"{VALIDATION_GATE_MARKER} Validation failed: printed total $10.00, extracted lines sum to "
@@ -89,37 +89,50 @@ class TestPipelineStopsBeforeSilver(unittest.TestCase):
 
     def test_total_not_found_is_stopped_too(self):
         with mock.patch("builtins.print"):
-            code, build = self._run({"status": "total_not_found"})
-        self.assertEqual(code, 4)
+            outcome, build = self._run({"status": "total_not_found"})
+        self.assertEqual(outcome, "stopped")
         build.assert_not_called()
 
     def test_matches_goes_on_to_silver(self):
         with mock.patch("builtins.print"):
-            code, build = self._run({"status": "matches", "difference": 0.0})
-        self.assertEqual(code, "silver")
+            outcome, build = self._run({"status": "matches", "difference": 0.0})
+        self.assertEqual(outcome, "silver")
         build.assert_called_once_with("STMT-X")
 
     def test_gate_off_lets_a_mismatch_through(self):
         with mock.patch("builtins.print"):
-            code, build = self._run({"status": "mismatch", "difference": 1.0}, env={"VALIDATION_GATE_ENABLED": "false"})
-        self.assertEqual(code, "silver")
+            outcome, build = self._run({"status": "mismatch", "difference": 1.0}, env={"VALIDATION_GATE_ENABLED": "false"})
+        self.assertEqual(outcome, "silver")
 
 
-class TestWorkerMessage(unittest.TestCase):
+class TestWorkerMarksItCompleted(unittest.TestCase):
 
-    def test_validation_reason_is_the_jobs_final_line(self):
+    PROBLEM = "Validation failed: printed total $10.00, extracted lines sum to $9.00 (off by $1.00)"
+
+    def _run_job(self, silver_rows):
         from web import worker
-        problem = "Validation failed: printed total $10.00, extracted lines sum to $9.00 (off by $1.00)"
-        stdout = f"Statement ID: STMT-X\n{VALIDATION_GATE_MARKER} {problem} (statement_id STMT-X)\n"
-        completed = subprocess.CompletedProcess(args=[], returncode=4, stdout=stdout,
-                                                stderr="DeprecationWarning: something noisy\n")
-        job = {"job_id": "J1", "pdf_path": __file__, "pdf_filename": "x.pdf", "source_blob_path": None}
+        stdout = f"Statement ID: STMT-X\n{VALIDATION_GATE_MARKER} {self.PROBLEM} (statement_id STMT-X)\n"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
+        job = {"job_id": "J1", "pdf_path": __file__, "pdf_filename": "x.pdf", "source_blob_path": "raw/x.pdf"}
         with mock.patch("web.worker.subprocess.run", return_value=completed), \
+                mock.patch("web.queries.get_silver_row_count", return_value=silver_rows), \
+                mock.patch("web.queries.get_vendor_name_for_statement", return_value="Acme"), \
+                mock.patch("web.worker._write_blob_outcome") as outcome, \
                 mock.patch("web.queries.update_job_status") as update:
             worker._run_job(job)
-        kwargs = update.call_args.kwargs
+        return update.call_args.kwargs, outcome.call_args.args
+
+    def test_stopped_at_validation_is_completed_with_the_reason_as_note(self):
+        kwargs, outcome = self._run_job(silver_rows=12)
+        self.assertEqual(kwargs["status"], "COMPLETED")
+        self.assertEqual(kwargs["statement_id"], "STMT-X")
+        self.assertEqual(kwargs["error_message"], f"Not reconciled -- {self.PROBLEM} (statement_id STMT-X)")
+        # Mailbox blob marked completed, so the sync doesn't retry it.
+        self.assertEqual(outcome[1], "completed")
+
+    def test_nothing_extracted_is_still_a_failed_job(self):
+        kwargs, _ = self._run_job(silver_rows=0)
         self.assertEqual(kwargs["status"], "FAILED")
-        self.assertEqual(kwargs["error_message"].strip().splitlines()[-1], f"{problem} (statement_id STMT-X)")
 
 
 if __name__ == "__main__":

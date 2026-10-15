@@ -5,9 +5,13 @@ reconciliation.
 
 Every other result stops the pipeline right after intake: "mismatch" (lines
 missing or misread), "total_not_found" (nothing to check the lines against),
-"no_line_items", and a missing result. Bronze keeps what was extracted; the
-job fails with VALIDATION_GATE_MARKER and the reason (web/worker.py), and the
-statement shows as Failed on the Validation page as before.
+"no_line_items", and a missing result. Bronze keeps what was extracted. The
+pipeline prints VALIDATION_GATE_MARKER and the reason and exits normally:
+extraction worked, so web/worker.py marks the job COMPLETED with a "Not
+reconciled -- <reason>" note rather than FAILED (failed jobs are for failed
+extractions; a statement with no extracted rows at all still fails on the
+worker's zero-rows check). The statement shows as Failed on the Validation
+page as before.
 
 VALIDATION_GATE_ENABLED=false turns the gate off (every statement reconciles,
 the behaviour before this change).

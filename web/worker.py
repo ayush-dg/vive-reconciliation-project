@@ -204,16 +204,13 @@ def _run_job(job: dict) -> None:
 
             print(f"[worker] Job {job_id} FAILED (exit {result.returncode})")
             error_message = output.strip()[-4000:] or "Pipeline exited with no output."
-            # src/lakehouse/silver_check.py (lines didn't come through the
-            # field mapping) or src/validation/gate.py (validation not 100%).
-            # Explanation LAST (friendly_error() shows the final line);
-            # stderr is appended after stdout, so it can't be relied on to
-            # already be last.
-            for marker in (SILVER_CHECK_MARKER, VALIDATION_GATE_MARKER):
-                check_line = next((l for l in output.splitlines() if l.startswith(marker)), None)
-                if check_line:
-                    error_message = f"{output.strip()[-3500:]}\n\n{check_line[len(marker):].strip()}"
-                    break
+            check_line = next((l for l in output.splitlines() if l.startswith(SILVER_CHECK_MARKER)), None)
+            if check_line:
+                # src/lakehouse/silver_check.py: lines didn't come through the
+                # field mapping. Explanation LAST (friendly_error() shows the
+                # final line); stderr is appended after stdout, so it can't be
+                # relied on to already be last.
+                error_message = f"{output.strip()[-3500:]}\n\n{check_line[len(SILVER_CHECK_MARKER):].strip()}"
             queries.update_job_status(
                 job_id,
                 status="FAILED",
@@ -266,15 +263,23 @@ def _run_job(job: dict) -> None:
             return
 
         vendor_name = queries.get_vendor_name_for_statement(statement_id)
-        duplicate_note = None
+        note = None
         if DUPLICATE_MARKER in output:
             # run_intake() matched this PDF byte-for-byte to an already-
             # extracted statement and wrote nothing new; statement_id is
             # that existing statement.
-            duplicate_note = (f"Duplicate of {statement_id} -- this exact PDF was already processed, "
-                              f"so nothing new was written.")
+            note = (f"Duplicate of {statement_id} -- this exact PDF was already processed, "
+                    f"so nothing new was written.")
+        validation_line = next((l for l in output.splitlines() if l.startswith(VALIDATION_GATE_MARKER)), None)
+        if validation_line:
+            # src/validation/gate.py stopped it before reconciliation:
+            # extraction worked, so the job is COMPLETED (not a failed job --
+            # FAILED is for failed extractions) with the reason as its note.
+            # It shows as Failed on the Validation page.
+            note = f"Not reconciled -- {validation_line[len(VALIDATION_GATE_MARKER):].strip()}"
         print(f"[worker] Job {job_id} COMPLETED — {statement_id} ({vendor_name})"
-              + (" [duplicate]" if duplicate_note else ""))
+              + (" [duplicate]" if DUPLICATE_MARKER in output else "")
+              + (" [stopped at validation]" if validation_line else ""))
         queries.update_job_status(
             job_id,
             status="COMPLETED",
@@ -282,7 +287,7 @@ def _run_job(job: dict) -> None:
             statement_id=statement_id,
             vendor_name=vendor_name,
             document_hash=document_hash,
-            **({"error_message": duplicate_note} if duplicate_note else {}),
+            **({"error_message": note} if note else {}),
         )
         _write_blob_outcome(job, "completed")
     except Exception as e:
