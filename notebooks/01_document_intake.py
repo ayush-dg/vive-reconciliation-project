@@ -1438,6 +1438,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             "bronze_count": bronze_count,
             "silver_count": silver_count,
             "extraction_incomplete_count": incomplete_count,
+            # For run_full_pipeline.py's validation gate (see that call site).
+            "validation": cache_schema_result.get("validation") or {},
         }
 
     print(f"  Cache MISS — proceeding with extraction.")
@@ -1769,6 +1771,9 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         # Silver build straight away instead of polling wait_for_visibility()
         # for its full timeout for a row that will never appear.
         "raw_statement_ready": raw_promoted,
+        # The Arithmetic Validation Gate result -- run_full_pipeline.py stops
+        # before Silver/matching unless its status is "matches".
+        "validation": schema_result.get("validation") or {},
     }
 
 

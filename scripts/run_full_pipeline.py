@@ -170,6 +170,23 @@ def main():
         print(f"{'#'*65}\n")
         return
 
+    # Validation gate (2026-10-15): only a statement whose printed total
+    # matches its extracted lines goes on to Silver + reconciliation; any
+    # other result fails the job here (src/validation/gate.py). Bronze
+    # keeps the extraction either way.
+    from src.validation.gate import describe_failure, gate_enabled
+    from src.pipeline_markers import VALIDATION_GATE_MARKER
+    validation_problem = describe_failure(intake_result.get("validation"))
+    if validation_problem and gate_enabled():
+        print(f"\n{'#'*65}")
+        print(f"  PIPELINE STOPPED — {validation_problem}")
+        print(f"  Statement ID: {statement_id}")
+        print(f"  Not reconciled: only statements that pass validation 100% go on to")
+        print(f"  Silver and NetSuite matching.")
+        print(f"{'#'*65}\n")
+        print(f"{VALIDATION_GATE_MARKER} {validation_problem} (statement_id {statement_id})")
+        sys.exit(4)
+
     # Fabric Silver build (dbt/) -- additive to Phase 1, scoped to this
     # statement. Best-effort: a skip/failure here never stops the pipeline
     # -- Phase 2 (Matching) below still runs against the existing
