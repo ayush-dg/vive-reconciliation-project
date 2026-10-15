@@ -78,6 +78,13 @@ def _project_fingerprint() -> str:
                     digest.update(f.read())
     with open(os.path.join(DBT_PROJECT_DIR, "dbt_project.yml"), "rb") as f:
         digest.update(f.read())
+    # The compiled SQL names the Lakehouse/Warehouse it reads (sources.yml /
+    # profiles.yml env_var()s), so the environment is part of the key: a
+    # machine that runs against dev and then prod (in-place reruns,
+    # 2026-10-15) must not reuse dev's compile -- it read dev's Lakehouse
+    # name and failed with "Invalid object name 'if_vive_lakehouse...'".
+    for var in ("FABRIC_LAKEHOUSE_NAME", "FABRIC_WAREHOUSE_NAME", "FABRIC_SQL_ENDPOINT"):
+        digest.update(f"{var}={os.getenv(var, '')}".encode())
     return digest.hexdigest()[:16]
 
 
