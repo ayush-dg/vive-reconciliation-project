@@ -23,8 +23,8 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.netsuite.client import NetSuiteClient, NetSuiteConfigError
 from src.netsuite.writeback import (
-    apply_plans, apply_revert, build_plans, build_revert_actions, find_revert_actions_for_statement,
-    write_apply_log,
+    CAT_PERIOD_LOCKED, apply_plans, apply_revert, build_plans, build_revert_actions, failure_counts,
+    find_revert_actions_for_statement, write_apply_log,
 )
 
 _ACTION_ORDER = (
@@ -86,11 +86,16 @@ def _apply(ns, ctx, plans) -> int:
     results = apply_plans(ns, plans)
     for r in results:
         record = r.new_record_id or r.plan.record_id or "-"
-        print(f"  {'OK  ' if r.ok else 'FAIL'} {r.plan.action:<22}{r.plan.invoice_number:<14}"
-              f"{r.plan.record_type or 'statement_line':<16}{record:<10}{r.detail}")
-    failed = [r for r in results if not r.ok]
-    print(f"\n{len(results) - len(failed)} written and verified, {len(failed)} failed.")
-    print(f"Write log: {write_apply_log(ns, ctx.statement_id, results)}")
+        status = "OK  " if r.ok else ("LOCK" if r.category == CAT_PERIOD_LOCKED else "FAIL")
+        detail = r.detail if (r.ok or r.category != CAT_PERIOD_LOCKED) else "period locked (Allow Non-G/L Changes)"
+        print(f"  {status} {r.plan.action:<22}{r.plan.invoice_number:<14}"
+              f"{r.plan.record_type or 'statement_line':<16}{record:<10}{detail}")
+    counts = failure_counts(results)
+    locked = counts.pop(CAT_PERIOD_LOCKED, 0)
+    failed = sum(counts.values())
+    written = sum(1 for r in results if r.ok)
+    print(f"\n{written} written and verified, {failed} failed, {locked} period locked.")
+    print(f"Write log: {write_apply_log(ns, ctx.statement_id, results, plans)}")
     return 1 if failed else 0
 
 
