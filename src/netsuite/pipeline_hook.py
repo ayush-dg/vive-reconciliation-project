@@ -13,7 +13,8 @@ import os
 
 from src.netsuite.client import NetSuiteClient, NetSuiteConfigError
 from src.netsuite.writeback import (
-    CAT_PERIOD_LOCKED, apply_plans, build_plans, failure_counts, skip_counts, write_apply_log,
+    CAT_LINK_ONLY_FAILED, CAT_PERIOD_LOCKED, PATCH_LINK_ONLY, apply_plans, build_plans, failure_counts,
+    skip_counts, write_apply_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,9 +26,13 @@ def _enabled() -> bool:
 
 def run_netsuite_writeback(statement_id: str) -> dict:
     """Returns {"skipped": True, "reason": ...}, {"error": ...}, or
-    {"written": n, "failed": n, "period_locked": n, "not_written": {reason: count},
-    "log": path}. "failed" excludes locked-period failures, which are counted on their
-    own: they are expected for older invoices and are not a fault of the run."""
+    {"written": n, "failed": n, "period_locked": n, "links_added": n, "link_only_failed": n,
+    "link_mismatch": n, "not_written": {reason: count}, "log": path}. "failed" excludes
+    locked-period failures, which are counted on their own: they are expected for older
+    invoices and are not a fault of the run. "written" counts reconciliation results only;
+    "links_added" counts link-only writes (a bill that already had this statement's result
+    but no PDF link), "link_only_failed" the ones that failed for a reason other than a
+    locked period, and "link_mismatch" result writes whose link came back different."""
     if not _enabled():
         return {"skipped": True, "reason": "NETSUITE_WRITEBACK_ENABLED is not true"}
     try:
@@ -42,10 +47,14 @@ def run_netsuite_writeback(statement_id: str) -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
     failures = failure_counts(results)
     locked = failures.pop(CAT_PERIOD_LOCKED, 0)
+    link_only_failed = failures.pop(CAT_LINK_ONLY_FAILED, 0)
     return {
-        "written": sum(1 for r in results if r.ok),
+        "written": sum(1 for r in results if r.ok and r.plan.action != PATCH_LINK_ONLY),
         "failed": sum(failures.values()),
         "period_locked": locked,
+        "links_added": sum(1 for r in results if r.ok and r.plan.action == PATCH_LINK_ONLY),
+        "link_only_failed": link_only_failed,
+        "link_mismatch": sum(1 for r in results if r.link_mismatch),
         "not_written": skip_counts(plans),
         "log": log_path,
     }

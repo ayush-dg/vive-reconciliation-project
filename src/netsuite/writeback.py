@@ -54,6 +54,10 @@ CREATE_STATEMENT_LINE = "CREATE_STATEMENT_LINE"
 SKIP_UP_TO_DATE = "SKIP_UP_TO_DATE"
 SKIP_RECONCILED_EARLIER = "SKIP_RECONCILED_EARLIER"
 SKIP_REVIEW = "SKIP_REVIEW"
+# A bill that already carries THIS statement's result but no link: only
+# custbody_statement_link is written (never for another statement's bill,
+# never over an existing link). Applied after every result write.
+PATCH_LINK_ONLY = "PATCH_LINK_ONLY"
 
 # Why a line was NOT written. Shown in the job output and the apply log, so
 # the reason an invoice was left out is never a mystery after an automatic run.
@@ -70,6 +74,7 @@ CAT_NEEDS_REVIEW = "needs review"
 # Why a WRITE that was attempted did not succeed.
 CAT_PERIOD_LOCKED = "period locked"
 CAT_WRITE_FAILED = "failed"
+CAT_LINK_ONLY_FAILED = "link-only write failed"
 
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
 EXCEPTION_DUPLICATE = "Duplicate"
@@ -354,6 +359,19 @@ def _exception_fields(ctx: StatementContext, exception_name: str) -> dict:
     return fields
 
 
+def _skipped_or_link_only(invoice, amount, txn, ctx: StatementContext, skip: str) -> Plan:
+    """A skipped record's plan -- or, for a bill that already carries THIS
+    statement's result (SKIP_UP_TO_DATE: same reference) but has no link
+    yet, a link-only write. Never for SKIP_RECONCILED_EARLIER (another
+    statement's bill) and never over an existing link, even a different one."""
+    if (skip == SKIP_UP_TO_DATE and ctx.link
+            and txn.get("custbody_statement_reference") == ctx.reference
+            and not txn.get("custbody_statement_link")):
+        return _txn_plan_base(invoice, amount, txn, PATCH_LINK_ONLY, {"custbody_statement_link": ctx.link},
+                              note="already carries this statement's result -- adding the PDF link only")
+    return _txn_plan_base(invoice, amount, txn, skip, note=_skip_message(skip))
+
+
 def _skip_message(action: str) -> str:
     if action == SKIP_RECONCILED_EARLIER:
         return "already reconciled by an earlier statement -- left untouched"
@@ -373,7 +391,7 @@ def plan_matched(row, candidates, ctx) -> Plan:
     txn = tying[0]
     skip = _already_handled(txn, ctx, True, None)
     if skip:
-        return _txn_plan_base(invoice, amount, txn, skip, note=_skip_message(skip))
+        return _skipped_or_link_only(invoice, amount, txn, ctx, skip)
     return _txn_plan_base(invoice, amount, txn, PATCH_MATCHED, _matched_fields(ctx))
 
 
@@ -402,7 +420,7 @@ def _plan_one_exception(row, txn, ctx, exception_name: str) -> Plan:
                      category=CAT_AMOUNT_NOT_TIED)
     skip = _already_handled(txn, ctx, False, ctx.exception_ids.get(exception_name))
     if skip:
-        return _txn_plan_base(invoice, amount, txn, skip, note=_skip_message(skip))
+        return _skipped_or_link_only(invoice, amount, txn, ctx, skip)
     return _txn_plan_base(invoice, amount, txn, PATCH_EXCEPTION, _exception_fields(ctx, exception_name),
                           note=exception_name)
 
@@ -532,6 +550,9 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
     plans = [plan_matched(r, sandbox.get(r["invoice_number"].lower(), []), ctx) for r in results["matched"]]
     for r in results["exceptions"]:
         plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
+    # Link-only writes go last (stable sort): every reconciliation result is
+    # written first, whatever happens to a link.
+    plans.sort(key=lambda p: p.action == PATCH_LINK_ONLY)
     return ctx, plans
 
 
@@ -539,7 +560,7 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
 # Applying a plan (live writes -- sandbox only, enforced by NetSuiteClient)
 # ----------------------------------------------------------------------
 
-WRITE_ACTIONS = (PATCH_MATCHED, PATCH_EXCEPTION, CREATE_STATEMENT_LINE)
+WRITE_ACTIONS = (PATCH_MATCHED, PATCH_EXCEPTION, CREATE_STATEMENT_LINE, PATCH_LINK_ONLY)
 
 
 @dataclass
@@ -611,7 +632,7 @@ def apply_plan(ns, plan: Plan) -> ApplyResult:
     result = _apply_plan_untimed(ns, plan)
     result.seconds = round(time.monotonic() - started, 2)
     if not result.ok and not result.category:
-        result.category = CAT_WRITE_FAILED
+        result.category = CAT_LINK_ONLY_FAILED if plan.action == PATCH_LINK_ONLY else CAT_WRITE_FAILED
     return result
 
 
@@ -655,8 +676,9 @@ def _stops_the_run(result: ApplyResult, attempts_so_far: int) -> bool:
     older invoices), so the rest must still be written. The run still stops
     early for failures that would repeat on every record: an authentication
     or permission error at any point, or any other failure on the very
-    first write (a bad field or format)."""
-    if result.category == CAT_PERIOD_LOCKED:
+    first write (a bad field or format). A link-only write never stops the
+    run (they come last; `attempts_so_far` counts result writes only)."""
+    if result.category == CAT_PERIOD_LOCKED or result.plan.action == PATCH_LINK_ONLY:
         return False
     return result.status_code in _AUTH_STATUS_CODES or attempts_so_far == 1
 
@@ -677,7 +699,8 @@ def apply_plans(ns, plans: list) -> list:
     for plan in (p for p in plans if p.action in WRITE_ACTIONS):
         result = apply_plan(ns, plan)
         results.append(result)
-        if not result.ok and _stops_the_run(result, len(results)):
+        result_writes = sum(1 for r in results if r.plan.action != PATCH_LINK_ONLY)
+        if not result.ok and _stops_the_run(result, result_writes):
             break
     return results
 
