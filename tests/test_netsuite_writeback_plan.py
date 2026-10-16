@@ -313,6 +313,106 @@ class PdfLinkSwitchTests(unittest.TestCase):
         self.assertNotIn("custrecord_sl_statement_link", line.fields)
 
 
+class _FakeNs:
+    """Records PATCHes and answers the read-back with `row` (SuiteQL leaves
+    out null columns, so an absent key means empty)."""
+
+    def __init__(self, row):
+        self.row = row
+        self.patches = []
+        self.queries = []
+
+    def patch_record(self, record_type, record_id, body):
+        self.patches.append((record_type, record_id, dict(body)))
+
+    def suiteql(self, query):
+        self.queries.append(query)
+        return [self.row] if self.row is not None else []
+
+
+class ReadBackTests(unittest.TestCase):
+    def _matched(self, link=SP_URL):
+        return wb.plan_matched(_row(), [_txn("-100")], _ctx(link=link))
+
+    def _stored(self, plan, **override):
+        row = {"custbody_reconciled": "T", "custbody_statement_reference": STMT}
+        if "custbody_statement_link" in plan.fields:
+            row["custbody_statement_link"] = plan.fields["custbody_statement_link"]
+        row.update(override)
+        return row
+
+    def test_matched_write_reads_back_the_link_too(self):
+        plan = self._matched()
+        ns = _FakeNs(self._stored(plan))
+        result = wb.apply_plan(ns, plan)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.detail, "updated")
+        self.assertFalse(result.link_mismatch)
+        self.assertIn("custbody_statement_link", ns.queries[0])
+
+    def test_link_mismatch_on_a_result_write_is_ok_but_flagged(self):
+        plan = self._matched()
+        ns = _FakeNs(self._stored(plan, custbody_statement_link=SP_URL[:100]))   # truncated
+        result = wb.apply_plan(ns, plan)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.link_mismatch)
+        self.assertEqual(result.detail, "updated; link not stored as sent")
+
+    def test_a_truncated_link_on_the_first_write_does_not_stop_the_run(self):
+        first = wb.plan_matched(_row(invoice="INV1"), [dict(_txn("-100"), id="501", tranid="INV1")], _ctx(link=SP_URL))
+        second = wb.plan_matched(_row(invoice="INV2"), [dict(_txn("-100"), id="502", tranid="INV2")], _ctx(link=SP_URL))
+
+        class Ns(_FakeNs):
+            def suiteql(self, query):
+                self.queries.append(query)
+                truncated = "WHERE id = 501" in query
+                return [{"custbody_reconciled": "T", "custbody_statement_reference": STMT,
+                         "custbody_statement_link": SP_URL[:100] if truncated else SP_URL}]
+
+        ns = Ns(None)
+        results = wb.apply_plans(ns, [first, second])
+        self.assertEqual([p[1] for p in ns.patches], ["501", "502"], "both bills written")
+        self.assertEqual(len(results), 2, "the run did not stop after the first write")
+        self.assertTrue(all(r.ok for r in results))
+        self.assertEqual([r.link_mismatch for r in results], [True, False])
+
+    def test_result_mismatch_still_fails(self):
+        plan = self._matched()
+        ns = _FakeNs(self._stored(plan, custbody_statement_reference="STMT-OTHER"))
+        result = wb.apply_plan(ns, plan)
+        self.assertFalse(result.ok)
+        self.assertIn("statement reference", result.detail)
+
+    def test_no_link_sent_means_no_link_check(self):
+        plan = self._matched(link=None)
+        ns = _FakeNs(self._stored(plan, custbody_statement_link="https://something-else"))
+        self.assertTrue(wb.apply_plan(ns, plan).ok)
+
+    def test_link_only_plan_is_checked_without_a_key_error(self):
+        txn = _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT)
+        plan = wb._txn_plan_base("INV1", Decimal("100"), txn, wb.PATCH_MATCHED, {"custbody_statement_link": SP_URL})
+        ok = wb.apply_plan(_FakeNs({"custbody_statement_link": SP_URL}), plan)
+        self.assertTrue(ok.ok, ok.detail)
+        bad = wb.apply_plan(_FakeNs({"custbody_statement_link": SP_URL[:100]}), plan)
+        self.assertFalse(bad.ok)
+        self.assertEqual(bad.detail, "link not stored as sent")
+        self.assertFalse(bad.link_mismatch)
+
+    def test_exception_write_checks_the_exception(self):
+        plan = wb.plan_exception_row(_row("100.00", wb.REASON_AMOUNT_MISMATCH), [_txn("-90")], _ctx(link=None),
+                                     set())[0]
+        self.assertEqual(plan.action, wb.PATCH_EXCEPTION)
+        good = {"custbody_reconciled": "F", "custbody_statement_reference": STMT,
+                "custbody_reconciliation_exception": "7"}
+        self.assertTrue(wb.apply_plan(_FakeNs(good), plan).ok)
+        self.assertFalse(wb.apply_plan(_FakeNs(dict(good, custbody_reconciliation_exception="9")), plan).ok)
+
+    def test_record_gone_on_read_back(self):
+        result = wb.apply_plan(_FakeNs(None), self._matched())
+        self.assertFalse(result.ok)
+        self.assertEqual(result.detail, "record not found on read-back")
+
+
 class LockedPeriodRunControlTests(unittest.TestCase):
     LOCKED_BODY = ('{"o:errorDetails":[{"detail":"Error while accessing a resource. You cannot make changes '
                    'to this period without the Allow Non-G/L Changes permission."}]}')

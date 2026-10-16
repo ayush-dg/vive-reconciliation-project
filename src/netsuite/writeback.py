@@ -551,27 +551,45 @@ class ApplyResult:
     seconds: float = 0.0
     status_code: int = None
     category: str = ""
+    # The result fields were stored but the link came back different (e.g.
+    # truncated): still a successful write, counted separately.
+    link_mismatch: bool = False
+
+
+LINK_NOT_STORED = "link not stored as sent"
+
+
+def _is_link_only(plan: Plan) -> bool:
+    return set(plan.fields) == {"custbody_statement_link"}
 
 
 def _read_back_bill(ns, plan: Plan) -> str:
     """Re-reads the bill/credit and returns "" if it carries what we sent,
-    else a description of the first difference."""
+    else a description of the first difference. Only the fields this plan
+    actually sent are checked (a link-only plan sends just the link), and
+    the link is compared exactly -- LINK_NOT_STORED when it differs."""
     rows = ns.suiteql(
-        "SELECT custbody_reconciled, custbody_statement_reference, custbody_reconciliation_exception "
-        f"FROM transaction WHERE id = {int(plan.record_id)}")
+        "SELECT custbody_reconciled, custbody_statement_reference, custbody_reconciliation_exception, "
+        f"custbody_statement_link FROM transaction WHERE id = {int(plan.record_id)}")
     if not rows:
         return "record not found on read-back"
     row = rows[0]
-    wanted_exception = plan.fields.get("custbody_reconciliation_exception")
-    wanted_id = str(wanted_exception["id"]) if wanted_exception else ""
-    checks = (
-        ("reconciled", _is_true(row.get("custbody_reconciled")), plan.fields["custbody_reconciled"]),
-        ("statement reference", row.get("custbody_statement_reference"), plan.fields["custbody_statement_reference"]),
-        ("exception", str(row.get("custbody_reconciliation_exception") or ""), wanted_id),
-    )
+    sent = plan.fields
+    checks = []
+    if "custbody_reconciled" in sent:
+        checks.append(("reconciled", _is_true(row.get("custbody_reconciled")), sent["custbody_reconciled"]))
+    if "custbody_statement_reference" in sent:
+        checks.append(("statement reference", row.get("custbody_statement_reference"),
+                       sent["custbody_statement_reference"]))
+    if "custbody_reconciliation_exception" in sent:
+        wanted_exception = sent["custbody_reconciliation_exception"]
+        checks.append(("exception", str(row.get("custbody_reconciliation_exception") or ""),
+                       str(wanted_exception["id"]) if wanted_exception else ""))
     for label, actual, wanted in checks:
         if actual != wanted:
             return f"read-back mismatch on {label}: got {actual!r}, expected {wanted!r}"
+    if "custbody_statement_link" in sent and row.get("custbody_statement_link") != sent["custbody_statement_link"]:
+        return LINK_NOT_STORED
     return ""
 
 
@@ -614,6 +632,10 @@ def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
             return ApplyResult(plan, not problem, problem or "created", new_id)
         ns.patch_record(plan.record_type, plan.record_id, plan.fields)
         problem = _read_back_bill(ns, plan)
+        if problem == LINK_NOT_STORED and not _is_link_only(plan):
+            # The reconciliation result itself was stored: a link problem must
+            # not mark it failed (or stop the run as a "first write" failure).
+            return ApplyResult(plan, True, f"updated; {LINK_NOT_STORED}", plan.record_id, link_mismatch=True)
         return ApplyResult(plan, not problem, problem or "updated", plan.record_id)
     except Exception as exc:  # report and move on -- one bad record must not stop the batch
         body = getattr(exc, "body", "") or ""
@@ -785,7 +807,7 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
         "record_type": r.plan.record_type or STATEMENT_LINE_RECORD,
         "record_id": r.new_record_id or r.plan.record_id,
         "fields_sent": r.plan.fields, "previous": r.plan.previous,
-        "ok": r.ok, "detail": r.detail, "seconds": r.seconds,
+        "ok": r.ok, "detail": r.detail, "seconds": r.seconds, "link_mismatch": r.link_mismatch,
         "category": r.category or ("written" if r.ok else CAT_WRITE_FAILED),
     } for r in results]
     not_written = [{
