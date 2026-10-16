@@ -1,4 +1,5 @@
-{# Results fragment for the "Find in NetSuite" modal -- returned on its
+{# Results fragment for the "Find in NetSuite" panel (a modal until
+   2026-10-16, now always open on the review page) -- returned on its
    own by GET /netsuite-search and swapped into #nsResults, so changing a
    filter re-renders only this table, never the exception under review.
 
@@ -74,7 +75,8 @@
       <td colspan="5">
         <div class="ns-details-grid">
           <div><span class="ns-details-key">RO #</span><span>{{ row.ro_number or "—" }}</span></div>
-          <div><span class="ns-details-key">Location (code)</span><span>{{ row.location_code or "—" }}</span></div>
+          {# NetSuite's own location name since 2026-10-16 (src/netsuite/locations.py), code kept alongside. #}
+          <div><span class="ns-details-key">Shop</span><span>{% if row.location_name %}{{ row.location_name }} ({{ row.location_code }}){% else %}{{ row.location_code or "—" }}{% endif %}</span></div>
           <div><span class="ns-details-key">Transaction #</span><span>{{ row.transaction_number or "—" }}</span></div>
           <div><span class="ns-details-key">Entity</span><span>{{ row.entity_id or "—" }}</span></div>
         </div>

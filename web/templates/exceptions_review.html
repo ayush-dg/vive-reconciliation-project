@@ -108,14 +108,6 @@
       </form>
       {% endif %}
     </div>
-    <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">
-    <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
-    <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
-    <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
-    <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
-    <input type="hidden" name="filter" value="{{ filter }}">
-    <input type="hidden" name="sort" value="{{ sort }}">
-
     <div class="sec-label" style="margin-top:6px">Invoice details</div>
     <div class="field-grid">
       <div class="field-box"><div class="fb-label">Invoice number</div><div class="fb-value">{{ selected.invoice_number }}</div></div>
@@ -192,30 +184,135 @@
     </div>
     {% endif %}
 
-    {# "Find in NetSuite" -- opens the look-only search modal below. Sits
-       under the "NetSuite record" preview and is independent of it: the
-       preview only ever appears for Amount Mismatch, while this covers
-       every reason that means "did not tie out", including the ones
-       where hand-searching matters most. Opening the modal resolves
-       nothing; Accept/Reject/Escalate remain the only way to close an
-       exception. #}
+    {# "Find in NetSuite" -- an always-open, LOOK-ONLY search panel
+       (2026-10-16; a pop-up behind a button before). It searches as soon as
+       the page opens, pre-filled for this exception, under the "NetSuite
+       record" preview and independent of it: the preview only ever appears
+       for Amount Mismatch, while this covers every reason that means "did
+       not tie out". It sits OUTSIDE the action form below, so Enter in its
+       boxes can never submit Accept; nothing in it posts or resolves
+       anything -- Accept/Reject/Escalate remain the only way to close an
+       exception. Wired up by static/app.js. #}
     {% if selected.exception_reason in searchable_reasons %}
-    <div class="ns-find-row">
-      <button type="button" class="btn ns-find-btn" id="nsFindBtn"
-              data-vendor-id="{{ selected.vendor_id or '' }}"
-              data-vendor-name="{{ vendor_name }}"
-              data-vendor-display="{{ vendor_display_name }}"
-              data-invoice="{{ selected.invoice_number or '' }}"
-              data-amount="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}"
-              data-reason="{{ selected.exception_reason }}"
-              data-reason-label="{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}"
-              data-reason-css="{{ reason_badge.get(selected.exception_reason, {}).css or 'grey' }}">
-        <svg class="icon" aria-hidden="true" style="width:14px;height:14px"><use href="#i-search"/></svg>
-        Find in NetSuite
-      </button>
-      <span class="ns-find-hint">Search NetSuite bills without leaving this page — nothing is changed.</span>
-    </div>
+    <section class="ns-inline" id="nsPanel" aria-labelledby="nsPanelTitle"
+             data-vendor-id="{{ selected.vendor_id or '' }}"
+             data-vendor-name="{{ vendor_name }}"
+             data-vendor-display="{{ vendor_display_name }}"
+             data-invoice="{{ selected.invoice_number or '' }}"
+             data-amount="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}"
+             data-reason="{{ selected.exception_reason }}">
+      <div class="ns-inline-head">
+        <h2 class="ns-modal-title" id="nsPanelTitle">Find this invoice in NetSuite</h2>
+        <p class="ns-modal-sub">Search open and paid bills across vendors and shops. Nothing here changes the exception.</p>
+      </div>
+
+      {# Each chip's x (2026-10-06) is a sibling of the chip button, not inside
+         it (a button can't contain another button). app.js shows it only
+         while that filter is set and resets the filter to its "any" state:
+         Any vendor / Any shop / Any amount / Any time / Any status. #}
+      <div class="ns-modal-filters" id="nsFilters">
+        <div class="ns-chip-wrap">
+          <button type="button" class="ns-chip" id="nsChipVendor" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopVendor">
+            <span class="ns-chip-label">Vendor:</span> <span class="ns-chip-value" id="nsChipVendorValue">{{ vendor_display_name }}</span>
+          </button>
+          <button type="button" class="ns-chip-clear" id="nsClearVendor" aria-label="Clear vendor filter" title="Clear vendor filter" hidden>&times;</button>
+          <div class="ns-popover" id="nsPopVendor" hidden>
+            <button type="button" class="ns-pop-opt" data-vendor="on">{{ vendor_display_name }}</button>
+            <button type="button" class="ns-pop-opt" data-vendor="off">Any vendor</button>
+          </div>
+        </div>
+
+        {# Shop (2026-10-16): NetSuite's own location names
+           (config/netsuite_locations.json); tick one or more. Always starts
+           on "Any shop". #}
+        <div class="ns-chip-wrap">
+          <button type="button" class="ns-chip" id="nsChipShop" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopShop">
+            <span class="ns-chip-label">Shop:</span> <span class="ns-chip-value" id="nsChipShopValue">Any shop</span>
+          </button>
+          <button type="button" class="ns-chip-clear" id="nsClearShop" aria-label="Clear shop filter" title="Clear shop filter" hidden>&times;</button>
+          <div class="ns-popover ns-pop-shop" id="nsPopShop" hidden>
+            <input type="text" id="nsShopSearch" class="ns-date-input ns-shop-search" placeholder="Search shops" aria-label="Search shops" autocomplete="off">
+            <div class="ns-shop-list" id="nsShopList">
+              {% for shop in shop_options %}
+              <label class="ns-pop-check" data-name="{{ shop.name | lower }}"><input type="checkbox" value="{{ shop.code }}" data-name="{{ shop.name }}"> {{ shop.name }}</label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <div class="ns-chip-wrap">
+          <button type="button" class="ns-chip" id="nsChipAmount" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopAmount">
+            <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Any amount</span>
+          </button>
+          <button type="button" class="ns-chip-clear" id="nsClearAmount" aria-label="Clear amount filter" title="Clear amount filter" hidden>&times;</button>
+          <div class="ns-popover" id="nsPopAmount" hidden>
+            <button type="button" class="ns-pop-opt" data-tol="exact" aria-pressed="true">Exact</button>
+            <button type="button" class="ns-pop-opt" data-tol="up_to" aria-pressed="false">Up to</button>
+            <button type="button" class="ns-pop-opt" data-tol="at_least" aria-pressed="false">At least</button>
+            <div class="ns-pop-custom">
+              <label class="ns-search-label" for="nsAmountInput">Amount</label>
+              <input type="text" id="nsAmountInput" class="ns-date-input" inputmode="decimal"
+                     placeholder="Any amount" aria-label="Amount (blank = any amount)">
+            </div>
+          </div>
+        </div>
+
+        <div class="ns-chip-wrap">
+          <button type="button" class="ns-chip" id="nsChipDate" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopDate">
+            <span class="ns-chip-label">Date:</span> <span class="ns-chip-value" id="nsChipDateValue">Any time</span>
+          </button>
+          <button type="button" class="ns-chip-clear" id="nsClearDate" aria-label="Clear date filter" title="Clear date filter" hidden>&times;</button>
+          <div class="ns-popover" id="nsPopDate" hidden>
+            <button type="button" class="ns-pop-opt" data-range="any">Any time</button>
+            <button type="button" class="ns-pop-opt" data-range="30">Last 30 days</button>
+            <button type="button" class="ns-pop-opt" data-range="90">Last 90 days</button>
+            <button type="button" class="ns-pop-opt" data-range="365">Last 12 months</button>
+            <div class="ns-pop-custom">
+              <label class="ns-search-label" for="nsDateFrom">From</label>
+              <input type="date" id="nsDateFrom" class="ns-date-input">
+              <label class="ns-search-label" for="nsDateTo">To</label>
+              <input type="date" id="nsDateTo" class="ns-date-input">
+              <button type="button" class="btn ns-pop-apply" id="nsDateApply">Apply</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ns-chip-wrap">
+          <button type="button" class="ns-chip" id="nsChipStatus" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopStatus">
+            <span class="ns-chip-label">Status:</span> <span class="ns-chip-value" id="nsChipStatusValue">Open</span>
+          </button>
+          <button type="button" class="ns-chip-clear" id="nsClearStatus" aria-label="Clear status filter" title="Clear status filter" hidden>&times;</button>
+          <div class="ns-popover" id="nsPopStatus" hidden>
+            <label class="ns-pop-check"><input type="checkbox" id="nsStatusOpen" checked> Open</label>
+            <label class="ns-pop-check"><input type="checkbox" id="nsStatusPaid"> Paid</label>
+          </div>
+        </div>
+
+        <div class="ns-search-box">
+          <svg class="icon ns-search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+          <input type="text" id="nsInvoice" class="ns-search-input"
+                 placeholder="Enter invoice number (minimum 4 characters)"
+                 aria-label="Enter invoice number (minimum 4 characters)">
+        </div>
+        <span class="ns-search-hint" id="nsInvoiceHint" hidden>Enter at least 4 characters</span>
+
+        <button type="button" class="ns-link-btn" id="nsReset">Reset filters</button>
+        <button type="button" class="btn ns-reload-btn" id="nsReload">Reload</button>
+      </div>
+
+      <div class="ns-modal-body ns-inline-body" id="nsResults">
+        <div class="ns-modal-empty">Searching&hellip;</div>
+      </div>
+    </section>
     {% endif %}
+
+    <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">
+    <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
+    <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
+    <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
+    <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
+    <input type="hidden" name="filter" value="{{ filter }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
 
     <div class="note-field">
       <label>Add a note <span class="field-hint">(optional)</span></label>
@@ -244,122 +341,6 @@
 </div>
 </div>
 
-{% if selected and selected.exception_reason in searchable_reasons %}
-{# LOOK-ONLY modal. No <form>, no action, no method, nothing that posts.
-   Selecting rows only drives the footer total; resolving an exception
-   stays with the page's own Accept/Reject/Escalate forms. #}
-<dialog class="ns-modal" id="nsModal" aria-labelledby="nsModalTitle">
-  <div class="ns-modal-head">
-    <div>
-      <h2 class="ns-modal-title" id="nsModalTitle">Find this invoice in NetSuite</h2>
-      <p class="ns-modal-sub">Search open and paid bills across vendors. Nothing here changes the exception.</p>
-    </div>
-    <button type="button" class="ns-modal-close" id="nsModalClose" aria-label="Close">&times;</button>
-  </div>
-
-  <div class="ns-modal-summary">
-    <div class="ns-summary-main">
-      <div class="ns-summary-vendor" id="nsSumVendor">{{ vendor_display_name }}</div>
-      <div class="ns-summary-line">
-        <span class="ns-summary-inv">Invoice #<span id="nsSumInvoice">{{ selected.invoice_number or "Unknown" }}</span></span>
-        <span class="badge {{ reason_badge.get(selected.exception_reason, {}).css or 'grey' }}" id="nsSumReason">{{ reason_badge.get(selected.exception_reason, {}).label or selected.exception_reason }}</span>
-      </div>
-    </div>
-    <div class="ns-summary-amount">
-      <div class="ns-search-label">Statement amount</div>
-      <div class="ns-summary-amount-value" id="nsSumAmount">{{ selected.statement_amount | money }}</div>
-    </div>
-  </div>
-
-  {# Each chip's x (2026-10-06) is a sibling of the chip button, not inside
-     it (a button can't contain another button). app.js shows it only
-     while that filter is set and resets the filter to its "any" state:
-     Any vendor / Any amount / Any time / Any status. #}
-  <div class="ns-modal-filters" id="nsFilters">
-    <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipVendor" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopVendor">
-        <span class="ns-chip-label">Vendor:</span> <span class="ns-chip-value" id="nsChipVendorValue">{{ vendor_display_name }}</span>
-      </button>
-      <button type="button" class="ns-chip-clear" id="nsClearVendor" aria-label="Clear vendor filter" title="Clear vendor filter" hidden>&times;</button>
-      <div class="ns-popover" id="nsPopVendor" hidden>
-        <button type="button" class="ns-pop-opt" data-vendor="on">{{ vendor_display_name }}</button>
-        <button type="button" class="ns-pop-opt" data-vendor="off">Any vendor</button>
-      </div>
-    </div>
-
-    <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipAmount" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopAmount">
-        <span class="ns-chip-label">Amount:</span> <span class="ns-chip-value" id="nsChipAmountValue">Any amount</span>
-      </button>
-      <button type="button" class="ns-chip-clear" id="nsClearAmount" aria-label="Clear amount filter" title="Clear amount filter" hidden>&times;</button>
-      <div class="ns-popover" id="nsPopAmount" hidden>
-        <button type="button" class="ns-pop-opt" data-tol="exact" aria-pressed="true">Exact</button>
-        <button type="button" class="ns-pop-opt" data-tol="up_to" aria-pressed="false">Up to</button>
-        <button type="button" class="ns-pop-opt" data-tol="at_least" aria-pressed="false">At least</button>
-        <div class="ns-pop-custom">
-          <label class="ns-search-label" for="nsAmountInput">Amount</label>
-          <input type="text" id="nsAmountInput" class="ns-date-input" inputmode="decimal"
-                 placeholder="Any amount" aria-label="Amount (blank = any amount)">
-        </div>
-      </div>
-    </div>
-
-    <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipDate" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopDate">
-        <span class="ns-chip-label">Date:</span> <span class="ns-chip-value" id="nsChipDateValue">Any time</span>
-      </button>
-      <button type="button" class="ns-chip-clear" id="nsClearDate" aria-label="Clear date filter" title="Clear date filter" hidden>&times;</button>
-      <div class="ns-popover" id="nsPopDate" hidden>
-        <button type="button" class="ns-pop-opt" data-range="any">Any time</button>
-        <button type="button" class="ns-pop-opt" data-range="30">Last 30 days</button>
-        <button type="button" class="ns-pop-opt" data-range="90">Last 90 days</button>
-        <button type="button" class="ns-pop-opt" data-range="365">Last 12 months</button>
-        <div class="ns-pop-custom">
-          <label class="ns-search-label" for="nsDateFrom">From</label>
-          <input type="date" id="nsDateFrom" class="ns-date-input">
-          <label class="ns-search-label" for="nsDateTo">To</label>
-          <input type="date" id="nsDateTo" class="ns-date-input">
-          <button type="button" class="btn ns-pop-apply" id="nsDateApply">Apply</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="ns-chip-wrap">
-      <button type="button" class="ns-chip" id="nsChipStatus" aria-expanded="false" aria-haspopup="true" aria-controls="nsPopStatus">
-        <span class="ns-chip-label">Status:</span> <span class="ns-chip-value" id="nsChipStatusValue">Open</span>
-      </button>
-      <button type="button" class="ns-chip-clear" id="nsClearStatus" aria-label="Clear status filter" title="Clear status filter" hidden>&times;</button>
-      <div class="ns-popover" id="nsPopStatus" hidden>
-        <label class="ns-pop-check"><input type="checkbox" id="nsStatusOpen" checked> Open</label>
-        <label class="ns-pop-check"><input type="checkbox" id="nsStatusPaid"> Paid</label>
-      </div>
-    </div>
-
-    <div class="ns-search-box">
-      <svg class="icon ns-search-icon" aria-hidden="true"><use href="#i-search"/></svg>
-      <input type="text" id="nsInvoice" class="ns-search-input"
-             placeholder="Enter invoice number (minimum 4 characters)"
-             aria-label="Enter invoice number (minimum 4 characters)">
-    </div>
-    <span class="ns-search-hint" id="nsInvoiceHint" hidden>Enter at least 4 characters</span>
-
-    <button type="button" class="ns-link-btn" id="nsReset">Reset filters</button>
-    <button type="button" class="btn ns-reload-btn" id="nsReload">Reload</button>
-  </div>
-
-  <div class="ns-modal-body" id="nsResults">
-    <div class="ns-modal-empty">Searching&hellip;</div>
-  </div>
-
-  {# Selection/footer totals removed 2026-09-30 (rows are no longer
-     selectable) -- the footer is just the Close button now. #}
-  <div class="ns-modal-foot">
-    <div class="ns-foot-right">
-      <button type="button" class="btn btn-primary ns-foot-close" id="nsModalDone">Close</button>
-    </div>
-  </div>
-</dialog>
-{% endif %}
 
 <script>
 (function () {

@@ -1,0 +1,354 @@
+{
+  "1": {
+    "name": "Clarkstown",
+    "inactive": false
+  },
+  "2": {
+    "name": "Corporate",
+    "inactive": false
+  },
+  "3": {
+    "name": "Coleman's",
+    "inactive": false
+  },
+  "4": {
+    "name": "Hewitt's",
+    "inactive": false
+  },
+  "5": {
+    "name": "RP Bell",
+    "inactive": false
+  },
+  "6": {
+    "name": "Sebago",
+    "inactive": false
+  },
+  "7": {
+    "name": "Rockland",
+    "inactive": false
+  },
+  "8": {
+    "name": "Pawtucket",
+    "inactive": false
+  },
+  "9": {
+    "name": "Bristol",
+    "inactive": false
+  },
+  "10": {
+    "name": "Middletown",
+    "inactive": false
+  },
+  "11": {
+    "name": "Acme",
+    "inactive": false
+  },
+  "12": {
+    "name": "Don Joe",
+    "inactive": false
+  },
+  "13": {
+    "name": "Seacoast",
+    "inactive": false
+  },
+  "14": {
+    "name": "Hamden",
+    "inactive": false
+  },
+  "15": {
+    "name": "Superior",
+    "inactive": false
+  },
+  "16": {
+    "name": "Springfield",
+    "inactive": false
+  },
+  "17": {
+    "name": "Holyoke",
+    "inactive": false
+  },
+  "18": {
+    "name": "Matawan",
+    "inactive": false
+  },
+  "19": {
+    "name": "Middletown - NJ",
+    "inactive": false
+  },
+  "20": {
+    "name": "JC Auto",
+    "inactive": false
+  },
+  "21": {
+    "name": "Caron's",
+    "inactive": false
+  },
+  "23": {
+    "name": "Collex",
+    "inactive": false
+  },
+  "24": {
+    "name": "Nutley",
+    "inactive": false
+  },
+  "25": {
+    "name": "Lyndhurst",
+    "inactive": false
+  },
+  "26": {
+    "name": "Lehigh Valley",
+    "inactive": false
+  },
+  "27": {
+    "name": "Milford",
+    "inactive": false
+  },
+  "28": {
+    "name": "Highway 35",
+    "inactive": false
+  },
+  "29": {
+    "name": "South Main",
+    "inactive": false
+  },
+  "30": {
+    "name": "First Choice",
+    "inactive": false
+  },
+  "31": {
+    "name": "Thomaston",
+    "inactive": false
+  },
+  "32": {
+    "name": "Noaker's",
+    "inactive": false
+  },
+  "33": {
+    "name": "Harbour",
+    "inactive": false
+  },
+  "34": {
+    "name": "Prestige",
+    "inactive": false
+  },
+  "35": {
+    "name": "Quonset",
+    "inactive": false
+  },
+  "36": {
+    "name": "Neet's",
+    "inactive": false
+  },
+  "37": {
+    "name": "Albany",
+    "inactive": false
+  },
+  "38": {
+    "name": "Natick",
+    "inactive": false
+  },
+  "39": {
+    "name": "Watertown",
+    "inactive": false
+  },
+  "40": {
+    "name": "International Auto Works",
+    "inactive": true
+  },
+  "41": {
+    "name": "Thru It All",
+    "inactive": false
+  },
+  "42": {
+    "name": "zz_Growth",
+    "inactive": true
+  },
+  "43": {
+    "name": "ClearDrive",
+    "inactive": false
+  },
+  "44": {
+    "name": "Bangor",
+    "inactive": false
+  },
+  "45": {
+    "name": "Jake's",
+    "inactive": false
+  },
+  "46": {
+    "name": "Prestige - NH",
+    "inactive": false
+  },
+  "47": {
+    "name": "Kingston",
+    "inactive": false
+  },
+  "48": {
+    "name": "Dallas",
+    "inactive": false
+  },
+  "49": {
+    "name": "Clarks Summit",
+    "inactive": false
+  },
+  "50": {
+    "name": "Montoursville",
+    "inactive": false
+  },
+  "51": {
+    "name": "Crossroads",
+    "inactive": false
+  },
+  "52": {
+    "name": "Collision Restoration",
+    "inactive": false
+  },
+  "53": {
+    "name": "Maurice & Son",
+    "inactive": false
+  },
+  "54": {
+    "name": "Keene",
+    "inactive": false
+  },
+  "55": {
+    "name": "Newington",
+    "inactive": false
+  },
+  "56": {
+    "name": "Ben's",
+    "inactive": false
+  },
+  "57": {
+    "name": "Xtreme",
+    "inactive": false
+  },
+  "58": {
+    "name": "Worcester",
+    "inactive": false
+  },
+  "59": {
+    "name": "Duncansville",
+    "inactive": false
+  },
+  "60": {
+    "name": "Sprague",
+    "inactive": false
+  },
+  "61": {
+    "name": "Clark's",
+    "inactive": false
+  },
+  "62": {
+    "name": "Lund",
+    "inactive": false
+  },
+  "63": {
+    "name": "Lee's",
+    "inactive": false
+  },
+  "64": {
+    "name": "Lamon",
+    "inactive": false
+  },
+  "65": {
+    "name": "Maine Collision",
+    "inactive": false
+  },
+  "66": {
+    "name": "Rotunda",
+    "inactive": false
+  },
+  "67": {
+    "name": "Englishtown",
+    "inactive": false
+  },
+  "68": {
+    "name": "Evolve",
+    "inactive": false
+  },
+  "69": {
+    "name": "Vernon",
+    "inactive": false
+  },
+  "70": {
+    "name": "J.A.S. Auto",
+    "inactive": false
+  },
+  "71": {
+    "name": "Body & Paint Center",
+    "inactive": false
+  },
+  "72": {
+    "name": "Modern",
+    "inactive": false
+  },
+  "73": {
+    "name": "Binghamton",
+    "inactive": false
+  },
+  "74": {
+    "name": "Owego",
+    "inactive": false
+  },
+  "75": {
+    "name": "Vestal",
+    "inactive": false
+  },
+  "76": {
+    "name": "Waverly",
+    "inactive": false
+  },
+  "77": {
+    "name": "Norwich",
+    "inactive": false
+  },
+  "78": {
+    "name": "Mount Laurel",
+    "inactive": false
+  },
+  "79": {
+    "name": "Millville",
+    "inactive": false
+  },
+  "80": {
+    "name": "Cherry Hill",
+    "inactive": false
+  },
+  "81": {
+    "name": "NEK",
+    "inactive": false
+  },
+  "82": {
+    "name": "New Britain",
+    "inactive": false
+  },
+  "83": {
+    "name": "West Hartford",
+    "inactive": false
+  },
+  "84": {
+    "name": "Trevose",
+    "inactive": false
+  },
+  "85": {
+    "name": "Klapec",
+    "inactive": false
+  },
+  "86": {
+    "name": "Jasmin",
+    "inactive": false
+  },
+  "87": {
+    "name": "Joe DiIorio",
+    "inactive": false
+  },
+  "88": {
+    "name": "Above All",
+    "inactive": false
+  },
+  "89": {
+    "name": "Noaker's Truck Shop",
+    "inactive": false
+  }
+}

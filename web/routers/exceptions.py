@@ -27,6 +27,7 @@ from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
 from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, search_open_ap
 from src.matching.netsuite_status_codes import decode_netsuite_status
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
+from src.netsuite.locations import known_codes, shop_options
 
 router = APIRouter()
 
@@ -301,6 +302,9 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
         "searchable_reasons": SEARCHABLE_REASONS,
+        # The Find in NetSuite panel's Shop filter: NetSuite's own location
+        # names (config/netsuite_locations.json), starting on "Any shop".
+        "shop_options": shop_options(),
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
@@ -425,7 +429,7 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
                     use_vendor: bool = True, amount: str = "",
                     tolerance: str = "exact", invoice_contains: str = "",
                     statuses: str = "open", sort_amount: str = "",
-                    date_from: str = "", date_to: str = ""):
+                    date_from: str = "", date_to: str = "", locations: str = ""):
     """Open-AP search partial for the "Find in NetSuite" modal.
 
     STRICTLY READ-ONLY: this issues SELECTs against the Fabric Lakehouse
@@ -461,6 +465,9 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
         sort_amount=parsed_sort,
         date_from=date_from,
         date_to=date_to,
+        # Shop filter: comma-separated NetSuite location codes; unknown
+        # ones are dropped (src/netsuite/locations.py's known_codes()).
+        locations=known_codes(locations.split(",")) if locations else None,
     )
     return render(request, "_netsuite_search_results.html",
                   {"result": result, "last_sync": queries.get_last_netsuite_sync()})

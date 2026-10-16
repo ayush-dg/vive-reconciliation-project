@@ -885,3 +885,20 @@ select {
 @media (max-width: 720px) {
   .sp-stages { flex-direction: column; }
 }
+
+/* ---- "Find in NetSuite" as an always-open panel on the review page
+   (2026-10-16; it was a <dialog> modal). Reuses the modal's filter, table
+   and empty-state styles inside a card. Shop filter: a searchable list of
+   NetSuite location names with checkboxes. ---- */
+.ns-inline { margin: 18px 0 28px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.ns-inline-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
+.ns-inline .ns-modal-filters { padding: 12px 18px; }
+.ns-inline-body { padding: 0 18px; max-height: 560px; overflow: auto; }
+.ns-pop-shop { min-width: 250px; }
+.ns-shop-search { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+.ns-shop-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.ns-shop-list .ns-pop-check[hidden] { display: none; }
+@media (max-width: 720px) {
+  .ns-inline .ns-modal-filters, .ns-inline-head { padding-left: 12px; padding-right: 12px; }
+  .ns-inline-body { padding: 0 12px; overflow-x: auto; }
+}

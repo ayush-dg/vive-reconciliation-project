@@ -1,8 +1,9 @@
 """
 tests/test_netsuite_modal.py
 
-Render-level tests for the "Find in NetSuite" modal on the exception
-review page.
+Render-level tests for the "Find in NetSuite" search on the exception
+review page -- an always-open panel since 2026-10-16 (a <dialog> modal
+before; the class and test names still say "modal").
 
 The load-bearing assertion here is that the modal is LOOK-ONLY: it must
 never grow a form, an action, a method or a POST. Closing an exception
@@ -75,8 +76,8 @@ class TestFindButtonVisibility(unittest.TestCase):
         for reason in SEARCHABLE:
             with self.subTest(reason=reason):
                 html = _render(reason)
-                self.assertIn('id="nsFindBtn"', html)
-                self.assertIn("Find in NetSuite", html)
+                self.assertIn('id="nsPanel"', html)
+                self.assertIn("Find this invoice in NetSuite", html)
 
     def test_searchable_reasons_is_exactly_these_three(self):
         self.assertEqual(tuple(SEARCHABLE_REASONS), SEARCHABLE)
@@ -85,16 +86,16 @@ class TestFindButtonVisibility(unittest.TestCase):
         for reason in NOT_SEARCHABLE:
             with self.subTest(reason=reason):
                 html = _render(reason)
-                self.assertNotIn('id="nsFindBtn"', html)
-                self.assertNotIn('id="nsModal"', html)
+                self.assertNotIn('id="nsPanel"', html)
+                self.assertNotIn('id="nsResults"', html)
 
 
 class TestModalIsLookOnly(unittest.TestCase):
     """The whole point of the feature: it researches, it never resolves."""
 
     def _modal_markup(self, html):
-        start = html.index('<dialog class="ns-modal"')
-        return html[start:html.index("</dialog>", start)]
+        start = html.index('<section class="ns-inline"')
+        return html[start:html.index("</section>", start)]
 
     def test_modal_contains_no_form(self):
         modal = self._modal_markup(_render("Not Found in NetSuite"))
@@ -142,19 +143,23 @@ class TestModalIsLookOnly(unittest.TestCase):
         self.assertNotIn('type="checkbox"', rendered)
 
     def test_modal_is_outside_the_action_form(self):
-        """The page's Accept/Dispute <form> must close before the dialog
-        opens -- a dialog nested in that form would submit it."""
+        """The panel must not sit inside any form -- in the Accept/Reject
+        form, Enter in its search box would submit Accept. Since 2026-10-16
+        the panel comes first and the action form opens after it."""
         html = _render("Not Found in NetSuite")
         self.assertIn('id="action-form"', html)
-        self.assertLess(html.index("</form>"), html.index("<dialog"))
+        panel = html.index('<section class="ns-inline"')
+        before = html[:panel]
+        self.assertEqual(before.count("<form"), before.count("</form>"))
+        self.assertLess(html.index("</section>", panel), html.index('id="action-form"'))
 
 
 class TestModalMarkup(unittest.TestCase):
 
     def test_dialog_is_labelled(self):
         html = _render("Not Found in NetSuite")
-        self.assertIn('aria-labelledby="nsModalTitle"', html)
-        self.assertIn('id="nsModalTitle"', html)
+        self.assertIn('aria-labelledby="nsPanelTitle"', html)
+        self.assertIn('id="nsPanelTitle"', html)
 
     def test_chips_expose_state_to_assistive_tech(self):
         """All four chips are popover triggers now (2026-09-30) -- Vendor
@@ -193,8 +198,9 @@ class TestModalMarkup(unittest.TestCase):
 
     def test_every_id_the_javascript_looks_up_exists_exactly_once(self):
         html = _render("Not Found in NetSuite")
-        for el_id in ("nsFindBtn", "nsModal", "nsModalClose", "nsModalDone",
-                      "nsModalTitle", "nsResults", "nsInvoice", "nsInvoiceHint",
+        for el_id in ("nsPanel", "nsPanelTitle", "nsResults", "nsInvoice", "nsInvoiceHint",
+                      "nsChipShop", "nsChipShopValue", "nsPopShop", "nsClearShop",
+                      "nsShopSearch", "nsShopList",
                       "nsChipVendor", "nsChipVendorValue", "nsPopVendor",
                       "nsChipAmount", "nsChipAmountValue", "nsPopAmount", "nsAmountInput",
                       "nsChipDate", "nsChipDateValue", "nsPopDate",
@@ -228,8 +234,8 @@ class TestModalMarkup(unittest.TestCase):
         })
         self.assertIn("NetSuite record", html)
         self.assertIn("ns-panel", html)
-        # ...and the modal sits after it, not instead of it.
-        self.assertLess(html.index("NetSuite record"), html.index("<dialog"))
+        # ...and the search panel sits after it, not instead of it.
+        self.assertLess(html.index("NetSuite record"), html.index('<section class="ns-inline"'))
 
 
 
@@ -321,11 +327,11 @@ class TestChipBehaviourInAppJs(unittest.TestCase):
 
     def test_click_outside_closes_the_open_dropdown_in_capture_phase(self):
         self.assertIn(".parentElement.contains(ev.target)", self.js)
-        self.assertRegex(self.js, r'(?s)nsModal\.addEventListener\("click", function \(ev\) \{\s*const open = openFilter\(\);'
+        self.assertRegex(self.js, r'(?s)document\.addEventListener\("click", function \(ev\) \{\s*const open = openFilter\(\);'
                                   r'.*?\}, true\);')
 
     def test_escape_closes_only_the_open_dropdown(self):
-        handler = re.search(r'nsModal\.addEventListener\("keydown", function \(ev\) \{.*?\n    \}\);',
+        handler = re.search(r'nsPanel\.addEventListener\("keydown", function \(ev\) \{.*?\n    \}\);',
                             self.js, re.S).group(0)
         self.assertIn('if (ev.key !== "Escape" || !open) return;', handler)
         self.assertIn("ev.preventDefault();", handler)
@@ -449,7 +455,7 @@ class TestResultsPartialRendering(unittest.TestCase):
     def test_details_row_carries_ro_location_and_transaction(self):
         html = self._render_rows([dict(self.ROW)])
         self.assertIn("3104605", html)
-        self.assertIn("Location (code)", html)
+        self.assertIn('<span class="ns-details-key">Shop</span><span>10</span>', html)
         self.assertIn("VENDBILL1", html)
 
     def test_no_checkbox_anywhere_in_the_results_partial(self):

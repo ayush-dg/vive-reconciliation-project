@@ -15,11 +15,11 @@ Everything is optional and independent, because the whole point is
 dropping one filter at a time. That's why the WHERE clause is assembled
 from a list of (sql_fragment, params) pairs rather than written out per
 combination: a shop/location filter is one more pair appended to that
-list, with no restructuring. Location is deliberately NOT filterable in
-this version -- bronze.netsuite_vendorbill.location is a bare NetSuite
-internal code (e.g. "65", 86 distinct values) and nothing in this repo
-maps a code to a shop name, so a "JAS Auto" filter would have nothing
-to resolve against. The raw code is returned for display only.
+list, with no restructuring. Location is filterable since 2026-10-16:
+bronze.netsuite_vendorbill.location is a bare NetSuite internal code
+(e.g. "65"), and config/netsuite_locations.json -- NetSuite's own
+location list, see src/netsuite/locations.py -- names each code, so the
+Shop filter offers NetSuite's names and filters by code.
 
 Facts this module relies on, all confirmed live against Fabric
 2026-09-25 (re-check before changing any of them):
@@ -55,6 +55,7 @@ import logging
 import os
 
 from src.lakehouse.fabric_sql import execute_lakehouse_query
+from src.netsuite.locations import location_names
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,13 @@ def _entity_condition(entity_ids) -> tuple:
     return (f"t.entity IN ({placeholders})", list(entity_ids))
 
 
+def _location_condition(locations) -> tuple:
+    """The Shop filter (2026-10-16): NetSuite location codes, as the
+    Lakehouse stores them (strings like "64") -- see src/netsuite/locations.py."""
+    placeholders = ",".join("?" * len(locations))
+    return (f"t.location IN ({placeholders})", [str(code) for code in locations])
+
+
 def _amount_condition(bounds) -> tuple:
     low, high = bounds
     if high is None:
@@ -233,16 +241,16 @@ def _status_condition(table: str, statuses):
 
 def build_conditions(table: str, entity_ids=None, bounds=None,
                      invoice_contains=None, statuses=None,
-                     date_from=None, date_to=None) -> list:
+                     date_from=None, date_to=None, locations=None) -> list:
     """Assembles the WHERE clause as a list of (sql_fragment, params)
     pairs -- one pair per active filter, each independent of the others.
-
-    A location/shop filter slots in here as one more append once a
-    code-to-shop-name mapping exists; nothing else in this module needs
-    to change for that."""
+    `locations` (NetSuite location codes, the Shop filter) is one more
+    such pair since 2026-10-16."""
     conditions = [("t.voided = ?", ["F"]), ("t.tranid IS NOT NULL", [])]
     if entity_ids:
         conditions.append(_entity_condition(entity_ids))
+    if locations:
+        conditions.append(_location_condition(locations))
     if bounds:
         conditions.append(_amount_condition(bounds))
     if invoice_contains and invoice_contains.strip():
@@ -352,6 +360,7 @@ def _shape_row(row: dict) -> dict:
         "status_label": _status_label(row),
         "ro_number": row.get("custbody_cgh_ro"),
         "location_code": row.get("location"),
+        "location_name": location_names().get(str(row.get("location"))) if row.get("location") is not None else None,
         "transaction_number": row.get("transactionnumber"),
     }
 
@@ -480,7 +489,7 @@ def _validate_dates(date_from, date_to):
 def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
                    invoice_contains=None, statuses=None,
                    sort_amount=None, date_from=None, date_to=None,
-                   limit=DEFAULT_LIMIT) -> dict:
+                   locations=None, limit=DEFAULT_LIMIT) -> dict:
     """Searches NetSuite bills and credits. Best-effort, like the rest of
     the Fabric code: never raises to the caller -- on failure it returns
     error=True and the UI shows "search unavailable".
@@ -495,6 +504,10 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
     `statuses` (STATUSES membership, e.g. {"open"}/{"paid"}/{"open","paid"})
     replaced the old include_paid bool 2026-09-30 -- see
     _status_condition()'s own docstring for what each combination means.
+
+    `locations` (NetSuite location codes) narrows to those shops but, like
+    sorting, doesn't satisfy the guardrail on its own: one shop can hold
+    tens of thousands of bills.
 
     Every filter is optional. Returns a dict with rows (display-shaped,
     see _shape_row), row_count, truncated, error, needs_filter, message.
@@ -526,13 +539,13 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
 
     try:
         rows = _run_search(entity_ids, bounds, invoice_contains, statuses,
-                           sort_amount, parsed_from, parsed_to, limit)
+                           sort_amount, parsed_from, parsed_to, limit, locations)
     except Exception:
         logger.exception(
             "NetSuite open-AP search failed (entity_ids=%s amount=%s tolerance=%s "
-            "invoice_contains=%r statuses=%s sort_amount=%s date_from=%s date_to=%s)",
+            "invoice_contains=%r statuses=%s sort_amount=%s date_from=%s date_to=%s locations=%s)",
             entity_ids, amount, amount_tolerance, invoice_contains, statuses,
-            sort_amount, parsed_from, parsed_to,
+            sort_amount, parsed_from, parsed_to, locations,
         )
         return _empty_result(error=True, message="NetSuite search is unavailable right now.")
 
@@ -546,7 +559,7 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
 
 
 def _run_search(entity_ids, bounds, invoice_contains, statuses,
-                sort_amount, date_from, date_to, limit) -> list:
+                sort_amount, date_from, date_to, limit, locations=None) -> list:
     """Queries both tables and returns the combined display rows.
 
     Two separate round-trips rather than a SQL UNION: the two tables have
@@ -563,7 +576,7 @@ def _run_search(entity_ids, bounds, invoice_contains, statuses,
         conditions = build_conditions(
             table, entity_ids=entity_ids, bounds=bounds,
             invoice_contains=invoice_contains, statuses=statuses,
-            date_from=date_from, date_to=date_to,
+            date_from=date_from, date_to=date_to, locations=locations,
         )
         sql, params = _select_for(table, conditions, limit, order_by)
         rows.extend(_shape_row(raw) for raw in execute_lakehouse_query(sql, params))

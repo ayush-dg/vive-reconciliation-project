@@ -82,23 +82,26 @@ document.addEventListener("DOMContentLoaded", function () {
       .catch(function () {});
   }
 
-  // Exceptions review page: the "Find in NetSuite" modal. LOOK-ONLY --
-  // it GETs an HTML fragment from /netsuite-search and swaps it into the
-  // results area. Nothing here POSTs, resolves an exception, or changes
-  // any record -- rows are no longer selectable at all (2026-09-30; the
-  // old checkbox/footer-total feature is gone). The endpoint deliberately
-  // sits OUTSIDE /exceptions/, which is a {vendor_name:path} catch-all
-  // that would otherwise swallow it.
-  const nsFindBtn = document.getElementById("nsFindBtn");
-  const nsModal = document.getElementById("nsModal");
-  if (nsFindBtn && nsModal) {
-    const ctx = nsFindBtn.dataset;
+  // Exceptions review page: the "Find in NetSuite" panel -- always open
+  // and searching as soon as the page loads (2026-10-16; a modal behind a
+  // button before). LOOK-ONLY -- it GETs an HTML fragment from
+  // /netsuite-search and swaps it into the results area. Nothing here
+  // POSTs, resolves an exception, or changes any record -- rows are not
+  // selectable (2026-09-30). The endpoint deliberately sits OUTSIDE
+  // /exceptions/, which is a {vendor_name:path} catch-all that would
+  // otherwise swallow it.
+  const nsPanel = document.getElementById("nsPanel");
+  if (nsPanel) {
+    const ctx = nsPanel.dataset;
     const nsResults = document.getElementById("nsResults");
     const nsInvoice = document.getElementById("nsInvoice");
     const nsInvoiceHint = document.getElementById("nsInvoiceHint");
     const nsAmountInput = document.getElementById("nsAmountInput");
     const nsStatusOpen = document.getElementById("nsStatusOpen");
     const nsStatusPaid = document.getElementById("nsStatusPaid");
+    const nsShopSearch = document.getElementById("nsShopSearch");
+    const nsShopBoxes = Array.prototype.slice.call(
+      document.querySelectorAll("#nsShopList input[type=checkbox]"));
 
     // Fewer than this many non-space characters is not selective enough
     // to search by invoice number alone -- mirrors
@@ -126,6 +129,9 @@ document.addEventListener("DOMContentLoaded", function () {
       const invoiceChars = (ctx.invoice || "").replace(/\s+/g, "").length;
       return {
         useVendor: true,
+        // Shop: NetSuite location codes ticked in the Shop list. Always
+        // starts on "Any shop" (2026-10-16).
+        shops: [],
         tolerance: "exact",
         amount: isAmountMismatch ? "" : (ctx.amount || ""),
         statuses: isAmountMismatch ? ["open", "paid"] : ["open"],
@@ -159,6 +165,17 @@ document.addEventListener("DOMContentLoaded", function () {
       return state.statuses[0] === "paid" ? "Paid" : "Open";
     }
 
+    function shopName(code) {
+      const box = nsShopBoxes.find(function (b) { return b.value === code; });
+      return box ? box.dataset.name : code;
+    }
+
+    function shopChipText() {
+      if (!state.shops.length) return "Any shop";
+      const first = shopName(state.shops[0]);
+      return state.shops.length === 1 ? first : first + " +" + (state.shops.length - 1);
+    }
+
     function dateChipText() {
       if (state.range === "custom") {
         return (state.dateFrom || "…") + " → " + (state.dateTo || "…");
@@ -166,11 +183,12 @@ document.addEventListener("DOMContentLoaded", function () {
       return DATE_LABELS[state.range] || "Any time";
     }
 
-    // The four filter chips: the chip button, its dropdown, and its x
-    // (clear) button -- a sibling of the chip, since a button can't nest
-    // inside another (2026-10-06).
+    // The filter chips: the chip button, its dropdown, and its x (clear)
+    // button -- a sibling of the chip, since a button can't nest inside
+    // another (2026-10-06). Shop added 2026-10-16.
     const FILTERS = {
       vendor: { chip: "nsChipVendor", pop: "nsPopVendor", clear: "nsClearVendor" },
+      shop: { chip: "nsChipShop", pop: "nsPopShop", clear: "nsClearShop" },
       amount: { chip: "nsChipAmount", pop: "nsPopAmount", clear: "nsClearAmount" },
       date: { chip: "nsChipDate", pop: "nsPopDate", clear: "nsClearDate" },
       status: { chip: "nsChipStatus", pop: "nsPopStatus", clear: "nsClearStatus" }
@@ -181,6 +199,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // (CLEAR_TO_ANY below).
     function filterIsSet(name) {
       if (name === "vendor") return state.useVendor;
+      if (name === "shop") return state.shops.length > 0;
       if (name === "amount") return !!state.amount.trim();
       if (name === "date") return state.range !== "any";
       return state.statuses.length === 1;
@@ -192,6 +211,7 @@ document.addEventListener("DOMContentLoaded", function () {
     // defaults (defaultState()).
     const CLEAR_TO_ANY = {
       vendor: function () { state.useVendor = false; },
+      shop: function () { state.shops = []; },
       amount: function () { state.amount = ""; state.tolerance = "exact"; },
       date: function () { state.range = "any"; state.dateFrom = ""; state.dateTo = ""; },
       status: function () { state.statuses = ["open", "paid"]; }
@@ -200,6 +220,7 @@ document.addEventListener("DOMContentLoaded", function () {
     function renderChips() {
       document.getElementById("nsChipVendorValue").textContent =
         state.useVendor ? (ctx.vendorDisplay || "This vendor") : "Any vendor";
+      document.getElementById("nsChipShopValue").textContent = shopChipText();
       document.getElementById("nsChipAmountValue").textContent = amountChipText();
       document.getElementById("nsChipDateValue").textContent = dateChipText();
       document.getElementById("nsChipStatusValue").textContent = statusChipText();
@@ -245,7 +266,8 @@ document.addEventListener("DOMContentLoaded", function () {
         invoice_contains: invoiceCharCount() >= MIN_INVOICE_CHARS ? state.invoice : "",
         statuses: state.statuses.join(","),
         date_from: dates[0],
-        date_to: dates[1]
+        date_to: dates[1],
+        locations: state.shops.join(",")
       });
       nsResults.innerHTML = '<div class="ns-modal-empty">Searching…</div>';
       fetch("/netsuite-search?" + params.toString())
@@ -306,6 +328,26 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     nsStatusOpen.addEventListener("change", updateStatusesFromCheckboxes);
     nsStatusPaid.addEventListener("change", updateStatusesFromCheckboxes);
+
+    // Shop list: ticking a box searches again (the dropdown stays open so
+    // several can be ticked); the box above it narrows the list by name.
+    let shopDebounce = null;
+    nsShopBoxes.forEach(function (box) {
+      box.addEventListener("change", function () {
+        state.shops = nsShopBoxes.filter(function (b) { return b.checked; })
+          .map(function (b) { return b.value; });
+        renderChips();
+        clearTimeout(shopDebounce);
+        shopDebounce = setTimeout(runSearch, 300);
+      });
+    });
+    function filterShopList() {
+      const q = nsShopSearch.value.trim().toLowerCase();
+      nsShopBoxes.forEach(function (box) {
+        box.parentElement.hidden = !!q && box.parentElement.dataset.name.indexOf(q) === -1;
+      });
+    }
+    nsShopSearch.addEventListener("input", filterShopList);
 
     function closePopovers(except) {
       Object.keys(FILTERS).forEach(function (name) {
@@ -400,6 +442,9 @@ document.addEventListener("DOMContentLoaded", function () {
       nsStatusPaid.checked = state.statuses.indexOf("paid") !== -1;
       document.getElementById("nsDateFrom").value = state.dateFrom;
       document.getElementById("nsDateTo").value = state.dateTo;
+      nsShopBoxes.forEach(function (box) { box.checked = state.shops.indexOf(box.value) !== -1; });
+      nsShopSearch.value = "";
+      filterShopList();
     }
 
     document.getElementById("nsReset").addEventListener("click", function () {
@@ -411,52 +456,31 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     document.getElementById("nsReload").addEventListener("click", runSearch);
 
-    // --- open / close -------------------------------------------------
-    function openModal() {
-      state = defaultState();
-      applyStateToInputs();
-      renderChips();
-      nsModal.showModal();
-      runSearch();
-    }
-    function closeModal() {
-      closePopovers(null);
-      if (nsModal.open) { nsModal.close(); }
-    }
-
-    nsFindBtn.addEventListener("click", openModal);
-    document.getElementById("nsModalClose").addEventListener("click", closeModal);
-    document.getElementById("nsModalDone").addEventListener("click", closeModal);
     // An open dropdown closes on a click anywhere outside its own chip,
-    // x and dropdown. Capture phase, so it still runs for controls that
-    // stop propagation (the results' Details toggles). Clicks inside it
-    // -- the amount box, the date inputs, the status checkboxes -- keep
-    // it open.
-    nsModal.addEventListener("click", function (ev) {
+    // x and dropdown -- on the page, not just in the panel. Capture phase,
+    // so it still runs for controls that stop propagation (the results'
+    // Details toggles). Clicks inside it -- the amount box, the date
+    // inputs, the status and shop checkboxes -- keep it open.
+    document.addEventListener("click", function (ev) {
       const open = openFilter();
       if (open && !document.getElementById(FILTERS[open].pop).parentElement.contains(ev.target)) {
         closePopovers(null);
       }
     }, true);
     // Escape with a dropdown open closes only that dropdown and returns
-    // focus to its chip -- preventDefault() on the keydown keeps <dialog>
-    // from also treating it as "cancel". With none open, Escape closes
-    // the modal as before.
-    nsModal.addEventListener("keydown", function (ev) {
+    // focus to its chip.
+    nsPanel.addEventListener("keydown", function (ev) {
       const open = openFilter();
       if (ev.key !== "Escape" || !open) return;
       ev.preventDefault();
       closePopovers(null);
       document.getElementById(FILTERS[open].chip).focus();
     });
-    // Clicking the backdrop: <dialog> reports clicks on the backdrop as
-    // clicks on the dialog element itself, so anything landing directly
-    // on it (rather than on a child) is a backdrop click.
-    nsModal.addEventListener("click", function (ev) {
-      if (ev.target === nsModal) { closeModal(); }
-    });
-    // Esc fires "cancel" natively; returning focus is our job.
-    nsModal.addEventListener("close", function () { nsFindBtn.focus(); });
+
+    // Always open: search straight away with this exception's defaults.
+    applyStateToInputs();
+    renderChips();
+    runSearch();
   }
 
   // "Past syncs" picker (2026-10-01): a fixed-label button plus a

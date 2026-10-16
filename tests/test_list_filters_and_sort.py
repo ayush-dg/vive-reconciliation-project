@@ -329,7 +329,8 @@ class TestReviewPageCarriesSort(unittest.TestCase):
 
     def test_modal_still_has_no_form(self):
         html = _render_review()
-        modal = html[html.index('<dialog class="ns-modal"'):html.index("</dialog>")]
+        start = html.index('<section class="ns-inline"')  # a panel since 2026-10-16
+        modal = html[start:html.index("</section>", start)]
         self.assertNotIn("<form", modal)
 
 

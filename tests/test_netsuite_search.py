@@ -369,7 +369,7 @@ class TestNetsuiteSearchRoute(unittest.TestCase):
             resp = self.client.get("/netsuite-search", params={"amount": "195.65"})
         self.assertEqual(resp.status_code, 200)
         self.assertIn("390617", resp.text)
-        self.assertIn("Location (code)", resp.text)
+        self.assertIn('<span class="ns-details-key">Shop</span>', resp.text)
         # A partial, not a whole page.
         self.assertNotIn("<html", resp.text.lower())
 
