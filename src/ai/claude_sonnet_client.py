@@ -62,6 +62,21 @@ NOT_A_STATEMENT = "NOT_A_STATEMENT"
 # generate_with_file() never retries.
 READ_TIMEOUT_ERROR = "READ_TIMEOUT"
 
+
+def continuation_note(columns: list, enforce: bool = False) -> str:
+    """Appended to EXTRACTION_PROMPT for parts 2+ of a split statement
+    (2026-10-16): part 1's columns_found, so a part whose pages print no
+    header reads the same columns under the same names. enforce=True is the
+    one retry after a part came back with different columns."""
+    listed = ", ".join(json.dumps(c) for c in columns)
+    if enforce:
+        return ("\n\nIMPORTANT - CONTINUATION PAGES: these pages continue a statement whose first pages were already "
+                f"read. Use EXACTLY these columns_found, in this order, and exactly these keys in every row: [{listed}]. "
+                "Do not rename, add, drop or reorder any column, even where these pages print no header.")
+    return ("\n\nCONTINUATION PAGES: these pages continue a statement whose first pages were already read with "
+            f"columns_found [{listed}]. Use exactly these column names, in this order, unless these pages print a "
+            "different table.")
+
 # Applied to a row's line_confidence only when the model omits a "confidence"
 # field, or returns something unparseable/out-of-range — deliberately below
 # the 0.0 validate_invoice() threshold (config/validation/extraction_rules.json)
@@ -558,30 +573,62 @@ class ClaudeSonnetClient(AIClient):
         attempts = 0
         parsed_parts, sent_parts = [], []
         queue = list(plan.parts)
-        while queue:
-            part = queue.pop(0)
-            outcome = self._request_parsed(part.data, temperature, max_tokens)
-            attempts += outcome["attempts"]
-            if outcome["error"] is not None:
-                if outcome["error"] == "truncated" and part.last_page > part.first_page:
-                    middle = (part.first_page + part.last_page) // 2
-                    print(f"  [ClaudeSonnetClient] Response for pages {part.first_page}-{part.last_page} was cut off "
-                          f"— re-sending as pages {part.first_page}-{middle} and {middle + 1}-{part.last_page}")
-                    queue = self._split_part(pdf_path, part, middle) + queue
-                    continue
-                error = ("Response appears truncated — falling back" if outcome["error"] == "truncated"
-                         else outcome["error"])
-                if len(plan.parts) > 1 or sent_parts or queue:
-                    error = f"part pages {part.first_page}-{part.last_page} failed: {error} — whole statement failed"
-                return failed(error, attempts)
-            parsed_parts.append(outcome["parsed"])
-            sent_parts.append(part)
+        # Columns carried forward (2026-10-16): parts are sent strictly in
+        # page order; the first part's columns_found is passed to every
+        # later part (continuation_note), each later part's columns_found
+        # must equal it -- one retry with the list enforced, else the whole
+        # statement fails. A file sent in one request never carries a list.
+        carried, carry_notes = None, []
+        try:
+            while queue:
+                part = queue.pop(0)
+                self._continuation_columns, self._continuation_enforced = carried, False
+                outcome = self._request_parsed(part.data, temperature, max_tokens)
+                attempts += outcome["attempts"]
+                if outcome["error"] is not None:
+                    if outcome["error"] == "truncated" and part.last_page > part.first_page:
+                        middle = (part.first_page + part.last_page) // 2
+                        print(f"  [ClaudeSonnetClient] Response for pages {part.first_page}-{part.last_page} was cut off "
+                              f"— re-sending as pages {part.first_page}-{middle} and {middle + 1}-{part.last_page}")
+                        queue = self._split_part(pdf_path, part, middle) + queue
+                        continue
+                    error = ("Response appears truncated — falling back" if outcome["error"] == "truncated"
+                             else outcome["error"])
+                    if len(plan.parts) > 1 or sent_parts or queue:
+                        error = f"part pages {part.first_page}-{part.last_page} failed: {error} — whole statement failed"
+                    return failed(error, attempts)
+                pages = f"pages {part.first_page}-{part.last_page}"
+                got = list(outcome["parsed"].get("columns_found") or [])
+                if carried is None:
+                    if queue or sent_parts:  # a split statement: this first part's list is carried forward
+                        carried = got or None
+                elif got != carried:
+                    print(f"  [ClaudeSonnetClient] {pages} returned columns {got}, not part 1's {carried} "
+                          f"— retrying once with the list enforced")
+                    self._continuation_enforced = True
+                    retry = self._request_parsed(part.data, temperature, max_tokens)
+                    attempts += retry["attempts"]
+                    retry_cols = list((retry["parsed"] or {}).get("columns_found") or []) if retry["parsed"] else None
+                    if retry["error"] is not None or retry_cols != carried:
+                        why = retry["error"] or f"columns {retry_cols}"
+                        return failed(f"part {pages} did not use part 1's columns {carried} ({why}, after one retry "
+                                      f"with the list enforced) — whole statement failed", attempts)
+                    outcome = retry
+                    carry_notes.append(f"{pages}: sent with part 1's column list; first answer {got}; matched after "
+                                       f"the enforced retry")
+                else:
+                    carry_notes.append(f"{pages}: sent with part 1's column list ({len(carried)} columns); matched")
+                parsed_parts.append(outcome["parsed"])
+                sent_parts.append(part)
+        finally:
+            self._continuation_columns, self._continuation_enforced = None, False
 
         if len(parsed_parts) == 1 and sent_parts[0].first_page == 1 and sent_parts[0].last_page == plan.pages:
             parsed = parsed_parts[0]
         else:
             order = sorted(range(len(sent_parts)), key=lambda i: sent_parts[i].first_page)
             parsed = merge_chunk_results([sent_parts[i] for i in order], [parsed_parts[i] for i in order])
+            parsed["_merge_notes"] = list(parsed.get("_merge_notes") or []) + carry_notes
             for note in parsed.get("_merge_notes") or []:
                 print(f"  [ClaudeSonnetClient]   merge: {note}")
 
@@ -771,7 +818,9 @@ class ClaudeSonnetClient(AIClient):
                         },
                         {
                             "type": "text",
-                            "text": EXTRACTION_PROMPT,
+                            "text": EXTRACTION_PROMPT + (
+                                continuation_note(self._continuation_columns, getattr(self, "_continuation_enforced", False))
+                                if getattr(self, "_continuation_columns", None) else ""),
                         },
                     ],
                 }],

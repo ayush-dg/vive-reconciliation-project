@@ -310,5 +310,128 @@ class TestClientWithParts(_Case):
         self.assertEqual(sha(path), before)
 
 
+def column_model(rename_pages=(), stubborn=False, cut_off_pages=()):
+    """A fake that also answers columns_found: parts holding a page in
+    rename_pages answer different column names -- unless the part was sent
+    with the list enforced (stubborn: even then). Records, per call, the
+    pages sent and the carried list the client set."""
+    calls = []
+
+    def call(self, pdf_b64, temperature, max_tokens):
+        data = base64.standard_b64decode(pdf_b64)
+        pages = pages_in(data)
+        carried = getattr(self, "_continuation_columns", None)
+        enforced = getattr(self, "_continuation_enforced", False)
+        calls.append({"pages": pages, "carried": carried, "enforced": enforced})
+        self._last_stop_reason = "end_turn"
+        if len(pages) > 1 and set(pages) & set(cut_off_pages):
+            self._last_stop_reason = "max_tokens"
+        renamed = bool(set(pages) & set(rename_pages)) and (stubborn or not enforced)
+        names = ["Date", "Inv #", "Amt"] if renamed else ["DATE", "INVOICE", "AMOUNT"]
+        rows = []
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            for page in doc:
+                for line in page.get_text().splitlines():
+                    if line.startswith("08/"):
+                        date, inv, amount = line.split()
+                        rows.append(dict(zip(names, (date, inv, float(amount))), confidence=0.95))
+        body = {"vendor_name": "Synthetic Supply", "statement_date": "08/31/26", "statement_total_as_printed": None,
+                "columns_found": names, "rows": rows}
+        return True, json.dumps(body), None
+    return call, calls
+
+
+class TestCarriedColumns(_Case):
+    """2026-10-16: parts 2+ of a split statement get part 1's columns_found."""
+
+    run_client = TestClientWithParts.run_client
+
+    def test_later_parts_get_part_ones_list_and_are_sent_in_order(self):
+        path = self.make(text_pdf(6))
+        model, calls = column_model()
+        response = self.run_client(path, model, max_pages=2)
+        self.assertTrue(response.success, response.error)
+        self.assertEqual([c["pages"] for c in calls], [[1, 2], [3, 4], [5, 6]])
+        self.assertEqual([c["carried"] for c in calls], [None, ["DATE", "INVOICE", "AMOUNT"], ["DATE", "INVOICE", "AMOUNT"]])
+        self.assertFalse(any(c["enforced"] for c in calls))
+        message = next(w["message"] for w in response.parsed_json["warnings"] if w["code"] == "UPLOAD_PREPROCESSED")
+        self.assertIn("pages 3-4: sent with part 1's column list (3 columns); matched", message)
+        self.assertIn("pages 5-6: sent with part 1's column list (3 columns); matched", message)
+
+    def test_different_names_are_detected_retried_enforced_and_then_pass(self):
+        path = self.make(text_pdf(6))
+        model, calls = column_model(rename_pages=(4,))
+        response = self.run_client(path, model, max_pages=2)
+        self.assertTrue(response.success, response.error)
+        self.assertEqual([(c["pages"], c["enforced"]) for c in calls],
+                         [([1, 2], False), ([3, 4], False), ([3, 4], True), ([5, 6], False)])
+        self.assertEqual(len(response.parsed_json["invoices"]), 18)
+        message = next(w["message"] for w in response.parsed_json["warnings"] if w["code"] == "UPLOAD_PREPROCESSED")
+        self.assertIn("pages 3-4: sent with part 1's column list; first answer ['Date', 'Inv #', 'Amt']; matched after the "
+                      "enforced retry", message)
+
+    def test_still_different_after_the_retry_fails_the_whole_statement(self):
+        path = self.make(text_pdf(6))
+        model, calls = column_model(rename_pages=(5,), stubborn=True)
+        response = self.run_client(path, model, max_pages=2)
+        self.assertFalse(response.success)
+        self.assertIn("part pages 5-6 did not use part 1's columns ['DATE', 'INVOICE', 'AMOUNT']", response.error)
+        self.assertIn("whole statement failed", response.error)
+        self.assertIsNone(response.parsed_json)
+        self.assertEqual(sum(1 for c in calls if c["pages"] == [5, 6]), 2)  # sent, then retried once
+
+    def test_a_single_request_file_never_carries_a_list(self):
+        path = self.make(text_pdf(3))
+        model, calls = column_model()
+        response = self.run_client(path, model)
+        self.assertTrue(response.success, response.error)
+        self.assertEqual(calls, [{"pages": [1, 2, 3], "carried": None, "enforced": False}])
+
+    def test_a_cut_off_later_part_is_re_split_and_both_halves_get_the_list(self):
+        path = self.make(text_pdf(8))
+        model, calls = column_model(cut_off_pages=(6,))
+        response = self.run_client(path, model, max_pages=4)
+        self.assertTrue(response.success, response.error)
+        self.assertEqual([c["pages"] for c in calls], [[1, 2, 3, 4], [5, 6, 7, 8], [5, 6], [5], [6], [7, 8]])
+        self.assertEqual([c["carried"] for c in calls[1:]], [["DATE", "INVOICE", "AMOUNT"]] * 5)
+        self.assertEqual([i["invoice_number"] for i in response.parsed_json["invoices"]],
+                         [f"INV-{k}-{r}" for k in range(1, 9) for r in range(3)])
+
+    def _payload_texts(self, path, max_pages):
+        """The prompt text the REAL _real_file_call puts in each request (requests.post mocked)."""
+        from src.ai import claude_sonnet_client as csc
+        texts = []
+
+        def post(url, headers=None, json=None, timeout=None):
+            data = base64.standard_b64decode(json["messages"][0]["content"][0]["source"]["data"])
+            texts.append((pages_in(data), json["messages"][0]["content"][1]["text"]))
+            rows = [{"DATE": "08/01/26", "INVOICE": f"INV-{p}-0", "AMOUNT": 10.0} for p in pages_in(data)]
+            body = {"vendor_name": "Synthetic Supply", "columns_found": ["DATE", "INVOICE", "AMOUNT"], "rows": rows}
+            resp = mock.Mock(status_code=200, text="")
+            resp.json.return_value = {"stop_reason": "end_turn", "usage": {"input_tokens": 1, "output_tokens": 1},
+                                      "content": [{"type": "text", "text": globals()["json"].dumps(body)}]}
+            resp.raise_for_status.return_value = None
+            return resp
+        c = client()
+        c.endpoint = "https://example.invalid"
+        planner = lambda p: up.plan_upload(p, max_bytes=c.MAX_UPLOAD_PDF_BYTES, max_pages=max_pages, gate=OK_GATE)
+        with mock.patch.object(csc.requests, "post", post), mock.patch.object(c, "_upload_plan", planner), \
+                mock.patch.object(c, "_detect_truncation", lambda *a, **k: None), mock.patch("builtins.print"):
+            response = c.generate_with_file(path, "")
+        self.assertTrue(response.success, response.error)
+        return texts
+
+    def test_single_request_payload_is_exactly_todays_prompt(self):
+        from src.ai.claude_sonnet_client import EXTRACTION_PROMPT
+        texts = self._payload_texts(self.make(text_pdf(3)), max_pages=16)
+        self.assertEqual(texts, [([1, 2, 3], EXTRACTION_PROMPT)])
+
+    def test_split_payload_adds_the_continuation_note_to_later_parts_only(self):
+        from src.ai.claude_sonnet_client import EXTRACTION_PROMPT, continuation_note
+        texts = self._payload_texts(self.make(text_pdf(4)), max_pages=2)
+        self.assertEqual(texts[0], ([1, 2], EXTRACTION_PROMPT))
+        self.assertEqual(texts[1], ([3, 4], EXTRACTION_PROMPT + continuation_note(["DATE", "INVOICE", "AMOUNT"])))
+
+
 if __name__ == "__main__":
     unittest.main()

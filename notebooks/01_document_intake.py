@@ -70,7 +70,7 @@ from src.extraction.python_library.adapter import (
 )
 from src.validation.arithmetic_gate import (
     compute_arithmetic_validation, compute_statement_total_from_invoices, compute_vendor_column_total,
-    validate_with_fallbacks,
+    try_pdf_full_match, validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
@@ -1249,6 +1249,9 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
             with_ocr = validate(ocr_previous_balance)
             if with_ocr["status"] == "matches":
                 validation, previous_balance = with_ocr, ocr_previous_balance
+        # The very last fallback: the extraction matches the PDF cell by cell
+        # (pdf_full_match, 2026-10-16). Only after everything above failed.
+        validation = try_pdf_full_match(validation, schema_result.get("invoices") or [], pdf_path)
         if validation["status"] == "total_not_found":
             validation = _rows_only_status(validation, schema_result.get("invoices") or [], pdf_path)
         sources = {k: v for k, v in (("printed_total_source", printed_source),

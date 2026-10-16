@@ -27,6 +27,16 @@ Tekion), every row verified, at least one store complete (printed row numbers
 1..N with no duplicates. The printed total there is the group's, so it is
 recorded, not reconciled.
 
+pdf_full_match (check_pdf_full_match, 2026-10-16, user decision): the gate's
+very last fallback -- a pass when the extraction matches the PDF cell by
+cell, whether or not any total equation reconciles. Every PDF transaction
+line has exactly one extracted row and vice versa; every column printed in
+the table header is present in the extraction (a printed column the
+extraction lacks fails -- Chuck's missing Due column); and every cell is
+compared in its own column: amounts to the cent with their printed sign,
+dates as dates, invoice/reference numbers exactly (O/0, l/I/1 only), free
+text normalised for case, spacing and punctuation.
+
 check_rows_only: for a statement with no printed total anywhere on the PDF --
 rows verified both ways, no equation. Passing it is the statement's pass
 (validation_method "pdf_rows_no_total", set by the intake); any row problem,
@@ -1171,4 +1181,249 @@ def check_rows_only(rows, pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, prin
         result.update(status="rows_do_not_match", offending_rows=failures[:10])
     else:
         result.update(status="rows_verified", reason="")
+    return result
+
+
+# --------------------------------------------------------------------------
+# pdf_full_match: every row and every column, no equation (2026-10-16)
+# --------------------------------------------------------------------------
+
+FULL_MATCH_LABEL = "PDF full match (every row and column)"
+# _raw_row keys that are not printed columns: the model's per-row
+# confidence, its section name and the split-upload page tag.
+_NOT_A_COLUMN = frozenset({"confidence", "section", "_page"})
+_MONEY_KINDS = frozenset({"charge", "credit", "signed", "balance", "unalloc", "total"})
+
+
+def _squash(text) -> str:
+    return re.sub(r"[^0-9a-z]", "", str(text or "").lower())
+
+
+def _norm_text(text) -> str:
+    """Free text compared without case, spacing or punctuation."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]|_", " ", str(text or "").lower())).strip()
+
+
+def _cell_kind(column) -> str:
+    role = column["role"]
+    if role == "date":
+        return "date"
+    if role == "ref":
+        return "ref"
+    if role in _MONEY_KINDS:
+        return "money"
+    return "text"
+
+
+def _blank(value) -> bool:
+    return value is None or str(value).strip() == ""
+
+
+def _as_money(value) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return round(float(value), 2)
+    return parse_money(re.sub(r"\s+", "", str(value)))
+
+
+def _same_date(a, b) -> bool:
+    da, db = parse_date(a), parse_date(b)
+    if da is None or db is None:
+        return False
+    if da.year == 2000 or db.year == 2000:  # a printed date with no year
+        return (da.month, da.day) == (db.month, db.day)
+    return da == db
+
+
+def cell_equals(kind: str, extracted, printed: str) -> bool:
+    """One extracted cell against the text printed in its column."""
+    if _blank(extracted) or _blank(printed):
+        return _blank(extracted) and _blank(printed)
+    if kind == "money":
+        e, p = _as_money(extracted), _as_money(printed)
+        return e is not None and p is not None and abs(e - p) <= _CENT
+    if kind == "date":
+        return _same_date(extracted, printed)
+    if kind == "ref":
+        return norm_invoice(extracted) == norm_invoice(printed) != ""
+    e_money, p_money = _as_money(extracted), _as_money(printed)
+    if e_money is not None and p_money is not None:
+        return abs(e_money - p_money) <= _CENT
+    return _norm_text(extracted) == _norm_text(printed)
+
+
+def _column_map(columns, keys):
+    """({id(printed header column): extracted key}, [printed headers with no
+    extracted column]). A header matches the key whose name is the same once
+    case, spacing and punctuation are dropped, else the one key (3+
+    characters) containing it or contained in it."""
+    def squash(text):  # the invoice-number O/0, l/I/1 tolerance too (Chuck's "Sls" read as "SIs")
+        return _squash(str(text or "").translate(_INVOICE_TRANSLATE))
+
+    mapping, missing, taken = {}, [], set()
+    for c in columns:
+        sq = squash(c["text"])
+        same = [k for k in keys if squash(k) == sq]
+        near = [k for k in keys if len(sq) >= 3 and len(squash(k)) >= 3 and (sq in squash(k) or squash(k) in sq)]
+        key = same[0] if len(same) == 1 else (near[0] if not same and len(near) == 1 else None)
+        if key is None or key in taken:
+            missing.append(c["text"])
+            continue
+        mapping[id(c)] = key
+        taken.add(key)
+    return mapping, missing
+
+
+def _find_value_words(words, value, free):
+    """The word(s) on a line holding `value` (one word, or up to four
+    consecutive ones), only among word ids in `free`; None if absent."""
+    target_money, target_text = _as_money(value), _norm_text(value)
+    for size in (1, 2, 3, 4):
+        for start in range(0, len(words) - size + 1):
+            run = words[start:start + size]
+            if not all(id(w) in free for w in run):
+                continue
+            text = " ".join(w["text"] for w in run)
+            if target_money is not None:
+                if _as_money(text) is not None and abs(_as_money(text) - target_money) <= _CENT:
+                    return run
+            elif target_text and _norm_text(text) == target_text:
+                return run
+    return None
+
+
+def check_pdf_full_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
+    """Gate method "pdf_full_match" (see the module docstring). Runs only
+    after every other method has failed and can only add a pass."""
+    started = time.monotonic()
+    if not pdf_path:
+        return _not_applicable("no PDF available")
+    if not rows:
+        return _not_applicable("no rows")
+    if not all(isinstance(inv.get("_raw_row"), dict) and inv["_raw_row"] for inv in rows):
+        return _not_applicable("a row has no extracted cells (_raw_row) to compare")
+    try:
+        pages, table, matches, failures, rereads = _analyse(rows, pdf_path, budget_seconds)
+    except NotVerified as e:
+        return {"applicable": True, "passed": False, "computed": None, "reason": f"not verified: {e}",
+                "seconds": round(time.monotonic() - started, 2)}
+    result = _row_result(pages, table, rows, matches, failures, rereads, started)
+    if failures:
+        return result
+    if len(matches) != len(rows) or len({id(line) for _, line in matches}) != len(matches):
+        result["reason"] = "rows and PDF lines are not one-to-one"
+        return result
+    keys = []
+    for inv in rows:
+        keys += [k for k in inv["_raw_row"] if k not in _NOT_A_COLUMN and k not in keys]
+    reread = _Rereader(pdf_path, started + budget_seconds) if any(p["source"] == "ocr" for p in pages) else None
+    column_report, problems, unlabelled_keys = OrderedDict(), [], []
+    for inv, line in matches:
+        columns = line["columns"] or []
+        mapping, missing = _column_map(columns, keys)
+        if missing:
+            problems.append(f"printed column(s) {missing} not in the extraction (p{line['page']})")
+            break
+        unlabelled = [k for k in keys if k not in set(mapping.values())]
+        unlabelled_keys = unlabelled_keys or unlabelled
+        raw = inv["_raw_row"]
+        free = {id(w) for w in line["words"]}
+        # A column the PDF prints without a header (the model's UNLABELED_*
+        # columns) claims its words first, so they can't be taken for a
+        # neighbouring labelled column's cell.
+        for key in unlabelled:
+            entry = column_report.setdefault(key, {"printed": None, "extracted_as": key, "kind": "unlabelled",
+                                                   "cells": 0, "ok": 0})
+            entry["cells"] += 1
+            if _blank(raw.get(key)):
+                entry["ok"] += 1
+                continue
+            run = _find_value_words(line["words"], raw.get(key), free)
+            if run is None:
+                entry.setdefault("problem", f"p{line['page']}: {raw.get(key)!r} not on the line")
+                problems.append(f"unlabelled column {key}: {raw.get(key)!r} not on the PDF line (p{line['page']})")
+                continue
+            entry["ok"] += 1
+            free -= {id(w) for w in run}
+        # The line's words, left to right, must be used up exactly by the
+        # row's cells in header order: a printed value no cell holds, or a
+        # cell whose value is not printed next, fails. Amounts, dates and
+        # references must also sit under their own header (wrong column =
+        # fail); free text may run past its header's edges, as printed text
+        # does.
+        words = sorted((w for w in line["words"] if id(w) in free), key=lambda w: w["x0"])
+        pos, line_failed = 0, False
+        for c in sorted(columns, key=lambda col: col["x0"]):
+            key = mapping[id(c)]
+            value = raw.get(key)
+            kind = _cell_kind(c)
+            entry = column_report.setdefault(c["text"], {"printed": c["text"], "extracted_as": key, "kind": kind,
+                                                         "cells": 0, "ok": 0})
+            entry["cells"] += 1
+            if _blank(value):
+                entry["ok"] += 1  # a value printed here anyway is left over -> caught below
+                continue
+            run, problem = None, None
+            if kind == "money" and _as_money(value) is None:
+                # An amount column whose extracted cell is not an amount -- e.g.
+                # Autoly's "Due" amount merged into the description text
+                # ("650.00 2015 MERCEDES ...") -- means the amount was never
+                # extracted: the same failure as Chuck's missing Due column.
+                problem = f"amount column {c['text']} holds non-amount {value!r}"
+                entry.setdefault("problem", f"p{line['page']} {inv.get('invoice_number')}: {problem}")
+                problems.append(f"{c['text']}: {inv.get('invoice_number')} {problem} (p{line['page']})")
+                line_failed = True
+                break
+            for k in range(1, min(16, len(words) - pos) + 1):
+                if cell_equals(kind, value, " ".join(w["text"] for w in words[pos:pos + k])):
+                    run = words[pos:pos + k]
+                    break
+            if run is not None and kind != "text" and not all(column_of(w, columns) is c for w in run):
+                under = column_of(run[0], columns)
+                problem = f"{value!r} is printed under {under['text'] if under else 'no column'}, not {c['text']}"
+                run = None
+            if run is None and problem is None and reread is not None and line["source"] == "ocr" and not line.get("rotation"):
+                # A disputed scanned cell: one equality-only re-read (_Rereader)
+                # of the words OCR placed under this column here.
+                under = []
+                while pos + len(under) < len(words) and column_of(words[pos + len(under)], columns) is c:
+                    under.append(words[pos + len(under)])
+                if under:
+                    pad = 0.6 * line["height"]
+                    box = (min(w["x0"] for w in under) - pad, line["top"] - pad,
+                           max(w["x1"] for w in under) + pad, line["bottom"] + pad)
+                    whitelist = "".join(sorted(set(re.sub(r"\s", "", str(value))) | set("0123456789.,-/()$")))
+                    got = " ".join(w["text"] for w in reread._ocr(line["page"], box, whitelist, 7) or [])
+                    accepted = bool(got) and cell_equals(kind, value, got)
+                    rereads.append({"page": line["page"], "kind": f"{kind} cell ({c['text']})",
+                                    "ocr": " ".join(w["text"] for w in under), "reread": got, "extracted": str(value),
+                                    "accepted": accepted})
+                    if accepted:
+                        run = under
+                        entry["rereads_accepted"] = entry.get("rereads_accepted", 0) + 1
+            if run is not None:
+                entry["ok"] += 1
+                pos += len(run)
+                continue
+            printed_next = " ".join(w["text"] for w in words[pos:pos + 4]) or "nothing"
+            problem = problem or f"extracted {value!r}, the PDF prints {printed_next!r} next"
+            entry.setdefault("problem", f"p{line['page']} {inv.get('invoice_number')}: {problem}")
+            problems.append(f"{c['text']}: {inv.get('invoice_number')} {problem} (p{line['page']})")
+            line_failed = True
+            break
+        if not line_failed and pos < len(words):
+            left = " ".join(w["text"] for w in words[pos:])
+            problems.append(f"{inv.get('invoice_number')}: the PDF also prints {left!r}, which no extracted cell holds "
+                            f"(p{line['page']})")
+    result["columns"] = list(column_report.values())
+    if unlabelled_keys:
+        result["unlabelled_columns"] = unlabelled_keys
+    if rereads:
+        result["ocr_rereads"] = rereads
+    result["seconds"] = round(time.monotonic() - started, 2)
+    if problems:
+        result["reason"] = f"{len(problems)} cell/column problem(s): " + "; ".join(problems[:5])
+        return result
+    result.update(passed=True, computed=round(sum(_printed_net(line) for _, line in matches), 2), reason="")
     return result

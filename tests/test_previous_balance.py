@@ -110,8 +110,17 @@ class TestResolvePreviousBalance(unittest.TestCase):
         result = resolve_previous_balance(179.0, "PREV SERV CHARGES", "Page 1")
         self.assertIsNone(result["value"])
 
-    def test_scan_value_without_any_label_is_not_even_a_chain_opening(self):
+    def test_scan_value_without_any_label_is_only_a_chain_opening(self):
+        # 2026-10-16 (was "... is not even a chain opening"): Northeast
+        # Coffee's AI re-read returns the opening 80.40 with no label at all.
         result = resolve_previous_balance(80.40, None, "Page 1")
+        self.assertIsNone(result["value"])
+        self.assertEqual(result["source"], "rejected: no printed label")
+        self.assertEqual(result["chain_opening"], 80.40)
+
+    def test_text_layer_rule_is_unchanged_for_no_label(self):
+        text = statement("08/01/26 80.40", "08/12/26 2524536 76.29 156.69")
+        result = resolve_previous_balance(80.40, None, text)
         self.assertIsNone(result["value"])
         self.assertIsNone(result.get("chain_opening"))
 

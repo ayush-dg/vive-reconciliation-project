@@ -307,6 +307,7 @@ VALIDATION_METHOD_RUNNING_BALANCE = "running_balance"
 VALIDATION_METHOD_SECTION_SUBTOTAL = "section_subtotal"
 VALIDATION_METHOD_PDF_ROW_MATCH = "pdf_row_match"
 VALIDATION_METHOD_PDF_STORE_SECTIONS = "pdf_store_sections"
+VALIDATION_METHOD_PDF_FULL_MATCH = "pdf_full_match"
 
 _MONEY_EPSILON = 0.005  # float noise only -- never widens the 0.01 match rule
 
@@ -644,3 +645,27 @@ def validate_with_fallbacks(
             }
     result["detail"] = {"attempts": attempts}
     return result
+
+
+def try_pdf_full_match(validation: dict, invoices: list, pdf_path: Optional[str], tolerance: float = 0.01) -> dict:
+    """The gate's LAST fallback (2026-10-16, user decision): called by the
+    intake once every other method -- validate_with_fallbacks() and its
+    retry with a scan's OCR previous balance -- has failed. A pass when the
+    extraction matches the PDF cell by cell (src/validation/pdf_row_match.py
+    check_pdf_full_match), whether or not any total equation reconciles. It
+    only runs on a "mismatch" with a PDF, and can only add a pass; its
+    attempt (with the per-column results) is appended to the detail either
+    way."""
+    if validation.get("status") != "mismatch" or not pdf_path:
+        return validation
+    from src.validation.pdf_row_match import check_pdf_full_match
+    printed = validation.get("printed")
+    outcome = check_pdf_full_match(printed, _rows_for_checks(invoices), tolerance=tolerance, pdf_path=pdf_path)
+    detail = dict(validation.get("detail") or {})
+    detail["attempts"] = list(detail.get("attempts") or []) + [{"method": VALIDATION_METHOD_PDF_FULL_MATCH, **outcome}]
+    if not outcome.get("passed"):
+        return {**validation, "detail": detail}
+    computed = outcome["computed"]
+    detail.update(primary_computed=validation.get("computed"), primary_difference=validation.get("difference"))
+    return {"status": "matches", "printed": printed, "computed": computed, "difference": round(printed - computed, 2),
+            "method": VALIDATION_METHOD_PDF_FULL_MATCH, "detail": detail}

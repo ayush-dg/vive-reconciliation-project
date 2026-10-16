@@ -120,6 +120,28 @@ class TestApplyArithmeticValidation(unittest.TestCase):
         self.assertIsNone(s["statement_metadata"]["previous_balance"])
         self.assertEqual(s["statement_metadata"]["previous_balance_source"], "rejected: label is not a balance-forward label")
 
+    def test_scan_unlabelled_opening_opens_the_running_balance_only(self):
+        # 2026-10-16: Northeast Coffee's AI re-read returns 80.40 with no label at all.
+        rows = [inv("2524536", 76.29, due=156.69), inv(None, credit=80.40, due=76.29), inv("2531421", 17.92, due=94.21)]
+        s = schema(rows, 94.21, previous_balance=80.40, previous_balance_label=None)
+        result = INTAKE.apply_arithmetic_validation(s, "Page 1")
+        self.assertEqual((result["status"], result["method"]), ("matches", "running_balance"))
+        self.assertIsNone(s["statement_metadata"]["previous_balance"])
+        self.assertEqual(s["statement_metadata"]["previous_balance_source"], "rejected: no printed label")
+
+    def test_adversarial_scan_unlabelled_opening_that_does_not_chain_fails(self):
+        rows = [inv("2524536", 76.29, due=156.69), inv(None, credit=80.40, due=76.29), inv("2531421", 17.92, due=94.21)]
+        s = schema(rows, 94.21, previous_balance=80.50, previous_balance_label=None)  # beyond the 0.01 tolerance
+        self.assertEqual(INTAKE.apply_arithmetic_validation(s, "Page 1")["status"], "mismatch")
+
+    def test_adversarial_scan_unlabelled_value_never_reaches_statement_equation(self):
+        # opening + activity = printed, but no balance column to chain through.
+        rows = [inv("2524536", 76.29), inv(None, credit=80.40), inv("2531421", 17.92)]
+        s = schema(rows, 94.21, previous_balance=80.40, previous_balance_label=None)
+        result = INTAKE.apply_arithmetic_validation(s, "Page 1")
+        self.assertEqual(result["status"], "mismatch")
+        self.assertIsNone(result["method"])
+
     def test_adversarial_scan_field_name_label_never_reaches_statement_equation(self):
         # Previous balance + activity = printed, but the label is another
         # field's name and there is no balance column to chain through.
