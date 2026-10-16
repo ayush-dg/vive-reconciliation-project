@@ -232,7 +232,13 @@ def _patch(testcase, **fns):
 
 
 SIDEBAR = {"get_open_recon_exceptions_count": lambda: 0, "get_pending_review_count": lambda: 0,
-           "get_outlook_synced_jobs": lambda: []}
+           "get_outlook_synced_jobs": lambda: [],
+           # Statement Processing (2026-10-16): list and detail also read jobs,
+           # reconciliation and the Bronze rows.
+           "get_processing_jobs": lambda: [], "get_recon_status": lambda: {},
+           "get_latest_job_for_statement": lambda sid: None,
+           "get_statement_report": lambda sid: {"summary": None, "intake": None, "matched": [], "exceptions": []},
+           "get_extracted_rows_for_statement": lambda sid: []}
 
 
 class TestValidationPage(unittest.TestCase):

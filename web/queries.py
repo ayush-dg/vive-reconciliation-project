@@ -208,8 +208,10 @@ def get_outlook_synced_jobs() -> list:
     web/time_window.py's sync_status_counts()). Used by Home, Exceptions
     and Validation's own "Last run" filter, so all three stay scoped to
     the exact same definition."""
+    # job_id (2026-10-16): Statement Processing places a failed extraction --
+    # a job with no statement_id -- in its sync by job.
     return execute_query(
-        "SELECT submitted_at, statement_id, status FROM jobs WHERE source_blob_path IS NOT NULL "
+        "SELECT job_id, submitted_at, statement_id, status FROM jobs WHERE source_blob_path IS NOT NULL "
         "ORDER BY submitted_at DESC"
     )
 
@@ -1827,7 +1829,23 @@ def get_extracted_rows_for_job(job_id: str) -> list:
     existed; extracted_data.html's "not available" note is now that rare
     case, not the default for pdfplumber vendors. Also a `.aging_summary`
     attribute -- a dict, empty when this statement has none."""
-    job = get_job_by_id(job_id)
+    return _extracted_rows_for(get_job_by_id(job_id))
+
+
+def get_extracted_rows_for_statement(statement_id: str):
+    """get_extracted_rows_for_job() keyed by statement_id instead -- the
+    Statement Processing detail page's Extraction tab (2026-10-16). Reads
+    Bronze, so it works for a statement the validation gate stopped before
+    Silver too. Uses the statement's newest job (its document_hash resolves
+    a cache hit's Bronze rows); a statement with no job row (scripted
+    re-runs) is looked up under its own statement_id."""
+    jobs = execute_query(
+        "SELECT * FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC", [statement_id]
+    )
+    return _extracted_rows_for(jobs[0] if jobs else {"statement_id": statement_id})
+
+
+def _extracted_rows_for(job):
     if not job or not job.get("statement_id"):
         return _RowsWithColumns([], [])
     statement_id = _resolve_bronze_statement_id(job)
@@ -2423,6 +2441,51 @@ def get_validation_report() -> list:
     return rows
 
 
+def get_processing_jobs() -> list:
+    """Every job, newest first -- Statement Processing (2026-10-16) reads
+    each statement's extraction/reconciliation stage from its job (FAILED,
+    PENDING/PROCESSING, the "Not reconciled -- ..." validation note) and
+    lists jobs that never produced an intake row (failed extractions,
+    still running) as cards of their own."""
+    return execute_query(
+        "SELECT job_id, pdf_filename, status, statement_id, vendor_name, error_message, "
+        "submitted_at, completed_at FROM jobs ORDER BY submitted_at DESC"
+    )
+
+
+def get_latest_job_for_statement(statement_id: str):
+    """The newest job for one statement (Statement Processing detail), or None."""
+    rows = execute_query(
+        "SELECT job_id, pdf_filename, status, statement_id, vendor_name, error_message, "
+        "submitted_at, completed_at FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC",
+        [statement_id],
+    )
+    return rows[0] if rows else None
+
+
+def get_recon_status() -> dict:
+    """{statement_id: {"total", "matched", "exceptions", "reasons": {reason: n}}}
+    for every reconciled statement (silver.recon_summary +
+    silver.recon_exceptions, Fabric Warehouse) -- Statement Processing's
+    Reconciliation stage and its "Amount mismatch on 3 invoices, 2 not
+    found in NetSuite" line. Reasons count every exception row, resolved or
+    not: the stage describes what reconciliation found."""
+    status = {}
+    for row in recon_query(
+        "SELECT statement_id, total_invoice_count, matched_count, exception_count FROM silver.recon_summary"
+    ):
+        status[row["statement_id"]] = {"total": row["total_invoice_count"] or 0,
+                                       "matched": row["matched_count"] or 0,
+                                       "exceptions": row["exception_count"] or 0, "reasons": {}}
+    for row in recon_query(
+        "SELECT statement_id, exception_reason, COUNT(*) AS n FROM silver.recon_exceptions "
+        "GROUP BY statement_id, exception_reason"
+    ):
+        if row["statement_id"] in status:
+            status[row["statement_id"]]["reasons"][row["exception_reason"] or "Other"] = row["n"]
+    return status
+
+
 def get_extraction_validation_detail(statement_id: str) -> dict:
     """Arithmetic-only detail for one intake attempt -- deliberately just
     the printed total, the extracted line items, and their sum, with NO
@@ -2481,7 +2544,7 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
     lines = recon_query(
         """
         SELECT line_number, invoice_number, line_date, description_raw,
-               charge_amount, payment_amount
+               charge_amount, payment_amount, line_net_amount
         FROM silver.statement_line
         WHERE statement_id = ?
         ORDER BY line_number

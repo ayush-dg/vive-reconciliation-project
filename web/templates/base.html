@@ -44,7 +44,7 @@
     <div class="nav-group-label">Workspace</div>
     <a href="/" class="nav-item {{ 'active' if active_page == 'home' }}"><svg class="icon"><use href="#i-home"/></svg> Home</a>
     <a href="/upload" class="nav-item {{ 'active' if active_page in ['upload', 'mailbox_sync'] }}"><svg class="icon"><use href="#i-upload"/></svg> Statement Intake</a>
-    <a href="/validation" class="nav-item {{ 'active' if active_page == 'validation' }}"><svg class="icon"><use href="#i-check-circle"/></svg> Validation</a>
+    <a href="/validation" class="nav-item {{ 'active' if active_page == 'validation' }}"><svg class="icon"><use href="#i-check-circle"/></svg> Statement Processing</a>
     <a href="/exceptions" class="nav-item {{ 'active' if active_page == 'exceptions' }}"><svg class="icon"><use href="#i-alert"/></svg> Exceptions
       {% if open_exceptions_count %}<div class="nav-dot"></div>{% endif %}
     </a>

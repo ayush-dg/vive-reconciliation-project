@@ -1,17 +1,77 @@
 {% extends "base.html" %}
-{% block title %}VIVE Collision — Validation{% endblock %}
+{% block title %}VIVE Collision — Statement Processing{% endblock %}
 
 {% block topbar %}
 <div class="topbar">
   <div class="breadcrumb">
-    <a href="/validation">← Validation</a>
+    <a href="/validation">← Statement Processing</a>
     <span>/</span>
-    <span style="color:var(--text);font-weight:500">{{ intake.vendor_name if intake else statement_id }} — {{ intake.statement_period | period_label if intake else "" }}</span>
+    <span style="color:var(--text);font-weight:500">{{ (card.vendor_display_name if card else none) or (intake.vendor_name if intake else statement_id) }}{% if intake and intake.statement_period %} — {{ intake.statement_period | period_label }}{% endif %}</span>
   </div>
 </div>
 {% endblock %}
 
 {% block content %}
+{% if card %}
+{# One statement, one tab per stage (2026-10-16). Each stage button shows its
+   state and opens its panel; the page opens on active_tab -- the stage that
+   needs attention (web/statement_processing.py's default_tab()), or ?tab=. #}
+{% set stage_icon = {"ok": "✓", "fail": "✕", "warn": "!", "run": "", "skip": ""} %}
+{% set ex, va, re = card.stages %}
+{% set stage_sub = {
+  "extraction": ((extracted | length) ~ " line" ~ ("" if extracted | length == 1 else "s")) if ex.state == "ok" else "",
+  "validation": ("Diff " ~ (intake.validation_difference | money_signed)) if intake and intake.validation_difference is not none else "",
+  "reconciliation": (recon.tiles.matched ~ " of " ~ recon.tiles.invoices ~ " invoices matched") if recon else "",
+} %}
+<div class="sp-stages" role="tablist" aria-label="Processing stages">
+  {% for stage in card.stages %}
+  {% set key = stage.name | lower %}
+  <button type="button" class="sp-stg sp-{{ stage.state }}" role="tab" id="tab-{{ key }}" data-panel="p-{{ key }}"
+          aria-controls="p-{{ key }}" aria-selected="{{ 'true' if key == active_tab else 'false' }}">
+    <span class="sp-dot" aria-hidden="true">{{ stage_icon[stage.state] }}</span>
+    <span>
+      <span class="sp-stg-name">{{ stage.name }}</span>
+      <span class="sp-stg-state"><b>{{ stage.label }}</b>{% if stage_sub[key] %}<span>{{ stage_sub[key] }}</span>{% endif %}</span>
+    </span>
+    <svg class="icon sp-chev" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  </button>
+  {% endfor %}
+</div>
+{% if card.note %}<div class="sp-note sp-note-{{ card.note_tone }} sp-detail-note">{{ card.note }}</div>{% endif %}
+
+{# ---------------- Extraction ---------------- #}
+<section class="sp-panel" id="p-extraction" role="tabpanel" aria-labelledby="tab-extraction"{% if active_tab != 'extraction' %} hidden{% endif %}>
+  <div class="section-header">
+    <div class="section-title">Extracted lines ({{ extracted | length }})</div>
+    <span style="font-size:12px;color:var(--text-muted)">From {{ card.source_file }}</span>
+  </div>
+  {% if extracted and extracted.columns %}
+  <div class="table-responsive" style="overflow-x:auto">
+    <table class="table">
+      <thead><tr><th>Line</th>{% for col in extracted.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for r in extracted %}
+        <tr>
+          <td style="color:var(--text-secondary)">{{ loop.index0 }}</td>
+          {% for col in extracted.columns %}
+          <td>{{ r.raw_columns[col] if r.raw_columns and col in r.raw_columns and r.raw_columns[col] is not none else "—" }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif ex.state == "fail" %}
+  <div class="empty-state">Extraction failed — nothing was extracted from this PDF.</div>
+  {% elif ex.state == "run" %}
+  <div class="empty-state">Still extracting — check back shortly.</div>
+  {% else %}
+  <div class="empty-state">No extracted lines found for this statement.</div>
+  {% endif %}
+</section>
+
+{# ---------------- Validation ---------------- #}
+<section class="sp-panel" id="p-validation" role="tabpanel" aria-labelledby="tab-validation"{% if active_tab != 'validation' %} hidden{% endif %}>
 {% if intake %}
 <div class="kpi-grid">
   <div class="kpi">
@@ -21,7 +81,7 @@
   <div class="kpi">
     <div class="kpi-label">Extracted amount sum</div>
     <div class="kpi-value">{{ computed_total | money if computed_total is not none else "—" }}</div>
-    <div class="kpi-sub">{{ lines | length }} line{{ "s" if lines | length != 1 }}</div>
+    <div class="kpi-sub">{{ extracted | length }} line{{ "s" if extracted | length != 1 }}</div>
   </div>
   <div class="kpi">
     <div class="kpi-label">Difference</div>
@@ -85,31 +145,116 @@
   </tbody>
 </table>
 {% endif %}
+{% else %}
+<div class="empty-state">Validation was not reached — extraction did not finish for this PDF.</div>
+{% endif %}
+</section>
+
+{# ---------------- Reconciliation ---------------- #}
+<section class="sp-panel" id="p-reconciliation" role="tabpanel" aria-labelledby="tab-reconciliation"{% if active_tab != 'reconciliation' %} hidden{% endif %}>
+{% if recon %}
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">Matched in NetSuite</div>
+    <div class="kpi-value green">{{ recon.tiles.matched }} <span class="sp-of">of {{ recon.tiles.invoices }}</span></div>
+    <div class="kpi-sub">{{ recon.tiles.matched_amount | money }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Amount mismatch</div>
+    <div class="kpi-value{{ ' amber' if recon.tiles.mismatch }}">{{ recon.tiles.mismatch }}</div>
+    <div class="kpi-sub">{{ recon.tiles.mismatch_amount | money }} difference</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Not in NetSuite</div>
+    <div class="kpi-value{{ ' amber' if recon.tiles.missing }}">{{ recon.tiles.missing }}</div>
+    <div class="kpi-sub">{{ recon.tiles.missing_amount | money }} on statement</div>
+  </div>
+  {% if recon.tiles.other %}
+  <div class="kpi">
+    <div class="kpi-label">Other exceptions</div>
+    <div class="kpi-value amber">{{ recon.tiles.other }}</div>
+    <div class="kpi-sub">e.g. possible duplicates</div>
+  </div>
+  {% endif %}
+</div>
 
 <div class="section-header">
-  <div class="section-title">Extracted amounts ({{ lines | length }})</div>
+  <div class="section-title">Line-by-line against NetSuite</div>
+  {% if summary %}<a href="/exceptions/{{ summary.vendor_name | urlname }}?statement_id={{ statement_id }}" class="link">Review exceptions →</a>{% endif %}
 </div>
-{% if lines %}
-<table class="table">
-  <thead>
-    <tr><th>Line</th><th>Invoice</th><th>Date</th><th>Description</th><th>Charge amount</th><th>Payment amount</th></tr>
-  </thead>
-  <tbody>
-    {% for line in lines %}
-    <tr>
-      <td style="color:var(--text-secondary)">{{ line.line_number }}</td>
-      <td>{{ line.invoice_number or "—" }}</td>
-      <td style="color:var(--text-secondary)">{{ line.line_date | friendly_date }}</td>
-      <td style="color:var(--text-secondary)">{{ line.description_raw or "—" }}</td>
-      <td class="num">{{ line.charge_amount | money if line.charge_amount is not none else "—" }}</td>
-      <td class="num">{{ line.payment_amount | money if line.payment_amount is not none else "—" }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+<div class="filter-chips" id="sp-line-chips">
+  <button type="button" class="filter-chip active" data-line="all">All {{ recon.rows | length }}</button>
+  <button type="button" class="filter-chip" data-line="matched">Matched {{ recon.counts.matched }}</button>
+  <button type="button" class="filter-chip" data-line="mismatch">Amount mismatch {{ recon.counts.mismatch }}</button>
+  <button type="button" class="filter-chip" data-line="missing">Not in NetSuite {{ recon.counts.missing }}</button>
+  {% if recon.counts.other %}<button type="button" class="filter-chip" data-line="other">Other {{ recon.counts.other }}</button>{% endif %}
+  {% if recon.counts.none %}<button type="button" class="filter-chip" data-line="none">Not reconciled {{ recon.counts.none }}</button>{% endif %}
+</div>
+{% if recon.rows %}
+<div class="table-responsive" style="overflow-x:auto">
+  <table class="table" id="sp-line-table">
+    <thead>
+      <tr><th>Line</th><th>Invoice</th><th class="num">Statement amount</th><th class="num">NetSuite amount</th><th class="num">Diff</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {% for r in recon.rows %}
+      <tr data-line="{{ r.status }}">
+        <td style="color:var(--text-secondary)">{{ r.line_number }}</td>
+        <td>{{ r.invoice_number or "—" }}{% if r.shared %}<div class="sp-shared" title="Matching works per invoice: these lines share one result">1 result for {{ r.invoice_lines }} lines</div>{% endif %}</td>
+        <td class="num">{{ r.amount | money if r.amount is not none else "—" }}</td>
+        <td class="num">{{ r.netsuite_amount | money if r.netsuite_amount is not none else "—" }}</td>
+        <td class="num{{ ' sp-bad' if r.difference }}">{{ r.difference | money_signed if r.difference is not none else "—" }}</td>
+        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger'}.get(r.status, 'neutral') }}">{{ ('✓ ' if r.status == 'matched') ~ r.label }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="empty-state" id="sp-line-empty" hidden>No lines in this group.</div>
 {% else %}
-<div class="empty-state">No extracted line items found for this statement.</div>
+<div class="empty-state">No Silver lines found for this statement.</div>
 {% endif %}
+{% elif re.state == "run" %}
+<div class="empty-state">Reconciliation is running — check back shortly.</div>
+{% elif re.state == "fail" %}
+<div class="empty-state">Reconciliation failed: {{ card.note }}</div>
+{% elif va.state == "fail" %}
+<div class="empty-state">Not reconciled — only statements that pass validation 100% go on to reconciliation.</div>
+{% else %}
+<div class="empty-state">Reconciliation was not reached for this statement.</div>
+{% endif %}
+</section>
+
+<script>
+(function () {
+  var tabs = document.querySelectorAll(".sp-stg");
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        document.getElementById(t.dataset.panel).hidden = !on;
+      });
+    });
+  });
+
+  var chips = document.querySelectorAll("#sp-line-chips .filter-chip");
+  var rows = document.querySelectorAll("#sp-line-table tbody tr");
+  var empty = document.getElementById("sp-line-empty");
+  chips.forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      chips.forEach(function (c) { c.classList.toggle("active", c === chip); });
+      var shown = 0;
+      rows.forEach(function (row) {
+        var on = chip.dataset.line === "all" || row.dataset.line === chip.dataset.line;
+        row.style.display = on ? "" : "none";
+        if (on) { shown += 1; }
+      });
+      if (empty) { empty.hidden = shown > 0; }
+    });
+  });
+})();
+</script>
 
 {% else %}
 <div class="empty-state">No intake record found for this statement.</div>

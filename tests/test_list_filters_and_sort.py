@@ -349,6 +349,8 @@ def _patch_all(testcase, **fns):
 
 
 _SIDEBAR = {"get_open_recon_exceptions_count": lambda: 0, "get_pending_review_count": lambda: 0}
+# Statement Processing (2026-10-16) also reads jobs and reconciliation status.
+_PROCESSING = {"get_processing_jobs": lambda: [], "get_recon_status": lambda: {}}
 
 
 class TestReviewRouteSortWiring(unittest.TestCase):
@@ -479,7 +481,7 @@ class TestValidationPeriodFilter(unittest.TestCase):
              "ingestion_timestamp": None, "shop": None, "passed": True},
         ]
         _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs],
-                   get_outlook_synced_jobs=lambda: [], **_SIDEBAR)
+                   get_outlook_synced_jobs=lambda: [], **_SIDEBAR, **_PROCESSING)
         self.html = _client(validation.router).get("/validation").text
 
     def test_dropdown_offers_only_periods_with_data_newest_first(self):
@@ -540,7 +542,7 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
             {"submitted_at": "2026-09-29 14:58:00", "statement_id": None, "status": "PROCESSING"},
         ]
         _patch_all(self, get_validation_report=lambda: [dict(r) for r in runs],
-                   get_outlook_synced_jobs=lambda: outlook_jobs, **_SIDEBAR)
+                   get_outlook_synced_jobs=lambda: outlook_jobs, **_SIDEBAR, **_PROCESSING)
         self.html = _client(validation.router).get("/validation").text
 
     def test_last_run_select_present_as_an_independent_filter(self):
@@ -595,8 +597,9 @@ class TestValidationLastRunAndCalendarFilter(unittest.TestCase):
     def test_hero_is_recounted_by_the_filter_script_ignoring_the_status_chip(self):
         script = self.html[self.html.index("function applyFilters()"):]
         script = script[:script.index("\n  }\n")]
-        # Counted from the time window + vendor/shop/period match only...
-        self.assertIn("if (inWindow) {", script)
+        # Counted from the time window + vendor/shop/period match only (and,
+        # since 2026-10-16, only cards with a verdict -- not queued/running)...
+        self.assertIn('if (inWindow && card.dataset.checked === "1") {', script)
         self.assertIn("updateHero(heroCount, heroPassedCount);", script)
         # ...while the Pass/Fail chip only decides which cards are shown.
         self.assertIn('card.style.display = (matchesStatus && inWindow) ? "" : "none";', script)

@@ -824,3 +824,64 @@ select {
   .ns-modal-table { min-width: 720px; }
   .ns-summary-amount { text-align: left; }
 }
+
+/* ---- Statement Processing (2026-10-16): stage pipeline on each card and
+   stage tabs on the detail page. States: ok / fail / warn (exceptions) /
+   run (queued or running) / skip (not reached). Colours are the app's own
+   tokens, so light and dark themes both follow. ---- */
+.sp-card[data-state="failed"] { border-top-color: var(--danger); }
+.sp-card[data-state="failed"] .report-card-icon { background: var(--danger-tint); color: var(--danger); }
+.sp-card[data-state="review"] { border-top-color: var(--warning); }
+.sp-card[data-state="review"] .report-card-icon { background: var(--warning-tint); color: var(--warning); }
+.sp-card[data-state="running"] { border-top-color: var(--info); }
+.sp-card[data-state="running"] .report-card-icon { background: var(--info-tint); color: var(--info); }
+
+.sp-pipe { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); }
+.sp-step { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 0; }
+.sp-step + .sp-step::before { content: ""; position: absolute; top: 8px; right: calc(50% + 12px); width: calc(100% - 24px); height: 2px; background: var(--border); }
+.sp-step.sp-ok + .sp-step::before { background: var(--success); }
+.sp-step.sp-skip::before { background: repeating-linear-gradient(90deg, var(--border-strong) 0 3px, transparent 3px 6px) !important; }
+.sp-dot { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; flex: none; }
+.sp-ok .sp-dot { background: var(--success); }
+.sp-fail .sp-dot { background: var(--danger); }
+.sp-warn .sp-dot { background: var(--warning); }
+.sp-run .sp-dot { border: 2px solid var(--info); border-right-color: transparent; }
+.sp-skip .sp-dot { border: 1.5px dashed var(--border-strong); }
+.sp-sname { font-size: 11px; font-weight: 600; margin-top: 5px; color: var(--text); }
+.sp-sstate { font-size: 10.5px; color: var(--text-muted); }
+.sp-ok .sp-sstate { color: var(--success); }
+.sp-fail .sp-sstate { color: var(--danger); }
+.sp-warn .sp-sstate { color: var(--warning); }
+.sp-run .sp-sstate { color: var(--info); }
+.sp-skip .sp-sstate { color: var(--text-faint); }
+.sp-note { font-size: 11.5px; line-height: 1.4; }
+.sp-note-f { color: var(--danger); }
+.sp-note-w { color: var(--warning); }
+.sp-note-r { color: var(--info); }
+.sp-bad { color: var(--danger); }
+
+.sp-stages { display: flex; gap: 10px; margin-bottom: 14px; }
+.sp-stg { flex: 1; display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; font: inherit; color: inherit; text-align: left; }
+.sp-stg:hover { border-color: var(--border-strong); }
+.sp-stg[aria-selected="true"] { border: 1.5px solid var(--navy-2); box-shadow: 0 0 0 3px var(--navy-tint); }
+.sp-stg:focus-visible { outline: 2px solid var(--navy-2); outline-offset: 2px; }
+.sp-stg .sp-dot { width: 32px; height: 32px; font-size: 14px; }
+.sp-stg-name { display: block; font-size: 14px; font-weight: 600; }
+.sp-stg-state { display: block; font-size: 12.5px; margin-top: 2px; }
+.sp-stg-state b { font-weight: 600; margin-right: 6px; }
+.sp-stg-state span { color: var(--text-muted); }
+.sp-stg.sp-ok .sp-stg-state b { color: var(--success); }
+.sp-stg.sp-fail .sp-stg-state b { color: var(--danger); }
+.sp-stg.sp-warn .sp-stg-state b { color: var(--warning); }
+.sp-stg.sp-run .sp-stg-state b { color: var(--info); }
+.sp-stg.sp-skip .sp-stg-state b { color: var(--text-faint); }
+.sp-chev { margin-left: auto; width: 16px; height: 16px; color: var(--text-muted); }
+.sp-stg[aria-selected="true"] .sp-chev { transform: rotate(90deg); }
+.sp-detail-note { margin: 0 0 18px; font-size: 13px; }
+.sp-panel { margin-top: 8px; }
+.sp-panel[hidden] { display: none; }
+.sp-of { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.sp-shared { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+@media (max-width: 720px) {
+  .sp-stages { flex-direction: column; }
+}

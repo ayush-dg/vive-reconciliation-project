@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}VIVE Collision — Validation{% endblock %}
+{% block title %}VIVE Collision — Statement Processing{% endblock %}
 
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
-    <div class="eyebrow">Validation</div>
-    <h1>Validation Gate</h1>
+    <div class="eyebrow">Statement Processing</div>
+    <h1>Statement Processing Status</h1>
   </div>
   <div class="topbar-actions">
     <span style="font-size:12px;color:var(--text-muted)">{{ "{:,}".format(runs | length) }} intake attempt{{ "s" if runs | length != 1 }} in total</span>
@@ -22,9 +22,11 @@
    at the bottom recounts on every filter change; rendered here for the
    default window (every attempt -- Past syncs "All", since 2026-10-15),
    so the first paint already matches. The top bar keeps the all-time
-   count. #}
-{% set hero_runs = runs %}
-{% set passed_runs = hero_runs | selectattr('passed') | list %}
+   count. Since 2026-10-16 (Statement Processing) it counts every card that
+   reached a verdict -- a failed extraction counts as failed -- and leaves
+   out cards still queued or running. #}
+{% set hero_runs = runs | selectattr('checked') | list %}
+{% set passed_runs = hero_runs | selectattr('validation_passed') | list %}
 {% set total_runs = hero_runs | length %}
 {% set pct = ((passed_runs | length / total_runs) * 100) | round | int if total_runs else 0 %}
 
@@ -43,12 +45,12 @@
     <div class="report-hero-divider"></div>
     <div>
       <div class="report-hero-stat-num success" id="hero-passed">{{ "{:,}".format(passed_runs | length) }}</div>
-      <div class="report-hero-stat-label">Passed</div>
+      <div class="report-hero-stat-label">Passed validation</div>
     </div>
     <div class="report-hero-divider"></div>
     <div>
       <div class="report-hero-stat-num warning" id="hero-failed">{{ "{:,}".format(total_runs - (passed_runs | length)) }}</div>
-      <div class="report-hero-stat-label">Failed</div>
+      <div class="report-hero-stat-label">Failed validation</div>
     </div>
   </div>
 </div>
@@ -95,9 +97,13 @@
 </div>
 
 <div class="filter-chips">
+  {# Passed = passed validation; Failed = extraction, validation or
+     reconciliation failed; Exceptions = reconciled with at least one
+     exception (2026-10-16). #}
   <button type="button" class="filter-chip active" data-filter="all">All</button>
   <button type="button" class="filter-chip" data-filter="pass">Passed</button>
   <button type="button" class="filter-chip" data-filter="fail">Failed</button>
+  <button type="button" class="filter-chip" data-filter="exceptions">Exceptions</button>
   <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
     <option value="">All vendors</option>
     {% for vname in vendor_options %}
@@ -119,13 +125,23 @@
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
+  {# One card per intake attempt (plus failed / unfinished jobs), with its
+     Extraction -> Validation -> Reconciliation stages and one reason line
+     (web/statement_processing.py, 2026-10-16). data-validation / data-failed
+     / data-exceptions drive the status chips; data-checked decides whether
+     the card counts in the hero. #}
+  {% set stage_icon = {"ok": "✓", "fail": "✕", "warn": "!", "run": "", "skip": ""} %}
+  {% set card_icon = {"ok": "i-check-circle", "failed": "i-x-circle", "review": "i-alert", "running": "i-clock"} %}
   {% for run in runs %}
-  <div class="report-card{{ ' has-exceptions' if not run.passed }}" data-status="{{ 'pass' if run.passed else 'fail' }}"
+  <div class="report-card sp-card" data-state="{{ run.status }}"
+       data-validation="{{ 'pass' if run.validation_passed else 'fail' }}"
+       data-failed="{{ '1' if run.failed else '' }}" data-exceptions="{{ '1' if run.has_exceptions else '' }}"
+       data-checked="{{ '1' if run.checked else '' }}"
        data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
        data-period="{{ run.statement_period or '' }}"
-       data-sync="{{ run.sync_time }}" data-day="{{ run.ingestion_timestamp | eastern_day }}">
+       data-sync="{{ run.sync_time }}" data-day="{{ run.timestamp | eastern_day }}">
     <div class="report-card-head">
-      <div class="report-card-icon"><svg class="icon"><use href="#{{ 'i-check-circle' if run.passed else 'i-x-circle' }}"/></svg></div>
+      <div class="report-card-icon"><svg class="icon"><use href="#{{ card_icon[run.status] }}"/></svg></div>
       <div>
         <div class="report-card-title">{{ run.vendor_display_name or run.source_file }}</div>
         {% if run.shop %}<div class="report-card-sub" style="font-weight:600;color:var(--text)">{{ run.shop }}</div>{% endif %}
@@ -133,18 +149,25 @@
       </div>
     </div>
 
+    <ol class="sp-pipe" aria-label="Processing stages">
+      {% for stage in run.stages %}
+      <li class="sp-step sp-{{ stage.state }}"><span class="sp-dot" aria-hidden="true">{{ stage_icon[stage.state] }}</span><span class="sp-sname">{{ stage.name }}</span><span class="sp-sstate">{{ stage.label }}</span></li>
+      {% endfor %}
+    </ol>
+    {% if run.note %}<div class="sp-note sp-note-{{ run.note_tone }}">{{ run.note }}</div>{% endif %}
+
     <div class="report-card-meta">
-      <span>Printed total <b>{{ run.statement_total_as_printed | money if run.statement_total_as_printed is not none else "—" }}</b></span>
-      <span>{{ "Diff " + (run.validation_difference | money_signed) if run.validation_difference is not none else "No printed total" }}</span>
-      {% if run.passed and run.validation_method %}
-      <span class="badge {{ 'neutral' if run.validation_method == 'primary' else 'info' }}" title="Check that matched the printed total">{{ run.validation_method | validation_method_label }}</span>
+      <span>Printed total <b>{{ run.printed_total | money if run.printed_total is not none else "—" }}</b></span>
+      <span>Diff <b class="{{ 'sp-bad' if run.difference is not none and run.difference != 0 }}">{{ run.difference | money_signed if run.difference is not none else "—" }}</b></span>
+      {% if run.validation_passed and run.method %}
+      <span class="badge {{ 'neutral' if run.method == 'primary' else 'info' }}" title="Check that matched the printed total">{{ run.method | validation_method_label }}</span>
       {% endif %}
     </div>
 
     <div class="report-card-footer">
-      <span>{{ run.ingestion_timestamp | friendly_dt }}</span>
+      <span>{{ run.timestamp | friendly_dt }}</span>
       <div class="report-card-actions">
-        <a href="/validation/{{ run.statement_id }}">View →</a>
+        {% if run.statement_id %}<a href="/validation/{{ run.statement_id }}">View →</a>{% endif %}
       </div>
     </div>
   </div>
@@ -189,15 +212,19 @@
     var heroCount = 0;
     var heroPassedCount = 0;
     cards.forEach(function (card) {
-      var matchesStatus = currentStatus === "all" || card.dataset.status === currentStatus;
+      var matchesStatus = currentStatus === "all"
+        || (currentStatus === "pass" && card.dataset.validation === "pass")
+        || (currentStatus === "fail" && card.dataset.failed === "1")
+        || (currentStatus === "exceptions" && card.dataset.exceptions === "1");
       var inWindow = (!vendor || card.dataset.vendor === vendor)
         && (!shop || card.dataset.shop === shop)
         && (!period || card.dataset.period === period)
         && (!sync || card.dataset.sync === sync)
         && (!day || card.dataset.day === day);
-      if (inWindow) {
+      // Queued / running cards have no verdict yet, so they don't count.
+      if (inWindow && card.dataset.checked === "1") {
         heroCount += 1;
-        if (card.dataset.status === "pass") { heroPassedCount += 1; }
+        if (card.dataset.validation === "pass") { heroPassedCount += 1; }
       }
       card.style.display = (matchesStatus && inWindow) ? "" : "none";
     });
@@ -263,6 +290,6 @@
 </script>
 
 {% else %}
-<div class="empty-state">No validation results yet — upload a vendor statement to get started.</div>
+<div class="empty-state">No statements processed yet — upload a vendor statement to get started.</div>
 {% endif %}
 {% endblock %}

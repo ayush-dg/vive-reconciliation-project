@@ -576,8 +576,10 @@ class TestHomeDashboardQuery(unittest.TestCase):
 
     def test_outlook_synced_jobs_carry_their_status(self):
         self._outlook_job("A1", "2026-09-29 12:08:00", status="FAILED")
+        # job_id since 2026-10-16 (Statement Processing places a failed
+        # extraction in its sync by job).
         self.assertEqual(queries.get_outlook_synced_jobs(),
-                         [{"submitted_at": "2026-09-29 12:08:00", "statement_id": "A1", "status": "FAILED"}])
+                         [{"job_id": None, "submitted_at": "2026-09-29 12:08:00", "statement_id": "A1", "status": "FAILED"}])
 
     def test_finished_sync_with_cache_hits_and_failures_is_not_still_processing(self):
         # Oct 1 shape, scaled down: A1-A3 reached recon_summary; CACHE1
