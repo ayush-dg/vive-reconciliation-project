@@ -240,20 +240,70 @@ class RevertTests(unittest.TestCase):
         self.assertEqual(wb.build_revert_actions(self._log([entry])), [])
 
 
+SP_URL = ("https://vivecollision.sharepoint.com/sites/AIVendorStatements/Shared%20Documents/General/"
+          "Vendor%20Statements/_dev_test/fred_beans/2026/09/Fred%20Beans__abababababab.pdf")
+
+
 class PdfLinkSwitchTests(unittest.TestCase):
+    ON = {"NETSUITE_WRITEBACK_PDF_LINK": "true"}
+
+    def _resolve(self, rows, env=None):
+        with mock.patch.dict(os.environ, env or self.ON, clear=True), \
+             mock.patch("src.lakehouse.connection.execute_query", return_value=rows) as query:
+            url, note = wb.resolve_pdf_link("STMT-1")
+        return url, note, query
+
     def test_link_is_off_unless_explicitly_switched_on(self):
         for env in ({}, {"NETSUITE_WRITEBACK_PDF_LINK": "false"}, {"NETSUITE_WRITEBACK_PDF_LINK": ""}):
-            with self.subTest(env=env), mock.patch.dict(
-                    os.environ, dict(env, APP_PUBLIC_BASE_URL="https://app.example"), clear=True):
-                url, note = wb.resolve_pdf_link("STMT-1")
-            self.assertIsNone(url)
-            self.assertIn("switched off", note)
+            with self.subTest(env=env):
+                url, note, query = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": SP_URL}],
+                                                 env=dict(env, APP_PUBLIC_BASE_URL="https://app.example"))
+                self.assertIsNone(url)
+                self.assertIn("switched off", note)
+                query.assert_not_called()
 
-    def test_switched_on_uses_the_base_url_and_the_document_hash(self):
-        env = {"NETSUITE_WRITEBACK_PDF_LINK": "true", "APP_PUBLIC_BASE_URL": "https://app.example/"}
-        with mock.patch.dict(os.environ, env, clear=True),              mock.patch("src.lakehouse.connection.execute_query", return_value=[{"document_hash": "ab" * 32}]):
+    def test_switched_on_uses_the_sharepoint_link_from_the_intake_log(self):
+        url, note, query = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": SP_URL}])
+        self.assertEqual((url, note), (SP_URL, ""))
+        sql, params = query.call_args.args
+        self.assertIn("FROM document_intake_log", sql)
+        self.assertEqual(params, ["STMT-1"])
+
+    def test_an_existing_file_is_linked_too(self):
+        url, _, _ = self._resolve([{"sharepoint_status": "existing", "sharepoint_web_url": SP_URL}])
+        self.assertEqual(url, SP_URL)
+
+    def test_the_base_url_is_no_longer_needed_or_used(self):
+        env = dict(self.ON, APP_PUBLIC_BASE_URL="https://app.example")
+        url, _, _ = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": SP_URL}], env=env)
+        self.assertEqual(url, SP_URL)
+        self.assertNotIn("/statements/", url)
+
+    def test_no_link_unless_the_upload_succeeded(self):
+        for rows, status in (([], "none"),
+                             ([{"sharepoint_status": None, "sharepoint_web_url": None}], "none"),
+                             ([{"sharepoint_status": "failed", "sharepoint_web_url": None}], "failed"),
+                             ([{"sharepoint_status": "skipped", "sharepoint_web_url": None}], "skipped"),
+                             ([{"sharepoint_status": "uploaded", "sharepoint_web_url": ""}], "uploaded")):
+            with self.subTest(rows=rows):
+                url, note, _ = self._resolve(rows)
+                self.assertIsNone(url)
+                self.assertEqual(note, f"no SharePoint link for this statement (status: {status})")
+
+    def test_url_longer_than_the_field_limit_is_not_written(self):
+        long_url = "https://x.sharepoint.com/" + "a" * wb.NETSUITE_LINK_MAX_LEN
+        url, note, _ = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": long_url}])
+        self.assertIsNone(url)
+        self.assertIn("too long", note)
+        exact = "h" * wb.NETSUITE_LINK_MAX_LEN
+        self.assertEqual(self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": exact}])[0], exact)
+
+    def test_lookup_failure_is_not_fatal(self):
+        with mock.patch.dict(os.environ, self.ON, clear=True), \
+             mock.patch("src.lakehouse.connection.execute_query", side_effect=RuntimeError("db down")):
             url, note = wb.resolve_pdf_link("STMT-1")
-        self.assertEqual(url, "https://app.example/statements/" + "ab" * 32 + "/pdf")
+        self.assertIsNone(url)
+        self.assertEqual(note, "SharePoint link lookup failed (RuntimeError)")
 
     def test_plans_carry_no_link_fields_when_there_is_no_link(self):
         ctx = _ctx(link=None)

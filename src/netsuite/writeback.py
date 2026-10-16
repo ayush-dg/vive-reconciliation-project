@@ -158,34 +158,41 @@ def load_statement_results(statement_id: str) -> dict:
             "exceptions": exceptions, "lines": lines}
 
 
+# custbody_statement_link is a Hyperlink field; its real maximum length is
+# not confirmed yet, so a longer URL is not written at all rather than
+# risking a rejected or truncated link.
+NETSUITE_LINK_MAX_LEN = 999
+
+
 def resolve_pdf_link(statement_id: str) -> tuple:
-    """Returns (url_or_None, note). The link needs the statement's
-    document_hash, which lives on the jobs / extraction_cache rows of the
-    app database. The local dev database often has no such row (jobs live
-    in the deployed app's DB), so a missing hash is reported, not fatal.
+    """Returns (url_or_None, note). The link is the statement PDF's
+    SharePoint file, recorded on its document_intake_log row by intake
+    Step 8b (notebooks/01_document_intake.py archive_statement_to_sharepoint)
+    in the same run, before the write-back. No successful upload means no
+    link: the bills are still written, just without the link field.
+    (Until 2026-10-17 this was {APP_PUBLIC_BASE_URL}/statements/<hash>/pdf,
+    a login-protected page of this app; that link is retired.)
 
     OFF by default: the link fields are only written when
-    NETSUITE_WRITEBACK_PDF_LINK=true (deferred 2026-10-08 -- the link has
-    not been verified end to end yet)."""
+    NETSUITE_WRITEBACK_PDF_LINK=true."""
     if os.getenv("NETSUITE_WRITEBACK_PDF_LINK", "").strip().lower() != "true":
         return None, "PDF link is switched off (NETSUITE_WRITEBACK_PDF_LINK is not true)"
-    base = (os.getenv("APP_PUBLIC_BASE_URL") or "").rstrip("/")
-    if not base:
-        return None, "APP_PUBLIC_BASE_URL is not set"
     try:
         from src.lakehouse.connection import execute_query
         rows = execute_query(
-            "SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL",
-            [statement_id])
-        if not rows:
-            rows = execute_query(
-                "SELECT document_hash FROM extraction_cache WHERE statement_id = ? "
-                "AND document_hash IS NOT NULL", [statement_id])
+            "SELECT sharepoint_status, sharepoint_web_url FROM document_intake_log WHERE statement_id = ? "
+            "ORDER BY sharepoint_uploaded_at DESC", [statement_id])
     except Exception as exc:  # best-effort lookup; the preview must still run
-        return None, f"document_hash lookup failed ({type(exc).__name__})"
-    if not rows:
-        return None, "no document_hash found for this statement in the local app DB"
-    return f"{base}/statements/{rows[0]['document_hash']}/pdf", ""
+        return None, f"SharePoint link lookup failed ({type(exc).__name__})"
+    usable = [r for r in rows if r.get("sharepoint_status") in ("uploaded", "existing")
+              and r.get("sharepoint_web_url")]
+    if not usable:
+        status = (rows[0].get("sharepoint_status") if rows else None) or "none"
+        return None, f"no SharePoint link for this statement (status: {status})"
+    url = usable[0]["sharepoint_web_url"]
+    if len(url) > NETSUITE_LINK_MAX_LEN:
+        return None, f"SharePoint URL too long for NetSuite ({len(url)} chars)"
+    return url, ""
 
 
 # ----------------------------------------------------------------------
