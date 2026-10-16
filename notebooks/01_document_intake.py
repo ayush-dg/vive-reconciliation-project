@@ -88,6 +88,9 @@ from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import resolve_vendor_id, display_name
 from src.storage.blob_client import BlobStorageClient
+from src.storage.sharepoint_client import (
+    SharePointArchiveClient, SharePointUploadResult, read_settings, sharepoint_enabled,
+)
 
 
 def _research_mode_extraction_only() -> bool:
@@ -1005,6 +1008,71 @@ def upload_pdf_to_blob_storage(pdf_path: str, vendor_name: str, statement_period
         return None
 
 
+def record_sharepoint_result(statement_id: str, result: SharePointUploadResult):
+    """Writes one SharePoint archive outcome onto the statement's intake row.
+    Never raises: if the database write fails the file may sit in SharePoint
+    without a link, which is the agreed outcome (no link is written)."""
+    try:
+        execute_sql(
+            f"UPDATE document_intake_log SET {', '.join(c + ' = ?' for c in SHAREPOINT_COLUMNS)} "
+            "WHERE statement_id = ?",
+            [result.status, result.web_url, result.item_id, result.drive_id, result.path, result.error,
+             datetime.now(timezone.utc).isoformat(), statement_id],
+        )
+    except Exception as e:
+        print(f"  Warning: SharePoint result could not be recorded ({type(e).__name__}) -- no link for this statement.")
+
+
+def archive_statement_to_sharepoint(statement_id: str, pdf_path: str, vendor_name: str,
+                                    statement_month: str, statement_period: str,
+                                    document_hash: str, routing: str, research_only: bool) -> None:
+    """Step 8b: archives a RECONCILIATION statement's PDF to SharePoint and
+    records the outcome on its document_intake_log row (written by Step 7,
+    which runs first). The NetSuite write-back links bills to that file.
+
+    Does nothing at all while SHAREPOINT_ARCHIVE_ENABLED isn't "true", and
+    nothing for PARKED documents or in research mode. A failure is recorded
+    ("failed" + reason) and intake carries on -- this never raises, so a
+    SharePoint problem can never stop intake, validation, matching or the
+    write-back. The folder month is the printed statement month when there
+    is one, else statement_period (for AI-extracted statements that is the
+    month the pipeline ran)."""
+    try:
+        if not sharepoint_enabled():
+            return
+        if routing != "RECONCILIATION" or research_only:
+            why = "research mode" if research_only else f"routing {routing}"
+            print(f"\n[Step 8b] SharePoint: not archived ({why})")
+            return
+        print(f"\n[Step 8b] Archiving PDF to SharePoint...")
+        settings, reason = read_settings()
+        if settings is None:
+            record_sharepoint_result(statement_id, SharePointUploadResult("skipped", error=reason))
+            print(f"  SharePoint: skipped -- {reason}")
+            return
+        current = execute_query(
+            "SELECT sharepoint_status FROM document_intake_log WHERE statement_id = ?", [statement_id])
+        if current and current[0].get("sharepoint_status") in ("uploaded", "existing"):
+            print(f"  SharePoint: already archived for this statement -- not uploaded again")
+            return
+        if statement_month and len(statement_month) >= 7:
+            month_value, month_source = statement_month, "statement date"
+        else:
+            month_value, month_source = statement_period or "", "statement period (no statement date)"
+        result = SharePointArchiveClient(settings).upload_statement_pdf(
+            pdf_path, vendor_name=vendor_name, year=month_value[:4], month=month_value[5:7],
+            document_hash=document_hash, original_filename=os.path.basename(pdf_path),
+        )
+        record_sharepoint_result(statement_id, result)
+        if result.status in ("uploaded", "existing"):
+            note = "uploaded" if result.status == "uploaded" else "existing (same file already archived)"
+            print(f"  SharePoint: {note} -- {result.path} (month from {month_source})")
+        else:
+            print(f"  SharePoint: {result.status} -- {result.error} (no link will be written)")
+    except Exception as e:
+        print(f"  Warning: SharePoint archive step failed unexpectedly ({type(e).__name__}) -- continuing without it.")
+
+
 def update_cache(document_hash: str, statement_id: str, source_file: str,
                  provider_used: str, row_count: int):
     """Insert or replace a cache entry.
@@ -1464,6 +1532,15 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         else:
             print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
 
+        # Step 8b (cache hit): SharePoint archive -- RECONCILIATION only,
+        # never research mode, never blocks (see archive_statement_to_sharepoint()).
+        archive_statement_to_sharepoint(
+            statement_id, pdf_path, cache_vendor_name,
+            (original_intake_row or {}).get("statement_month")
+            or normalize_statement_month(cache_schema_result["statement_metadata"].get("statement_date")),
+            statement_period, document_hash, cache_routing, research_only,
+        )
+
         return {
             "statement_id": statement_id,
             "cache_hit": True,
@@ -1713,6 +1790,16 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Uploaded to: {blob_storage_path}")
     else:
         print(f"  Warning: PDF was not archived to Blob Storage — continuing without it.")
+
+    # Step 8b: SharePoint archive -- RECONCILIATION only, never research
+    # mode, never blocks (see archive_statement_to_sharepoint()). Runs after
+    # Step 7 so the intake row it updates exists, and before the write-back
+    # (scripts/run_full_pipeline.py) reads the link.
+    archive_statement_to_sharepoint(
+        statement_id, pdf_path, vendor_name,
+        normalize_statement_month(stmt_meta.get("statement_date")), statement_period,
+        document_hash, routing, research_only,
+    )
 
     # Step 9: Update cache (skipped in RESEARCH MODE -- bronze_count is 0,
     # and check_cache() already requires row_count > 0 for a valid hit, so
