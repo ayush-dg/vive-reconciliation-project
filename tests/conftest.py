@@ -7,8 +7,8 @@ that don't patch web.queries.recon_sql / recon_query then connected to the
 real Fabric Warehouse and COMMITTED their UPDATEs / INSERTs there. pytest
 loads this file before it imports any test module, so:
 
-  - every FABRIC_*, AZURE_SQL_*, AZURE_CLAUDE_* and AZURE_BLOB_* variable is
-    set to "" -- load_dotenv() never overrides a key that already exists, so
+  - every FABRIC_*, AZURE_SQL_*, AZURE_CLAUDE_*, AZURE_BLOB_*, SHAREPOINT_*,
+    SANDBOX_* and NETSUITE_* variable is set to "" -- load_dotenv() never overrides a key that already exists, so
     .env can't fill them in again (a test that sets one itself still can);
   - outbound sockets raise on connect, except to localhost;
   - pyodbc.connect raises: the ODBC driver opens its sockets natively, below
@@ -20,7 +20,10 @@ A test that needs one of these services must mock it.
 import os
 import socket
 
-_PREFIXES = ("FABRIC_", "AZURE_SQL_", "AZURE_CLAUDE_", "AZURE_BLOB_")
+_PREFIXES = ("FABRIC_", "AZURE_SQL_", "AZURE_CLAUDE_", "AZURE_BLOB_",
+             # 2026-10-17: the SharePoint archive and the NetSuite sandbox
+             # write-back -- a test that wants one must set it itself.
+             "SHAREPOINT_", "SANDBOX_", "NETSUITE_")
 # Every such name the code or .env uses (also blanked when not set, so a later
 # load_dotenv() can't add it).
 _NAMES = (
@@ -30,6 +33,11 @@ _NAMES = (
     "FABRIC_CLIENT_ID", "FABRIC_CLIENT_SECRET", "FABRIC_LAKEHOUSE_ID", "FABRIC_LAKEHOUSE_NAME", "FABRIC_SQLDB_ENDPOINT",
     "FABRIC_SQLDB_NAME", "FABRIC_SQL_ENDPOINT", "FABRIC_SQL_ENDPOINT_ID", "FABRIC_TENANT_ID", "FABRIC_WAREHOUSE_NAME",
     "FABRIC_WORKSPACE_ID",
+    "NETSUITE_WRITEBACK_ENABLED", "NETSUITE_WRITEBACK_PDF_LINK",
+    "SANDBOX_ACCOUNT_ID", "SANDBOX_CONSUMER_KEY", "SANDBOX_CONSUMER_SECRET", "SANDBOX_TOKEN_ID", "SANDBOX_TOKEN_SECRET",
+    "SHAREPOINT_ARCHIVE_ENABLED", "SHAREPOINT_TENANT_ID", "SHAREPOINT_CLIENT_ID", "SHAREPOINT_CLIENT_SECRET",
+    "SHAREPOINT_SITE_HOSTNAME", "SHAREPOINT_SITE_PATH", "SHAREPOINT_LIBRARY", "SHAREPOINT_BASE_FOLDER",
+    "SHAREPOINT_ALLOW_LIVE_FOLDER",
 )
 for _name in set(_NAMES) | {k for k in os.environ if k.startswith(_PREFIXES)}:
     os.environ[_name] = ""
