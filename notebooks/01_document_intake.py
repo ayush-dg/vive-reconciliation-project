@@ -847,6 +847,35 @@ def intake_log_values(document_id: str, pdf_path: str, document_hash: str,
     return values
 
 
+# migrations/020_add_sharepoint_archive_columns.sql -- written by
+# archive_statement_to_sharepoint() (Step 8b), AFTER write_intake_log().
+SHAREPOINT_COLUMNS = (
+    "sharepoint_status", "sharepoint_web_url", "sharepoint_item_id", "sharepoint_drive_id",
+    "sharepoint_path", "sharepoint_error", "sharepoint_uploaded_at",
+)
+
+
+def carried_sharepoint_values(statement_id: str, document_hash: str) -> dict:
+    """The SharePoint columns of this statement's current intake row, when
+    that row is for the SAME file (same document_hash) -- write_intake_log()
+    deletes and re-inserts the row, and these are written after it, so
+    without this a same-statement re-intake would lose them. A different
+    file keeps nothing. Never raises: a failed lookup (e.g. a database
+    without migration 020) just carries nothing forward."""
+    try:
+        rows = execute_query(
+            f"SELECT document_hash, {', '.join(SHAREPOINT_COLUMNS)} FROM document_intake_log "
+            "WHERE statement_id = ? ORDER BY ingestion_timestamp DESC",
+            [statement_id],
+        )
+    except Exception as e:
+        print(f"  Warning: could not read the previous SharePoint result ({type(e).__name__}) -- not carried forward.")
+        return {}
+    if not rows or not document_hash or rows[0].get("document_hash") != document_hash:
+        return {}
+    return {col: rows[0][col] for col in SHAREPOINT_COLUMNS if rows[0].get(col) is not None}
+
+
 def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
                      schema_result: dict, statement_id: str, statement_period: str,
                      invoice_count: int, routing_decision: str):
@@ -866,6 +895,9 @@ def write_intake_log(document_id: str, pdf_path: str, document_hash: str,
     """
     values = intake_log_values(document_id, pdf_path, document_hash, schema_result,
                                statement_id, statement_period, invoice_count, routing_decision)
+    # Same file re-intaken under the same statement_id: keep its SharePoint
+    # archive result (see carried_sharepoint_values()).
+    values.update(carried_sharepoint_values(statement_id, document_hash))
 
     execute_sql(
         "DELETE FROM document_intake_log WHERE statement_id = ?",
