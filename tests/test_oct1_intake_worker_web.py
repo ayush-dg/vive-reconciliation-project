@@ -155,7 +155,8 @@ class TestDuplicateCheck(unittest.TestCase):
         self.pdf = f.name
         self.addCleanup(os.remove, self.pdf)
         no_writes = mock.MagicMock(side_effect=AssertionError("nothing may be written"))
-        for name in ("execute_sql", "write_to_bronze", "write_intake_log", "upload_pdf_to_blob_storage"):
+        for name in ("execute_sql", "write_to_bronze", "write_intake_log", "upload_pdf_to_blob_storage",
+                     "archive_statement_to_sharepoint"):
             patcher = mock.patch.object(load_intake(), name, no_writes)
             patcher.start()
             self.addCleanup(patcher.stop)

@@ -101,7 +101,10 @@ def _run_netsuite_writeback(statement_id):
         not_written = ", ".join(f"{n} {reason}" for reason, n in result["not_written"].items())
         locked = f", {result['period_locked']} period locked" if result["period_locked"] else ""
         locked += f", {result['held_by_other']} saved first by another statement" if result["held_by_other"] else ""
-        print(f"    NetSuite write-back: {result['written']} written, {result['failed']} failed{locked}"
+        links = "".join(f", {result[key]} {label}" for key, label in (
+            ("links_added", "PDF link(s) added"), ("link_only_failed", "PDF link write(s) failed"),
+            ("link_mismatch", "PDF link(s) not stored as sent")) if result.get(key))
+        print(f"    NetSuite write-back: {result['written']} written, {result['failed']} failed{locked}{links}"
               f"{', not written: ' + not_written if not_written else ''}. Log: {result['log']}")
 
 

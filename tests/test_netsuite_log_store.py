@@ -147,6 +147,23 @@ class UnattemptedRowsTests(_TempDbCase):
         self.assertEqual(json.loads(run["not_written_counts"]), {wb.CAT_NOT_ATTEMPTED: 2})
 
 
+class LinkOnlyRunCountTests(_TempDbCase):
+    """A link-only write adds a PDF link to a bill that is already reconciled: it is not a result."""
+
+    def _link_only(self, invoice, ok, category=""):
+        plan = self._written(invoice).plan
+        plan.action = wb.PATCH_LINK_ONLY
+        return wb.ApplyResult(plan, ok, "updated" if ok else "bad value", "501" if ok else None, category=category)
+
+    def test_link_writes_are_not_counted_as_written_and_a_failed_one_is_not_a_failure(self):
+        results = [self._written("A"), self._link_only("B", True),
+                   self._link_only("C", False, wb.CAT_LINK_ONLY_FAILED)]
+        log_store.save_run(STMT, results, [r.plan for r in results], started_at=STARTED)
+        (run,) = log_store.get_runs(STMT)
+        self.assertEqual((run["written"], run["failed"], run["not_written"]), (1, 0, 1))
+        self.assertEqual(json.loads(run["not_written_counts"]), {wb.CAT_LINK_ONLY_FAILED: 1})
+
+
 class SaveRevertTests(_TempDbCase):
     def _results(self):
         patch = {"op": "PATCH", "record_type": "vendorbill", "record_id": "1", "invoice_number": "A",

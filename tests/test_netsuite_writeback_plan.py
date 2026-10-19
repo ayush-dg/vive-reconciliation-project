@@ -71,7 +71,9 @@ class PlanMatchedTests(unittest.TestCase):
         self.assertEqual(wb.plan_matched(_row(), [txn], _ctx()).action, wb.SKIP_RECONCILED_EARLIER)
 
     def test_rerun_of_same_statement_is_up_to_date(self):
-        txn = _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT)
+        # (A bill with no link yet gets a link-only write -- LinkOnlyPlanTests.)
+        txn = _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT,
+                   custbody_statement_link="https://app.example/statements/abc/pdf")
         self.assertEqual(wb.plan_matched(_row(), [txn], _ctx()).action, wb.SKIP_UP_TO_DATE)
 
     def test_previous_mismatch_flag_is_cleared_when_it_now_matches(self):
@@ -96,7 +98,7 @@ class PlanExceptionOnBillsTests(unittest.TestCase):
 
     def test_mismatch_rerun_is_up_to_date(self):
         txn = _txn("-120", custbody_reconciled="F", custbody_statement_reference=STMT,
-                   custbody_reconciliation_exception="7")
+                   custbody_reconciliation_exception="7", custbody_statement_link="https://app.example/statements/abc/pdf")
         (plan,) = self._mismatch([txn])
         self.assertEqual(plan.action, wb.SKIP_UP_TO_DATE)
 
@@ -240,20 +242,70 @@ class RevertTests(unittest.TestCase):
         self.assertEqual(wb.build_revert_actions(self._log([entry])), [])
 
 
+SP_URL = ("https://vivecollision.sharepoint.com/sites/AIVendorStatements/Shared%20Documents/General/"
+          "Vendor%20Statements/_dev_test/fred_beans/2026/09/Fred%20Beans__abababababab.pdf")
+
+
 class PdfLinkSwitchTests(unittest.TestCase):
+    ON = {"NETSUITE_WRITEBACK_PDF_LINK": "true"}
+
+    def _resolve(self, rows, env=None):
+        with mock.patch.dict(os.environ, env or self.ON, clear=True), \
+             mock.patch("src.lakehouse.connection.execute_query", return_value=rows) as query:
+            url, note = wb.resolve_pdf_link("STMT-1")
+        return url, note, query
+
     def test_link_is_off_unless_explicitly_switched_on(self):
         for env in ({}, {"NETSUITE_WRITEBACK_PDF_LINK": "false"}, {"NETSUITE_WRITEBACK_PDF_LINK": ""}):
-            with self.subTest(env=env), mock.patch.dict(
-                    os.environ, dict(env, APP_PUBLIC_BASE_URL="https://app.example"), clear=True):
-                url, note = wb.resolve_pdf_link("STMT-1")
-            self.assertIsNone(url)
-            self.assertIn("switched off", note)
+            with self.subTest(env=env):
+                url, note, query = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": SP_URL}],
+                                                 env=dict(env, APP_PUBLIC_BASE_URL="https://app.example"))
+                self.assertIsNone(url)
+                self.assertIn("switched off", note)
+                query.assert_not_called()
 
-    def test_switched_on_uses_the_base_url_and_the_document_hash(self):
-        env = {"NETSUITE_WRITEBACK_PDF_LINK": "true", "APP_PUBLIC_BASE_URL": "https://app.example/"}
-        with mock.patch.dict(os.environ, env, clear=True),              mock.patch("src.lakehouse.connection.execute_query", return_value=[{"document_hash": "ab" * 32}]):
+    def test_switched_on_uses_the_sharepoint_link_from_the_intake_log(self):
+        url, note, query = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": SP_URL}])
+        self.assertEqual((url, note), (SP_URL, ""))
+        sql, params = query.call_args.args
+        self.assertIn("FROM document_intake_log", sql)
+        self.assertEqual(params, ["STMT-1"])
+
+    def test_an_existing_file_is_linked_too(self):
+        url, _, _ = self._resolve([{"sharepoint_status": "existing", "sharepoint_web_url": SP_URL}])
+        self.assertEqual(url, SP_URL)
+
+    def test_the_base_url_is_no_longer_needed_or_used(self):
+        env = dict(self.ON, APP_PUBLIC_BASE_URL="https://app.example")
+        url, _, _ = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": SP_URL}], env=env)
+        self.assertEqual(url, SP_URL)
+        self.assertNotIn("/statements/", url)
+
+    def test_no_link_unless_the_upload_succeeded(self):
+        for rows, status in (([], "none"),
+                             ([{"sharepoint_status": None, "sharepoint_web_url": None}], "none"),
+                             ([{"sharepoint_status": "failed", "sharepoint_web_url": None}], "failed"),
+                             ([{"sharepoint_status": "skipped", "sharepoint_web_url": None}], "skipped"),
+                             ([{"sharepoint_status": "uploaded", "sharepoint_web_url": ""}], "uploaded")):
+            with self.subTest(rows=rows):
+                url, note, _ = self._resolve(rows)
+                self.assertIsNone(url)
+                self.assertEqual(note, f"no SharePoint link for this statement (status: {status})")
+
+    def test_url_longer_than_the_field_limit_is_not_written(self):
+        long_url = "https://x.sharepoint.com/" + "a" * wb.NETSUITE_LINK_MAX_LEN
+        url, note, _ = self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": long_url}])
+        self.assertIsNone(url)
+        self.assertIn("too long", note)
+        exact = "h" * wb.NETSUITE_LINK_MAX_LEN
+        self.assertEqual(self._resolve([{"sharepoint_status": "uploaded", "sharepoint_web_url": exact}])[0], exact)
+
+    def test_lookup_failure_is_not_fatal(self):
+        with mock.patch.dict(os.environ, self.ON, clear=True), \
+             mock.patch("src.lakehouse.connection.execute_query", side_effect=RuntimeError("db down")):
             url, note = wb.resolve_pdf_link("STMT-1")
-        self.assertEqual(url, "https://app.example/statements/" + "ab" * 32 + "/pdf")
+        self.assertIsNone(url)
+        self.assertEqual(note, "SharePoint link lookup failed (RuntimeError)")
 
     def test_plans_carry_no_link_fields_when_there_is_no_link(self):
         ctx = _ctx(link=None)
@@ -261,6 +313,281 @@ class PdfLinkSwitchTests(unittest.TestCase):
         (line,) = wb.plan_exception_row(_row("5", wb.REASON_NOT_FOUND), [], ctx, set())
         self.assertNotIn("custbody_statement_link", matched.fields)
         self.assertNotIn("custrecord_sl_statement_link", line.fields)
+
+
+class _FakeNs:
+    """Records PATCHes and answers the read-back with `row` (SuiteQL leaves
+    out null columns, so an absent key means empty)."""
+
+    domain_id = "7321761-sb1"
+
+    def __init__(self, row):
+        self.row = row
+        self.patches = []
+        self.queries = []
+
+    def patch_record(self, record_type, record_id, body):
+        self.patches.append((record_type, record_id, dict(body)))
+
+    def suiteql(self, query):
+        self.queries.append(query)
+        return [self.row] if self.row is not None else []
+
+
+class ReadBackTests(unittest.TestCase):
+    def _matched(self, link=SP_URL):
+        return wb.plan_matched(_row(), [_txn("-100")], _ctx(link=link))
+
+    def _stored(self, plan, **override):
+        row = {"custbody_reconciled": "T", "custbody_statement_reference": STMT}
+        if "custbody_statement_link" in plan.fields:
+            row["custbody_statement_link"] = plan.fields["custbody_statement_link"]
+        row.update(override)
+        return row
+
+    def test_matched_write_reads_back_the_link_too(self):
+        plan = self._matched()
+        ns = _FakeNs(self._stored(plan))
+        result = wb.apply_plan(ns, plan)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.detail, "updated")
+        self.assertFalse(result.link_mismatch)
+        self.assertIn("custbody_statement_link", ns.queries[0])
+
+    def test_link_mismatch_on_a_result_write_is_ok_but_flagged(self):
+        plan = self._matched()
+        ns = _FakeNs(self._stored(plan, custbody_statement_link=SP_URL[:100]))   # truncated
+        result = wb.apply_plan(ns, plan)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.link_mismatch)
+        self.assertEqual(result.detail, "updated; link not stored as sent")
+
+    def test_a_truncated_link_on_the_first_write_does_not_stop_the_run(self):
+        first = wb.plan_matched(_row(invoice="INV1"), [dict(_txn("-100"), id="501", tranid="INV1")], _ctx(link=SP_URL))
+        second = wb.plan_matched(_row(invoice="INV2"), [dict(_txn("-100"), id="502", tranid="INV2")], _ctx(link=SP_URL))
+
+        class Ns(_FakeNs):
+            def suiteql(self, query):
+                self.queries.append(query)
+                truncated = "WHERE id = 501" in query
+                return [{"custbody_reconciled": "T", "custbody_statement_reference": STMT,
+                         "custbody_statement_link": SP_URL[:100] if truncated else SP_URL}]
+
+        ns = Ns(None)
+        results = wb.apply_plans(ns, [first, second])
+        self.assertEqual([p[1] for p in ns.patches], ["501", "502"], "both bills written")
+        self.assertEqual(len(results), 2, "the run did not stop after the first write")
+        self.assertTrue(all(r.ok for r in results))
+        self.assertEqual([r.link_mismatch for r in results], [True, False])
+
+    def test_result_mismatch_still_fails(self):
+        plan = self._matched()
+        ns = _FakeNs(self._stored(plan, custbody_statement_reference="STMT-OTHER"))
+        result = wb.apply_plan(ns, plan)
+        self.assertFalse(result.ok)
+        self.assertIn("statement reference", result.detail)
+
+    def test_no_link_sent_means_no_link_check(self):
+        plan = self._matched(link=None)
+        ns = _FakeNs(self._stored(plan, custbody_statement_link="https://something-else"))
+        self.assertTrue(wb.apply_plan(ns, plan).ok)
+
+    def test_link_only_plan_is_checked_without_a_key_error(self):
+        txn = _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT)
+        plan = wb._txn_plan_base("INV1", Decimal("100"), txn, wb.PATCH_MATCHED, {"custbody_statement_link": SP_URL})
+        ok = wb.apply_plan(_FakeNs({"custbody_statement_link": SP_URL}), plan)
+        self.assertTrue(ok.ok, ok.detail)
+        bad = wb.apply_plan(_FakeNs({"custbody_statement_link": SP_URL[:100]}), plan)
+        self.assertFalse(bad.ok)
+        self.assertEqual(bad.detail, "link not stored as sent")
+        self.assertFalse(bad.link_mismatch)
+
+    def test_exception_write_checks_the_exception(self):
+        plan = wb.plan_exception_row(_row("100.00", wb.REASON_AMOUNT_MISMATCH), [_txn("-90")], _ctx(link=None),
+                                     set())[0]
+        self.assertEqual(plan.action, wb.PATCH_EXCEPTION)
+        good = {"custbody_reconciled": "F", "custbody_statement_reference": STMT,
+                "custbody_reconciliation_exception": "7"}
+        self.assertTrue(wb.apply_plan(_FakeNs(good), plan).ok)
+        self.assertFalse(wb.apply_plan(_FakeNs(dict(good, custbody_reconciliation_exception="9")), plan).ok)
+
+    def test_record_gone_on_read_back(self):
+        result = wb.apply_plan(_FakeNs(None), self._matched())
+        self.assertFalse(result.ok)
+        self.assertEqual(result.detail, "record not found on read-back")
+
+
+OLD_LINK = "https://app.example/statements/abc/pdf"
+
+
+def _done(**extra):
+    """A matched bill already carrying THIS statement's result."""
+    return _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT, **extra)
+
+
+class LinkOnlyPlanTests(unittest.TestCase):
+    def test_up_to_date_bill_without_a_link_gets_a_link_only_write(self):
+        plan = wb.plan_matched(_row(), [_done()], _ctx(link=SP_URL))
+        self.assertEqual(plan.action, wb.PATCH_LINK_ONLY)
+        self.assertEqual(plan.fields, {"custbody_statement_link": SP_URL})
+        self.assertEqual(plan.previous, {"custbody_reconciled": "T", "custbody_statement_reference": STMT,
+                                         "custbody_statement_link": None})
+        self.assertIn(wb.PATCH_LINK_ONLY, wb.WRITE_ACTIONS)
+
+    def test_up_to_date_exception_bill_without_a_link_gets_a_link_only_write(self):
+        txn = _txn("-120", custbody_reconciled="F", custbody_statement_reference=STMT,
+                   custbody_reconciliation_exception="7")
+        (plan,) = wb.plan_exception_row(_row("100.00", wb.REASON_AMOUNT_MISMATCH), [txn], _ctx(link=SP_URL), set())
+        self.assertEqual((plan.action, plan.fields), (wb.PATCH_LINK_ONLY, {"custbody_statement_link": SP_URL}))
+
+    def test_never_over_an_existing_link_even_a_different_one(self):
+        for existing in (OLD_LINK, SP_URL):
+            with self.subTest(existing=existing):
+                plan = wb.plan_matched(_row(), [_done(custbody_statement_link=existing)], _ctx(link=SP_URL))
+                self.assertEqual(plan.action, wb.SKIP_UP_TO_DATE)
+                self.assertEqual(plan.fields, {})
+
+    def test_never_for_a_bill_reconciled_by_another_statement(self):
+        for link in (None, OLD_LINK):
+            with self.subTest(link=link):
+                txn = _txn("-100", custbody_reconciled="T", custbody_statement_reference="STMT-OLD",
+                           **({"custbody_statement_link": link} if link else {}))
+                plan = wb.plan_matched(_row(), [txn], _ctx(link=SP_URL))
+                self.assertEqual(plan.action, wb.SKIP_RECONCILED_EARLIER)
+                self.assertEqual(plan.fields, {})
+
+    def test_never_without_a_link_for_this_statement(self):
+        plan = wb.plan_matched(_row(), [_done()], _ctx(link=None))
+        self.assertEqual(plan.action, wb.SKIP_UP_TO_DATE)
+
+    def test_defensive_reference_check(self):
+        # Even if a skip were ever mislabelled "up to date", a bill whose
+        # reference isn't this statement never gets a link-only write.
+        txn = _txn("-100", custbody_reconciled="T", custbody_statement_reference="STMT-OTHER")
+        plan = wb._skipped_or_link_only("INV1", Decimal("100"), txn, _ctx(link=SP_URL), wb.SKIP_UP_TO_DATE)
+        self.assertEqual(plan.action, wb.SKIP_UP_TO_DATE)
+
+    def test_link_only_is_a_write_not_a_skip_in_the_counts(self):
+        plans = [wb.plan_matched(_row(), [_done()], _ctx(link=SP_URL)),
+                 wb.plan_matched(_row(), [_done(custbody_statement_link=OLD_LINK)], _ctx(link=SP_URL))]
+        self.assertEqual(wb.skip_counts(plans), {wb.CAT_UP_TO_DATE: 1})
+
+    def test_build_plans_puts_link_only_writes_last(self):
+        results = {"header": {"vendor_id": "V", "vendor_name_raw": "Vendor", "shop_name_raw": None},
+                   "matched": [_row(invoice="DONE1"), _row(invoice="NEW1"), _row(invoice="DONE2")],
+                   "exceptions": [], "lines": []}
+        sandbox = {"done1": [_done(id="601", tranid="DONE1")], "new1": [dict(_txn("-100"), id="602", tranid="NEW1")],
+                   "done2": [_done(id="603", tranid="DONE2")]}
+        with mock.patch.object(wb, "load_statement_results", return_value=results), \
+             mock.patch.object(wb, "resolve_entity_ids", return_value=["111"]), \
+             mock.patch.object(wb, "resolve_pdf_link", return_value=(SP_URL, "")), \
+             mock.patch.object(wb, "fetch_exception_list_ids", return_value={}), \
+             mock.patch.object(wb, "fetch_sandbox_transactions", return_value=sandbox), \
+             mock.patch.object(wb, "fetch_existing_statement_lines", return_value=set()), \
+             mock.patch.object(wb, "_primary_entity", return_value="111"), \
+             mock.patch.object(wb, "_statement_location", return_value=None):
+            ctx, plans = wb.build_plans(STMT, mock.Mock())
+        self.assertEqual([(p.action, p.invoice_number) for p in plans],
+                         [(wb.PATCH_MATCHED, "NEW1"), (wb.PATCH_LINK_ONLY, "DONE1"), (wb.PATCH_LINK_ONLY, "DONE2")])
+
+
+class LinkOnlyApplyTests(unittest.TestCase):
+    LOCKED = ('{"o:errorDetails":[{"detail":"You cannot make changes to this period without the '
+              'Allow Non-G/L Changes permission."}]}')
+
+    def _link_only(self, record_id):
+        return wb.plan_matched(_row(invoice=f"DONE{record_id}"), [_done(id=record_id, tranid=f"DONE{record_id}")],
+                               _ctx(link=SP_URL))
+
+    def _ns(self, fail_ids=(), locked_ids=(), truncate_ids=()):
+        outer = self
+
+        class Ns(_FakeNs):
+            def patch_record(self, record_type, record_id, body):
+                if record_id in fail_ids or record_id in locked_ids:
+                    exc = RuntimeError("HTTP 400")
+                    exc.status_code = 400
+                    exc.body = outer.LOCKED if record_id in locked_ids else "bad value"
+                    raise exc
+                super().patch_record(record_type, record_id, body)
+
+            def suiteql(self, query):
+                self.queries.append(query)
+                rid = query.rsplit("= ", 1)[1].strip()
+                return [{"custbody_reconciled": "T", "custbody_statement_reference": STMT,
+                         "custbody_statement_link": SP_URL[:50] if rid in truncate_ids else SP_URL}]
+        return Ns(None)
+
+    def test_only_the_link_is_sent(self):
+        ns = self._ns()
+        (result,) = wb.apply_plans(ns, [self._link_only("701")])
+        self.assertTrue(result.ok, result.detail)
+        self.assertEqual(ns.patches, [("vendorbill", "701", {"custbody_statement_link": SP_URL})])
+
+    def test_a_failed_link_only_write_never_stops_the_run(self):
+        ns = self._ns(fail_ids=("701",))
+        results = wb.apply_plans(ns, [self._link_only("701"), self._link_only("702")])
+        self.assertEqual(len(results), 2, "the run carried on after the first (link-only) write failed")
+        self.assertEqual([r.ok for r in results], [False, True])
+        self.assertEqual(results[0].category, wb.CAT_LINK_ONLY_FAILED)
+
+    def test_a_link_only_write_in_a_locked_period_is_labelled_period_locked(self):
+        (result, after) = wb.apply_plans(self._ns(locked_ids=("701",)), [self._link_only("701"), self._link_only("702")])
+        self.assertEqual(result.category, wb.CAT_PERIOD_LOCKED)
+        self.assertTrue(after.ok)
+
+    def test_a_link_only_write_whose_link_comes_back_different_fails(self):
+        (result,) = wb.apply_plans(self._ns(truncate_ids=("701",)), [self._link_only("701")])
+        self.assertFalse(result.ok)
+        self.assertEqual(result.detail, wb.LINK_NOT_STORED)
+
+    def test_failed_link_only_writes_do_not_count_toward_the_first_write_rule(self):
+        # A link-only failure, then a failing RESULT write: the result write is
+        # the run's first, so the run stops there.
+        result_write = wb.plan_matched(_row(invoice="NEW1"), [dict(_txn("-100"), id="801", tranid="NEW1")],
+                                       _ctx(link=SP_URL))
+        results = wb.apply_plans(self._ns(fail_ids=("701", "801")),
+                                 [self._link_only("701"), result_write, self._link_only("702")])
+        self.assertEqual(len(results), 2)
+
+    def test_pipeline_summary_counts_link_only_writes_separately(self):
+        from src.netsuite import pipeline_hook
+        plans = [wb.plan_matched(_row(invoice="NEW1"), [dict(_txn("-100"), id="801", tranid="NEW1")], _ctx(link=SP_URL)),
+                 self._link_only("701"), self._link_only("702"), self._link_only("703")]
+        ns = self._ns(fail_ids=("702",), locked_ids=("703",))
+        with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": "true"}, clear=True), \
+             mock.patch.object(pipeline_hook, "NetSuiteClient", return_value=ns), \
+             mock.patch.object(pipeline_hook, "build_plans", return_value=(mock.Mock(), plans)), \
+             mock.patch.object(pipeline_hook, "write_apply_log", return_value="log.json"), \
+             mock.patch.object(pipeline_hook, "save_run"):
+            summary = pipeline_hook.run_netsuite_writeback(STMT)
+        self.assertEqual({k: summary[k] for k in ("written", "failed", "period_locked", "links_added",
+                                                  "link_only_failed", "link_mismatch")},
+                         {"written": 1, "failed": 0, "period_locked": 1, "links_added": 1,
+                          "link_only_failed": 1, "link_mismatch": 0})
+
+
+class LinkOnlyRevertTests(unittest.TestCase):
+    def test_revert_from_log_puts_back_the_empty_link(self):
+        plan = wb.plan_matched(_row(), [_done(id="701")], _ctx(link=SP_URL))
+        entry = {"action": plan.action, "invoice_number": plan.invoice_number, "record_type": plan.record_type,
+                 "record_id": plan.record_id, "fields_sent": plan.fields, "previous": plan.previous, "ok": True}
+        (action,) = wb.build_revert_actions({"writes": [entry]})
+        self.assertEqual(action["op"], "PATCH")
+        self.assertEqual(action["body"], {"custbody_statement_link": None})
+
+    def test_revert_by_statement_finds_it_by_this_statements_reference_and_clears_the_link(self):
+        queries = []
+
+        class Ns:
+            def suiteql(self, query):
+                queries.append(query)
+                if "FROM transaction" in query:
+                    return [{"id": "701", "tranid": "DONE701", "type": "VendBill", "custbody_statement_link": SP_URL}]
+                return []
+        (action,) = wb.find_revert_actions_for_statement(Ns(), STMT)
+        self.assertIn(f"custbody_statement_reference = '{STMT}'", queries[0])
+        self.assertIsNone(action["body"]["custbody_statement_link"])
 
 
 class LockedPeriodRunControlTests(unittest.TestCase):
@@ -478,72 +805,6 @@ class RevertLogTests(unittest.TestCase):
             self.assertEqual(wb.write_revert_log(mock.Mock(domain_id="x"), STMT, self._results()), "")
 
 
-class ShortPdfLinkTests(unittest.TestCase):
-    ENV = {"NETSUITE_WRITEBACK_PDF_LINK": "true", "APP_PUBLIC_BASE_URL": "https://app.example/"}
-
-    def test_names_are_made_url_friendly_and_lose_a_mailbox_prefix(self):
-        cases = {
-            "BMW.pdf": "BMW.pdf",
-            "Cherry Hill Nissan (Lamon).pdf": "Cherry_Hill_Nissan_Lamon.pdf",
-            "L&M Auto (M3 S Main).pdf": "L_M_Auto_M3_S_Main.pdf",
-            "89a77bd0_AR Statement_BT316033_2026_SEP_Tekion.pdf": "AR_Statement_BT316033_2026_SEP_Tekion.pdf",
-            "8e30cf89-1079-463d-aa8d-2f7d938a8dc6__Keystone_20261014T190444Z.pdf": "Keystone_20261014T190444Z.pdf",
-            "Sullivan Tire Maurice  093026.pdf": "Sullivan_Tire_Maurice_093026.pdf",
-            "20261012113727.pdf": "20261012113727.pdf",
-            "NOEXT": "NOEXT.pdf",
-            None: "statement.pdf",
-            "  .pdf": "statement.pdf",
-        }
-        for given, expected in cases.items():
-            with self.subTest(given=given):
-                self.assertEqual(wb.pdf_link_name(given), expected)
-
-    def test_the_stored_link_is_short_and_ends_with_the_pdf_name(self):
-        with mock.patch.dict(os.environ, self.ENV, clear=True), \
-             mock.patch("src.lakehouse.connection.execute_query", return_value=[{"pdf_filename": "BMW.pdf"}]):
-            url, note = wb.resolve_pdf_link("STMT-60A970B4")
-        self.assertEqual(url, "https://app.example/statements/STMT-60A970B4/BMW.pdf")
-        self.assertEqual(note, "")
-
-    def _answers(self, **by_table):
-        """An execute_query stand-in: the rows to return, chosen by which table the SQL reads."""
-        def fake(sql, params=None):
-            for needle, rows in by_table.items():
-                if needle in sql:
-                    return rows
-            return []
-        return fake
-
-    def _link(self, **by_table):
-        with mock.patch.dict(os.environ, self.ENV, clear=True), \
-             mock.patch("src.lakehouse.connection.execute_query", side_effect=self._answers(**by_table)):
-            return wb.resolve_pdf_link("STMT-1")
-
-    def test_a_statement_with_no_name_anywhere_falls_back_to_the_hash_link(self):
-        url, _ = self._link(**{"FROM jobs WHERE statement_id = ? AND document_hash": [{"document_hash": "ab" * 32}]})
-        self.assertEqual(url, "https://app.example/statements/" + "ab" * 32 + "/pdf")
-
-    def test_inside_the_pipeline_the_name_comes_from_the_intake_log(self):
-        # the job row has no statement id yet, but intake has already logged the file name
-        url, note = self._link(document_intake_log=[{"original_filename": None, "source_file": "BMW.pdf"}])
-        self.assertEqual((url, note), ("https://app.example/statements/STMT-1/BMW.pdf", ""))
-
-    def test_the_job_name_wins_over_the_intake_log(self):
-        url, _ = self._link(**{"pdf_filename FROM jobs": [{"pdf_filename": "From_Job.pdf"}],
-                               "document_intake_log": [{"original_filename": None, "source_file": "Other.pdf"}]})
-        self.assertTrue(url.endswith("/STMT-1/From_Job.pdf"))
-
-    def test_an_original_filename_is_preferred_to_the_source_file(self):
-        url, _ = self._link(document_intake_log=[{"original_filename": "Original.pdf", "source_file": "x.pdf"}])
-        self.assertTrue(url.endswith("/STMT-1/Original.pdf"))
-
-    def test_a_path_in_the_source_file_is_reduced_to_the_file_name(self):
-        for path in ("new-stmts/fromoct13pdfs/BMW.pdf", "new-stmts\\fromoct13pdfs\\BMW.pdf"):
-            with self.subTest(path=path):
-                url, _ = self._link(document_intake_log=[{"original_filename": None, "source_file": path}])
-                self.assertEqual(url, "https://app.example/statements/STMT-1/BMW.pdf")
-
-
 class StatementLineDateTests(unittest.TestCase):
     def _line_ctx(self, lines):
         ctx = _ctx()
@@ -640,7 +901,8 @@ class NotWrittenReasonTests(unittest.TestCase):
         self.assertEqual(wb.skip_category(plan), wb.CAT_AMOUNT_NOT_TIED)
 
     def test_up_to_date_and_reconciled_earlier_have_reasons(self):
-        done = _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT)
+        done = _txn("-100", custbody_reconciled="T", custbody_statement_reference=STMT,
+                    custbody_statement_link="https://app.example/statements/abc/pdf")
         earlier = _txn("-100", custbody_reconciled="T", custbody_statement_reference="STMT-OLD")
         self.assertEqual(wb.skip_category(wb.plan_matched(_row(), [done], _ctx())), wb.CAT_UP_TO_DATE)
         self.assertEqual(wb.skip_category(wb.plan_matched(_row(), [earlier], _ctx())), wb.CAT_RECONCILED_EARLIER)

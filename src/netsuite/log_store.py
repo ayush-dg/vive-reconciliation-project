@@ -1,6 +1,6 @@
 """Saves NetSuite write-back runs to the application database.
 
-Two tables (migrations/020_add_netsuite_writeback_log.sql, and the matching
+Two tables (migrations/021_add_netsuite_writeback_log.sql, and the matching
 definitions in src/lakehouse/azure_sql_migrations.py):
 
   netsuite_writeback_run     one row per run for a statement
@@ -23,8 +23,10 @@ from datetime import datetime, timezone
 from src.lakehouse.connection import _run_with_retry, execute_query
 from src.netsuite.writeback import (
     CAT_HELD_BY_OTHER,
+    CAT_LINK_ONLY_FAILED,
     CAT_NOT_ATTEMPTED,
     CAT_PERIOD_LOCKED,
+    PATCH_LINK_ONLY,
     WRITE_ACTIONS,
     failure_counts,
     skip_category,
@@ -122,9 +124,12 @@ def _run_counts(results: list, plans: list) -> dict:
     failures = failure_counts(results)
     locked = failures.pop(CAT_PERIOD_LOCKED, 0)
     held = failures.pop(CAT_HELD_BY_OTHER, 0)
+    link_failed = failures.pop(CAT_LINK_ONLY_FAILED, 0)   # a missing link is not a failed result
     not_written = skip_counts(plans, results)
+    if link_failed:
+        not_written[CAT_LINK_ONLY_FAILED] = link_failed
     return {
-        "written": sum(1 for r in results if r.ok),
+        "written": sum(1 for r in results if r.ok and r.plan.action != PATCH_LINK_ONLY),
         "failed": sum(failures.values()),
         "period_locked": locked,
         "held_by_other": held,

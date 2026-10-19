@@ -42,7 +42,7 @@ matching succeeds. It is best-effort: it never fails a job. It is **off unless**
 | `SANDBOX_ACCOUNT_ID`, `SANDBOX_CONSUMER_KEY`, `SANDBOX_CONSUMER_SECRET`, `SANDBOX_TOKEN_ID`, `SANDBOX_TOKEN_SECRET` | TBA credentials for the sandbox |
 | `NETSUITE_WRITEBACK_ENABLED` | `true` turns the write-back on (default off) |
 | `NETSUITE_WRITEBACK_PDF_LINK` | `true` also writes the statement PDF link (default off) |
-| `APP_PUBLIC_BASE_URL` | base address in the stored link, e.g. `https://<app>`; links open only for statements the app at that address processed |
+| `SHAREPOINT_*` | the statement PDF is archived to SharePoint at intake; the link written is that file's SharePoint URL (see `.env.example`) |
 
 ## What must exist in NetSuite
 
@@ -58,7 +58,7 @@ for bills in closed periods. Run `python scripts/netsuite_preflight.py` to check
 Every run is saved **twice**.
 
 * **Database** (`netsuite_writeback_run` + `netsuite_writeback_record`; Azure SQL when deployed, SQLite locally;
-  schema in `migrations/020_...sql` and `src/lakehouse/azure_sql_migrations.py`). One row per run
+  schema in `migrations/021_...sql` and `src/lakehouse/azure_sql_migrations.py`). One row per run
   (when, outcome, counts, source `pipeline`/`cli`) and one per invoice line: outcome and reason, the
   NetSuite record, the fields sent and the values they replaced. Outcomes: `written`, `period locked`,
   `reconciled by another statement`, `failed`, `not written` (with reason), `not attempted` (the run stopped
@@ -93,7 +93,8 @@ because bills it already stamped are skipped.
 * Sandbox only. Production needs its own credentials, the same fields/record/permissions, and a deliberate change to the guard in `client.py`.
 * The sandbox lacks bills created in production after its last refresh, so matched lines can be skipped as "not in sandbox".
 * Invoices whose matcher-saved number is not NetSuite's exact tranid (some vendors use alternate spellings) are skipped as not found in the sandbox.
-* The stored PDF link shows as the whole address in a Hyperlink field; searches and portlets cannot show just the file name
-  (their formula columns show the HTML as text).
+* The stored link is the PDF's SharePoint URL, shown as the whole address in a Hyperlink field; searches and portlets cannot show
+  just the file name (their formula columns show the HTML as text). A bill already reconciled by this statement but lacking the link
+  gets a link-only write; those are counted separately and a failed one is "not written", not a failure of the run.
 * Two statements covering the same bills processed at the same moment can collide ("Record has been changed"); the loser re-checks the bill and
   leaves it to the winner. The root cause (the same PDF uploaded twice) is not prevented.

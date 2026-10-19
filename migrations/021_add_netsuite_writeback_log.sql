@@ -1,4 +1,4 @@
--- 020_add_netsuite_writeback_log.sql
+-- 021_add_netsuite_writeback_log.sql
 --
 -- Stores every NetSuite write-back run in the database instead of only in a
 -- JSON file inside the container (those files are lost on a restart, which is

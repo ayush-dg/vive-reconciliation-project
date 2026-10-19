@@ -23,13 +23,13 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.netsuite.client import NetSuiteClient, NetSuiteConfigError
 from src.netsuite.writeback import (
-    CAT_HELD_BY_OTHER, CAT_PERIOD_LOCKED, apply_plans, apply_revert, build_plans, build_revert_actions, failure_counts,
+    CAT_HELD_BY_OTHER, CAT_LINK_ONLY_FAILED, CAT_PERIOD_LOCKED, apply_plans, apply_revert, build_plans, build_revert_actions, failure_counts,
     find_revert_actions_for_statement, write_apply_log, write_revert_log,
 )
 from src.netsuite.log_store import now_iso, save_revert, save_run
 
 _ACTION_ORDER = (
-    "PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE",
+    "PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE", "PATCH_LINK_ONLY",
     "SKIP_UP_TO_DATE", "SKIP_RECONCILED_EARLIER", "SKIP_REVIEW",
 )
 
@@ -66,7 +66,7 @@ def _print_table(plans) -> None:
 
 def _print_field_samples(plans) -> None:
     print("\nField values per write type (first example of each):")
-    for action in ("PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE"):
+    for action in ("PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE", "PATCH_LINK_ONLY"):
         sample = next((p for p in plans if p.action == action), None)
         if sample:
             print(f"  {action} ({sample.invoice_number}):")
@@ -95,9 +95,12 @@ def _apply(ns, ctx, plans) -> int:
     counts = failure_counts(results)
     locked = counts.pop(CAT_PERIOD_LOCKED, 0)
     held = counts.pop(CAT_HELD_BY_OTHER, 0)
+    counts.pop(CAT_LINK_ONLY_FAILED, 0)  # reported by the per-line FAIL rows; a link is not a result
     failed = sum(counts.values())
-    written = sum(1 for r in results if r.ok)
-    print(f"\n{written} written and verified, {failed} failed, {locked} period locked, "
+    written = sum(1 for r in results if r.ok and r.plan.action != "PATCH_LINK_ONLY")
+    links = sum(1 for r in results if r.ok and r.plan.action == "PATCH_LINK_ONLY")
+    print(f"
+{written} written and verified, {links} PDF link(s) added, {failed} failed, {locked} period locked, "
           f"{held} saved first by another statement.")
     log_path = write_apply_log(ns, ctx.statement_id, results, plans)
     print(f"Write log: {log_path}")
