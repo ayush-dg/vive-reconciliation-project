@@ -1465,6 +1465,30 @@ def get_archived_pdf_for_document_hash(document_hash: str):
     return rows[0] if rows else None
 
 
+def get_archived_pdf_for_statement(statement_id: str):
+    """The archived blob URL and original filename for a statement's PDF,
+    found by statement id -- or None. Tries the intake log row first; a
+    statement whose extraction was reused from an earlier identical upload
+    can have no intake row of its own, so it falls back to the job's
+    document_hash. Backs the short /statements/<statement id>/<name>.pdf
+    link the NetSuite write-back stores."""
+    rows = execute_query(
+        """
+        SELECT blob_storage_path, original_filename FROM document_intake_log
+        WHERE statement_id = ? AND blob_storage_path IS NOT NULL
+        ORDER BY uploaded_at DESC
+        """,
+        [statement_id],
+    )
+    if rows:
+        return rows[0]
+    jobs = execute_query(
+        "SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL",
+        [statement_id],
+    )
+    return get_archived_pdf_for_document_hash(jobs[0]["document_hash"]) if jobs else None
+
+
 def list_users() -> list:
     return execute_query(
         "SELECT id, name, email, is_active, created_at, created_by FROM users ORDER BY created_at"

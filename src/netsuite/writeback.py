@@ -71,6 +71,8 @@ CAT_NEEDS_REVIEW = "needs review"
 CAT_PERIOD_LOCKED = "period locked"
 CAT_WRITE_FAILED = "failed"
 CAT_HELD_BY_OTHER = "reconciled by another statement"
+# A planned write the run never reached because it stopped early (see _stops_the_run).
+CAT_NOT_ATTEMPTED = "not attempted (run stopped early)"
 
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
 EXCEPTION_DUPLICATE = "Duplicate"
@@ -159,11 +161,31 @@ def load_statement_results(statement_id: str) -> dict:
             "exceptions": exceptions, "lines": lines}
 
 
+_MAILBOX_PREFIX = re.compile(r"^(?:[0-9a-f]{8}-[0-9a-f-]{27}__|[0-9a-f]{8}_)")
+
+
+def pdf_link_name(filename) -> str:
+    """The file name as it appears at the end of the stored link: the upload's
+    own name, minus a mailbox-sync id prefix, with anything a URL dislikes
+    (spaces, brackets, ampersands) turned into underscores -- BMW.pdf,
+    Cherry_Hill_Nissan_Lamon.pdf. It is cosmetic: the route finds the PDF by
+    statement id."""
+    name = _MAILBOX_PREFIX.sub("", str(filename or "").strip())
+    stem = name[:-4] if name.lower().endswith(".pdf") else name
+    stem = re.sub(r"[^A-Za-z0-9.-]+", "_", stem).strip("_.-")
+    return f"{stem or 'statement'}.pdf"
+
+
 def resolve_pdf_link(statement_id: str) -> tuple:
-    """Returns (url_or_None, note). The link needs the statement's
-    document_hash, which lives on the jobs / extraction_cache rows of the
-    app database. The local dev database often has no such row (jobs live
-    in the deployed app's DB), so a missing hash is reported, not fatal.
+    """Returns (url_or_None, note). The short link is
+    <base>/statements/<statement id>/<pdf name>.pdf. The name comes from the
+    job's uploaded file name, or -- inside the pipeline, where the job row has
+    no statement id yet (the worker sets it after the run) -- from the intake
+    log row, which intake writes before matching. With neither, it falls back
+    to the older <base>/statements/<document hash>/pdf form when a hash is
+    known.
+    The local dev database often has no job rows for a deployed app's
+    statements, so a missing one is reported, not fatal.
 
     OFF by default: the link fields are only written when
     NETSUITE_WRITEBACK_PDF_LINK=true (deferred 2026-10-08 -- the link has
@@ -175,6 +197,16 @@ def resolve_pdf_link(statement_id: str) -> tuple:
         return None, "APP_PUBLIC_BASE_URL is not set"
     try:
         from src.lakehouse.connection import execute_query
+        jobs = execute_query("SELECT pdf_filename FROM jobs WHERE statement_id = ?", [statement_id])
+        name = jobs[0].get("pdf_filename") if jobs else None
+        if not name:
+            intake = execute_query(
+                "SELECT original_filename, source_file FROM document_intake_log WHERE statement_id = ?",
+                [statement_id])
+            name = (intake[0].get("original_filename") or intake[0].get("source_file")) if intake else None
+        if name:
+            clean = os.path.basename(str(name).replace("\\", "/"))     # a CLI run can store a path
+            return f"{base}/statements/{statement_id}/{pdf_link_name(clean)}", ""
         rows = execute_query(
             "SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL",
             [statement_id])
@@ -301,12 +333,24 @@ def skip_category(plan: Plan) -> str:
     return _CATEGORY_BY_ACTION.get(plan.action) or plan.category or CAT_NEEDS_REVIEW
 
 
-def skip_counts(plans: list) -> dict:
-    """{reason: count} over every plan that is not a write."""
+def unattempted_plans(plans: list, results: list) -> list:
+    """The write plans with no result: the run stopped before reaching them.
+    Without this they would vanish -- neither written, failed nor skipped."""
+    attempted = {id(r.plan) for r in results}
+    return [p for p in plans if p.action in WRITE_ACTIONS and id(p) not in attempted]
+
+
+def skip_counts(plans: list, results: list = None) -> dict:
+    """{reason: count} over every plan that was not written. With `results`,
+    the writes the run never reached are counted too."""
     counts = {}
     for plan in plans:
         if plan.action not in WRITE_ACTIONS:
             counts[skip_category(plan)] = counts.get(skip_category(plan), 0) + 1
+    if results is not None:
+        stopped = len(unattempted_plans(plans, results))
+        if stopped:
+            counts[CAT_NOT_ATTEMPTED] = stopped
     return counts
 
 
@@ -855,10 +899,40 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
         "record_type": p.record_type, "record_id": p.record_id,
         "reason": skip_category(p), "detail": p.note,
     } for p in (plans or []) if p.action not in WRITE_ACTIONS]
+    not_written += [{
+        "action": p.action, "invoice_number": p.invoice_number,
+        "statement_amount": None if p.statement_amount is None else str(p.statement_amount),
+        "record_type": p.record_type, "record_id": p.record_id,
+        "reason": CAT_NOT_ATTEMPTED, "detail": "the run stopped before this write was attempted",
+    } for p in unattempted_plans(plans or [], results)]
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
                    "applied_at": datetime.now().isoformat(timespec="seconds"),
                    "writes": entries, "failed_counts": failure_counts(results),
                    "not_written": not_written,
-                   "not_written_counts": skip_counts(plans or [])}, f, indent=2, default=str)
+                   "not_written_counts": skip_counts(plans or [], results)}, f, indent=2, default=str)
     return path
+
+
+def write_revert_log(ns, statement_id: str, results: list) -> str:
+    """Saves an undo run -- which records were reset or deleted, and what
+    failed -- next to the apply logs. `results` are (action, ok, detail)
+    tuples from apply_revert(). Returns the path, or "" if it could not be
+    written."""
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(_LOG_DIR, f"{statement_id}_{stamp}_REVERT.json")
+        reverts = [{
+            "op": a["op"], "record_type": a["record_type"], "record_id": a["record_id"],
+            "invoice_number": a["invoice_number"], "body": a.get("body"), "ok": ok, "detail": detail,
+        } for a, ok, detail in results]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
+                       "reverted_at": datetime.now().isoformat(timespec="seconds"),
+                       "reverted": sum(1 for r in reverts if r["ok"]),
+                       "failed": sum(1 for r in reverts if not r["ok"]),
+                       "reverts": reverts}, f, indent=2, default=str)
+        return path
+    except OSError:
+        return ""

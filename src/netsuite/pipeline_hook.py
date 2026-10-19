@@ -56,6 +56,6 @@ def run_netsuite_writeback(statement_id: str) -> dict:
         "failed": sum(failures.values()),
         "period_locked": locked,
         "held_by_other": held,
-        "not_written": skip_counts(plans),
+        "not_written": skip_counts(plans, results),
         "log": log_path,
     }

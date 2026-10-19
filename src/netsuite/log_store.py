@@ -23,11 +23,13 @@ from datetime import datetime, timezone
 from src.lakehouse.connection import _run_with_retry, execute_query
 from src.netsuite.writeback import (
     CAT_HELD_BY_OTHER,
+    CAT_NOT_ATTEMPTED,
     CAT_PERIOD_LOCKED,
     WRITE_ACTIONS,
     failure_counts,
     skip_category,
     skip_counts,
+    unattempted_plans,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,9 @@ OUTCOME_WRITTEN = "written"
 OUTCOME_NOT_WRITTEN = "not written"
 RUN_COMPLETED = "completed"
 RUN_FAILED = "failed"
+RUN_REVERTED = "reverted"          # an undo run (see save_revert)
+OUTCOME_NOT_ATTEMPTED = "not attempted"
+OUTCOME_REVERTED = "reverted"
 
 _RUN_COLUMNS = (
     "run_id", "statement_id", "job_id", "source", "sandbox", "outcome", "started_at", "finished_at",
@@ -98,9 +103,18 @@ def _not_written_row(run_id: str, statement_id: str, plan) -> tuple:
     )
 
 
+def _unattempted_row(run_id: str, statement_id: str, plan) -> tuple:
+    return (
+        run_id, statement_id, plan.invoice_number, _amount(plan), plan.action, OUTCOME_NOT_ATTEMPTED,
+        CAT_NOT_ATTEMPTED, plan.record_type, plan.record_id, "the run stopped before this write was attempted",
+        None, _json(plan.fields), _json(plan.previous),
+    )
+
+
 def _record_rows(run_id: str, statement_id: str, results: list, plans: list) -> list:
     rows = [_result_row(run_id, statement_id, r) for r in results]
     rows += [_not_written_row(run_id, statement_id, p) for p in plans if p.action not in WRITE_ACTIONS]
+    rows += [_unattempted_row(run_id, statement_id, p) for p in unattempted_plans(plans, results)]
     return rows
 
 
@@ -108,7 +122,7 @@ def _run_counts(results: list, plans: list) -> dict:
     failures = failure_counts(results)
     locked = failures.pop(CAT_PERIOD_LOCKED, 0)
     held = failures.pop(CAT_HELD_BY_OTHER, 0)
-    not_written = skip_counts(plans)
+    not_written = skip_counts(plans, results)
     return {
         "written": sum(1 for r in results if r.ok),
         "failed": sum(failures.values()),
@@ -161,11 +175,56 @@ def save_failed_run(statement_id: str, exc: Exception, *, started_at: str, sourc
         return None
 
 
+def save_revert(statement_id: str, results: list, *, started_at: str, source: str = "cli",
+                sandbox: str = None, log_path: str = None, job_id: str = None):
+    """Saves an undo run: which records were reset or deleted. `results` are
+    (action, ok, detail) tuples from writeback.apply_revert(). It becomes the
+    statement's newest run, so the app stops showing "written" for a statement
+    whose NetSuite records have since been cleared. Returns the run_id, or None
+    if the database could not be written (never raises)."""
+    try:
+        run_id = str(uuid.uuid4())
+        reverted = sum(1 for _, ok, _ in results if ok)
+        run_row = (
+            run_id, statement_id, job_id, source, sandbox, RUN_REVERTED, started_at, now_iso(),
+            0, len(results) - reverted, 0, 0, 0, _json({"reverted": reverted}), None, None, None, log_path,
+        )
+        records = [
+            (run_id, statement_id, action["invoice_number"], None, f"REVERT_{action['op']}",
+             OUTCOME_REVERTED if ok else "failed", "" if ok else "failed", action["record_type"],
+             action["record_id"], detail, None, _json(action.get("body") or {}), _json({}))
+            for action, ok, detail in results
+        ]
+        _insert_many("netsuite_writeback_run", _RUN_COLUMNS, [run_row])
+        _insert_many("netsuite_writeback_record", _RECORD_COLUMNS, records)
+        return run_id
+    except Exception:  # best-effort: see the module docstring
+        logger.warning("Could not save the NetSuite revert run for %s to the database",
+                       statement_id, exc_info=True)
+        return None
+
+
 def get_runs(statement_id: str) -> list:
     """Every saved run for a statement, newest first."""
     return execute_query(
         "SELECT * FROM netsuite_writeback_run WHERE statement_id = ? ORDER BY started_at DESC, id DESC",
         [statement_id])
+
+
+def get_latest_runs(statement_ids) -> dict:
+    """{statement_id: its newest run} for many statements in one go (a page of
+    cards), instead of one query per statement. Statements with no saved run
+    are simply absent."""
+    ids = [s for s in dict.fromkeys(statement_ids) if s]
+    latest = {}
+    for start in range(0, len(ids), 200):
+        chunk = ids[start:start + 200]
+        rows = execute_query(
+            "SELECT * FROM netsuite_writeback_run WHERE statement_id IN "
+            f"({','.join('?' * len(chunk))}) ORDER BY started_at DESC, id DESC", chunk)
+        for row in rows:
+            latest.setdefault(row["statement_id"], row)
+    return latest
 
 
 def get_records(run_id: str) -> list:

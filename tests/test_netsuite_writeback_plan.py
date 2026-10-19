@@ -403,6 +403,147 @@ class ErrorLogTests(unittest.TestCase):
             self.assertEqual(wb.write_error_log(STMT, RuntimeError("x")), "")
 
 
+class UnattemptedWritesTests(unittest.TestCase):
+    """A run that stops early must not make the writes it never reached vanish."""
+
+    def _plans(self, n=3):
+        return [wb.plan_matched(_row(invoice=f"INV{i}"), [dict(_txn("-100"), id=str(700 + i), tranid=f"INV{i}")], _ctx())
+                for i in range(n)]
+
+    def _stopped_run(self, plans):
+        """First write fails for a reason that ends the run, so only one result exists."""
+        from src.netsuite.client import NetSuiteAPIError
+        ns = mock.Mock()
+        ns.patch_record.side_effect = NetSuiteAPIError(400, "Bad Request", "Invalid field value")
+        with mock.patch.object(wb, "_read_back_bill", return_value=""):
+            return wb.apply_plans(ns, plans)
+
+    def test_the_writes_a_stopped_run_never_reached_are_identified(self):
+        plans = self._plans(3)
+        results = self._stopped_run(plans)
+        self.assertEqual(len(results), 1)
+        self.assertEqual([p.invoice_number for p in wb.unattempted_plans(plans, results)], ["INV1", "INV2"])
+
+    def test_plans_that_are_not_writes_are_never_called_unattempted(self):
+        skipped = wb._skip("X", None, "nope", category=wb.CAT_NOT_IN_SANDBOX)
+        self.assertEqual(wb.unattempted_plans([skipped], []), [])
+
+    def test_a_complete_run_has_nothing_unattempted(self):
+        plans = self._plans(2)
+        ns = mock.Mock()
+        with mock.patch.object(wb, "_read_back_bill", return_value=""):
+            results = wb.apply_plans(ns, plans)
+        self.assertEqual(wb.unattempted_plans(plans, results), [])
+
+    def test_the_counts_include_them_only_when_results_are_given(self):
+        plans = self._plans(3) + [wb._skip("S", None, "gone", category=wb.CAT_NOT_IN_SANDBOX)]
+        results = self._stopped_run(plans)
+        self.assertEqual(wb.skip_counts(plans, results),
+                         {wb.CAT_NOT_IN_SANDBOX: 1, wb.CAT_NOT_ATTEMPTED: 2})
+        self.assertEqual(wb.skip_counts(plans), {wb.CAT_NOT_IN_SANDBOX: 1})      # old call still works
+
+    def test_the_file_log_lists_each_one_with_its_reason(self):
+        import json, tempfile
+        plans = self._plans(3)
+        results = self._stopped_run(plans)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+            path = wb.write_apply_log(mock.Mock(domain_id="x-sb1"), STMT, results, plans)
+            log = json.load(open(path, encoding="utf-8"))
+        self.assertEqual([n["invoice_number"] for n in log["not_written"]], ["INV1", "INV2"])
+        self.assertEqual({n["reason"] for n in log["not_written"]}, {wb.CAT_NOT_ATTEMPTED})
+        self.assertEqual(log["not_written_counts"], {wb.CAT_NOT_ATTEMPTED: 2})
+        self.assertEqual(len(log["writes"]), 1)
+
+
+class RevertLogTests(unittest.TestCase):
+    def _results(self):
+        patch = {"op": "PATCH", "record_type": "vendorbill", "record_id": "1", "invoice_number": "A",
+                 "body": {"custbody_reconciled": False}}
+        delete = {"op": "DELETE", "record_type": "customrecord_statement_line", "record_id": "9", "invoice_number": "B"}
+        return [(patch, True, "reverted"), (delete, False, "HTTPError: nope")]
+
+    def test_an_undo_run_is_written_to_its_own_file_with_the_counts(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+            path = wb.write_revert_log(mock.Mock(domain_id="x-sb1"), STMT, self._results())
+            log = json.load(open(path, encoding="utf-8"))
+        self.assertTrue(path.endswith("_REVERT.json"))
+        self.assertEqual((log["statement_id"], log["reverted"], log["failed"]), (STMT, 1, 1))
+        self.assertEqual([r["op"] for r in log["reverts"]], ["PATCH", "DELETE"])
+        self.assertEqual(log["reverts"][0]["body"], {"custbody_reconciled": False})
+        self.assertFalse(log["reverts"][1]["ok"])
+
+    def test_an_unwritable_log_directory_is_not_fatal(self):
+        with mock.patch.object(wb.os, "makedirs", side_effect=OSError("read-only")):
+            self.assertEqual(wb.write_revert_log(mock.Mock(domain_id="x"), STMT, self._results()), "")
+
+
+class ShortPdfLinkTests(unittest.TestCase):
+    ENV = {"NETSUITE_WRITEBACK_PDF_LINK": "true", "APP_PUBLIC_BASE_URL": "https://app.example/"}
+
+    def test_names_are_made_url_friendly_and_lose_a_mailbox_prefix(self):
+        cases = {
+            "BMW.pdf": "BMW.pdf",
+            "Cherry Hill Nissan (Lamon).pdf": "Cherry_Hill_Nissan_Lamon.pdf",
+            "L&M Auto (M3 S Main).pdf": "L_M_Auto_M3_S_Main.pdf",
+            "89a77bd0_AR Statement_BT316033_2026_SEP_Tekion.pdf": "AR_Statement_BT316033_2026_SEP_Tekion.pdf",
+            "8e30cf89-1079-463d-aa8d-2f7d938a8dc6__Keystone_20261014T190444Z.pdf": "Keystone_20261014T190444Z.pdf",
+            "Sullivan Tire Maurice  093026.pdf": "Sullivan_Tire_Maurice_093026.pdf",
+            "20261012113727.pdf": "20261012113727.pdf",
+            "NOEXT": "NOEXT.pdf",
+            None: "statement.pdf",
+            "  .pdf": "statement.pdf",
+        }
+        for given, expected in cases.items():
+            with self.subTest(given=given):
+                self.assertEqual(wb.pdf_link_name(given), expected)
+
+    def test_the_stored_link_is_short_and_ends_with_the_pdf_name(self):
+        with mock.patch.dict(os.environ, self.ENV, clear=True), \
+             mock.patch("src.lakehouse.connection.execute_query", return_value=[{"pdf_filename": "BMW.pdf"}]):
+            url, note = wb.resolve_pdf_link("STMT-60A970B4")
+        self.assertEqual(url, "https://app.example/statements/STMT-60A970B4/BMW.pdf")
+        self.assertEqual(note, "")
+
+    def _answers(self, **by_table):
+        """An execute_query stand-in: the rows to return, chosen by which table the SQL reads."""
+        def fake(sql, params=None):
+            for needle, rows in by_table.items():
+                if needle in sql:
+                    return rows
+            return []
+        return fake
+
+    def _link(self, **by_table):
+        with mock.patch.dict(os.environ, self.ENV, clear=True), \
+             mock.patch("src.lakehouse.connection.execute_query", side_effect=self._answers(**by_table)):
+            return wb.resolve_pdf_link("STMT-1")
+
+    def test_a_statement_with_no_name_anywhere_falls_back_to_the_hash_link(self):
+        url, _ = self._link(**{"FROM jobs WHERE statement_id = ? AND document_hash": [{"document_hash": "ab" * 32}]})
+        self.assertEqual(url, "https://app.example/statements/" + "ab" * 32 + "/pdf")
+
+    def test_inside_the_pipeline_the_name_comes_from_the_intake_log(self):
+        # the job row has no statement id yet, but intake has already logged the file name
+        url, note = self._link(document_intake_log=[{"original_filename": None, "source_file": "BMW.pdf"}])
+        self.assertEqual((url, note), ("https://app.example/statements/STMT-1/BMW.pdf", ""))
+
+    def test_the_job_name_wins_over_the_intake_log(self):
+        url, _ = self._link(**{"pdf_filename FROM jobs": [{"pdf_filename": "From_Job.pdf"}],
+                               "document_intake_log": [{"original_filename": None, "source_file": "Other.pdf"}]})
+        self.assertTrue(url.endswith("/STMT-1/From_Job.pdf"))
+
+    def test_an_original_filename_is_preferred_to_the_source_file(self):
+        url, _ = self._link(document_intake_log=[{"original_filename": "Original.pdf", "source_file": "x.pdf"}])
+        self.assertTrue(url.endswith("/STMT-1/Original.pdf"))
+
+    def test_a_path_in_the_source_file_is_reduced_to_the_file_name(self):
+        for path in ("new-stmts/fromoct13pdfs/BMW.pdf", "new-stmts\\fromoct13pdfs\\BMW.pdf"):
+            with self.subTest(path=path):
+                url, _ = self._link(document_intake_log=[{"original_filename": None, "source_file": path}])
+                self.assertEqual(url, "https://app.example/statements/STMT-1/BMW.pdf")
+
+
 class StatementLineDateTests(unittest.TestCase):
     def _line_ctx(self, lines):
         ctx = _ctx()

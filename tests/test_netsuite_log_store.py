@@ -122,6 +122,59 @@ class SaveRunTests(_TempDbCase):
         self.assertEqual(len(log_store.get_records(run_id)), 1)
 
 
+class UnattemptedRowsTests(_TempDbCase):
+    def _stopped(self):
+        first = self._written("A")
+        failed = wb.ApplyResult(first.plan, False, "Invalid field value", category=wb.CAT_WRITE_FAILED)
+        unreached = [self._written("B").plan, self._written("C").plan]
+        return failed, [failed.plan] + unreached
+
+    def test_the_writes_a_stopped_run_never_reached_are_saved_as_not_attempted(self):
+        failed, plans = self._stopped()
+        run_id = log_store.save_run(STMT, [failed], plans, started_at=STARTED)
+        rows = {r["invoice_number"]: r for r in log_store.get_records(run_id)}
+        self.assertEqual(rows["A"]["outcome"], "failed")
+        for invoice in ("B", "C"):
+            self.assertEqual((rows[invoice]["outcome"], rows[invoice]["reason"]),
+                             ("not attempted", wb.CAT_NOT_ATTEMPTED))
+        self.assertEqual(len(rows), 3)                 # nothing vanished
+
+    def test_the_run_counts_include_them(self):
+        failed, plans = self._stopped()
+        log_store.save_run(STMT, [failed], plans, started_at=STARTED)
+        (run,) = log_store.get_runs(STMT)
+        self.assertEqual((run["failed"], run["written"], run["not_written"]), (1, 0, 2))
+        self.assertEqual(json.loads(run["not_written_counts"]), {wb.CAT_NOT_ATTEMPTED: 2})
+
+
+class SaveRevertTests(_TempDbCase):
+    def _results(self):
+        patch = {"op": "PATCH", "record_type": "vendorbill", "record_id": "1", "invoice_number": "A",
+                 "body": {"custbody_reconciled": False}}
+        delete = {"op": "DELETE", "record_type": "customrecord_statement_line", "record_id": "9", "invoice_number": "B"}
+        return [(patch, True, "reverted"), (delete, False, "HTTPError: nope")]
+
+    def test_an_undo_run_is_saved_with_one_row_per_record(self):
+        run_id = log_store.save_revert(STMT, self._results(), started_at=STARTED, sandbox="x-sb1", log_path="r.json")
+        (run,) = log_store.get_runs(STMT)
+        self.assertEqual((run["run_id"], run["outcome"], run["source"]), (run_id, "reverted", "cli"))
+        self.assertEqual((run["written"], run["failed"], run["log_path"]), (0, 1, "r.json"))
+        self.assertEqual(json.loads(run["not_written_counts"]), {"reverted": 1})
+        rows = {r["invoice_number"]: r for r in log_store.get_records(run_id)}
+        self.assertEqual((rows["A"]["action"], rows["A"]["outcome"]), ("REVERT_PATCH", "reverted"))
+        self.assertEqual((rows["B"]["action"], rows["B"]["outcome"]), ("REVERT_DELETE", "failed"))
+        self.assertEqual(json.loads(rows["A"]["fields_sent"]), {"custbody_reconciled": False})
+
+    def test_an_undo_run_becomes_the_statements_newest_run(self):
+        log_store.save_run(STMT, [self._written()], [self._written().plan], started_at="2026-10-19T09:00:00+00:00")
+        log_store.save_revert(STMT, self._results(), started_at="2026-10-19T10:00:00+00:00")
+        self.assertEqual(log_store.get_latest_runs([STMT])[STMT]["outcome"], "reverted")
+
+    def test_a_database_error_returns_none_instead_of_raising(self):
+        with mock.patch.object(log_store, "_insert_many", side_effect=RuntimeError("db is down")):
+            self.assertIsNone(log_store.save_revert(STMT, self._results(), started_at=STARTED))
+
+
 class SaveFailedRunTests(_TempDbCase):
     def test_a_run_that_failed_as_a_whole_keeps_the_error_and_traceback(self):
         try:

@@ -89,6 +89,77 @@ class StatementPdfRouteTests(unittest.TestCase):
         self.assertEqual(statements._inline_filename("no_extension"), "no_extension.pdf")
 
 
+class ShortLinkRouteTests(unittest.TestCase):
+    """/statements/<statement id>/<name>.pdf -- the link the write-back stores."""
+
+    def _get(self, path, archived=ARCHIVED):
+        client = _logged_in_client()
+        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement", return_value=archived) as by_id, \
+             mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash", return_value=ARCHIVED) as by_hash, \
+             mock.patch.object(statements, "_fetch_pdf_bytes", return_value=PDF_BYTES):
+            return client.get(path), by_id, by_hash
+
+    def test_serves_the_pdf_found_by_statement_id(self):
+        resp, by_id, by_hash = self._get("/statements/STMT-60A970B4/BMW.pdf")
+        self.assertEqual((resp.status_code, resp.headers["content-type"]), (200, "application/pdf"))
+        self.assertEqual(resp.content, PDF_BYTES)
+        by_id.assert_called_once_with("STMT-60A970B4")
+        by_hash.assert_not_called()
+
+    def test_the_name_in_the_link_is_only_cosmetic(self):
+        resp, by_id, _ = self._get("/statements/STMT-60A970B4/some-other-name.pdf")
+        self.assertEqual(resp.status_code, 200)
+        by_id.assert_called_once_with("STMT-60A970B4")
+
+    def test_the_name_is_used_for_the_download_when_the_archive_has_none(self):
+        resp, _, _ = self._get("/statements/STMT-60A970B4/BMW.pdf",
+                               archived={"blob_storage_path": "https://x/y.pdf", "original_filename": None})
+        self.assertIn('filename="BMW.pdf"', resp.headers["content-disposition"])
+
+    def test_a_name_that_is_not_a_pdf_or_a_malformed_id_is_404_without_a_lookup(self):
+        client = _logged_in_client()
+        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement") as by_id:
+            for path in ("/statements/STMT-60A970B4/BMW.txt", "/statements/STMT-60A970B4/BMW",
+                         "/statements/NOTANID/BMW.pdf", "/statements/STMT-%27%3B--/BMW.pdf"):
+                with self.subTest(path=path):
+                    self.assertEqual(client.get(path).status_code, 404)
+        by_id.assert_not_called()
+
+    def test_an_unknown_statement_is_404(self):
+        resp, _, _ = self._get("/statements/STMT-00000000/BMW.pdf", archived=None)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_the_old_hash_link_still_goes_to_the_hash_lookup(self):
+        resp, by_id, by_hash = self._get(f"/statements/{HASH}/pdf")
+        self.assertEqual(resp.status_code, 200)
+        by_hash.assert_called_once_with(HASH)
+        by_id.assert_not_called()
+
+    def test_logged_out_visitors_are_sent_to_login(self):
+        client = TestClient(_app())
+        resp = client.get("/statements/STMT-60A970B4/BMW.pdf", follow_redirects=False)
+        self.assertEqual((resp.status_code, resp.headers["location"]), (303, "/login"))
+
+
+class StatementLookupTests(unittest.TestCase):
+    def test_the_intake_row_is_used_when_there_is_one(self):
+        with mock.patch.object(statements.queries, "execute_query", return_value=[ARCHIVED]) as q:
+            self.assertEqual(statements.queries.get_archived_pdf_for_statement("STMT-1"), ARCHIVED)
+        self.assertEqual(q.call_count, 1)
+
+    def test_it_falls_back_to_the_jobs_document_hash(self):
+        with mock.patch.object(statements.queries, "execute_query",
+                               side_effect=[[], [{"document_hash": HASH}]]), \
+             mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash",
+                               return_value=ARCHIVED) as by_hash:
+            self.assertEqual(statements.queries.get_archived_pdf_for_statement("STMT-1"), ARCHIVED)
+        by_hash.assert_called_once_with(HASH)
+
+    def test_nothing_known_gives_none(self):
+        with mock.patch.object(statements.queries, "execute_query", side_effect=[[], []]):
+            self.assertIsNone(statements.queries.get_archived_pdf_for_statement("STMT-1"))
+
+
 class LoginRedirectTests(unittest.TestCase):
     def test_logged_out_user_is_sent_to_login_then_back_to_the_pdf(self):
         client = TestClient(_app())

@@ -24,9 +24,9 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.netsuite.client import NetSuiteClient, NetSuiteConfigError
 from src.netsuite.writeback import (
     CAT_HELD_BY_OTHER, CAT_PERIOD_LOCKED, apply_plans, apply_revert, build_plans, build_revert_actions, failure_counts,
-    find_revert_actions_for_statement, write_apply_log,
+    find_revert_actions_for_statement, write_apply_log, write_revert_log,
 )
-from src.netsuite.log_store import now_iso, save_run
+from src.netsuite.log_store import now_iso, save_revert, save_run
 
 _ACTION_ORDER = (
     "PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE",
@@ -112,17 +112,17 @@ def _revert_from_log(ns, log_path: str, apply: bool) -> int:
     with open(log_path, encoding="utf-8") as f:
         log = json.load(f)
     title = f"Revert of {log['statement_id']} (applied {log['applied_at']})"
-    return _run_revert(ns, title, build_revert_actions(log), apply)
+    return _run_revert(ns, title, build_revert_actions(log), apply, log["statement_id"])
 
 
 def _revert_statement(ns, statement_id: str, apply: bool) -> int:
     """Undo everything stamped with this statement id, found in NetSuite
     itself -- no log file needed. Previews unless --apply."""
     title = f"Revert of {statement_id} (found in NetSuite, no log)"
-    return _run_revert(ns, title, find_revert_actions_for_statement(ns, statement_id), apply)
+    return _run_revert(ns, title, find_revert_actions_for_statement(ns, statement_id), apply, statement_id)
 
 
-def _run_revert(ns, title: str, actions: list, apply: bool) -> int:
+def _run_revert(ns, title: str, actions: list, apply: bool, statement_id: str) -> int:
     print(f"{title}: {len(actions)} undo actions\n")
     for a in actions:
         what = "delete Statement Line" if a["op"] == "DELETE" else f"restore {json.dumps(a['body'], default=str)}"
@@ -130,11 +130,19 @@ def _run_revert(ns, title: str, actions: list, apply: bool) -> int:
     if not apply:
         print("\nPREVIEW ONLY -- add --apply to undo these changes in the sandbox.")
         return 0
+    started_at = now_iso()
     results = apply_revert(ns, actions)
     for a, ok, detail in results:
         print(f"  {'OK  ' if ok else 'FAIL'} {a['record_type']}/{a['record_id']}  {a['invoice_number']:<14}{detail}")
     failed = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(failed)} reverted, {len(failed)} failed.")
+    # Every undo is logged: a file next to the apply logs, and a run in the database.
+    log_path = write_revert_log(ns, statement_id, results)
+    print(f"Revert log: {log_path or '(could not be written)'}")
+    if results:
+        run_id = save_revert(statement_id, results, started_at=started_at, source="cli",
+                             sandbox=ns.domain_id, log_path=log_path)
+        print(f"Saved to the database as run {run_id}" if run_id else "Not saved to the database (see the warning above)")
     return 1 if failed else 0
 
 
