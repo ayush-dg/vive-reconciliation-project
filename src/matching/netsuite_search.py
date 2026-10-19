@@ -302,7 +302,7 @@ def _select_for(table: str, conditions: list, limit: int, order_by: tuple) -> tu
     sql = f"""
         SELECT TOP {int(limit)}
             '{table}' AS source_table,
-            t.tranid, t.entity, t.total, t.trandate, t.duedate, t.transactionnumber,
+            t.id, t.tranid, t.entity, t.total, t.trandate, t.duedate, t.transactionnumber,
             t.custbody_cgh_ro, t.location,
             {status_expr} AS status_code,
             {unapplied_expr} AS unapplied_amount,
@@ -346,6 +346,9 @@ def _shape_row(row: dict) -> dict:
         "record_type": "Bill" if row["source_table"] == BILL_TABLE else "Credit",
         "is_credit": row["source_table"] == CREDIT_TABLE,
         "tranid": row.get("tranid"),
+        # NetSuite internal id (2026-10-19): what "Accept as match" sends
+        # back, so the server re-reads the exact record (fetch_record()).
+        "internal_id": None if row.get("id") is None else str(row.get("id")),
         "vendor_name": row.get("companyname") or row.get("entityid") or "—",
         "entity_id": row.get("entity"),
         "total": _to_float(row.get("total")),
@@ -581,3 +584,30 @@ def _run_search(entity_ids, bounds, invoice_contains, statuses,
         sql, params = _select_for(table, conditions, limit, order_by)
         rows.extend(_shape_row(raw) for raw in execute_lakehouse_query(sql, params))
     return rows
+
+
+def fetch_record(record_type: str, internal_id: str):
+    """One NetSuite bill or credit by internal id, display-shaped like a
+    search row (_shape_row()), or None -- what "Accept as match" re-reads so
+    the match is saved from the record itself, not from what the page sent.
+    Read-only; raises on a Fabric error (the caller reports it)."""
+    table = {"bill": BILL_TABLE, "credit": CREDIT_TABLE}.get((record_type or "").lower())
+    if not table or not str(internal_id or "").isdigit():
+        return None
+    status_expr = "t.status" if table == BILL_TABLE else "NULL"
+    unapplied_expr = "t.unapplied" if table == CREDIT_TABLE else "NULL"
+    rows = execute_lakehouse_query(
+        f"""
+        SELECT '{table}' AS source_table,
+            t.id, t.tranid, t.entity, t.total, t.trandate, t.duedate, t.transactionnumber,
+            t.custbody_cgh_ro, t.location,
+            {status_expr} AS status_code,
+            {unapplied_expr} AS unapplied_amount,
+            v.companyname, v.entityid
+        FROM bronze.{table} t
+        LEFT JOIN bronze.netsuite_vendor v ON v.id = t.entity
+        WHERE t.id = ? AND t.voided = 'F'
+        """,
+        [str(internal_id)],
+    )
+    return _shape_row(rows[0]) if rows else None

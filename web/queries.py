@@ -1276,6 +1276,78 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
         logger.exception("recon table update failed for %s / %s (non-fatal)", statement_id, invoice_number)
 
 
+def get_recon_exception(exception_id: str):
+    """One silver.recon_exceptions row, or None."""
+    rows = recon_query("SELECT * FROM silver.recon_exceptions WHERE exception_id = ?", [exception_id])
+    return rows[0] if rows else None
+
+
+def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepted_by: str,
+                        note: str = None) -> None:
+    """"Accept as match" (2026-10-19): the person picked NetSuite `record`
+    (a netsuite_search row, re-read by internal id) for this OPEN exception.
+    The recon table gets Matched-manually rows first -- so a conflict
+    (record already matched elsewhere) stops here before anything is
+    resolved -- then the exception is resolved like Accept, with the match
+    in its note. If resolving fails, the recon rows are undone again.
+    NetSuite itself is not written here (that's the NetSuite step)."""
+    from src.lakehouse import recon_table
+    statement_id, invoice_number = exception["statement_id"], exception["invoice_number"]
+    recon_table.accept_manual_match(
+        statement_id, invoice_number, exception["exception_id"], exception.get("exception_reason"),
+        exception.get("statement_amount"), record, accepted_by, note,
+        vendor_id=exception.get("vendor_id"), vendor_name=vendor_name,
+    )
+    match_note = f"Matched to NetSuite {record['record_type'].lower()} {record.get('tranid')}"
+    try:
+        resolve_exception(exception["exception_id"], statement_id, vendor_name, invoice_number,
+                          exception.get("exception_reason"), "ACCEPTED",
+                          f"{match_note}. {note}" if note else match_note, accepted_by)
+    except Exception:
+        recon_table.undo_manual_match(statement_id, invoice_number, accepted_by)
+        raise
+
+
+def undo_manual_match(statement_id: str, invoice_number: str, vendor_name: str, undone_by: str) -> bool:
+    """Undo of "Accept as match": the recon table's manual rows become
+    history and the invoice's lines get their exception status back; each
+    exception the match resolved is OPEN again, with a PENDING disposition
+    recording the undo. Returns False when there was nothing to undo."""
+    from src.lakehouse import recon_table
+    undone = recon_table.undo_manual_match(statement_id, invoice_number, undone_by)
+    if not undone:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    for exception_id in undone["exception_ids"]:
+        recon_sql(
+            "UPDATE silver.recon_exceptions SET exception_status = 'OPEN', date_resolved = NULL WHERE exception_id = ?",
+            [exception_id],
+        )
+        execute_sql(
+            """
+            INSERT INTO exception_dispositions (
+                exception_id, statement_id, vendor_name, invoice_number, reason_code,
+                disposition_status, disposition_notes, disposed_by, disposed_at
+            ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+            """,
+            [exception_id, statement_id, vendor_name, invoice_number, None,
+             f"Undo: manual match to NetSuite {undone.get('tranid')} removed", undone_by, now],
+        )
+    _recompute_summary_counts(statement_id)
+    return True
+
+
+def get_manual_matches(statement_id: str) -> list:
+    """Active manual matches on a statement for the review page; [] when the
+    recon table can't be read (the page must still load)."""
+    try:
+        from src.lakehouse.recon_table import manual_matches
+        return manual_matches(statement_id) if statement_id else []
+    except Exception:
+        logger.exception("reading manual matches failed for %s (non-fatal)", statement_id)
+        return []
+
+
 def escalate_exception(exception_id: str, escalated_by: str) -> None:
     """Marks an exception ESCALATED -- see exceptions_review.html's
     "Escalate" button. Does not touch exception_status: an escalated

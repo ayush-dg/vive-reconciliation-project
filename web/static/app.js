@@ -270,11 +270,13 @@ document.addEventListener("DOMContentLoaded", function () {
         locations: state.shops.join(",")
       });
       nsResults.innerHTML = '<div class="ns-modal-empty">Searching…</div>';
+      setPick(null);
       fetch("/netsuite-search?" + params.toString())
         .then(function (r) { return r.text(); })
         .then(function (html) {
           nsResults.innerHTML = html;
           wireDetailsToggles();
+          wirePicks();
         })
         .catch(function () {
           nsResults.innerHTML =
@@ -282,8 +284,70 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    // The only interactive control left per row -- everything else
-    // (selecting a row, the footer total) was removed 2026-09-30.
+    // "Accept as match" (2026-10-19): one result can be picked at a time
+    // (.ns-pick); the bar below the panel shows it, and its button opens
+    // the confirm dialog, whose form posts the record's type + internal id.
+    const nsAccept = document.getElementById("nsAccept");
+    const nsAcceptDialog = document.getElementById("nsAcceptDialog");
+    let picked = null;
+
+    function money(n) {
+      const v = Math.abs(n);
+      return (n < 0 ? "−$" : "$") + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function setPick(box) {
+      picked = box ? box.dataset : null;
+      if (!nsAccept) return;
+      nsAccept.dataset.state = picked ? "picked" : "empty";
+      if (!picked) return;
+      const stmt = parseFloat(nsAccept.dataset.statementAmount);
+      const ns = parseFloat(picked.amount);
+      const kind = picked.recordType === "credit" ? "Credit" : "Bill";
+      document.getElementById("nsPickKind").textContent = kind;
+      document.getElementById("nsPickTranid").textContent = picked.tranid;
+      document.getElementById("nsPickDate").textContent = picked.date || "";
+      document.getElementById("nsPickStmt").textContent = isNaN(stmt) ? "—" : money(stmt);
+      document.getElementById("nsPickNs").textContent = isNaN(ns) ? "—" : money(ns);
+      const diff = (isNaN(stmt) || isNaN(ns)) ? null : Math.round((stmt - ns) * 100) / 100;
+      document.getElementById("nsPickDiff").textContent = diff === null ? "—" : money(diff);
+      document.getElementById("nsPickDiffWrap").classList.toggle("ns-off", !!diff);
+    }
+
+    function wirePicks() {
+      const boxes = nsResults.querySelectorAll(".ns-pick");
+      boxes.forEach(function (box) {
+        box.addEventListener("change", function () {
+          boxes.forEach(function (other) {
+            if (other !== box) { other.checked = false; other.closest("tr").classList.remove("ns-picked"); }
+          });
+          box.closest("tr").classList.toggle("ns-picked", box.checked);
+          setPick(box.checked ? box : null);
+        });
+      });
+    }
+
+    if (nsAccept && nsAcceptDialog) {
+      document.getElementById("nsAcceptBtn").addEventListener("click", function () {
+        if (!picked) return;
+        const ns = parseFloat(picked.amount);
+        const stmt = parseFloat(nsAccept.dataset.statementAmount);
+        document.getElementById("nsAcceptType").value = picked.recordType;
+        document.getElementById("nsAcceptId").value = picked.internalId;
+        document.getElementById("nsConfirmKind").textContent = picked.recordType;
+        document.getElementById("nsConfirmTranid").textContent = picked.tranid;
+        document.getElementById("nsConfirmAmount").textContent = isNaN(ns) ? "—" : money(ns);
+        const diff = (isNaN(stmt) || isNaN(ns)) ? 0 : Math.round((stmt - ns) * 100) / 100;
+        document.getElementById("nsConfirmDiff").textContent =
+          diff ? "The " + money(diff) + " difference is accepted as-is." : "";
+        nsAcceptDialog.showModal();
+      });
+      document.getElementById("nsAcceptCancel").addEventListener("click", function () {
+        nsAcceptDialog.close();
+      });
+    }
+
+    // The details toggle per row.
     function wireDetailsToggles() {
       nsResults.querySelectorAll(".ns-details-btn").forEach(function (btn) {
         btn.addEventListener("click", function (ev) {

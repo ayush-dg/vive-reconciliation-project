@@ -191,3 +191,132 @@ def rows_for_statement(statement_id: str) -> list:
         "SELECT * FROM recon WHERE statement_id = ? AND is_active = 1 ORDER BY line_number, id",
         [statement_id],
     )
+
+
+MANUAL_RULE = "picked in Find in NetSuite"
+_MATCHED_STATUSES = (STATUS_MATCHED, STATUS_MATCHED_MANUALLY)
+
+
+class MatchConflict(Exception):
+    """The picked bill/credit is already reconciled to another statement line."""
+
+
+def _rows(cur, sql, params):
+    cur.execute(sql, params)
+    cols = [c[0] for c in cur.description]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def accept_manual_match(statement_id: str, invoice_number: str, exception_id: str,
+                        exception_reason: str, statement_amount, record: dict, matched_by: str,
+                        note: str = None, vendor_id: str = None, vendor_name: str = None) -> int:
+    """A person accepted a NetSuite bill/credit for one statement invoice
+    ("Accept as match"). Adds a "manual" Matched-manually row for each of the
+    invoice's lines -- linked to `record` (a netsuite_search row: internal_id,
+    tranid, record_type, total, ...), difference = statement amount minus the
+    record's total -- and sets the invoice's auto rows inactive, in one
+    transaction. Raises MatchConflict when that record is already matched to
+    another statement line, ValueError when this invoice already has an
+    active manual match. Returns the number of rows added."""
+    now = _now()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        if _rows(cur, "SELECT recon_id FROM recon WHERE statement_id = ? AND invoice_number = ? "
+                      "AND source = ? AND is_active = 1", [statement_id, invoice_number, SOURCE_MANUAL]):
+            raise ValueError(f"Invoice {invoice_number} already has a manual match on this statement.")
+        taken = _rows(cur, "SELECT statement_id, invoice_number FROM recon WHERE netsuite_internal_id = ? "
+                           "AND netsuite_record_type = ? AND is_active = 1 AND status IN (?, ?) "
+                           "AND NOT (statement_id = ? AND invoice_number = ?)",
+                      [str(record["internal_id"]), record["record_type"].lower(), *_MATCHED_STATUSES,
+                       statement_id, invoice_number])
+        if taken:
+            raise MatchConflict(f"NetSuite {record['record_type'].lower()} {record.get('tranid')} is already "
+                                f"matched to invoice {taken[0]['invoice_number']} on {taken[0]['statement_id']}.")
+        auto = _rows(cur, "SELECT * FROM recon WHERE statement_id = ? AND invoice_number = ? AND source = ? "
+                          "AND is_active = 1 ORDER BY line_number", [statement_id, invoice_number, SOURCE_AUTO])
+        lines = auto or [{"vendor_id": vendor_id, "vendor_name": vendor_name, "line_amount": _float(statement_amount)}]
+        ns_amount, stmt_amount = _float(record.get("total")), _float(statement_amount)
+        difference = (round(abs(stmt_amount) - ns_amount, 2)
+                      if stmt_amount is not None and ns_amount is not None else None)
+        rows = []
+        for line in lines:
+            rows.append({
+                "recon_id": str(uuid.uuid4()), "statement_id": statement_id,
+                "vendor_id": line.get("vendor_id") or vendor_id, "vendor_name": line.get("vendor_name") or vendor_name,
+                "statement_period": line.get("statement_period"), "line_number": line.get("line_number"),
+                "statement_line_id": line.get("statement_line_id"), "invoice_number": invoice_number,
+                "original_invoice_number": line.get("original_invoice_number"), "line_date": line.get("line_date"),
+                "line_amount": line.get("line_amount"), "status": STATUS_MATCHED_MANUALLY,
+                "exception_id": exception_id, "exception_reason": exception_reason,
+                "netsuite_record_type": record["record_type"].lower(), "netsuite_internal_id": str(record["internal_id"]),
+                "netsuite_tranid": record.get("tranid"), "netsuite_transaction_number": record.get("transaction_number"),
+                "netsuite_amount": ns_amount, "difference": difference,
+                "netsuite_entity_id": None if record.get("entity_id") is None else str(record.get("entity_id")),
+                "netsuite_location": None if record.get("location_code") is None else str(record.get("location_code")),
+                "source": SOURCE_MANUAL, "match_rule": MANUAL_RULE, "matched_by": matched_by,
+                "matched_at": now, "note": note or None, "is_active": 1, "created_at": now,
+            })
+        insert = f"INSERT INTO recon ({', '.join(COLUMNS)}) VALUES ({','.join('?' * len(COLUMNS))})"
+        cur.executemany(insert, [[row.get(c) for c in COLUMNS] for row in rows])
+        cur.execute("UPDATE recon SET is_active = 0, updated_at = ? WHERE statement_id = ? AND invoice_number = ? "
+                    "AND source = ? AND is_active = 1", [now, statement_id, invoice_number, SOURCE_AUTO])
+        conn.commit()
+        return len(rows)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def undo_manual_match(statement_id: str, invoice_number: str, undone_by: str) -> dict:
+    """Undo of a manual match: its rows stay as history (inactive, undone by /
+    at) and the invoice's auto rows come back with their exception status.
+    Returns {"exception_ids": [...], "tranid": ...} of what was undone, or
+    {} when there was no active manual match."""
+    now = _now()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        manual = _rows(cur, "SELECT * FROM recon WHERE statement_id = ? AND invoice_number = ? AND source = ? "
+                            "AND is_active = 1", [statement_id, invoice_number, SOURCE_MANUAL])
+        if not manual:
+            return {}
+        cur.execute("UPDATE recon SET is_active = 0, undone_by = ?, undone_at = ?, updated_at = ? "
+                    "WHERE statement_id = ? AND invoice_number = ? AND source = ? AND is_active = 1",
+                    [undone_by, now, now, statement_id, invoice_number, SOURCE_MANUAL])
+        for row in _rows(cur, "SELECT recon_id, exception_reason FROM recon WHERE statement_id = ? AND "
+                              "invoice_number = ? AND source = ?", [statement_id, invoice_number, SOURCE_AUTO]):
+            status = status_for_reason(row["exception_reason"]) if row.get("exception_reason") else STATUS_MATCHED
+            cur.execute("UPDATE recon SET is_active = 1, status = ?, updated_at = ? WHERE recon_id = ?",
+                        [status, now, row["recon_id"]])
+        conn.commit()
+        return {"exception_ids": sorted({m["exception_id"] for m in manual if m.get("exception_id")}),
+                "tranid": manual[0].get("netsuite_tranid")}
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def manual_matches(statement_id: str) -> list:
+    """Active manual matches on one statement, one per invoice (its first
+    line's row), for the review page's "Matched manually" list."""
+    rows = execute_query(
+        "SELECT * FROM recon WHERE statement_id = ? AND source = ? AND is_active = 1 ORDER BY invoice_number, line_number",
+        [statement_id, SOURCE_MANUAL],
+    )
+    seen, out = set(), []
+    for row in rows:
+        if row["invoice_number"] not in seen:
+            seen.add(row["invoice_number"])
+            out.append(row)
+    return out

@@ -73,10 +73,38 @@
       {% else %}
       <div class="empty-state">No open exceptions{{ " in this filter" if filter != "all" else "" }}.</div>
       {% endfor %}
+
+      {# Matched manually (2026-10-19): this statement's "Accept as match"
+         results from the recon table, each with Undo (reopens the
+         exception). #}
+      {% if manual_matches %}
+      <div class="manual-match-head">Matched manually ({{ manual_matches | length }})</div>
+      {% for m in manual_matches %}
+      <div class="exception-row manual-match-row">
+        <div class="exception-row-top">
+          <div class="exception-row-main">
+            <div class="einv">Invoice #{{ m.invoice_number }}</div>
+            <span class="badge badge-matched">Reconciled · matches {{ m.netsuite_tranid }}</span>
+            <div class="edate">NetSuite {{ m.netsuite_record_type }} {{ m.netsuite_amount | money }}{% if m.difference %} · difference {{ m.difference | money_signed }} accepted{% endif %}</div>
+            <div class="edate">By {{ m.matched_by }} · {{ m.matched_at | friendly_dt }}</div>
+          </div>
+          <form method="post" action="/exceptions/{{ vendor_url_name }}/undo-match"
+                onsubmit="return confirm('Undo the match for invoice {{ m.invoice_number }}? The exception will be open again.');">
+            <input type="hidden" name="invoice_number" value="{{ m.invoice_number }}">
+            <input type="hidden" name="statement_id" value="{{ m.statement_id }}">
+            <input type="hidden" name="filter" value="{{ filter }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <button type="submit" class="btn-ghost">Undo</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
     </div>
   </div>
 
   <div class="detail-view-panel">
+    {% if match_msg %}<div class="match-msg" role="status">{{ match_msg }}</div>{% endif %}
     {% if selected %}
     <div class="detail-view-head">
       <h2>Invoice #{{ selected.invoice_number or "Unknown" }}</h2>
@@ -304,6 +332,44 @@
         <div class="ns-modal-empty">Searching&hellip;</div>
       </div>
     </section>
+
+    {# "Accept as match" (2026-10-19): sits right after the look-only panel,
+       outside it. static/app.js fills the bar from the picked result
+       (.ns-pick); the dialog's form posts only the exception and the record's
+       type + internal id -- the server re-reads the record and saves the match
+       in the recon table, then resolves the exception. #}
+    <div class="ns-accept" id="nsAccept" data-state="empty"
+         data-statement-amount="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}">
+      <div class="ns-accept-empty">Tick the NetSuite bill or credit that matches this statement line, then accept it.</div>
+      <div class="ns-accept-picked">
+        <span><span id="nsPickKind">Bill</span> <b id="nsPickTranid">—</b> <span class="ns-accept-date" id="nsPickDate"></span></span>
+        <span>Statement <b id="nsPickStmt">—</b></span>
+        <span>NetSuite <b id="nsPickNs">—</b></span>
+        <span class="ns-accept-diff" id="nsPickDiffWrap">Difference <b id="nsPickDiff">—</b></span>
+        <button type="button" class="btn btn-accept" id="nsAcceptBtn">Accept as match</button>
+      </div>
+    </div>
+    <dialog class="ns-confirm" id="nsAcceptDialog" aria-labelledby="nsAcceptTitle">
+      <form method="post" action="/exceptions/{{ vendor_url_name }}/accept-match">
+        <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
+        <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
+        <input type="hidden" name="filter" value="{{ filter }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="record_type" id="nsAcceptType" value="">
+        <input type="hidden" name="internal_id" id="nsAcceptId" value="">
+        <h2 class="ns-modal-title" id="nsAcceptTitle">Accept as match</h2>
+        <p>Accept <span id="nsConfirmKind">bill</span> <b id="nsConfirmTranid">—</b> (<span id="nsConfirmAmount">—</span>)
+          as the NetSuite match for invoice <b>{{ selected.invoice_number }}</b>?</p>
+        <p class="ns-confirm-sub" id="nsConfirmDiff"></p>
+        <p class="ns-confirm-sub">This resolves the exception. Any note you add is saved with it.</p>
+        <label class="ns-search-label" for="nsAcceptNote">Add a note <span class="field-hint">(optional)</span></label>
+        <textarea id="nsAcceptNote" name="note" rows="3"></textarea>
+        <div class="ns-confirm-actions">
+          <button type="button" class="btn" id="nsAcceptCancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm and resolve</button>
+        </div>
+      </form>
+    </dialog>
     {% endif %}
 
     <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">

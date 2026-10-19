@@ -25,7 +25,8 @@ from web import queries
 from web import time_window as tw
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
-from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, search_open_ap
+from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, fetch_record, search_open_ap
+from src.lakehouse.recon_table import MatchConflict
 from src.matching.netsuite_status_codes import decode_netsuite_status
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.locations import known_codes, shop_options
@@ -216,7 +217,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
                        filter: str = "all", selected: str = None, statement_id: str = None,
-                       sort: str = None):
+                       sort: str = None, match_msg: str = None):
     vendor_name = unquote(vendor_name)
     # Unrecognised values collapse to the default order here, so every
     # link/redirect built from `sort` below carries only a known value.
@@ -311,6 +312,11 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         # The Find in NetSuite panel's Shop filter: NetSuite's own location
         # names (config/netsuite_locations.json), starting on "Any shop".
         "shop_options": shop_options(),
+        # "Accept as match" (2026-10-19): this statement's active manual
+        # matches (the recon table), each with Undo, and the message an
+        # accept/undo redirect carries back.
+        "manual_matches": [] if exceptions_only else queries.get_manual_matches((statement or {}).get("statement_id")),
+        "match_msg": (match_msg or "")[:300] or None,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
@@ -365,6 +371,58 @@ def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(
     queries.escalate_exception(exception_id, escalated_by=user)
     suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
+
+
+@router.post("/exceptions/{vendor_name}/accept-match")
+def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depends(require_login),
+                            exception_id: str = Form(...), record_type: str = Form(...),
+                            internal_id: str = Form(...), note: str = Form(""),
+                            filter: str = Form("all"), statement_id: str = Form(""), sort: str = Form("")):
+    """"Accept as match" from the Find in NetSuite panel (2026-10-19): links
+    the open exception's statement invoice to the picked NetSuite bill or
+    credit -- re-read here by internal id, never taken from the page -- in
+    the recon table, and resolves the exception (queries.accept_manual_match()).
+    Registered ahead of the {vendor_name:path} POST route below, like escalate.
+    A conflict comes back as a message on the page, not an error."""
+    vendor_name = unquote(vendor_name)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{suffix}"
+    joiner = "&" if "?" in back else "?"
+
+    def _message(text):
+        return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
+
+    exception = queries.get_recon_exception(exception_id)
+    if not exception or exception.get("exception_status") != "OPEN":
+        return _message("This exception is no longer open -- nothing was matched.")
+    try:
+        record = fetch_record(record_type, internal_id)
+    except Exception:
+        return _message("NetSuite data is unavailable right now -- nothing was matched.")
+    if not record:
+        return _message("That NetSuite record wasn't found -- nothing was matched.")
+    try:
+        queries.accept_manual_match(exception, record, vendor_name, user, note.strip() or None)
+    except (MatchConflict, ValueError) as exc:
+        return _message(f"Not matched: {exc}")
+    return _message(f"Invoice {exception['invoice_number']} matched to NetSuite "
+                    f"{record['record_type'].lower()} {record.get('tranid')}.")
+
+
+@router.post("/exceptions/{vendor_name}/undo-match")
+def exceptions_undo_match(vendor_name: str, request: Request, user: str = Depends(require_login),
+                          invoice_number: str = Form(...), statement_id: str = Form(...),
+                          filter: str = Form("all"), sort: str = Form("")):
+    """Undo of "Accept as match": reopens the exception and puts the recon
+    rows back (queries.undo_manual_match())."""
+    vendor_name = unquote(vendor_name)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{suffix}"
+    joiner = "&" if "?" in back else "?"
+    undone = queries.undo_manual_match(statement_id, invoice_number, vendor_name, user)
+    text = (f"Match for invoice {invoice_number} undone -- the exception is open again." if undone
+            else f"Invoice {invoice_number} had no manual match to undo.")
+    return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
 
 
 @router.post("/exceptions/{vendor_name:path}")

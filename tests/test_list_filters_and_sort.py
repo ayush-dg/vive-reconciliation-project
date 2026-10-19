@@ -324,8 +324,9 @@ class TestReviewPageCarriesSort(unittest.TestCase):
         self.assertIn('class="filter-tab ">Invoice #', html)
 
     def test_both_post_forms_carry_sort(self):
+        # Escalate, Accept/Reject and (2026-10-19) Accept as match.
         html = _render_review(sort="amount")
-        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 2)
+        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 3)
 
     def test_modal_still_has_no_form(self):
         html = _render_review()

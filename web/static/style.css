@@ -902,3 +902,30 @@ select {
   .ns-inline .ns-modal-filters, .ns-inline-head { padding-left: 12px; padding-right: 12px; }
   .ns-inline-body { padding: 0 12px; overflow-x: auto; }
 }
+
+/* ---- "Accept as match" (2026-10-19): pick column in the NetSuite results,
+   the accept bar under the panel, its confirm dialog, the page message and
+   the "Matched manually" list with Undo. ---- */
+.ns-col-pick { width: 34px; }
+.ns-pick { width: 16px; height: 16px; cursor: pointer; }
+.ns-modal-row.ns-picked { background: var(--navy-tint); }
+.ns-accept { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: -16px 0 24px; padding: 12px 18px;
+  border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius) var(--radius); background: var(--surface-sunk); font-size: 13px; }
+.ns-accept .ns-accept-picked { display: none; align-items: center; gap: 18px; flex-wrap: wrap; width: 100%; }
+.ns-accept[data-state="picked"] .ns-accept-picked { display: flex; }
+.ns-accept[data-state="picked"] .ns-accept-empty { display: none; }
+.ns-accept-empty { color: var(--text-muted); }
+.ns-accept-date { color: var(--text-muted); }
+.ns-accept-diff.ns-off b { color: var(--warning); }
+.ns-accept .btn-accept { margin-left: auto; width: auto; }
+.ns-confirm { width: min(520px, 92vw); padding: 22px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+.ns-confirm::backdrop { background: rgba(15, 23, 42, .55); }
+.ns-confirm p { margin: 10px 0; font-size: 13.5px; }
+.ns-confirm .ns-confirm-sub { color: var(--text-muted); font-size: 12.5px; }
+.ns-confirm textarea { width: 100%; box-sizing: border-box; margin-top: 4px; }
+.ns-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.ns-confirm-actions .btn { width: auto; margin-top: 0; }
+.match-msg { margin: 0 0 14px; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--info-tint); color: var(--info); font-size: 13px; }
+.manual-match-head { padding: 12px 18px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); border-top: 1px solid var(--border); }
+.manual-match-row { cursor: default; }
+.manual-match-row form { margin: 0; }

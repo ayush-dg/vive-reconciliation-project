@@ -3,13 +3,13 @@
    own by GET /netsuite-search and swapped into #nsResults, so changing a
    filter re-renders only this table, never the exception under review.
 
-   LOOK-ONLY. There is deliberately no <form>, no action=, no method=, no
-   checkbox and no button that posts anywhere in this file -- a row click
-   does nothing (removed 2026-09-30, along with the selection footer it
-   used to drive); the only interactive control per row is the details
-   toggle (^/v). Resolving an exception stays with the page's existing
-   Accept/Reject/Escalate forms. A test asserts this file stays free of
-   form/action/method/checkbox markup.
+   No <form>, no action=, no method= and no button that posts in this
+   file. Since 2026-10-19 each row has a "pick" checkbox (class ns-pick,
+   one at a time) carrying the record's type/internal id/number/amount/
+   date; static/app.js shows the picked record in the "Accept as match"
+   bar below the panel, whose own form does the posting -- the server
+   re-reads the record by internal id. A test asserts this file stays free
+   of form/action/method markup.
 
    Rendered standalone: it extends nothing and must not assume any
    variable beyond `result` (always present) and `last_sync`. #}
@@ -35,6 +35,7 @@
 <table class="ns-modal-table">
   <thead>
     <tr>
+      <th class="ns-col-pick"><span class="ns-sr-only">Pick</span></th>
       <th>Vendor</th>
       <th>Bill #</th>
       <th>Status</th>
@@ -46,6 +47,14 @@
     {% for row in result.rows %}
     {% set rid = "nsrow-" ~ loop.index %}
     <tr class="ns-modal-row" data-row-id="{{ rid }}">
+      <td class="ns-col-pick">
+        {% if row.internal_id %}
+        <input type="checkbox" class="ns-pick" aria-label="Pick {{ row.record_type | lower }} {{ row.tranid }} for {{ row.total | money }}"
+               data-record-type="{{ row.record_type | lower }}" data-internal-id="{{ row.internal_id }}"
+               data-tranid="{{ row.tranid or '' }}" data-amount="{{ '%.2f' | format(row.total) if row.total is not none else '' }}"
+               data-date="{{ row.trandate_display or row.trandate or '' }}">
+        {% endif %}
+      </td>
       <td class="ns-cell-vendor">{{ row.vendor_name }}</td>
       <td>
         <span class="ns-bill-no">{{ row.tranid or "—" }}</span>
@@ -72,7 +81,7 @@
       </td>
     </tr>
     <tr class="ns-details-row" id="{{ rid }}-details" hidden>
-      <td colspan="5">
+      <td colspan="6">
         <div class="ns-details-grid">
           <div><span class="ns-details-key">RO #</span><span>{{ row.ro_number or "—" }}</span></div>
           {# NetSuite's own location name since 2026-10-16 (src/netsuite/locations.py), code kept alongside. #}
