@@ -825,6 +825,10 @@ class ClaudeSonnetClient(AIClient):
                     ],
                 }],
             }
+            # Sent like _real_text_call does (2026-10-19): until then every PDF
+            # request ran at the API default of 1.0 whatever the config said.
+            if temperature is not None:
+                payload["temperature"] = temperature
             with ai_call_slot():
                 resp = requests.post(
                     url, headers=headers, json=payload,

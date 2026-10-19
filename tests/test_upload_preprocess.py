@@ -397,12 +397,15 @@ class TestCarriedColumns(_Case):
         self.assertEqual([i["invoice_number"] for i in response.parsed_json["invoices"]],
                          [f"INV-{k}-{r}" for k in range(1, 9) for r in range(3)])
 
-    def _payload_texts(self, path, max_pages):
-        """The prompt text the REAL _real_file_call puts in each request (requests.post mocked)."""
+    def _payload_texts(self, path, max_pages, config=None):
+        """The prompt text the REAL _real_file_call puts in each request (requests.post mocked).
+        The whole request bodies are kept in self.payloads."""
         from src.ai import claude_sonnet_client as csc
         texts = []
+        self.payloads = []
 
         def post(url, headers=None, json=None, timeout=None):
+            self.payloads.append(json)
             data = base64.standard_b64decode(json["messages"][0]["content"][0]["source"]["data"])
             texts.append((pages_in(data), json["messages"][0]["content"][1]["text"]))
             rows = [{"DATE": "08/01/26", "INVOICE": f"INV-{p}-0", "AMOUNT": 10.0} for p in pages_in(data)]
@@ -414,6 +417,7 @@ class TestCarriedColumns(_Case):
             return resp
         c = client()
         c.endpoint = "https://example.invalid"
+        c.config.update(config or {})
         planner = lambda p: up.plan_upload(p, max_bytes=c.MAX_UPLOAD_PDF_BYTES, max_pages=max_pages, gate=OK_GATE)
         with mock.patch.object(csc.requests, "post", post), mock.patch.object(c, "_upload_plan", planner), \
                 mock.patch.object(c, "_detect_truncation", lambda *a, **k: None), mock.patch("builtins.print"):
@@ -431,6 +435,31 @@ class TestCarriedColumns(_Case):
         texts = self._payload_texts(self.make(text_pdf(4)), max_pages=2)
         self.assertEqual(texts[0], ([1, 2], EXTRACTION_PROMPT))
         self.assertEqual(texts[1], ([3, 4], EXTRACTION_PROMPT + continuation_note(["DATE", "INVOICE", "AMOUNT"])))
+
+
+class TestRequestTemperature(_Case):
+    """2026-10-19: the PDF request carries the configured temperature (before,
+    _real_file_call left it out and the API default 1.0 applied)."""
+
+    _payload_texts = TestCarriedColumns._payload_texts
+
+    def test_single_request_carries_the_config_temperature(self):
+        self._payload_texts(self.make(text_pdf(3)), max_pages=16, config={"temperature": 0.1})
+        self.assertEqual([p.get("temperature") for p in self.payloads], [0.1])
+
+    def test_every_part_of_a_split_statement_carries_it_including_continuations(self):
+        texts = self._payload_texts(self.make(text_pdf(6)), max_pages=2, config={"temperature": 0.1})
+        self.assertEqual([t[0] for t in texts], [[1, 2], [3, 4], [5, 6]])
+        self.assertIn("CONTINUATION PAGES", texts[1][1])  # a continuation part...
+        self.assertEqual([p.get("temperature") for p in self.payloads], [0.1, 0.1, 0.1])  # ...carries it too
+
+    def test_zero_is_sent_not_dropped(self):
+        self._payload_texts(self.make(text_pdf(4)), max_pages=2, config={"temperature": 0})
+        self.assertEqual([p.get("temperature") for p in self.payloads], [0, 0])
+
+    def test_no_config_value_sends_the_client_default(self):
+        self._payload_texts(self.make(text_pdf(3)), max_pages=16)
+        self.assertEqual([p.get("temperature") for p in self.payloads], [0.1])
 
 
 if __name__ == "__main__":
