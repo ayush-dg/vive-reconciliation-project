@@ -99,8 +99,7 @@ def _apply(ns, ctx, plans) -> int:
     failed = sum(counts.values())
     written = sum(1 for r in results if r.ok and r.plan.action != "PATCH_LINK_ONLY")
     links = sum(1 for r in results if r.ok and r.plan.action == "PATCH_LINK_ONLY")
-    print(f"
-{written} written and verified, {links} PDF link(s) added, {failed} failed, {locked} period locked, "
+    print(f"\n{written} written and verified, {links} PDF link(s) added, {failed} failed, {locked} period locked, "
           f"{held} saved first by another statement.")
     log_path = write_apply_log(ns, ctx.statement_id, results, plans)
     print(f"Write log: {log_path}")
