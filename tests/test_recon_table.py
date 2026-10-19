@@ -25,7 +25,7 @@ from src.lakehouse.migrations import apply_pending_migrations
 from src.matching import fabric_matching as fm
 
 STATEMENT = {"statement_id": "STMT-1", "vendor_id": "CONICELLI_TOYOTA", "vendor_name": "Conicelli Toyota",
-             "shop": "Lamon Auto Body", "statement_period": "2026-10"}
+             "statement_period": "2026-10"}
 BILL_23 = {"record_type": "bill", "id": 9123, "tranid": "23", "transaction_number": "VENDBILL23",
            "entity": 81667, "location": "64", "amount": 57.54}
 
@@ -253,6 +253,9 @@ class TestSchema(unittest.TestCase):
         for column in ("statement_id", "vendor_id", "status", "netsuite_tranid", "writeback_status",
                        "netsuite_before", "is_active", "undone_by"):
             self.assertIn(column, ddl)
+        # No shop column (2026-10-19, per the user).
+        self.assertNotRegex(ddl, r"\bshop\b")
+        self.assertNotIn("shop", rt.COLUMNS)
 
 
 if __name__ == "__main__":

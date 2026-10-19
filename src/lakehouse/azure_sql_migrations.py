@@ -339,7 +339,6 @@ TABLES = {
             statement_id NVARCHAR(100) NOT NULL,
             vendor_id NVARCHAR(255),
             vendor_name NVARCHAR(MAX),
-            shop NVARCHAR(MAX),
             statement_period NVARCHAR(20),
             line_number INT,
             statement_line_id NVARCHAR(100),

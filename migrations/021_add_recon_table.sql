@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS recon (
     statement_id TEXT NOT NULL,
     vendor_id TEXT,
     vendor_name TEXT,
-    shop TEXT,
     statement_period TEXT,
     line_number INTEGER,
     statement_line_id TEXT,

@@ -43,7 +43,7 @@ STATUS_BY_DISPOSITION = {"ACCEPTED": STATUS_ACCEPTED, "DISPUTED": STATUS_REJECTE
 SOURCE_AUTO, SOURCE_MANUAL = "auto", "manual"
 
 COLUMNS = (
-    "recon_id", "statement_id", "vendor_id", "vendor_name", "shop", "statement_period",
+    "recon_id", "statement_id", "vendor_id", "vendor_name", "statement_period",
     "line_number", "statement_line_id", "invoice_number", "original_invoice_number",
     "line_date", "line_amount", "status", "exception_id", "exception_reason",
     "netsuite_record_type", "netsuite_internal_id", "netsuite_tranid",
@@ -79,7 +79,7 @@ def status_for_reason(reason: str) -> str:
 def build_auto_rows(statement: dict, lines: list, results: dict, now: str = None) -> list:
     """One "auto" row per Silver line.
 
-    statement: {"statement_id", "vendor_id", "vendor_name", "shop", "statement_period"}
+    statement: {"statement_id", "vendor_id", "vendor_name", "statement_period"}
     lines:     every line of the statement as the matcher fetched it, BEFORE
                any line was dropped or deduplicated
     results:   {statement_line_id: result} for the lines the matcher decided
@@ -102,7 +102,6 @@ def build_auto_rows(statement: dict, lines: list, results: dict, now: str = None
             "statement_id": statement.get("statement_id"),
             "vendor_id": statement.get("vendor_id"),
             "vendor_name": statement.get("vendor_name"),
-            "shop": statement.get("shop"),
             "statement_period": statement.get("statement_period"),
             "line_number": line.get("line_number"),
             "statement_line_id": line.get("statement_line_id"),

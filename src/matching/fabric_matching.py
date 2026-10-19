@@ -935,7 +935,7 @@ def run_fabric_matching(statement_id: str) -> dict:
 
         recon_rows = _write_recon_rows(
             {"statement_id": statement_id, "vendor_id": vendor_id, "vendor_name": vendor_name,
-             "shop": shop, "statement_period": header.get("statement_period")},
+             "statement_period": header.get("statement_period")},
             all_lines, recon_results, now,
         )
 
