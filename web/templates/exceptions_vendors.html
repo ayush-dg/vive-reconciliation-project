@@ -72,10 +72,12 @@
 </div>
 
 <div class="filter-chips">
+  {# Each vendor shows how many statements (cards) it has (2026-10-19);
+     the script below recounts when a shop or location is picked. #}
   <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
-    <option value="">All vendors</option>
+    <option value="" data-name="All vendors">All vendors ({{ vendors | length }})</option>
     {% for vname in vendor_options %}
-    <option value="{{ vname }}">{{ vname }}</option>
+    <option value="{{ vname }}" data-name="{{ vname }}">{{ vname }} ({{ vendor_counts[vname] }})</option>
     {% endfor %}
   </select>
   <select id="shop-filter" class="filter-chip" style="cursor:pointer">
@@ -160,9 +162,32 @@
     });
   }
 
+  // The vendor dropdown's "(n)": statements per vendor among the cards the
+  // shop and location filters allow. A vendor with none there shows (0)
+  // rather than disappearing, so the current pick is never dropped.
+  function updateVendorCounts() {
+    var shop = shopFilter.value;
+    var location = locationFilter.value;
+    var counts = {};
+    var total = 0;
+    cards.forEach(function (card) {
+      if ((!shop || card.dataset.shop === shop) && (!location || card.dataset.location === location)) {
+        counts[card.dataset.vendor] = (counts[card.dataset.vendor] || 0) + 1;
+        total += 1;
+      }
+    });
+    Array.prototype.forEach.call(vendorFilter.options, function (opt) {
+      var n = opt.value ? (counts[opt.value] || 0) : total;
+      opt.textContent = opt.dataset.name + " (" + n + ")";
+    });
+  }
+
   vendorFilter.addEventListener("change", applyFilters);
-  shopFilter.addEventListener("change", applyFilters);
-  locationFilter.addEventListener("change", applyFilters);
+  shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); });
+  locationFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); });
+  // A browser can restore a previous shop/location pick on Back/reload.
+  updateVendorCounts();
+  applyFilters();
 })();
 </script>
 

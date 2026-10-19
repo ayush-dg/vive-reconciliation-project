@@ -14,6 +14,7 @@ swallow it whole (a :path converter matches slashes too, so no sub-path
 under /exceptions/ is safe from it).
 """
 
+from collections import Counter
 from urllib.parse import quote, unquote, urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -169,6 +170,10 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     # or no billing_location, e.g. anything routed through Foundry/Claude
     # Sonnet extraction rather than pdfplumber -- see get_exception_runs()).
     vendor_options = sorted({v["vendor_display_name"] for v in runs if v.get("vendor_display_name")})
+    # How many statements (cards) each vendor has in this window, shown in
+    # the vendor dropdown as "Nucar (12)" (2026-10-19). The page's script
+    # recounts it when a shop or location is picked.
+    vendor_counts = Counter(v["vendor_display_name"] for v in runs if v.get("vendor_display_name"))
     shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
     location_options = sorted({v["billing_location"] for v in runs if v.get("billing_location")})
 
@@ -184,6 +189,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         "active_page": "exceptions",
         "vendors": runs,
         "vendor_options": vendor_options,
+        "vendor_counts": vendor_counts,
         "shop_options": shop_options,
         "location_options": location_options,
         "total_open": total_open,

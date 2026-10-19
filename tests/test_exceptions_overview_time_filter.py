@@ -315,6 +315,18 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.assertIn("<option disabled>No syncs yet</option>", html)
         self.assertNotIn("No Outlook syncs yet", html)
 
+    def test_vendor_dropdown_shows_statement_counts(self):
+        # 2026-10-19: each vendor option carries its number of statements
+        # (cards) in the window; the script recounts on shop/location.
+        self.runs.append(dict(self.run_row, statement_id="S2", shop="Lamon"))
+        html = self._get("/exceptions")
+        options = re.findall(r'<select id="vendor-filter".*?</select>', html, re.DOTALL)[0]
+        self.assertIn('<option value="" data-name="All vendors">All vendors (3)</option>', options)
+        self.assertIn('<option value="Fenix" data-name="Fenix">Fenix (2)</option>', options)
+        self.assertIn('data-name="Orphan CO">Orphan CO (1)</option>', options)
+        self.assertIn("function updateVendorCounts()", html)
+        self.assertIn('shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); });', html)
+
     def test_vendor_shop_location_options_rebuilt_from_the_window(self):
         html = self._get("/exceptions")
         self.assertIn(">Fenix<", html)
