@@ -1,7 +1,7 @@
 """
 recon_table.py
 
-The `recon` table (Azure SQL; migrations/021_add_recon_table.sql and
+The `recon` table (Azure SQL; migrations/022_add_recon_table.sql and
 src/lakehouse/azure_sql_migrations.py): one row per statement line with its
 reconciliation status, plus the NetSuite bill/credit the line is linked to.
 

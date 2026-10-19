@@ -1140,3 +1140,9 @@ BENNETTS_AUTO_RECOVERY,Date,line_date,date,v1,1
 BENNETTS_AUTO_RECOVERY,Subtotal,charge_amount,decimal,v1,1
 BENNETTS_AUTO_RECOVERY,Balance,amount_remaining,decimal,v1,1
 BENNETTS_AUTO_RECOVERY,Vehicle,description_raw,string,v1,1
+ASBURY_AUTOMOTIVE_GROUP,Invoice Date,line_date,date,v1,1
+ASBURY_AUTOMOTIVE_GROUP,Invoice#,original_invoice_number,string,v1,1
+ASBURY_AUTOMOTIVE_GROUP,PO Number,po_number,string,v1,1
+ASBURY_AUTOMOTIVE_GROUP,Purchases,charge_amount,decimal,v1,1
+ASBURY_AUTOMOTIVE_GROUP,Payments,payment_amount,decimal,v1,1
+ASBURY_AUTOMOTIVE_GROUP,Balance,amount_remaining,decimal,v1,1

@@ -81,7 +81,9 @@ class TestNameFallbacks(unittest.TestCase):
                 self.assertEqual(resolve_vendor_id(name), vendor_id)
 
     def test_vendors_not_set_up_stay_unresolved(self):
-        for name in ("Asbury Automotive Group",):
+        # Asbury was the example here until it was set up on 2026-10-19
+        # (see tests/test_asbury_setup.py); any name with no alias entry works.
+        for name in ("Acme Imaginary Auto Parts",):
             with self.subTest(name=name):
                 self.assertIsNone(resolve_vendor_id(name))
 

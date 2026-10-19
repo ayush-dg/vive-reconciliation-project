@@ -328,7 +328,7 @@ TABLES = {
             batch_id NVARCHAR(36)
         )
     """,
-    # migrations/021_add_recon_table.sql (SQLite side) -- one row per
+    # migrations/022_add_recon_table.sql (SQLite side) -- one row per
     # statement line with its reconciliation status; see
     # src/lakehouse/recon_table.py. Indexed key columns are bounded
     # NVARCHARs (SQL Server can't index MAX).
@@ -373,6 +373,51 @@ TABLES = {
             updated_at NVARCHAR(40)
         )
     """,
+    # migrations/021_add_netsuite_writeback_log.sql -- one row per NetSuite
+    # write-back run for a statement, and one per invoice line of that run.
+    # Kept LAST in TABLES so a mistake here can never stop an older table
+    # from being created.
+    "netsuite_writeback_run": """
+        CREATE TABLE netsuite_writeback_run (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            run_id NVARCHAR(36) UNIQUE NOT NULL,
+            statement_id NVARCHAR(100) NOT NULL,
+            job_id NVARCHAR(255),
+            source NVARCHAR(20) NOT NULL,
+            sandbox NVARCHAR(50),
+            outcome NVARCHAR(20) NOT NULL,
+            started_at NVARCHAR(40) NOT NULL,
+            finished_at NVARCHAR(40) NOT NULL,
+            written INT NOT NULL DEFAULT 0,
+            failed INT NOT NULL DEFAULT 0,
+            period_locked INT NOT NULL DEFAULT 0,
+            held_by_other INT NOT NULL DEFAULT 0,
+            not_written INT NOT NULL DEFAULT 0,
+            not_written_counts NVARCHAR(MAX),
+            error_type NVARCHAR(255),
+            error_message NVARCHAR(MAX),
+            error_traceback NVARCHAR(MAX),
+            log_path NVARCHAR(MAX)
+        )
+    """,
+    "netsuite_writeback_record": """
+        CREATE TABLE netsuite_writeback_record (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            run_id NVARCHAR(36) NOT NULL,
+            statement_id NVARCHAR(100) NOT NULL,
+            invoice_number NVARCHAR(255),
+            statement_amount FLOAT,
+            action NVARCHAR(40) NOT NULL,
+            outcome NVARCHAR(60) NOT NULL,
+            reason NVARCHAR(100),
+            record_type NVARCHAR(40),
+            record_id NVARCHAR(40),
+            detail NVARCHAR(MAX),
+            seconds FLOAT,
+            fields_sent NVARCHAR(MAX),
+            previous_values NVARCHAR(MAX)
+        )
+    """,
 }
 
 INDEXES = {
@@ -392,6 +437,18 @@ INDEXES = {
     "idx_recon_invoice": (
         "recon",
         "CREATE INDEX idx_recon_invoice ON recon(statement_id, invoice_number)",
+    ),
+    "idx_nswb_run_statement": (
+        "netsuite_writeback_run",
+        "CREATE INDEX idx_nswb_run_statement ON netsuite_writeback_run(statement_id, started_at)",
+    ),
+    "idx_nswb_record_run": (
+        "netsuite_writeback_record",
+        "CREATE INDEX idx_nswb_record_run ON netsuite_writeback_record(run_id)",
+    ),
+    "idx_nswb_record_statement": (
+        "netsuite_writeback_record",
+        "CREATE INDEX idx_nswb_record_statement ON netsuite_writeback_record(statement_id, invoice_number)",
     ),
 }
 

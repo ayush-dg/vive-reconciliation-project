@@ -95,10 +95,12 @@ def _run_netsuite_writeback(statement_id):
     if result.get("skipped"):
         print(f"    NetSuite write-back: skipped ({result['reason']})")
     elif "error" in result:
-        print(f"    NetSuite write-back: failed ({result['error']}, see logs)")
+        where = f"error log: {result['log']}" if result.get("log") else "see logs"
+        print(f"    NetSuite write-back: failed ({result['error']}, {where})")
     else:
         not_written = ", ".join(f"{n} {reason}" for reason, n in result["not_written"].items())
         locked = f", {result['period_locked']} period locked" if result["period_locked"] else ""
+        locked += f", {result['held_by_other']} saved first by another statement" if result["held_by_other"] else ""
         links = "".join(f", {result[key]} {label}" for key, label in (
             ("links_added", "PDF link(s) added"), ("link_only_failed", "PDF link write(s) failed"),
             ("link_mismatch", "PDF link(s) not stored as sent")) if result.get(key))

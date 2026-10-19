@@ -1,4 +1,4 @@
--- 021_add_recon_table.sql
+-- 022_add_recon_table.sql
 --
 -- recon: one row per statement line with its reconciliation status
 -- (src/lakehouse/recon_table.py). The matching run
