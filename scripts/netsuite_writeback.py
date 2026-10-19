@@ -28,7 +28,7 @@ from src.netsuite.writeback import (
 )
 
 _ACTION_ORDER = (
-    "PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE",
+    "PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE", "PATCH_LINK_ONLY",
     "SKIP_UP_TO_DATE", "SKIP_RECONCILED_EARLIER", "SKIP_REVIEW",
 )
 
@@ -65,7 +65,7 @@ def _print_table(plans) -> None:
 
 def _print_field_samples(plans) -> None:
     print("\nField values per write type (first example of each):")
-    for action in ("PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE"):
+    for action in ("PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE", "PATCH_LINK_ONLY"):
         sample = next((p for p in plans if p.action == action), None)
         if sample:
             print(f"  {action} ({sample.invoice_number}):")
@@ -93,8 +93,9 @@ def _apply(ns, ctx, plans) -> int:
     counts = failure_counts(results)
     locked = counts.pop(CAT_PERIOD_LOCKED, 0)
     failed = sum(counts.values())
-    written = sum(1 for r in results if r.ok)
-    print(f"\n{written} written and verified, {failed} failed, {locked} period locked.")
+    written = sum(1 for r in results if r.ok and r.plan.action != "PATCH_LINK_ONLY")
+    links = sum(1 for r in results if r.ok and r.plan.action == "PATCH_LINK_ONLY")
+    print(f"\n{written} written and verified, {links} PDF link(s) added, {failed} failed, {locked} period locked.")
     print(f"Write log: {write_apply_log(ns, ctx.statement_id, results, plans)}")
     return 1 if failed else 0
 

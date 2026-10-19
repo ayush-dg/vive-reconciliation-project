@@ -155,6 +155,11 @@ class TestLevel2MatchingFiresThroughRealPipeline(unittest.TestCase):
 
     def test_level2_ro_and_amount_match_fires_when_invoice_numbers_differ(self):
         intake = self._load_intake_module()
+        # Never archive to real SharePoint from a test (tests/conftest.py
+        # also leaves every SHAREPOINT_* setting blank).
+        sharepoint = mock.patch.object(intake, "archive_statement_to_sharepoint")
+        sharepoint.start()
+        self.addCleanup(sharepoint.stop)
         intake_result = intake.run_intake(pdf_path=SAMPLE_PDF, statement_id="STMT-LEVEL2-TEST")
         self.assertEqual(intake_result["bronze_count"], 2)
 

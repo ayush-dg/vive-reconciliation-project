@@ -54,6 +54,10 @@ CREATE_STATEMENT_LINE = "CREATE_STATEMENT_LINE"
 SKIP_UP_TO_DATE = "SKIP_UP_TO_DATE"
 SKIP_RECONCILED_EARLIER = "SKIP_RECONCILED_EARLIER"
 SKIP_REVIEW = "SKIP_REVIEW"
+# A bill that already carries THIS statement's result but no link: only
+# custbody_statement_link is written (never for another statement's bill,
+# never over an existing link). Applied after every result write.
+PATCH_LINK_ONLY = "PATCH_LINK_ONLY"
 
 # Why a line was NOT written. Shown in the job output and the apply log, so
 # the reason an invoice was left out is never a mystery after an automatic run.
@@ -70,6 +74,7 @@ CAT_NEEDS_REVIEW = "needs review"
 # Why a WRITE that was attempted did not succeed.
 CAT_PERIOD_LOCKED = "period locked"
 CAT_WRITE_FAILED = "failed"
+CAT_LINK_ONLY_FAILED = "link-only write failed"
 
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
 EXCEPTION_DUPLICATE = "Duplicate"
@@ -158,34 +163,41 @@ def load_statement_results(statement_id: str) -> dict:
             "exceptions": exceptions, "lines": lines}
 
 
+# custbody_statement_link is a Hyperlink field; its real maximum length is
+# not confirmed yet, so a longer URL is not written at all rather than
+# risking a rejected or truncated link.
+NETSUITE_LINK_MAX_LEN = 999
+
+
 def resolve_pdf_link(statement_id: str) -> tuple:
-    """Returns (url_or_None, note). The link needs the statement's
-    document_hash, which lives on the jobs / extraction_cache rows of the
-    app database. The local dev database often has no such row (jobs live
-    in the deployed app's DB), so a missing hash is reported, not fatal.
+    """Returns (url_or_None, note). The link is the statement PDF's
+    SharePoint file, recorded on its document_intake_log row by intake
+    Step 8b (notebooks/01_document_intake.py archive_statement_to_sharepoint)
+    in the same run, before the write-back. No successful upload means no
+    link: the bills are still written, just without the link field.
+    (Until 2026-10-17 this was {APP_PUBLIC_BASE_URL}/statements/<hash>/pdf,
+    a login-protected page of this app; that link is retired.)
 
     OFF by default: the link fields are only written when
-    NETSUITE_WRITEBACK_PDF_LINK=true (deferred 2026-10-08 -- the link has
-    not been verified end to end yet)."""
+    NETSUITE_WRITEBACK_PDF_LINK=true."""
     if os.getenv("NETSUITE_WRITEBACK_PDF_LINK", "").strip().lower() != "true":
         return None, "PDF link is switched off (NETSUITE_WRITEBACK_PDF_LINK is not true)"
-    base = (os.getenv("APP_PUBLIC_BASE_URL") or "").rstrip("/")
-    if not base:
-        return None, "APP_PUBLIC_BASE_URL is not set"
     try:
         from src.lakehouse.connection import execute_query
         rows = execute_query(
-            "SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL",
-            [statement_id])
-        if not rows:
-            rows = execute_query(
-                "SELECT document_hash FROM extraction_cache WHERE statement_id = ? "
-                "AND document_hash IS NOT NULL", [statement_id])
+            "SELECT sharepoint_status, sharepoint_web_url FROM document_intake_log WHERE statement_id = ? "
+            "ORDER BY sharepoint_uploaded_at DESC", [statement_id])
     except Exception as exc:  # best-effort lookup; the preview must still run
-        return None, f"document_hash lookup failed ({type(exc).__name__})"
-    if not rows:
-        return None, "no document_hash found for this statement in the local app DB"
-    return f"{base}/statements/{rows[0]['document_hash']}/pdf", ""
+        return None, f"SharePoint link lookup failed ({type(exc).__name__})"
+    usable = [r for r in rows if r.get("sharepoint_status") in ("uploaded", "existing")
+              and r.get("sharepoint_web_url")]
+    if not usable:
+        status = (rows[0].get("sharepoint_status") if rows else None) or "none"
+        return None, f"no SharePoint link for this statement (status: {status})"
+    url = usable[0]["sharepoint_web_url"]
+    if len(url) > NETSUITE_LINK_MAX_LEN:
+        return None, f"SharePoint URL too long for NetSuite ({len(url)} chars)"
+    return url, ""
 
 
 # ----------------------------------------------------------------------
@@ -347,6 +359,19 @@ def _exception_fields(ctx: StatementContext, exception_name: str) -> dict:
     return fields
 
 
+def _skipped_or_link_only(invoice, amount, txn, ctx: StatementContext, skip: str) -> Plan:
+    """A skipped record's plan -- or, for a bill that already carries THIS
+    statement's result (SKIP_UP_TO_DATE: same reference) but has no link
+    yet, a link-only write. Never for SKIP_RECONCILED_EARLIER (another
+    statement's bill) and never over an existing link, even a different one."""
+    if (skip == SKIP_UP_TO_DATE and ctx.link
+            and txn.get("custbody_statement_reference") == ctx.reference
+            and not txn.get("custbody_statement_link")):
+        return _txn_plan_base(invoice, amount, txn, PATCH_LINK_ONLY, {"custbody_statement_link": ctx.link},
+                              note="already carries this statement's result -- adding the PDF link only")
+    return _txn_plan_base(invoice, amount, txn, skip, note=_skip_message(skip))
+
+
 def _skip_message(action: str) -> str:
     if action == SKIP_RECONCILED_EARLIER:
         return "already reconciled by an earlier statement -- left untouched"
@@ -366,7 +391,7 @@ def plan_matched(row, candidates, ctx) -> Plan:
     txn = tying[0]
     skip = _already_handled(txn, ctx, True, None)
     if skip:
-        return _txn_plan_base(invoice, amount, txn, skip, note=_skip_message(skip))
+        return _skipped_or_link_only(invoice, amount, txn, ctx, skip)
     return _txn_plan_base(invoice, amount, txn, PATCH_MATCHED, _matched_fields(ctx))
 
 
@@ -395,7 +420,7 @@ def _plan_one_exception(row, txn, ctx, exception_name: str) -> Plan:
                      category=CAT_AMOUNT_NOT_TIED)
     skip = _already_handled(txn, ctx, False, ctx.exception_ids.get(exception_name))
     if skip:
-        return _txn_plan_base(invoice, amount, txn, skip, note=_skip_message(skip))
+        return _skipped_or_link_only(invoice, amount, txn, ctx, skip)
     return _txn_plan_base(invoice, amount, txn, PATCH_EXCEPTION, _exception_fields(ctx, exception_name),
                           note=exception_name)
 
@@ -525,6 +550,9 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
     plans = [plan_matched(r, sandbox.get(r["invoice_number"].lower(), []), ctx) for r in results["matched"]]
     for r in results["exceptions"]:
         plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
+    # Link-only writes go last (stable sort): every reconciliation result is
+    # written first, whatever happens to a link.
+    plans.sort(key=lambda p: p.action == PATCH_LINK_ONLY)
     return ctx, plans
 
 
@@ -532,7 +560,7 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
 # Applying a plan (live writes -- sandbox only, enforced by NetSuiteClient)
 # ----------------------------------------------------------------------
 
-WRITE_ACTIONS = (PATCH_MATCHED, PATCH_EXCEPTION, CREATE_STATEMENT_LINE)
+WRITE_ACTIONS = (PATCH_MATCHED, PATCH_EXCEPTION, CREATE_STATEMENT_LINE, PATCH_LINK_ONLY)
 
 
 @dataclass
@@ -544,27 +572,45 @@ class ApplyResult:
     seconds: float = 0.0
     status_code: int = None
     category: str = ""
+    # The result fields were stored but the link came back different (e.g.
+    # truncated): still a successful write, counted separately.
+    link_mismatch: bool = False
+
+
+LINK_NOT_STORED = "link not stored as sent"
+
+
+def _is_link_only(plan: Plan) -> bool:
+    return set(plan.fields) == {"custbody_statement_link"}
 
 
 def _read_back_bill(ns, plan: Plan) -> str:
     """Re-reads the bill/credit and returns "" if it carries what we sent,
-    else a description of the first difference."""
+    else a description of the first difference. Only the fields this plan
+    actually sent are checked (a link-only plan sends just the link), and
+    the link is compared exactly -- LINK_NOT_STORED when it differs."""
     rows = ns.suiteql(
-        "SELECT custbody_reconciled, custbody_statement_reference, custbody_reconciliation_exception "
-        f"FROM transaction WHERE id = {int(plan.record_id)}")
+        "SELECT custbody_reconciled, custbody_statement_reference, custbody_reconciliation_exception, "
+        f"custbody_statement_link FROM transaction WHERE id = {int(plan.record_id)}")
     if not rows:
         return "record not found on read-back"
     row = rows[0]
-    wanted_exception = plan.fields.get("custbody_reconciliation_exception")
-    wanted_id = str(wanted_exception["id"]) if wanted_exception else ""
-    checks = (
-        ("reconciled", _is_true(row.get("custbody_reconciled")), plan.fields["custbody_reconciled"]),
-        ("statement reference", row.get("custbody_statement_reference"), plan.fields["custbody_statement_reference"]),
-        ("exception", str(row.get("custbody_reconciliation_exception") or ""), wanted_id),
-    )
+    sent = plan.fields
+    checks = []
+    if "custbody_reconciled" in sent:
+        checks.append(("reconciled", _is_true(row.get("custbody_reconciled")), sent["custbody_reconciled"]))
+    if "custbody_statement_reference" in sent:
+        checks.append(("statement reference", row.get("custbody_statement_reference"),
+                       sent["custbody_statement_reference"]))
+    if "custbody_reconciliation_exception" in sent:
+        wanted_exception = sent["custbody_reconciliation_exception"]
+        checks.append(("exception", str(row.get("custbody_reconciliation_exception") or ""),
+                       str(wanted_exception["id"]) if wanted_exception else ""))
     for label, actual, wanted in checks:
         if actual != wanted:
             return f"read-back mismatch on {label}: got {actual!r}, expected {wanted!r}"
+    if "custbody_statement_link" in sent and row.get("custbody_statement_link") != sent["custbody_statement_link"]:
+        return LINK_NOT_STORED
     return ""
 
 
@@ -586,7 +632,7 @@ def apply_plan(ns, plan: Plan) -> ApplyResult:
     result = _apply_plan_untimed(ns, plan)
     result.seconds = round(time.monotonic() - started, 2)
     if not result.ok and not result.category:
-        result.category = CAT_WRITE_FAILED
+        result.category = CAT_LINK_ONLY_FAILED if plan.action == PATCH_LINK_ONLY else CAT_WRITE_FAILED
     return result
 
 
@@ -607,6 +653,10 @@ def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
             return ApplyResult(plan, not problem, problem or "created", new_id)
         ns.patch_record(plan.record_type, plan.record_id, plan.fields)
         problem = _read_back_bill(ns, plan)
+        if problem == LINK_NOT_STORED and not _is_link_only(plan):
+            # The reconciliation result itself was stored: a link problem must
+            # not mark it failed (or stop the run as a "first write" failure).
+            return ApplyResult(plan, True, f"updated; {LINK_NOT_STORED}", plan.record_id, link_mismatch=True)
         return ApplyResult(plan, not problem, problem or "updated", plan.record_id)
     except Exception as exc:  # report and move on -- one bad record must not stop the batch
         body = getattr(exc, "body", "") or ""
@@ -626,8 +676,9 @@ def _stops_the_run(result: ApplyResult, attempts_so_far: int) -> bool:
     older invoices), so the rest must still be written. The run still stops
     early for failures that would repeat on every record: an authentication
     or permission error at any point, or any other failure on the very
-    first write (a bad field or format)."""
-    if result.category == CAT_PERIOD_LOCKED:
+    first write (a bad field or format). A link-only write never stops the
+    run (they come last; `attempts_so_far` counts result writes only)."""
+    if result.category == CAT_PERIOD_LOCKED or result.plan.action == PATCH_LINK_ONLY:
         return False
     return result.status_code in _AUTH_STATUS_CODES or attempts_so_far == 1
 
@@ -648,7 +699,8 @@ def apply_plans(ns, plans: list) -> list:
     for plan in (p for p in plans if p.action in WRITE_ACTIONS):
         result = apply_plan(ns, plan)
         results.append(result)
-        if not result.ok and _stops_the_run(result, len(results)):
+        result_writes = sum(1 for r in results if r.plan.action != PATCH_LINK_ONLY)
+        if not result.ok and _stops_the_run(result, result_writes):
             break
     return results
 
@@ -778,7 +830,7 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
         "record_type": r.plan.record_type or STATEMENT_LINE_RECORD,
         "record_id": r.new_record_id or r.plan.record_id,
         "fields_sent": r.plan.fields, "previous": r.plan.previous,
-        "ok": r.ok, "detail": r.detail, "seconds": r.seconds,
+        "ok": r.ok, "detail": r.detail, "seconds": r.seconds, "link_mismatch": r.link_mismatch,
         "category": r.category or ("written" if r.ok else CAT_WRITE_FAILED),
     } for r in results]
     not_written = [{

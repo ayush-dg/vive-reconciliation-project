@@ -60,6 +60,7 @@ class PipelineHookTests(unittest.TestCase):
                  mock.patch.object(pipeline_hook, "write_apply_log", return_value="log.json") as log:
                 result = pipeline_hook.run_netsuite_writeback("STMT-1")
         self.assertEqual(result, {"written": 1, "failed": 1, "period_locked": 2,
+                                  "links_added": 0, "link_only_failed": 0, "link_mismatch": 0,
                                   "not_written": {"not in sandbox": 1}, "log": "log.json"})
         # The log is given the plans too, so skipped lines are recorded.
         self.assertIs(log.call_args.args[3], plans)

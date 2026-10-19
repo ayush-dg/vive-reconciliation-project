@@ -444,6 +444,20 @@ COLUMNS = {
         ("previous_balance", "ALTER TABLE document_intake_log ADD previous_balance FLOAT"),
         ("previous_balance_source", "ALTER TABLE document_intake_log ADD previous_balance_source NVARCHAR(100)"),
         ("section_totals", "ALTER TABLE document_intake_log ADD section_totals NVARCHAR(MAX)"),
+        # migrations/020_add_sharepoint_archive_columns.sql (SQLite side of
+        # this same change) -- the SharePoint archive of each RECONCILIATION
+        # statement PDF (src/storage/sharepoint_client.py, intake Step 8b):
+        # status ('uploaded' / 'existing' / 'failed' / 'skipped'; NULL when
+        # the feature is off or the document isn't eligible), the file's
+        # webUrl (the NetSuite link target), Graph item + drive ids, the path
+        # inside the library, a short secret-free error, and the attempt time.
+        ("sharepoint_status", "ALTER TABLE document_intake_log ADD sharepoint_status NVARCHAR(20)"),
+        ("sharepoint_web_url", "ALTER TABLE document_intake_log ADD sharepoint_web_url NVARCHAR(1000)"),
+        ("sharepoint_item_id", "ALTER TABLE document_intake_log ADD sharepoint_item_id NVARCHAR(100)"),
+        ("sharepoint_drive_id", "ALTER TABLE document_intake_log ADD sharepoint_drive_id NVARCHAR(200)"),
+        ("sharepoint_path", "ALTER TABLE document_intake_log ADD sharepoint_path NVARCHAR(1000)"),
+        ("sharepoint_error", "ALTER TABLE document_intake_log ADD sharepoint_error NVARCHAR(1000)"),
+        ("sharepoint_uploaded_at", "ALTER TABLE document_intake_log ADD sharepoint_uploaded_at NVARCHAR(40)"),
     ],
     "silver_reconciliation_standard": [
         ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),
