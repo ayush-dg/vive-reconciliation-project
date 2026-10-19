@@ -84,6 +84,7 @@ import uuid
 from datetime import datetime, timezone
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection, get_warehouse_connection
+from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, replace_auto_rows, status_for_reason
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.shop_owners import get_shop_owner
@@ -123,7 +124,7 @@ def _fetch_statement(cur, statement_id: str):
 
 def _fetch_lines(cur, statement_id: str) -> list:
     cur.execute(
-        "SELECT statement_line_id, invoice_number, document_number, invoice_number_ref, "
+        "SELECT statement_line_id, line_number, invoice_number, document_number, invoice_number_ref, "
         "transaction_code, line_type, charge_amount, payment_amount, po_number, ro_number, line_date "
         "FROM silver.statement_line WHERE statement_id = ?",
         [statement_id],
@@ -214,10 +215,10 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     does it fall back to the single closest one, surfaced as a reviewable
     near-miss (Amount Mismatch) rather than a blanket "unresolved.\""""
     if not entity_ids:
-        return {}
+        return _Candidates()
     placeholders = ",".join("?" * len(entity_ids))
     cur.execute(
-        f"SELECT tranid, total FROM bronze.{table} "
+        f"SELECT tranid, total, id, transactionnumber, entity, location FROM bronze.{table} "
         f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
         entity_ids,
     )
@@ -229,14 +230,40 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     # that resolves both; comparing case-insensitively at match time does,
     # without needing a per-prefix normalization rule. The lookup side
     # (shape["invoice_number"].lower()) is lowercased to match.
-    by_tranid = {}
-    for tranid, total in cur.fetchall():
+    #
+    # The dict itself stays {tranid: [totals]} for the matching logic below;
+    # .records (2026-10-19) also keeps WHICH NetSuite record each total came
+    # from, so the recon table can say which bill/credit a line matched.
+    by_tranid = _Candidates()
+    record_type = "credit" if table == "netsuite_vendorcredit" else "bill"
+    for tranid, total, record_id, transaction_number, entity, location in cur.fetchall():
         try:
             total_f = float(total)
         except (TypeError, ValueError):
             continue
         by_tranid.setdefault(tranid.lower(), []).append(total_f)
+        by_tranid.records.setdefault((tranid.lower(), round(total_f, 2)), []).append({
+            "record_type": record_type, "id": record_id, "tranid": tranid,
+            "transaction_number": transaction_number, "entity": entity, "location": location,
+            "amount": total_f,
+        })
     return by_tranid
+
+
+class _Candidates(dict):
+    """{tranid_lower: [total, ...]} (what the matcher reads) plus .records:
+    {(tranid_lower, total): [NetSuite record, ...]}."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.records = {}
+
+    def record_for(self, key, total):
+        """The NetSuite record behind one (tranid, total) the matcher chose."""
+        if key is None or total is None:
+            return None
+        found = self.records.get((str(key).lower(), round(float(total), 2)))
+        return found[0] if found else None
 
 
 def _best_candidate(candidates: list, target_amount) -> tuple:
@@ -652,7 +679,11 @@ def run_fabric_matching(statement_id: str) -> dict:
         writes = _PendingWrites()
 
         lines = _fetch_lines(wh_cur, statement_id)
+        # Every line, before any is set aside below -- the recon table gets
+        # one row per line, and a set-aside line says why (_recon_note).
+        all_lines = list(lines)
         lines = _drop_payment_closing_lines(lines)
+        _note_set_aside(all_lines, lines, "payment line closing a charge on the same invoice -- set aside before matching")
 
         # select_lines() dedup applies to any vendor with a
         # vendor_line_selection_rule row -- today that's Fred Beans/
@@ -676,9 +707,25 @@ def run_fabric_matching(statement_id: str) -> dict:
         vendor_rules = selection_rules.get(vendor_id)
         if vendor_rules:
             lines = _apply_line_selection(vendor_id, lines, selection_rules)
+            _note_set_aside(all_lines, lines, "set aside by this vendor's line selection rule (reprint/duplicate)")
         vendor_uses_shapes = bool(vendor_rules) and (vendor_rules.get("charge") or {}).get("rule_type") == "transaction_code_priority"
 
         entity_ids = resolve_entity_ids(vendor_id, vendor_name)
+
+        # The recon table's per-line results: {statement_line_id: result}.
+        # _record() fills it for each matched/excepted item -- every Silver
+        # line of a shape, or the line itself.
+        recon_results = {}
+
+        def _record(item, inv, status, stmt_amount, exception_id=None, reason=None,
+                    netsuite=None, rule=None):
+            item_lines = item.get("lines") if vendor_uses_shapes else [item]
+            for line in item_lines or []:
+                recon_results[line.get("statement_line_id")] = {
+                    "invoice_number": inv, "status": status, "statement_amount": stmt_amount,
+                    "exception_id": exception_id, "exception_reason": reason,
+                    "netsuite": netsuite, "match_rule": rule,
+                }
 
         matched_count = 0
         exception_count = 0
@@ -695,11 +742,13 @@ def run_fabric_matching(statement_id: str) -> dict:
                     stmt_amount = item["charge_amt"] if item["charge_line_count"] else item["credit_amt"]
                 else:
                     stmt_amount, _ = _line_target(item)
-                _write_exception(
+                exception_id = _write_exception(
                     writes, statement_id, vendor_id, shop, shop_owner, item["invoice_number"],
                     item["ro_number"], stmt_amount, None, "Vendor Not Resolved in NetSuite", now,
                     original_invoice_number=item.get("document_number"),
                 )
+                _record(item, item["invoice_number"], status_for_reason("Vendor Not Resolved in NetSuite"),
+                        stmt_amount, exception_id, "Vendor Not Resolved in NetSuite")
                 exception_count += 1
                 statement_total += stmt_amount or 0.0
         else:
@@ -748,13 +797,15 @@ def run_fabric_matching(statement_id: str) -> dict:
                     netsuite_total, candidate_count = _match_credit(
                         inv.lower(), stmt_amount, keystone_credit_candidates
                     )
+                    ks_record = _keystone_credit_record(credits, keystone_credit_candidates, inv, netsuite_total)
                     if netsuite_total is None:
                         reason = "Possible Duplicate in NetSuite" if candidate_count > 1 else "Not Found in NetSuite"
-                        _write_exception(
+                        exception_id = _write_exception(
                             writes, statement_id, vendor_id, shop, shop_owner, inv,
                             ro, stmt_amount, None, reason, now,
                             original_invoice_number=orig_inv,
                         )
+                        _record(item, inv, status_for_reason(reason), stmt_amount, exception_id, reason)
                         exception_count += 1
                     elif _amounts_tie_out(stmt_amount, netsuite_total):
                         _write_match(
@@ -762,20 +813,27 @@ def run_fabric_matching(statement_id: str) -> dict:
                             ro, stmt_amount, netsuite_total, now,
                             original_invoice_number=orig_inv,
                         )
+                        _record(item, inv, STATUS_MATCHED, stmt_amount, netsuite=ks_record,
+                                rule="credit number contains the invoice")
                         matched_count += 1
                         erp_total += netsuite_total
                     else:
-                        _write_exception(
+                        exception_id = _write_exception(
                             writes, statement_id, vendor_id, shop, shop_owner, inv,
                             ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
                             original_invoice_number=orig_inv,
                         )
+                        _record(item, inv, status_for_reason("Amount Mismatch"), stmt_amount, exception_id,
+                                "Amount Mismatch", netsuite=ks_record, rule="credit number contains the invoice")
                         exception_count += 1
                         erp_total += netsuite_total
                     continue
 
                 candidates = netsuite_by_table.get(table, {}).get(inv.lower(), []) if table else []
                 netsuite_total, is_exact = _best_candidate(candidates, stmt_amount)
+                # Which tranid the chosen total belongs to, and how it was
+                # found -- for the recon table's NetSuite link.
+                matched_key, match_rule = inv.lower(), "invoice number"
 
                 if netsuite_total is None and table == "netsuite_vendorcredit":
                     # RH Long-confirmed 2026-09-22: its own standalone-credit
@@ -793,6 +851,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                     cm_total, cm_is_exact = _best_candidate(cm_candidates, stmt_amount)
                     if cm_total is not None:
                         netsuite_total, is_exact = cm_total, cm_is_exact
+                        matched_key, match_rule = f"cm{inv.lower()}", "CM prefix"
 
                 if netsuite_total is None and table:
                     # Last resort for a line whose own number missed: the
@@ -810,6 +869,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                         )
                         if dt_is_exact:
                             netsuite_total, is_exact = dt_total, dt_is_exact
+                            matched_key, match_rule = dt.group(1), "DT# reference"
 
                 if netsuite_total is None and table:
                     for alt in _alternate_tranids(vendor_id, inv, item.get("line_date")):
@@ -818,14 +878,19 @@ def run_fabric_matching(statement_id: str) -> dict:
                         )
                         if alt_is_exact:
                             netsuite_total, is_exact = alt_total, alt_is_exact
+                            matched_key, match_rule = alt.lower(), f"alternate number ({alt})"
                             break
 
+                ns_record = (netsuite_by_table.get(table).record_for(matched_key, netsuite_total)
+                             if table and netsuite_total is not None else None)
                 if netsuite_total is None:
-                    _write_exception(
+                    exception_id = _write_exception(
                         writes, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, None, "Not Found in NetSuite", now,
                         original_invoice_number=orig_inv,
                     )
+                    _record(item, inv, status_for_reason("Not Found in NetSuite"), stmt_amount,
+                            exception_id, "Not Found in NetSuite")
                     exception_count += 1
                 elif is_exact:
                     _write_match(
@@ -833,6 +898,7 @@ def run_fabric_matching(statement_id: str) -> dict:
                         ro, stmt_amount, netsuite_total, now,
                         original_invoice_number=orig_inv,
                     )
+                    _record(item, inv, STATUS_MATCHED, stmt_amount, netsuite=ns_record, rule=match_rule)
                     matched_count += 1
                     erp_total += netsuite_total
                 else:
@@ -841,11 +907,13 @@ def run_fabric_matching(statement_id: str) -> dict:
                     # (see _best_candidate()), surfaced so the UI can show
                     # what the nearest real NetSuite record actually was,
                     # not just "not found."
-                    _write_exception(
+                    exception_id = _write_exception(
                         writes, statement_id, vendor_id, shop, shop_owner, inv,
                         ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
                         original_invoice_number=orig_inv,
                     )
+                    _record(item, inv, status_for_reason("Amount Mismatch"), stmt_amount, exception_id,
+                            "Amount Mismatch", netsuite=ns_record, rule=match_rule)
                     exception_count += 1
                     erp_total += netsuite_total
 
@@ -865,9 +933,15 @@ def run_fabric_matching(statement_id: str) -> dict:
         writes.flush(wh_cur)
         wh_conn.commit()
 
+        recon_rows = _write_recon_rows(
+            {"statement_id": statement_id, "vendor_id": vendor_id, "vendor_name": vendor_name,
+             "shop": shop, "statement_period": header.get("statement_period")},
+            all_lines, recon_results, now,
+        )
+
         return {
             "matched": matched_count, "exceptions": exception_count,
-            "vendor_resolved": entity_ids is not None,
+            "vendor_resolved": entity_ids is not None, "recon_rows": recon_rows,
         }
 
     except Exception:
@@ -969,6 +1043,40 @@ class _PendingWrites:
             insert_rows(cur, table, columns, rows)
 
 
+def _note_set_aside(all_lines: list, kept: list, why: str) -> None:
+    """Marks lines a filter step removed, so their recon row says why."""
+    kept_ids = {line.get("statement_line_id") for line in kept}
+    for line in all_lines:
+        if line.get("statement_line_id") not in kept_ids and not line.get("_recon_note"):
+            line["_recon_note"] = why
+
+
+def _keystone_credit_record(credits, keystone_candidates, inv, total):
+    """The NetSuite credit behind a Keystone fuzzy credit match
+    (_match_credit()): the candidate whose tranid contains the invoice and
+    whose total is the one chosen."""
+    if total is None or not keystone_candidates or credits is None:
+        return None
+    for tranid, candidate_total in keystone_candidates:
+        if inv.lower() in tranid and abs(candidate_total - total) <= EXACT_AMOUNT_EPSILON:
+            return credits.record_for(tranid, candidate_total)
+    return None
+
+
+def _write_recon_rows(statement: dict, all_lines: list, results: dict, now: str):
+    """The recon table (Azure SQL, src/lakehouse/recon_table.py): one row
+    per statement line with its status, written after the Fabric results
+    are committed. Best-effort -- a failure here is logged and never fails
+    matching. Returns the number of rows written, or None on failure."""
+    try:
+        rows = build_auto_rows(statement, all_lines, results, now)
+        return replace_auto_rows(statement["statement_id"], rows)
+    except Exception:
+        logger.exception("recon table write failed for statement_id=%s (non-fatal)",
+                         statement.get("statement_id"))
+        return None
+
+
 def _has_prior_results(cur, statement_id) -> bool:
     for table in ("silver.recon_matched_invoices", "silver.recon_exceptions", "silver.recon_summary"):
         cur.execute(f"SELECT TOP 1 1 FROM {table} WHERE statement_id = ?", [statement_id])
@@ -987,10 +1095,13 @@ def _write_match(writes, statement_id, vendor_id, shop, invoice_number, ro_numbe
 
 def _write_exception(writes, statement_id, vendor_id, shop, shop_owner, invoice_number,
                       ro_number, stmt_amount, erp_amount, reason, now, original_invoice_number=None):
+    """Returns the new exception_id (the recon table links each line to it)."""
+    exception_id = str(uuid.uuid4())
     writes.add("silver.recon_exceptions", [
-        str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
+        exception_id, vendor_id, shop, invoice_number, original_invoice_number, ro_number,
         stmt_amount, erp_amount, "EXCEPTION", reason, "OPEN", statement_id, now, shop_owner,
     ])
+    return exception_id
 
 
 def _write_summary(writes, statement_id, vendor_id, vendor_name, shop, statement_period,

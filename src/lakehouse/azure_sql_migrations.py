@@ -328,6 +328,52 @@ TABLES = {
             batch_id NVARCHAR(36)
         )
     """,
+    # migrations/021_add_recon_table.sql (SQLite side) -- one row per
+    # statement line with its reconciliation status; see
+    # src/lakehouse/recon_table.py. Indexed key columns are bounded
+    # NVARCHARs (SQL Server can't index MAX).
+    "recon": """
+        CREATE TABLE recon (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            recon_id NVARCHAR(36) NOT NULL UNIQUE,
+            statement_id NVARCHAR(100) NOT NULL,
+            vendor_id NVARCHAR(255),
+            vendor_name NVARCHAR(MAX),
+            shop NVARCHAR(MAX),
+            statement_period NVARCHAR(20),
+            line_number INT,
+            statement_line_id NVARCHAR(100),
+            invoice_number NVARCHAR(255),
+            original_invoice_number NVARCHAR(MAX),
+            line_date NVARCHAR(40),
+            line_amount FLOAT,
+            status NVARCHAR(50) NOT NULL,
+            exception_id NVARCHAR(100),
+            exception_reason NVARCHAR(100),
+            netsuite_record_type NVARCHAR(20),
+            netsuite_internal_id NVARCHAR(50),
+            netsuite_tranid NVARCHAR(255),
+            netsuite_transaction_number NVARCHAR(100),
+            netsuite_amount FLOAT,
+            difference FLOAT,
+            netsuite_entity_id NVARCHAR(50),
+            netsuite_location NVARCHAR(50),
+            source NVARCHAR(10) NOT NULL,
+            match_rule NVARCHAR(100),
+            matched_by NVARCHAR(255),
+            matched_at NVARCHAR(40),
+            note NVARCHAR(MAX),
+            writeback_status NVARCHAR(30),
+            writeback_detail NVARCHAR(MAX),
+            netsuite_statement_line_id NVARCHAR(50),
+            netsuite_before NVARCHAR(MAX),
+            is_active INT NOT NULL DEFAULT 1,
+            undone_by NVARCHAR(255),
+            undone_at NVARCHAR(40),
+            created_at NVARCHAR(40) NOT NULL,
+            updated_at NVARCHAR(40)
+        )
+    """,
 }
 
 INDEXES = {
@@ -339,6 +385,14 @@ INDEXES = {
     "idx_jobs_status_submitted": (
         "jobs",
         "CREATE INDEX idx_jobs_status_submitted ON jobs(status, submitted_at)",
+    ),
+    "idx_recon_statement": (
+        "recon",
+        "CREATE INDEX idx_recon_statement ON recon(statement_id, is_active)",
+    ),
+    "idx_recon_invoice": (
+        "recon",
+        "CREATE INDEX idx_recon_invoice ON recon(statement_id, invoice_number)",
     ),
 }
 

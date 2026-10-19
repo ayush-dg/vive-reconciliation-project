@@ -9,6 +9,7 @@ SQL abstraction). Routers stay thin; this module owns the SQL.
 
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -40,6 +41,8 @@ from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import display_name as vendor_display_name
 from web.time_window import TimeWindow
+
+logger = logging.getLogger(__name__)
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -1263,6 +1266,14 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
         [now, exception_id],
     )
     _recompute_summary_counts(statement_id)
+    # The recon table (src/lakehouse/recon_table.py, 2026-10-19): this
+    # invoice's lines become Accepted / Rejected. Best-effort -- never
+    # blocks resolving the exception itself.
+    try:
+        from src.lakehouse.recon_table import mark_resolved
+        mark_resolved(statement_id, invoice_number, disposition_status, disposed_by, notes)
+    except Exception:
+        logger.exception("recon table update failed for %s / %s (non-fatal)", statement_id, invoice_number)
 
 
 def escalate_exception(exception_id: str, escalated_by: str) -> None:
