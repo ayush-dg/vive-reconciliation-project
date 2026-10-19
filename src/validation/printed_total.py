@@ -53,11 +53,31 @@ def _is_total_line(line: str) -> bool:
     return any(label in letters for label in _LABELS)
 
 
+# "THIS AMOUNT", letter-spaced or not ("T H IS A M O U N T").
+_THIS_AMOUNT_RE = re.compile(r"T\s*H\s*I\s*S\s*A\s*M\s*O\s*U\s*N\s*T", re.IGNORECASE)
+
+
+def _line_amounts(line: str) -> list:
+    """The non-zero amounts a total-labelled line contributes. On a "...THIS
+    AMOUNT" line only the amounts printed AFTER the label count (2026-10-19):
+    the CDK layout prints the aging boxes on the same line, so with a past-due
+    balance the line carries three different figures -- Bowser Klapec 1.pdf:
+    "STATUS 450.00 63,380.20 | PLEASE PAY THIS AMOUNT 63,830.20" (past due,
+    current, the total). If nothing is printed after the label, the whole
+    line counts, as before."""
+    match = _THIS_AMOUNT_RE.search(line)
+    if match:
+        after = [v for v in _money_values(line[match.end():]) if v != 0]
+        if after:
+            return after
+    return [v for v in _money_values(line) if v != 0]
+
+
 def find_printed_total(text: Optional[str]) -> Optional[float]:
     """The single non-zero amount printed on the text's total-labelled
     lines, or None when there is no such line or the lines disagree."""
     amounts = set()
     for line in (text or "").splitlines():
         if _is_total_line(line):
-            amounts.update(v for v in _money_values(line) if v != 0)
+            amounts.update(_line_amounts(line))
     return amounts.pop() if len(amounts) == 1 else None
