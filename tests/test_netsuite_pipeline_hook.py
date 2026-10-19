@@ -17,6 +17,16 @@ from src.netsuite.client import NetSuiteConfigError
 
 
 class PipelineHookTests(unittest.TestCase):
+    def setUp(self):
+        self.save_run = self._stub("save_run", return_value="run-1")
+        self.save_failed_run = self._stub("save_failed_run", return_value="run-2")
+        self._stub("write_error_log", return_value="err.json")
+
+    def _stub(self, name, **kwargs):
+        patcher = mock.patch.object(pipeline_hook, name, **kwargs)
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
     def test_off_by_default(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             result = pipeline_hook.run_netsuite_writeback("STMT-1")
@@ -51,6 +61,37 @@ class PipelineHookTests(unittest.TestCase):
                 result = pipeline_hook.run_netsuite_writeback("STMT-1")
         self.assertEqual(result["log"], "err.json")
         self.assertEqual(err.call_args.args[0], "STMT-1")
+
+    def test_a_failed_run_is_also_saved_to_the_database(self):
+        boom = RuntimeError("boom")
+        with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": "true"}, clear=True):
+            with mock.patch.object(pipeline_hook, "NetSuiteClient", return_value=mock.Mock()), \
+                 mock.patch.object(pipeline_hook, "build_plans", side_effect=boom):
+                pipeline_hook.run_netsuite_writeback("STMT-1")
+        args, kwargs = self.save_failed_run.call_args
+        self.assertEqual((args[0], args[1]), ("STMT-1", boom))
+        self.assertEqual(kwargs["log_path"], "err.json")
+        self.assertIn("started_at", kwargs)
+
+    def test_a_finished_run_is_saved_to_the_database(self):
+        plans, results = [mock.Mock(action="PATCH_MATCHED")], [mock.Mock(ok=True, category="")]
+        ns = mock.Mock(domain_id="7321761-sb1")
+        with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": "true"}, clear=True):
+            with mock.patch.object(pipeline_hook, "NetSuiteClient", return_value=ns), \
+                 mock.patch.object(pipeline_hook, "build_plans", return_value=(mock.Mock(), plans)), \
+                 mock.patch.object(pipeline_hook, "apply_plans", return_value=results), \
+                 mock.patch.object(pipeline_hook, "write_apply_log", return_value="log.json"):
+                pipeline_hook.run_netsuite_writeback("STMT-1")
+        args, kwargs = self.save_run.call_args
+        self.assertEqual(args, ("STMT-1", results, plans))
+        self.assertEqual((kwargs["sandbox"], kwargs["log_path"]), ("7321761-sb1", "log.json"))
+        self.assertIn("started_at", kwargs)
+
+    def test_nothing_is_saved_when_the_write_back_is_off(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            pipeline_hook.run_netsuite_writeback("STMT-1")
+        self.save_run.assert_not_called()
+        self.save_failed_run.assert_not_called()
 
     def test_summary_counts_written_failed_period_locked_and_not_written(self):
         from src.netsuite.writeback import ApplyResult

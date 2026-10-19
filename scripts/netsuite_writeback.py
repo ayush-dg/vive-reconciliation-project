@@ -26,6 +26,7 @@ from src.netsuite.writeback import (
     CAT_HELD_BY_OTHER, CAT_PERIOD_LOCKED, apply_plans, apply_revert, build_plans, build_revert_actions, failure_counts,
     find_revert_actions_for_statement, write_apply_log,
 )
+from src.netsuite.log_store import now_iso, save_run
 
 _ACTION_ORDER = (
     "PATCH_MATCHED", "PATCH_EXCEPTION", "CREATE_STATEMENT_LINE",
@@ -83,6 +84,7 @@ def _plans_as_json(ctx, plans) -> dict:
 
 def _apply(ns, ctx, plans) -> int:
     print("\nAPPLYING (each write is read back and verified):")
+    started_at = now_iso()
     results = apply_plans(ns, plans)
     for r in results:
         record = r.new_record_id or r.plan.record_id or "-"
@@ -97,7 +99,11 @@ def _apply(ns, ctx, plans) -> int:
     written = sum(1 for r in results if r.ok)
     print(f"\n{written} written and verified, {failed} failed, {locked} period locked, "
           f"{held} saved first by another statement.")
-    print(f"Write log: {write_apply_log(ns, ctx.statement_id, results, plans)}")
+    log_path = write_apply_log(ns, ctx.statement_id, results, plans)
+    print(f"Write log: {log_path}")
+    run_id = save_run(ctx.statement_id, results, plans, started_at=started_at, source="cli",
+                      sandbox=ns.domain_id, log_path=log_path)
+    print(f"Saved to the database as run {run_id}" if run_id else "Not saved to the database (see the warning above)")
     return 1 if failed else 0
 
 
