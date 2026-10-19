@@ -898,7 +898,8 @@
   "SCHALLER_SUBARU": [
     "Schaller Honda / Subaru",
     "Schaller Subaru",
-    "Schaller Honda"
+    "Schaller Honda",
+    "Schaller Honda / Schaller Subaru"
   ],
   "BERTERA_MITSUBISHI": [
     "Bertera Mitsubishi"
@@ -924,5 +925,11 @@
   "BENNETTS_AUTO_RECOVERY": [
     "Bennetts Auto Recovery",
     "Bennett's Auto Recovery"
+  ],
+  "ASBURY_AUTOMOTIVE_GROUP": [
+    "Asbury Automotive Group",
+    "Asbury Automotive Management",
+    "Asbury Automotive Management L.L.C",
+    "Asbury Automotive Management LLC"
   ]
 }
