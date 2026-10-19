@@ -2533,6 +2533,10 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
         detail = None
     intake["validation_attempts"] = (detail or {}).get("attempts") or []
     intake["primary_computed"] = (detail or {}).get("primary_computed")
+    # Invoice-balance check (2026-10-19): the flagged rows, and the pass it
+    # turned into a mismatch, if any.
+    intake["invoice_balance"] = (detail or {}).get("invoice_balance")
+    intake["blocked_pass"] = (detail or {}).get("blocked_pass")
     printed = intake["statement_total_as_printed"]
     difference = intake["validation_difference"]
     computed_total = (

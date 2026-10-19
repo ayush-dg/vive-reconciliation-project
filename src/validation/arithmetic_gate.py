@@ -22,6 +22,13 @@ TOTAL_COLUMNS_PATH = os.path.join(
 
 _total_columns_cache = None
 
+INVOICE_BALANCE_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "validation_invoice_balance.json",
+)
+
+_invoice_balance_cache = None  # (path, frozenset of vendor ids)
+
 
 def compute_arithmetic_validation(
     statement_total_as_printed: Optional[float],
@@ -645,6 +652,147 @@ def validate_with_fallbacks(
             }
     result["detail"] = {"attempts": attempts}
     return result
+
+
+INVOICE_BALANCE_RULE_ROW_SIGN = "due_opposite_sign"
+INVOICE_BALANCE_RULE_ROW_EXCEEDS = "due_exceeds_row_amount"
+INVOICE_BALANCE_RULE_DUE_ONLY = "due_without_amount"
+INVOICE_BALANCE_RULE_INVOICE = "invoice_does_not_net"
+_INVOICE_BALANCE_MAX_FLAGS = 50
+
+
+def _balance_group_key(invoice_number):
+    """_invoice_group_key() plus a credit memo's trailing letter:
+    "CM9460269A" groups with "9460269" (Fred Beans Rockland, STMT-6A9842BA).
+    A letter on a plain invoice number is kept -- only a credit memo's
+    suffix is dropped."""
+    key = _invoice_group_key(invoice_number)
+    if key is None:
+        return None
+    match = re.match(r"^CM(.*\d)[A-Z]$", str(invoice_number).strip(), flags=re.IGNORECASE)
+    return match.group(1) if match else key
+
+
+def check_invoice_balance(invoices: list) -> Optional[dict]:
+    """The invoice-balance check (2026-10-19): an extracted amount-due
+    (open balance) column must agree with the extracted row amounts, per
+    row and per invoice. Built from _check_open_balance()'s two guards, with
+    three refinements found on the three saved AI extractions of Fred Beans
+    Rockland (STMT-6A9842BA), where the printed AMOUNT DUE column sums to
+    the printed total even when rows are wrong:
+
+      - a credit memo groups with its invoice including a trailing letter
+        (_balance_group_key);
+      - row rule: an amount due must not exceed its own row's amount or
+        have the opposite sign -- EXCEPT when the row's invoice group nets
+        to its amount due overall and the due has the group's sign (the
+        invoice's due printed once, on its last line: 942002 22.67 + 34.34
+        = 57.01);
+      - a row with an amount due but no amount of its own is flagged when
+        its invoice has other rows (a credit read into AMOUNT DUE: 9391887
+        113.20, one of six rows). A line of its own that prints only a
+        balance is a real layout (Healey 1401474: no Amount, Balance
+        -100.54) and is not flagged;
+      - invoice rule: the rows of one invoice (2 or more rows) must net to
+        the sum of its amount-due values.
+
+    Returns None when it does not apply (no amount-due values, or the column
+    is a running balance), else {"rows_with_due", "invoices_checked",
+    "flag_count", "flags": [...]} -- each flag names its rule, invoice and
+    amounts. It never computes a total and never passes anything."""
+    rows = _rows_for_checks(invoices)
+    if not any(inv.get("amount_due") not in (None, 0, 0.0) for inv in rows):
+        return None
+    if _is_running_balance(rows):
+        return None
+    groups = {}
+    for inv in rows:
+        key = _balance_group_key(inv.get("invoice_number"))
+        if key is not None:
+            groups.setdefault(key, []).append(inv)
+    group_totals = {key: (round(sum(_row_net(inv) for inv in members), 2),
+                          round(sum(inv.get("amount_due") or 0 for inv in members), 2))
+                    for key, members in groups.items() if len(members) >= 2}
+    unbalanced = {key for key, (net, due) in group_totals.items() if abs(net - due) > _MONEY_EPSILON}
+
+    flags = []
+    for inv in rows:
+        due = inv.get("amount_due")
+        if due in (None, 0, 0.0):
+            continue
+        net = round(_row_net(inv), 2)
+        base = {"invoice_number": inv.get("invoice_number"), "row_number": inv.get("row_number"),
+                "row_amount": net, "amount_due": round(due, 2)}
+        key = _balance_group_key(inv.get("invoice_number"))
+        if abs(net) <= _MONEY_EPSILON:
+            if key in group_totals:
+                flags.append({"rule": INVOICE_BALANCE_RULE_DUE_ONLY, **base})
+            continue
+        if due * net >= 0 and abs(due) <= abs(net) + _MONEY_EPSILON:
+            continue
+        if key in group_totals and key not in unbalanced and due * group_totals[key][0] >= 0:
+            continue
+        flags.append({"rule": INVOICE_BALANCE_RULE_ROW_SIGN if due * net < 0 else INVOICE_BALANCE_RULE_ROW_EXCEEDS,
+                      **base})
+    for key in sorted(unbalanced):
+        net, due = group_totals[key]
+        flags.append({"rule": INVOICE_BALANCE_RULE_INVOICE, "invoice_number": key, "rows": len(groups[key]),
+                      "rows_net": net, "amount_due": due})
+    return {"rows_with_due": sum(1 for inv in rows if inv.get("amount_due") not in (None, 0, 0.0)),
+            "invoices_checked": len(group_totals), "flag_count": len(flags),
+            "flags": flags[:_INVOICE_BALANCE_MAX_FLAGS]}
+
+
+INVOICE_BALANCE_MODE_FAIL = "fail"
+INVOICE_BALANCE_MODE_FLAG_ONLY = "flag_only"
+
+
+def invoice_balance_fail_vendors() -> frozenset:
+    """Vendor ids listed under "fail_vendors" in config/validation_invoice_
+    balance.json. A missing, unreadable or malformed file gives an empty set
+    -- flag-only for every vendor: a config problem never fails a statement."""
+    global _invoice_balance_cache
+    path = INVOICE_BALANCE_CONFIG_PATH
+    if _invoice_balance_cache is None or _invoice_balance_cache[0] != path:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                listed = json.load(f).get("fail_vendors") or {}
+            vendors = frozenset(str(v) for v in listed if isinstance(v, str) and v and not v.startswith("_"))
+        except (OSError, ValueError, AttributeError, TypeError):
+            vendors = frozenset()
+        _invoice_balance_cache = (path, vendors)
+    return _invoice_balance_cache[1]
+
+
+def apply_invoice_balance_check(validation: dict, invoices: list, vendor_id: Optional[str] = None) -> dict:
+    """Runs check_invoice_balance() on a finished gate result (after
+    try_pdf_full_match and the no-total rule). Its report goes into
+    detail["invoice_balance"] with a "mode". It never adds a pass:
+
+      - a failed statement only gains the flags (which rows disagree);
+      - a passed statement with flags of a vendor listed in config/
+        validation_invoice_balance.json (mode "fail") becomes "mismatch"
+        (the passing method and its difference are kept in
+        detail["blocked_pass"]);
+      - for every other vendor (mode "flag_only", also when the config is
+        missing or unreadable) the status and method are never changed.
+
+    Not applied to a running_balance pass: that check has just proved the
+    amount-due column is a running balance, which _is_running_balance()
+    cannot see on a two-row statement."""
+    if validation.get("method") == VALIDATION_METHOD_RUNNING_BALANCE:
+        return validation
+    report = check_invoice_balance(invoices)
+    if report is None:
+        return validation
+    fail = bool(vendor_id) and vendor_id in invoice_balance_fail_vendors()
+    report["mode"] = INVOICE_BALANCE_MODE_FAIL if fail else INVOICE_BALANCE_MODE_FLAG_ONLY
+    detail = {**(validation.get("detail") or {}), "invoice_balance": report}
+    if validation.get("status") != "matches" or not report["flags"] or not fail:
+        return {**validation, "detail": detail}
+    detail["blocked_pass"] = {"method": validation.get("method"), "computed": validation.get("computed"),
+                              "difference": validation.get("difference")}
+    return {**validation, "status": "mismatch", "method": None, "detail": detail}
 
 
 def try_pdf_full_match(validation: dict, invoices: list, pdf_path: Optional[str], tolerance: float = 0.01) -> dict:

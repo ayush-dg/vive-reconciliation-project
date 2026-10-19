@@ -69,8 +69,8 @@ from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
 from src.validation.arithmetic_gate import (
-    compute_arithmetic_validation, compute_statement_total_from_invoices, compute_vendor_column_total,
-    try_pdf_full_match, validate_with_fallbacks,
+    apply_invoice_balance_check, compute_arithmetic_validation, compute_statement_total_from_invoices,
+    compute_vendor_column_total, try_pdf_full_match, validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
@@ -1354,6 +1354,13 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
         validation = try_pdf_full_match(validation, schema_result.get("invoices") or [], pdf_path)
         if validation["status"] == "total_not_found":
             validation = _rows_only_status(validation, schema_result.get("invoices") or [], pdf_path)
+        # Invoice-balance check (2026-10-19), on the finished result: an
+        # extracted amount-due column that disagrees with the row amounts is
+        # recorded in the detail; only for a vendor listed in config/
+        # validation_invoice_balance.json does it turn a pass into "mismatch".
+        validation = apply_invoice_balance_check(
+            validation, schema_result.get("invoices") or [],
+            vendor_id=resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")))
         sources = {k: v for k, v in (("printed_total_source", printed_source),
                                        ("text_source", "ocr" if text_source == "ocr" else None)) if v}
         if sources:

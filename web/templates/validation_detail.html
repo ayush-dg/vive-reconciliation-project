@@ -145,6 +145,33 @@
   </tbody>
 </table>
 {% endif %}
+{% if intake.invoice_balance and intake.invoice_balance.flags %}
+<div class="section-header">
+  <div class="section-title">Invoice balance check</div>
+</div>
+{% if intake.passed %}
+<div class="badge warning" id="invoice-balance-notice" style="display:inline-block;margin:0 0 8px;white-space:normal">Invoice balance check flagged {{ intake.invoice_balance.flag_count }} row{{ "" if intake.invoice_balance.flag_count == 1 else "s" }} - statement still passes; review</div>
+{% endif %}
+<p style="color:var(--text-secondary);margin:0 0 8px">
+  {% if intake.blocked_pass %}The total matched ({{ intake.blocked_pass.method | validation_method_label }}), but the amount-due column disagrees with these rows, so the statement failed validation.
+  {% elif intake.passed %}The amount-due column disagrees with these rows. For this vendor the check only records what it finds; the statement's result is unchanged.
+  {% else %}The amount-due column disagrees with these rows.{% endif %}
+  {{ intake.invoice_balance.flag_count }} flagged{% if intake.invoice_balance.flag_count > intake.invoice_balance.flags | length %} (first {{ intake.invoice_balance.flags | length }} shown){% endif %}.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Invoice</th><th>Problem</th></tr>
+  </thead>
+  <tbody>
+    {% for flag in intake.invoice_balance.flags %}
+    <tr>
+      <td>{{ flag.invoice_number or ("row " ~ flag.row_number) }}</td>
+      <td>{{ flag | invoice_balance_flag }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% else %}
 <div class="empty-state">Validation was not reached — extraction did not finish for this PDF.</div>
 {% endif %}

@@ -314,6 +314,15 @@ def validation_method_label(value):
 
 templates.env.filters["validation_method_label"] = validation_method_label
 
+
+def invoice_balance_flag(flag):
+    """A flag of the invoice-balance check (detail["invoice_balance"]) in words."""
+    from src.validation.gate import describe_invoice_balance_flag
+    return describe_invoice_balance_flag(flag)
+
+
+templates.env.filters["invoice_balance_flag"] = invoice_balance_flag
+
 # ---------------------------------------------------------------------------
 # Static asset cache busting
 # ---------------------------------------------------------------------------

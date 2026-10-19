@@ -1,0 +1,8 @@
+{
+  "_comment": "Invoice-balance check of the Arithmetic Validation Gate (src/validation/arithmetic_gate.py, check_invoice_balance / apply_invoice_balance_check, 2026-10-19). For EVERY statement with an amount-due (open balance) column the check compares that column with the extracted row amounts, per row and per invoice, and stores what it flags in the validation detail (detail.invoice_balance, mode \"flag_only\") -- it never changes the status or method of such a statement. ONLY for a vendor listed under \"fail_vendors\" (vendor_id as resolved by src/vendor_identity.py resolve_vendor_id, the same ids as config/validation_total_columns.json) a statement that passed with flags becomes \"mismatch\" (mode \"fail\"; the pass is kept in detail.blocked_pass). A missing or unreadable file means flag-only for everyone. Reason for the list: on 680 stored statements the check, failing everywhere, turned 12 passes into mismatches and nearly all were layouts whose 'Balance' column is not a per-row open balance (Albany, Tekion, RH Long, Darlings ...); on Fred Beans' CDK 'AMOUNT DUE' layout it flagged none of the passing statements and every wrong-column/missing-row error in the three saved AI runs of Fred Beans Rockland (STMT-6A9842BA).",
+  "fail_vendors": {
+    "FRED_BEANS_PARTS": {
+      "note": "Fred Beans Parts / Fred Beans Parts, Inc. (CDK statement, AMOUNT DUE printed per open item). Rockland STMT-6A9842BA: 9417731X3 760.41 read as a charge (printed under CREDITS), 9432454 / 9432454X1 rows missing, 9391887 113.20 credit read into AMOUNT DUE -- each flagged; the corrected extraction flags nothing. 2026-10-19 replay: 20 stored statements resolve here, none of the passing ones is flagged."
+    }
+  }
+}
