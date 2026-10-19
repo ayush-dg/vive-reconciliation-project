@@ -43,6 +43,15 @@ class PipelineHookTests(unittest.TestCase):
                 result = pipeline_hook.run_netsuite_writeback("STMT-1")
         self.assertIn("boom", result["error"])
 
+    def test_a_failed_run_returns_the_path_of_its_error_log(self):
+        with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": "true"}, clear=True):
+            with mock.patch.object(pipeline_hook, "NetSuiteClient", return_value=mock.Mock()), \
+                 mock.patch.object(pipeline_hook, "build_plans", side_effect=RuntimeError("boom")), \
+                 mock.patch.object(pipeline_hook, "write_error_log", return_value="err.json") as err:
+                result = pipeline_hook.run_netsuite_writeback("STMT-1")
+        self.assertEqual(result["log"], "err.json")
+        self.assertEqual(err.call_args.args[0], "STMT-1")
+
     def test_summary_counts_written_failed_period_locked_and_not_written(self):
         from src.netsuite.writeback import ApplyResult
         plans = [mock.Mock(action="PATCH_MATCHED"), mock.Mock(action="SKIP_REVIEW")]
@@ -51,6 +60,7 @@ class PipelineHookTests(unittest.TestCase):
             ApplyResult(mock.Mock(), False, "boom", category="failed"),
             ApplyResult(mock.Mock(), False, "locked", category="period locked"),
             ApplyResult(mock.Mock(), False, "locked", category="period locked"),
+            ApplyResult(mock.Mock(), False, "raced", category="reconciled by another statement"),
         ]
         with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": "true"}, clear=True):
             with mock.patch.object(pipeline_hook, "NetSuiteClient", return_value=mock.Mock()), \
@@ -59,7 +69,7 @@ class PipelineHookTests(unittest.TestCase):
                  mock.patch.object(pipeline_hook, "skip_counts", return_value={"not in sandbox": 1}), \
                  mock.patch.object(pipeline_hook, "write_apply_log", return_value="log.json") as log:
                 result = pipeline_hook.run_netsuite_writeback("STMT-1")
-        self.assertEqual(result, {"written": 1, "failed": 1, "period_locked": 2,
+        self.assertEqual(result, {"written": 1, "failed": 1, "period_locked": 2, "held_by_other": 1,
                                   "not_written": {"not in sandbox": 1}, "log": "log.json"})
         # The log is given the plans too, so skipped lines are recorded.
         self.assertIs(log.call_args.args[3], plans)

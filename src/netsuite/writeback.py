@@ -70,6 +70,7 @@ CAT_NEEDS_REVIEW = "needs review"
 # Why a WRITE that was attempted did not succeed.
 CAT_PERIOD_LOCKED = "period locked"
 CAT_WRITE_FAILED = "failed"
+CAT_HELD_BY_OTHER = "reconciled by another statement"
 
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
 EXCEPTION_DUPLICATE = "Duplicate"
@@ -592,6 +593,48 @@ def apply_plan(ns, plan: Plan) -> ApplyResult:
     return result
 
 
+_RECORD_CHANGED_RETRIES = 2
+_RETRY_PAUSE_SECONDS = 2
+
+
+def _is_record_changed(exc) -> bool:
+    """True for NetSuite's optimistic-locking refusal ("Record has been
+    changed"): someone else saved that record after our write began. Two
+    statements covering the same bills, processed at the same moment, hit
+    this."""
+    return "record has been changed" in f"{exc} {getattr(exc, 'body', '') or ''}".lower()
+
+
+def _held_by_another_statement(ns, plan: Plan) -> str:
+    """The statement id now stamped on this bill/credit when it is not ours,
+    else ""."""
+    rows = ns.suiteql(
+        "SELECT t.custbody_statement_reference AS ref FROM transaction t "
+        f"WHERE t.id = {int(plan.record_id)}")
+    held = rows[0].get("ref") if rows else None
+    return held if held and held != plan.fields.get("custbody_statement_reference") else ""
+
+
+def _patch_with_retry(ns, plan: Plan) -> str:
+    """PATCHes the bill/credit, retrying a "Record has been changed"
+    conflict a couple of times. Before each retry the record is re-read: if
+    another statement has stamped it meanwhile, ours must not overwrite
+    that, so its id is returned and nothing more is sent. Returns "" when
+    the write went through."""
+    for attempt in range(_RECORD_CHANGED_RETRIES + 1):
+        try:
+            ns.patch_record(plan.record_type, plan.record_id, plan.fields)
+            return ""
+        except Exception as exc:
+            if not _is_record_changed(exc) or attempt == _RECORD_CHANGED_RETRIES:
+                raise
+            time.sleep(_RETRY_PAUSE_SECONDS)
+            holder = _held_by_another_statement(ns, plan)
+            if holder:
+                return holder
+    return ""
+
+
 def _is_period_locked(exc) -> bool:
     """True for NetSuite's refusal to change a transaction in a locked or
     closed accounting period ("You cannot make changes to this period
@@ -607,7 +650,10 @@ def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
             new_id = ns.create_record(STATEMENT_LINE_RECORD, plan.fields)
             problem = _read_back_statement_line(ns, new_id, plan)
             return ApplyResult(plan, not problem, problem or "created", new_id)
-        ns.patch_record(plan.record_type, plan.record_id, plan.fields)
+        holder = _patch_with_retry(ns, plan)
+        if holder:
+            return ApplyResult(plan, False, f"{holder} saved this record first; left as it set it",
+                               plan.record_id, category=CAT_HELD_BY_OTHER)
         problem = _read_back_bill(ns, plan)
         return ApplyResult(plan, not problem, problem or "updated", plan.record_id)
     except Exception as exc:  # report and move on -- one bad record must not stop the batch
@@ -629,7 +675,7 @@ def _stops_the_run(result: ApplyResult, attempts_so_far: int) -> bool:
     early for failures that would repeat on every record: an authentication
     or permission error at any point, or any other failure on the very
     first write (a bad field or format)."""
-    if result.category == CAT_PERIOD_LOCKED:
+    if result.category in (CAT_PERIOD_LOCKED, CAT_HELD_BY_OTHER):
         return False
     return result.status_code in _AUTH_STATUS_CODES or attempts_so_far == 1
 
@@ -765,6 +811,26 @@ def apply_revert(ns, actions: list) -> list:
 
 _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                         "logs", "netsuite_writeback")
+
+
+def write_error_log(statement_id: str, exc: Exception) -> str:
+    """Saves why a write-back run failed as a whole (not a single write): a
+    planning or connection error. Without this the only trace was one
+    console line, which is how two Oct 16 statements went unexplained.
+    Returns the path, or "" if the file could not be written."""
+    import traceback
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(_LOG_DIR, f"{statement_id}_{stamp}_ERROR.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"statement_id": statement_id, "failed_at": datetime.now().isoformat(timespec="seconds"),
+                       "error_type": type(exc).__name__, "error": str(exc),
+                       "traceback": traceback.format_exception(type(exc), exc, exc.__traceback__)},
+                      f, indent=2)
+        return path
+    except OSError:
+        return ""
 
 
 def write_apply_log(ns, statement_id: str, results: list, plans: list = None) -> str:

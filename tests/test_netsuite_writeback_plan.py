@@ -325,6 +325,84 @@ class LockedPeriodRunControlTests(unittest.TestCase):
         self.assertEqual(log["failed_counts"], {"period locked": 1})
 
 
+class RecordChangedRetryTests(unittest.TestCase):
+    CHANGED = "Error while accessing a resource. Record has been changed."
+
+    def _plan(self):
+        return wb.plan_matched(_row(), [dict(_txn("-100"), id="501")], _ctx())
+
+    def _changed(self):
+        from src.netsuite.client import NetSuiteAPIError
+        return NetSuiteAPIError(400, "Bad Request", '{"detail":"' + self.CHANGED + '"}')
+
+    def _apply(self, errors, held_by=""):
+        ns = mock.Mock()
+        ns.patch_record.side_effect = errors
+        ns.suiteql.return_value = [{"ref": held_by}] if held_by else [{}]
+        with mock.patch.object(wb, "_read_back_bill", return_value=""), \
+             mock.patch.object(wb.time, "sleep"):
+            return wb.apply_plan(ns, self._plan()), ns
+
+    def test_a_conflict_is_retried_and_then_succeeds(self):
+        result, ns = self._apply([self._changed(), None])
+        self.assertTrue(result.ok)
+        self.assertEqual(ns.patch_record.call_count, 2)
+
+    def test_if_another_statement_saved_first_ours_does_not_overwrite_it(self):
+        result, ns = self._apply([self._changed(), None], held_by="STMT-OTHER")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.category, wb.CAT_HELD_BY_OTHER)
+        self.assertIn("STMT-OTHER", result.detail)
+        self.assertEqual(ns.patch_record.call_count, 1)   # no second write
+
+    def test_a_record_stamped_with_our_own_id_is_not_treated_as_someone_elses(self):
+        result, ns = self._apply([self._changed(), None], held_by=STMT)
+        self.assertTrue(result.ok)
+        self.assertEqual(ns.patch_record.call_count, 2)
+
+    def test_persistent_conflicts_give_up_as_an_ordinary_failure(self):
+        result, ns = self._apply([self._changed()] * 3)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.category, wb.CAT_WRITE_FAILED)
+        self.assertEqual(ns.patch_record.call_count, 3)   # first try + 2 retries
+
+    def test_other_errors_are_not_retried(self):
+        from src.netsuite.client import NetSuiteAPIError
+        result, ns = self._apply([NetSuiteAPIError(400, "Bad Request", "Invalid field value")])
+        self.assertEqual(ns.patch_record.call_count, 1)
+        self.assertEqual(result.category, wb.CAT_WRITE_FAILED)
+
+    def test_a_bill_another_statement_saved_first_does_not_stop_the_run(self):
+        ns = mock.Mock()
+        ns.patch_record.side_effect = [self._changed(), None, None]
+        ns.suiteql.return_value = [{"ref": "STMT-OTHER"}]
+        plans = [wb.plan_matched(_row(invoice=f"INV{i}"), [dict(_txn("-100"), id=str(600 + i), tranid=f"INV{i}")], _ctx())
+                 for i in range(3)]
+        with mock.patch.object(wb, "_read_back_bill", return_value=""), mock.patch.object(wb.time, "sleep"):
+            results = wb.apply_plans(ns, plans)
+        self.assertEqual([r.ok for r in results], [False, True, True])
+        self.assertEqual(wb.failure_counts(results), {wb.CAT_HELD_BY_OTHER: 1})
+
+
+class ErrorLogTests(unittest.TestCase):
+    def test_a_failed_run_leaves_a_log_naming_the_error(self):
+        import json, tempfile
+        try:
+            raise AttributeError("'NoneType' object has no attribute 'lower'")
+        except AttributeError as exc:
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+                path = wb.write_error_log(STMT, exc)
+                log = json.load(open(path, encoding="utf-8"))
+        self.assertTrue(path.endswith("_ERROR.json"))
+        self.assertEqual((log["statement_id"], log["error_type"]), (STMT, "AttributeError"))
+        self.assertIn("has no attribute 'lower'", log["error"])
+        self.assertTrue(any("raise AttributeError" in line for line in log["traceback"]))
+
+    def test_an_unwritable_log_directory_is_not_fatal(self):
+        with mock.patch.object(wb.os, "makedirs", side_effect=OSError("read-only")):
+            self.assertEqual(wb.write_error_log(STMT, RuntimeError("x")), "")
+
+
 class StatementLineDateTests(unittest.TestCase):
     def _line_ctx(self, lines):
         ctx = _ctx()

@@ -13,7 +13,8 @@ import os
 
 from src.netsuite.client import NetSuiteClient, NetSuiteConfigError
 from src.netsuite.writeback import (
-    CAT_PERIOD_LOCKED, apply_plans, build_plans, failure_counts, skip_counts, write_apply_log,
+    CAT_HELD_BY_OTHER, CAT_PERIOD_LOCKED, apply_plans, build_plans, failure_counts, skip_counts,
+    write_apply_log, write_error_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,9 +26,11 @@ def _enabled() -> bool:
 
 def run_netsuite_writeback(statement_id: str) -> dict:
     """Returns {"skipped": True, "reason": ...}, {"error": ...}, or
-    {"written": n, "failed": n, "period_locked": n, "not_written": {reason: count},
-    "log": path}. "failed" excludes locked-period failures, which are counted on their
-    own: they are expected for older invoices and are not a fault of the run."""
+    {"written": n, "failed": n, "period_locked": n, "held_by_other": n,
+    "not_written": {reason: count}, "log": path}. "failed" excludes locked-period
+    failures and bills another statement saved first, which are counted on their
+    own: neither is a fault of the run. An {"error": ...} result carries the path
+    of its error log under "log"."""
     if not _enabled():
         return {"skipped": True, "reason": "NETSUITE_WRITEBACK_ENABLED is not true"}
     try:
@@ -39,13 +42,15 @@ def run_netsuite_writeback(statement_id: str) -> dict:
         return {"skipped": True, "reason": str(exc)}
     except Exception as exc:  # best-effort: never fail the job
         logger.exception("NetSuite write-back failed for %s", statement_id)
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        return {"error": f"{type(exc).__name__}: {exc}", "log": write_error_log(statement_id, exc)}
     failures = failure_counts(results)
     locked = failures.pop(CAT_PERIOD_LOCKED, 0)
+    held = failures.pop(CAT_HELD_BY_OTHER, 0)
     return {
         "written": sum(1 for r in results if r.ok),
         "failed": sum(failures.values()),
         "period_locked": locked,
+        "held_by_other": held,
         "not_written": skip_counts(plans),
         "log": log_path,
     }
