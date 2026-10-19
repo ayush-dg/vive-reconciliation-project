@@ -610,7 +610,13 @@ class TestValidationPageBadge(unittest.TestCase):
 
     def _patch(self, **fns):
         fns.update(get_open_recon_exceptions_count=lambda: 0, get_pending_review_count=lambda: 0,
-                   get_outlook_synced_jobs=lambda: [])
+                   get_outlook_synced_jobs=lambda: [],
+                   # Statement Processing (2026-10-16): the list and detail
+                   # pages also read jobs, reconciliation and the Bronze rows.
+                   get_processing_jobs=lambda: [], get_recon_status=lambda: {},
+                   get_latest_job_for_statement=lambda sid: None,
+                   get_statement_report=lambda sid: {"summary": None, "intake": None, "matched": [], "exceptions": []},
+                   get_extracted_rows_for_statement=lambda sid: [])
         for name, fn in fns.items():
             patcher = mock.patch(f"web.queries.{name}", fn)
             patcher.start()
@@ -624,9 +630,9 @@ class TestValidationPageBadge(unittest.TestCase):
         self._patch(get_validation_report=lambda: [dict(run)])
         html = self._client().get("/validation").text
         self.assertIn("PDF rows, no printed total", html)
-        self.assertIn("No printed total", html)
-        self.assertNotIn("Diff ", html)
-        self.assertIn('data-status="pass"', html)
+        # Statement Processing card (2026-10-16): no total shows as a dash.
+        self.assertIn("Printed total <b>—</b>", html)
+        self.assertIn('data-validation="pass"', html)
 
     def test_detail_shows_matches_with_the_method(self):
         intake_row = {"statement_id": "H", "source_file": "h.pdf", "vendor_name": "Healey", "statement_period": "2026-09",
