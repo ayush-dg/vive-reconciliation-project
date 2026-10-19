@@ -402,11 +402,12 @@ def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depe
     if not record:
         return _message("That NetSuite record wasn't found -- nothing was matched.")
     try:
-        queries.accept_manual_match(exception, record, vendor_name, user, note.strip() or None)
+        netsuite = queries.accept_manual_match(exception, record, vendor_name, user, note.strip() or None) or {}
     except (MatchConflict, ValueError) as exc:
         return _message(f"Not matched: {exc}")
     return _message(f"Invoice {exception['invoice_number']} matched to NetSuite "
-                    f"{record['record_type'].lower()} {record.get('tranid')}.")
+                    f"{record['record_type'].lower()} {record.get('tranid')}. "
+                    f"NetSuite sandbox: {netsuite.get('status') or 'not written'}.")
 
 
 @router.post("/exceptions/{vendor_name}/undo-match")

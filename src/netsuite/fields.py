@@ -18,7 +18,13 @@ BODY_FIELDS = (
     "custbody_statement_link",
     "custbody_reconciled_date",
     "custbody_reconciliation_exception",
+    "custbody_matched_bill",
 )
+
+# Text field "Matched Bill" (added in the sandbox 2026-10-19): the statement
+# invoice number a person matched this bill/credit to with "Accept as match"
+# (src/netsuite/manual_match.py). Automatic matches leave it empty for now.
+MATCHED_BILL_FIELD = "custbody_matched_bill"
 
 STATEMENT_LINE_RECORD = "customrecord_statement_line"
 

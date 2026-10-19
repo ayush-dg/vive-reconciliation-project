@@ -320,3 +320,26 @@ def manual_matches(statement_id: str) -> list:
             seen.add(row["invoice_number"])
             out.append(row)
     return out
+
+
+def set_writeback(statement_id: str, invoice_number: str, result: dict) -> None:
+    """Saves the NetSuite write outcome (src/netsuite/manual_match.py) on the
+    invoice's active manual rows: status, detail, the Statement Line id and
+    the values before the write (JSON, for undo)."""
+    execute_sql(
+        "UPDATE recon SET writeback_status = ?, writeback_detail = ?, netsuite_statement_line_id = ?, "
+        "netsuite_before = ?, updated_at = ? WHERE statement_id = ? AND invoice_number = ? AND source = ? "
+        "AND is_active = 1",
+        [result.get("status"), result.get("detail"), result.get("statement_line_id"), result.get("before"),
+         _now(), statement_id, invoice_number, SOURCE_MANUAL],
+    )
+
+
+def manual_writeback_before(statement_id: str, invoice_number: str):
+    """The NetSuite "before" JSON of the invoice's active manual match, or None."""
+    rows = execute_query(
+        "SELECT netsuite_before FROM recon WHERE statement_id = ? AND invoice_number = ? AND source = ? "
+        "AND is_active = 1 AND netsuite_before IS NOT NULL",
+        [statement_id, invoice_number, SOURCE_MANUAL],
+    )
+    return rows[0]["netsuite_before"] if rows else None

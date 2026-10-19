@@ -87,6 +87,7 @@
             <span class="badge badge-matched">Reconciled · matches {{ m.netsuite_tranid }}</span>
             <div class="edate">NetSuite {{ m.netsuite_record_type }} {{ m.netsuite_amount | money }}{% if m.difference %} · difference {{ m.difference | money_signed }} accepted{% endif %}</div>
             <div class="edate">By {{ m.matched_by }} · {{ m.matched_at | friendly_dt }}</div>
+            {% if m.writeback_status %}<div class="edate" title="{{ m.writeback_detail or '' }}">NetSuite sandbox: {{ m.writeback_status }}</div>{% endif %}
           </div>
           <form method="post" action="/exceptions/{{ vendor_url_name }}/undo-match"
                 onsubmit="return confirm('Undo the match for invoice {{ m.invoice_number }}? The exception will be open again.');">

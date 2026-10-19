@@ -160,17 +160,24 @@ class TestQueriesAcceptAndUndo(unittest.TestCase):
         calls = []
         with mock.patch("src.lakehouse.recon_table.accept_manual_match", lambda *a, **k: calls.append("recon")), \
                 mock.patch.object(queries, "resolve_exception",
-                                  lambda *a: calls.append(("resolve", a[5], a[6], a[7]))):
-            queries.accept_manual_match(EXCEPTION, BILL_23, "Conicelli Toyota", "ap@vive.com", "confirmed")
-        self.assertEqual(calls, ["recon", ("resolve", "ACCEPTED", "Matched to NetSuite bill 23. confirmed", "ap@vive.com")])
+                                  lambda *a: calls.append(("resolve", a[5], a[6], a[7]))), \
+                mock.patch.object(queries, "_write_manual_match_to_netsuite",
+                                  lambda *a: calls.append("netsuite") or {"status": "written"}):
+            result = queries.accept_manual_match(EXCEPTION, BILL_23, "Conicelli Toyota", "ap@vive.com", "confirmed")
+        # Saved, then resolved, then (step c) written to NetSuite.
+        self.assertEqual(calls, ["recon", ("resolve", "ACCEPTED", "Matched to NetSuite bill 23. confirmed", "ap@vive.com"),
+                                 "netsuite"])
+        self.assertEqual(result, {"status": "written"})
 
     def test_a_conflict_resolves_nothing(self):
-        resolve = mock.Mock()
+        resolve, netsuite = mock.Mock(), mock.Mock()
         with mock.patch("src.lakehouse.recon_table.accept_manual_match", side_effect=rt.MatchConflict("taken")), \
-                mock.patch.object(queries, "resolve_exception", resolve):
+                mock.patch.object(queries, "resolve_exception", resolve), \
+                mock.patch.object(queries, "_write_manual_match_to_netsuite", netsuite):
             with self.assertRaises(rt.MatchConflict):
                 queries.accept_manual_match(EXCEPTION, BILL_23, "Conicelli Toyota", "ap@vive.com")
         resolve.assert_not_called()
+        netsuite.assert_not_called()
 
     def test_if_resolving_fails_the_match_is_undone(self):
         undo = mock.Mock()
@@ -185,6 +192,7 @@ class TestQueriesAcceptAndUndo(unittest.TestCase):
         recon_sql, execute_sql, recompute = mock.Mock(), mock.Mock(), mock.Mock()
         with mock.patch("src.lakehouse.recon_table.undo_manual_match",
                         return_value={"exception_ids": ["EXC-1"], "tranid": "23"}), \
+                mock.patch("src.lakehouse.recon_table.manual_writeback_before", return_value=None), \
                 mock.patch.object(queries, "recon_sql", recon_sql), mock.patch.object(queries, "execute_sql", execute_sql), \
                 mock.patch.object(queries, "_recompute_summary_counts", recompute):
             self.assertTrue(queries.undo_manual_match("STMT-1", "INV123", "Conicelli Toyota", "lead@vive.com"))
@@ -195,7 +203,8 @@ class TestQueriesAcceptAndUndo(unittest.TestCase):
         recompute.assert_called_once_with("STMT-1")
 
     def test_undo_with_nothing_to_undo(self):
-        with mock.patch("src.lakehouse.recon_table.undo_manual_match", return_value={}):
+        with mock.patch("src.lakehouse.recon_table.undo_manual_match", return_value={}), \
+                mock.patch("src.lakehouse.recon_table.manual_writeback_before", return_value=None):
             self.assertFalse(queries.undo_manual_match("STMT-1", "INV123", "V", "u"))
 
 

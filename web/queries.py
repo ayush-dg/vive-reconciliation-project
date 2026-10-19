@@ -1306,6 +1306,30 @@ def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepte
     except Exception:
         recon_table.undo_manual_match(statement_id, invoice_number, accepted_by)
         raise
+    return _write_manual_match_to_netsuite(exception, record, vendor_name)
+
+
+def _write_manual_match_to_netsuite(exception: dict, record: dict, vendor_name: str) -> dict:
+    """The NetSuite sandbox write for an accepted manual match
+    (src/netsuite/manual_match.py), with its outcome saved on the recon rows.
+    Best-effort: the match and the resolution are already saved, so a
+    NetSuite problem is reported, never raised."""
+    from src.lakehouse import recon_table
+    from src.netsuite.manual_match import STATUS_FAILED, write_manual_match
+    statement_id, invoice_number = exception["statement_id"], exception["invoice_number"]
+    try:
+        from src.matching.netsuite_vendor_resolver import resolve_entity_ids
+        entity_ids = resolve_entity_ids(exception.get("vendor_id") or "", vendor_name or "") or []
+    except Exception:
+        entity_ids = []
+    result = write_manual_match(statement_id, invoice_number, exception.get("statement_amount"), record,
+                                statement_entity_ids=[str(e) for e in entity_ids], shop=exception.get("shop"))
+    try:
+        recon_table.set_writeback(statement_id, invoice_number, result)
+    except Exception:
+        logger.exception("saving the NetSuite outcome failed for %s / %s", statement_id, invoice_number)
+        result = dict(result, status=result.get("status") or STATUS_FAILED)
+    return result
 
 
 def undo_manual_match(statement_id: str, invoice_number: str, vendor_name: str, undone_by: str) -> bool:
@@ -1314,6 +1338,19 @@ def undo_manual_match(statement_id: str, invoice_number: str, vendor_name: str, 
     exception the match resolved is OPEN again, with a PENDING disposition
     recording the undo. Returns False when there was nothing to undo."""
     from src.lakehouse import recon_table
+    # NetSuite first (src/netsuite/manual_match.py): put back what the
+    # accept wrote, then record the outcome on the rows before they become
+    # history. Best-effort -- the app-side undo always goes ahead.
+    try:
+        before = recon_table.manual_writeback_before(statement_id, invoice_number)
+        if before:
+            from src.netsuite.manual_match import undo_manual_match_writes
+            ns_undo = undo_manual_match_writes(before)
+            recon_table.set_writeback(statement_id, invoice_number, {
+                "status": f"undo: {ns_undo['status']}", "detail": ns_undo["detail"],
+                "statement_line_id": None, "before": before})
+    except Exception:
+        logger.exception("NetSuite undo failed for %s / %s (non-fatal)", statement_id, invoice_number)
     undone = recon_table.undo_manual_match(statement_id, invoice_number, undone_by)
     if not undone:
         return False
