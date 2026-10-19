@@ -194,8 +194,20 @@ class TestConfig(unittest.TestCase):
         with mock.patch.object(g, "INVOICE_BALANCE_CONFIG_PATH", path):
             return g.apply_invoice_balance_check(self.PASSED, TestApply.BAD, vendor_id=LISTED)
 
-    def test_the_shipped_config_lists_only_fred_beans(self):
-        self.assertEqual(g.invoice_balance_fail_vendors(), frozenset({"FRED_BEANS_PARTS"}))
+    def test_the_shipped_config_lists_fred_beans_and_bowser_only(self):
+        self.assertEqual(g.invoice_balance_fail_vendors(), frozenset({"FRED_BEANS_PARTS", "BOWSER"}))
+
+    def test_bowser_klapec_credit_memos_under_purchases_fail_a_pass(self):
+        # STMT-2EB30976: CM74369 125.00 / CM73112A 75.00 read as purchases, their balances negative
+        from src.vendor_identity import resolve_vendor_id
+        vendor = resolve_vendor_id("Power Bowser")
+        self.assertEqual(vendor, "BOWSER")
+        rows = [charge("74369", 1082.03, due=1082.03), charge("CM74369", 125.0, due=-125.0),
+                charge("73112", 150.0), credit("CM73112", 75.0, due=-75.0), charge("CM73112A", 75.0, due=-75.0)]
+        out = g.apply_invoice_balance_check(self.PASSED, rows, vendor_id=vendor)
+        self.assertEqual((out["status"], out["detail"]["invoice_balance"]["mode"]), ("mismatch", "fail"))
+        self.assertEqual(sorted({f["invoice_number"] for f in out["detail"]["invoice_balance"]["flags"]}),
+                         ["73112", "74369", "CM73112A", "CM74369"])
 
     def test_a_missing_config_means_flag_only(self):
         out = self.run_with_config(os.path.join(tempfile.gettempdir(), "no_such_dir_ib", "missing.json"))

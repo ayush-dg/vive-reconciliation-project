@@ -3,6 +3,9 @@
   "fail_vendors": {
     "FRED_BEANS_PARTS": {
       "note": "Fred Beans Parts / Fred Beans Parts, Inc. (CDK statement, AMOUNT DUE printed per open item). Rockland STMT-6A9842BA: 9417731X3 760.41 read as a charge (printed under CREDITS), 9432454 / 9432454X1 rows missing, 9391887 113.20 credit read into AMOUNT DUE -- each flagged; the corrected extraction flags nothing. 2026-10-19 replay: 20 stored statements resolve here, none of the passing ones is flagged."
+    },
+    "BOWSER": {
+      "note": "Bowser Pontiac Subaru / Power Bowser (CDK statement: PURCHASES / PAYMENTS & CREDITS / BALANCE per open item). Klapec STMT-2EB30976 (scan): CM74369 125.00 and CM73112A 75.00 were extracted under PURCHASES instead of PAYMENTS & CREDITS -- 2 x 200.00 = the 400.00 difference -- and both are flagged. 2026-10-19 replay: 2 stored statements resolve here (STMT-2EB30976, failing; STMT-CDA2F24C customerinvoice.pdf, passing with no flags)."
     }
   }
 }
