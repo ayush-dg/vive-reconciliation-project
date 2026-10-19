@@ -360,6 +360,15 @@ class StatementLineDateTests(unittest.TestCase):
         plan = self._plan(self._line_ctx(lines), amount="999.00")
         self.assertEqual(plan.fields["custrecord_sl_date"], "2026-07-03")
 
+    def test_lines_without_an_invoice_number_do_not_break_planning(self):
+        # Regression: a payment/summary line with a NULL invoice_number made
+        # the whole statement fail to plan, so nothing was written for it.
+        lines = [self._line("INV1", "2026-08-13", 75.0),
+                 {"invoice_number": None, "line_date": __import__("datetime").date(2026, 8, 1),
+                  "charge_amount": None, "payment_amount": -50.0}]
+        plan = self._plan(self._line_ctx(lines))
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-08-13")
+
     def test_invoice_lookup_ignores_case(self):
         plan = self._plan(self._line_ctx([self._line("inv1", "2026-08-13", 75.0)]))
         self.assertEqual(plan.fields["custrecord_sl_date"], "2026-08-13")

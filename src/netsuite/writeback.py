@@ -405,6 +405,8 @@ def _index_line_dates(lines: list) -> dict:
     from the statement's own lines (silver.statement_line.line_date)."""
     index = {}
     for line in lines:
+        if not line.get("invoice_number"):
+            continue  # payment/summary lines carry no invoice number; nothing to index
         amount = line.get("charge_amount")
         amount = line.get("payment_amount") if amount is None else amount
         date_value = line["line_date"]
