@@ -20,6 +20,7 @@ from urllib.parse import quote, unquote, urlencode
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
+from web.netsuite_status import writeback_pill
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
 from web import time_window as tw
@@ -121,6 +122,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     # appended inside get_exception_runs() AFTER the window filter, so
     # they always show and always count below, regardless of `window`.
     runs = queries.get_exception_runs(window)
+    _attach_writeback_status(runs)
     summary_backed_count = sum(1 for v in runs if v.get("statement_id"))
     for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
@@ -211,6 +213,34 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         **sidebar_context(request),
     }
     return render(request, "exceptions_vendors.html", ctx)
+
+
+def _attach_writeback_status(cards):
+    """Adds each card's NetSuite write-back status as card["writeback"] (None
+    when it has none). One batched lookup for the whole page; any database
+    problem just leaves the cards without the line."""
+    ids = [c["statement_id"] for c in cards if c.get("statement_id")]
+    try:
+        from src.netsuite.log_store import get_latest_runs
+        latest = get_latest_runs(ids)
+    except Exception:
+        latest = {}
+    for card in cards:
+        card["writeback"] = writeback_pill(latest.get(card.get("statement_id")))
+
+
+def _writeback_status(statement_id):
+    """The NetSuite write-back pill for a statement, or None. Reads the
+    latest saved run; any database problem (e.g. the log tables not created
+    yet on this database) just hides the pill instead of breaking the page."""
+    if not statement_id:
+        return None
+    try:
+        from src.netsuite.log_store import get_runs
+        runs = get_runs(statement_id)
+    except Exception:
+        return None
+    return writeback_pill(runs[0]) if runs else None
 
 
 @router.get("/exceptions/{vendor_name:path}")
@@ -307,6 +337,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
+        "writeback": None if exceptions_only else _writeback_status(statement_id),
         "searchable_reasons": SEARCHABLE_REASONS,
         # The Find in NetSuite panel's Shop filter: NetSuite's own location
         # names (config/netsuite_locations.json), starting on "Any shop".
