@@ -70,7 +70,7 @@ from src.extraction.python_library.adapter import (
 )
 from src.validation.arithmetic_gate import (
     compute_arithmetic_validation, compute_statement_total_from_invoices, compute_vendor_column_total,
-    validate_with_fallbacks,
+    try_pdf_full_match, validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
@@ -279,7 +279,9 @@ def validate_invoice(invoice: dict, rules: dict):
     # this required_fields check (confirmed missing from Bronze for BERLIN
     # HEW 0726 2026-08-29 before this carve-out existed).
     required = rules.get("required_fields", ["invoice_number", "outstanding_amount"])
-    has_other_content = has_value("description") or has_value("amount") or has_value("outstanding_amount")
+    # Same content fields as get_skip_reason() (2026-10-12) -- a credit-only
+    # row with no reference must not be diverted to the review queue either.
+    has_other_content = any(has_value(field) for field in _ROW_CONTENT_FIELDS)
     for field in required:
         if field == "invoice_number" and has_other_content:
             continue
@@ -412,6 +414,12 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
     return count
 
 
+_ROW_CONTENT_FIELDS = (
+    "description", "amount", "outstanding_amount", "credit", "credits", "charges", "amount_due",
+    "payment", "payment_applied", "credit_applied", "balance_forward", "period_activity",
+)
+
+
 def get_skip_reason(invoice: dict) -> str:
     """
     A row is genuinely unusable — not just low-confidence — when it has
@@ -440,11 +448,12 @@ def get_skip_reason(invoice: dict) -> str:
         return val is not None and str(val).strip() != ""
 
     has_identifier = has_value("invoice_number") or has_value("ro_number")
-    has_other_content = (
-        has_value("description")
-        or has_value("amount")
-        or has_value("outstanding_amount")
-    )
+    # Any money field is real content (2026-10-12): a credit-only row with
+    # no reference -- Northeast Coffee STMT-5D1050A6's "08/17/26 credit
+    # 80.40" -- only fills credit/credits, so it was skipped to
+    # gold_exceptions as EXTRACTION_INCOMPLETE and never reached Bronze,
+    # although the gate had already counted it.
+    has_other_content = any(has_value(field) for field in _ROW_CONTENT_FIELDS)
     if not has_identifier and not has_other_content:
         return "no invoice identifier found"
 
@@ -1235,6 +1244,34 @@ def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source)
     return resolved, {**from_ocr, "chain_opening": resolved.get("chain_opening")}
 
 
+PDF_ROWS_NO_TOTAL_METHOD = "pdf_rows_no_total"
+
+
+def _rows_only_status(validation: dict, invoices: list, pdf_path) -> dict:
+    """A statement whose PDF prints no total anywhere (status total_not_found)
+    passes or fails on its rows alone (user decision, 2026-10-12): every
+    extracted row verified on its PDF line AND every PDF transaction line
+    extracted (src/validation/pdf_row_match.py check_rows_only) -> status
+    "matches", method "pdf_rows_no_total", difference None. Any row problem,
+    an unreadable PDF, more than 12 pages, the OCR time budget, or a total the
+    PDF does print -> it stays "total_not_found" (a fail). Either way the
+    detail records the check under "rows_only"."""
+    if validation.get("printed") is not None:
+        return validation  # a statement with a printed total never takes this path
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    if not pdf_path or not rows:
+        return validation
+    from src.validation.pdf_row_match import check_rows_only
+    outcome = check_rows_only(rows, pdf_path, printed=validation.get("printed"))
+    detail = {**(validation.get("detail") or {}), "rows_only": outcome, "no_printed_total": True}
+    if outcome["status"] == "rows_verified":
+        print(f"  Rows-only check: all {outcome['rows']} rows verified on the PDF, no printed total -- passes.")
+        return {**validation, "status": "matches", "method": PDF_ROWS_NO_TOTAL_METHOD,
+                "difference": None, "detail": detail}
+    print(f"  Rows-only check: {outcome['status']} ({outcome.get('reason', '')}) -- stays total_not_found")
+    return {**validation, "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
@@ -1300,6 +1337,7 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
                 previous_balance=previous["value"],
                 section_totals=stmt_meta.get("section_totals"),
                 chain_opening_balance=previous.get("chain_opening"),
+                pdf_path=pdf_path,
             )
 
         validation = validate(previous_balance)
@@ -1311,6 +1349,11 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
             with_ocr = validate(ocr_previous_balance)
             if with_ocr["status"] == "matches":
                 validation, previous_balance = with_ocr, ocr_previous_balance
+        # The very last fallback: the extraction matches the PDF cell by cell
+        # (pdf_full_match, 2026-10-16). Only after everything above failed.
+        validation = try_pdf_full_match(validation, schema_result.get("invoices") or [], pdf_path)
+        if validation["status"] == "total_not_found":
+            validation = _rows_only_status(validation, schema_result.get("invoices") or [], pdf_path)
         sources = {k: v for k, v in (("printed_total_source", printed_source),
                                        ("text_source", "ocr" if text_source == "ocr" else None)) if v}
         if sources:

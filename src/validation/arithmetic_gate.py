@@ -305,6 +305,9 @@ VALIDATION_METHOD_OPEN_BALANCE = "open_balance"
 VALIDATION_METHOD_STATEMENT_EQUATION = "statement_equation"
 VALIDATION_METHOD_RUNNING_BALANCE = "running_balance"
 VALIDATION_METHOD_SECTION_SUBTOTAL = "section_subtotal"
+VALIDATION_METHOD_PDF_ROW_MATCH = "pdf_row_match"
+VALIDATION_METHOD_PDF_STORE_SECTIONS = "pdf_store_sections"
+VALIDATION_METHOD_PDF_FULL_MATCH = "pdf_full_match"
 
 _MONEY_EPSILON = 0.005  # float noise only -- never widens the 0.01 match rule
 
@@ -556,6 +559,27 @@ _FALLBACK_CHECKS = (
 )
 
 
+def _check_pdf_row_match(printed, rows, *, tolerance, pdf_path=None, **_):
+    # Imported here: it pulls in pdfplumber/PyMuPDF/Tesseract, which only
+    # these last-resort checks need (see src/validation/pdf_row_match.py).
+    from src.validation.pdf_row_match import check_pdf_row_match
+    return check_pdf_row_match(printed, rows, tolerance=tolerance, pdf_path=pdf_path)
+
+
+def _check_pdf_store_sections(printed, rows, *, tolerance, pdf_path=None, **_):
+    from src.validation.pdf_row_match import check_pdf_store_sections
+    return check_pdf_store_sections(printed, rows, tolerance=tolerance, pdf_path=pdf_path)
+
+
+# Run after every check above has failed, and only when the caller passes the
+# statement's PDF: they read the PDF itself, so they are the slowest checks
+# and can only add a pass (2026-10-12).
+_PDF_CHECKS = (
+    (VALIDATION_METHOD_PDF_ROW_MATCH, _check_pdf_row_match),
+    (VALIDATION_METHOD_PDF_STORE_SECTIONS, _check_pdf_store_sections),
+)
+
+
 def validate_with_fallbacks(
     statement_total_as_printed: Optional[float],
     statement_total_computed: Optional[float],
@@ -565,11 +589,14 @@ def validate_with_fallbacks(
     section_totals: Optional[list] = None,
     tolerance: float = 0.01,
     chain_opening_balance: Optional[float] = None,
+    pdf_path: Optional[str] = None,
 ) -> dict:
     """Primary check, then -- only if it mismatches -- the four fallback
-    identities in order. Returns compute_arithmetic_validation()'s dict plus
-    "method" (which check passed, or None) and "detail" (every fallback that
-    was tried and why it did or didn't pass).
+    identities in order, then (only with a pdf_path) the two PDF checks,
+    pdf_row_match and pdf_store_sections. Returns
+    compute_arithmetic_validation()'s dict plus "method" (which check
+    passed, or None) and "detail" (every fallback that was tried and why it
+    did or didn't pass).
 
     chain_opening_balance (an unlabelled opening figure from a scan -- see
     previous_balance.py) is passed to the running_balance check only; it is
@@ -594,8 +621,11 @@ def validate_with_fallbacks(
     rows = _rows_for_checks(invoices)
     printed = statement_total_as_printed
     attempts = []
-    for method, check in _FALLBACK_CHECKS:
+    checks = _FALLBACK_CHECKS + (_PDF_CHECKS if pdf_path else ())
+    for method, check in checks:
         extra = {"chain_opening_balance": chain_opening_balance} if method == VALIDATION_METHOD_RUNNING_BALANCE else {}
+        if method in (VALIDATION_METHOD_PDF_ROW_MATCH, VALIDATION_METHOD_PDF_STORE_SECTIONS):
+            extra = {"pdf_path": pdf_path}
         outcome = check(printed, rows, tolerance=tolerance,
                         previous_balance=previous_balance, section_totals=section_totals, **extra)
         attempts.append({"method": method, **outcome})
@@ -615,3 +645,27 @@ def validate_with_fallbacks(
             }
     result["detail"] = {"attempts": attempts}
     return result
+
+
+def try_pdf_full_match(validation: dict, invoices: list, pdf_path: Optional[str], tolerance: float = 0.01) -> dict:
+    """The gate's LAST fallback (2026-10-16, user decision): called by the
+    intake once every other method -- validate_with_fallbacks() and its
+    retry with a scan's OCR previous balance -- has failed. A pass when the
+    extraction matches the PDF cell by cell (src/validation/pdf_row_match.py
+    check_pdf_full_match), whether or not any total equation reconciles. It
+    only runs on a "mismatch" with a PDF, and can only add a pass; its
+    attempt (with the per-column results) is appended to the detail either
+    way."""
+    if validation.get("status") != "mismatch" or not pdf_path:
+        return validation
+    from src.validation.pdf_row_match import check_pdf_full_match
+    printed = validation.get("printed")
+    outcome = check_pdf_full_match(printed, _rows_for_checks(invoices), tolerance=tolerance, pdf_path=pdf_path)
+    detail = dict(validation.get("detail") or {})
+    detail["attempts"] = list(detail.get("attempts") or []) + [{"method": VALIDATION_METHOD_PDF_FULL_MATCH, **outcome}]
+    if not outcome.get("passed"):
+        return {**validation, "detail": detail}
+    computed = outcome["computed"]
+    detail.update(primary_computed=validation.get("computed"), primary_difference=validation.get("difference"))
+    return {"status": "matches", "printed": printed, "computed": computed, "difference": round(printed - computed, 2),
+            "method": VALIDATION_METHOD_PDF_FULL_MATCH, "detail": detail}
