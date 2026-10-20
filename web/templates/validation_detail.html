@@ -155,6 +155,29 @@
 <div class="section-header">
   <div class="section-title">Column corrections from the PDF</div>
 </div>
+{% if intake.text_column_corrections[0].change is defined %}
+<p style="color:var(--text-secondary);margin:0 0 8px" id="text-row-corrections">
+  {{ intake.text_column_corrections | length }} row{{ "" if intake.text_column_corrections | length == 1 else "s" }} were set to the amount and column printed on their own line of the PDF (read from the PDF's text layer; every row matched exactly one printed line). The statement passed only after these corrections.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Reference</th><th>Date</th><th>Change</th><th>Extracted</th><th>PDF prints</th><th>Page</th></tr>
+  </thead>
+  <tbody>
+    {% for c in intake.text_column_corrections %}
+    <tr>
+      <td>{{ c.row_number }}</td>
+      <td>{{ c.invoice_number }}</td>
+      <td>{{ c.date }}</td>
+      <td>{{ {"moved": "moved to its printed column", "filled": "amount filled in", "replaced": "amount replaced"}.get(c.change, c.change) }}</td>
+      <td>{% if c.extracted_value is none %}no amount{% else %}{{ c.extracted_value | money }} ({{ c.extracted_field }}){% endif %}</td>
+      <td>{{ c.printed_value | money }} ({{ c.field }})</td>
+      <td>{{ c.page }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
 <p style="color:var(--text-secondary);margin:0 0 8px" id="text-column-corrections">
   {{ intake.text_column_corrections | length }} row{{ "" if intake.text_column_corrections | length == 1 else "s" }} were extracted in the wrong column and moved to the column the PDF prints them in (read from the PDF's text layer). The statement passed only after these corrections.
 </p>
@@ -176,6 +199,7 @@
     {% endfor %}
   </tbody>
 </table>
+{% endif %}
 {% endif %}
 {% if intake.invoice_balance and intake.invoice_balance.flags %}
 <div class="section-header">

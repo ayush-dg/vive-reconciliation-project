@@ -1294,6 +1294,17 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     (Azure SQL raw_payload, bronze.raw_statement, unnested lines/fields) --
     and every move is listed in detail["text_column_corrections"]. Otherwise
     nothing changes and detail["text_column_check"] says why.
+
+    If that does not pass, the row correction from the printed line is tried
+    (text_columns.plan_text_row_corrections, C2, 2026-10-20; same switch):
+    other header sets (CHARGES / CREDITS or PYMTS/CR, a single signed AMOUNT
+    column), and a row's amount may be filled or replaced from its own
+    printed line. Every row must match exactly one printed line and every
+    printed line exactly one row; kept only if the PDF's columns AND the
+    corrected rows both total the printed total to the cent and the
+    corrected rows pass the whole gate (tried on a copy first). Each change
+    is listed in detail["text_column_corrections"] with the extracted and the
+    printed value; otherwise detail["text_column_check"]["row_check"] says why.
     """
     validation = _validate_extraction(schema_result, pdf_text, pdf_path)
     if validation.get("status") != "mismatch" or not text_columns.enabled():
@@ -1324,10 +1335,46 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
             schema_result["validation"] = validation
             return validation
         reason = f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    row_validation, row_reason = _try_text_row_corrections(schema_result, pdf_text, pdf_path, printed)
+    if row_validation is not None:
+        return row_validation
     validation["detail"] = {**(validation.get("detail") or {}),
-                            "text_column_check": {"applied": False, "reason": reason}}
+                            "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
     schema_result["validation"] = validation
     return validation
+
+
+def _try_text_row_corrections(schema_result: dict, pdf_text: str, pdf_path: str, printed) -> tuple:
+    """C2 (see apply_arithmetic_validation): (validation, None) when the rows were corrected in place
+    and now pass; (None, reason) when nothing was changed."""
+    plan = text_columns.plan_text_row_corrections(schema_result.get("invoices") or [], pdf_path, printed)
+    if not plan["applicable"]:
+        return None, plan["reason"]
+    trial = copy.deepcopy(schema_result)
+    trial_plan = text_columns.plan_text_row_corrections(trial.get("invoices") or [], pdf_path, printed)
+    text_columns.apply_text_row_corrections(trial_plan)
+    trial_total = compute_statement_total_from_invoices(trial.get("invoices") or [])
+    if trial_total is None or abs(trial_total - printed) >= 0.005:
+        return None, f"the corrected rows total {trial_total}, not the printed {printed:,.2f}"
+    trial.setdefault("statement_metadata", {})["statement_total_computed"] = trial_total
+    with contextlib.redirect_stdout(io.StringIO()):
+        trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+    if trial_validation.get("status") != "matches":
+        return None, f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    changed = text_columns.apply_text_row_corrections(plan)
+    schema_result.setdefault("statement_metadata", {})["statement_total_computed"] = \
+        compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+    for c in plan["corrections"]:
+        extracted = "none" if c["extracted_value"] is None else f"{c['extracted_value']:,.2f} {c['extracted_field']}"
+        print(f"  Text-layer row correction: row {c['row_number']} {c['invoice_number']} {c['date']} {c['change']}: "
+              f"{extracted} -> {c['printed_value']:,.2f} {c['field']} (printed on p{c['page']})")
+    print(f"  {changed} row(s) set to their printed line; PDF columns total {plan['pdf_total']:,.2f} = printed. "
+          f"Re-validating.")
+    validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+    corrections = [{k: v for k, v in c.items()} for c in plan["corrections"]]
+    validation["detail"] = {**(validation.get("detail") or {}), "text_column_corrections": corrections}
+    schema_result["validation"] = validation
+    return validation, None
 
 
 def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:

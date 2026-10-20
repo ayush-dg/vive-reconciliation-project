@@ -24,7 +24,22 @@ charge fields (outstanding_amount, amount, charges, the PURCHASES column of
 _raw_row) and the credit fields (credit, credits, the PAYMENTS & CREDITS column)
 in place, so Bronze, Silver and matching all see the corrected row.
 
-TEXT_COLUMN_CORRECTION_ENABLED=false switches the correction off (default on).
+Row correction from the printed line (C2, 2026-10-20) -- plan_text_row_corrections() /
+apply_text_row_corrections(), tried only after the column correction above refuses or does not
+pass. It reads other column header sets too -- CHARGES / CREDITS (or PYMTS/CR) [/ BALANCE] and a
+single signed AMOUNT column -- and besides moving a row to the side the PDF prints it on, it may
+take a row's amount from its own printed line when the extracted amount is missing or differs
+(Goldstein STMT-33A495CD, RH Long STMT-74B91C07, NYE STMT-4AD32710 / -E2B6D395). Every row must
+match exactly one printed transaction line by reference + date (plus its other printed text, e.g.
+PO#/MEMO, where the reference repeats) and every printed transaction line must be claimed by
+exactly one row; each line prints exactly one amount in an amount column, and that amount (its
+own words, its own column and sign) is the only value ever written. Lines that do not start with
+a date -- invoice subtotals, balances, totals -- are never transaction lines. An extracted amount
+that differs from its line is replaced only if the extracted value is itself printed somewhere on
+the PDF (the model took another printed number); an amount printed nowhere refuses. The PDF's
+columns must total the printed total exactly. Anything else refuses and changes nothing.
+
+TEXT_COLUMN_CORRECTION_ENABLED=false switches both corrections off (default on).
 """
 
 import os
@@ -253,3 +268,282 @@ def apply_text_column_corrections(plan: dict) -> int:
             if isinstance(raw, dict):
                 raw[payments], raw[purchases] = None, value
     return len(plan["_pairs"])
+
+
+# ---------------------------------------------------------------------------------------------------
+# C2: row correction from the printed line (2026-10-20)
+# ---------------------------------------------------------------------------------------------------
+
+AMOUNT = "amount"            # a single signed AMOUNT column (credits printed negative)
+BALANCE = "balance"
+_C2_DATE_RE = re.compile(r"^(\d{2}[A-Z]{3}\d{2}|\d{1,2}/\d{1,2}/(\d{2}|\d{4})|\d{2}-\d{2}(-(\d{2}|\d{4}))?)$")
+_C2_MONEY_RE = re.compile(r"^-?\$?-?[\d,]*\d\.\d{2}-?$")
+_COLUMN_REACH = 20.0         # pt: an amount's right edge must be this close to its header's right edge
+_COLUMN_MARGIN = 6.0         # pt: ...and this much closer to it than to any other header
+_CHARGE_LABELS = {"PURCHASES", "CHARGES"}
+_CREDIT_LABELS = {"CREDITS", "PYMTS/CR", "PAYMENTS"}
+_RAW_KEYS = {CHARGE: {"PURCHASES", "CHARGES"}, CREDIT: {"PAYMENTSCREDITS", "CREDITS", "PYMTSCR"},
+             AMOUNT: {"AMOUNT"}}
+
+
+def _c2_money(text: str) -> Optional[float]:
+    if not _C2_MONEY_RE.match(text):
+        return None
+    negative = "-" in text
+    value = float(text.replace("-", "").replace("$", "").replace(",", ""))
+    return -value if negative else value
+
+
+def _c2_header(line: list) -> Optional[dict]:
+    """Amount-column geometry from a header line. Two-column layout: a charge label (PURCHASES /
+    CHARGES) left of a credit label (PAYMENTS & CREDITS / CREDITS / PYMTS/CR). Single-column layout:
+    AMOUNT with DATE and INVOICE or REFERENCE to its left (never the footer's "PAY THIS AMOUNT")."""
+    upper = [(w["text"].upper(), w) for w in line]
+    labels = {t for t, _ in upper}
+    charge = next((w for t, w in upper if t in _CHARGE_LABELS), None)
+    credit = next((w for t, w in upper if t in _CREDIT_LABELS), None)
+    if charge and credit:
+        if not charge["x1"] < credit["x0"]:
+            return None
+        credit_right = max([credit["x1"]] + [w["x1"] for t, w in upper if t in ("&", "CREDITS")
+                                             and credit["x0"] <= w["x0"] < credit["x0"] + 80])
+        columns = [(CHARGE, charge["x1"]), (CREDIT, credit_right)]
+        layout, first_amount = "charge_credit", charge
+    else:
+        amount = next((w for t, w in upper if t == "AMOUNT"), None)
+        if amount is None or "THIS" in labels:
+            return None
+        left_labels = {t for t, w in upper if w["x1"] < amount["x0"]}
+        if "DATE" not in left_labels or not left_labels & {"INVOICE", "REFERENCE"}:
+            return None
+        columns = [(AMOUNT, amount["x1"])]
+        layout, first_amount = "amount", amount
+    columns += [(BALANCE, w["x1"]) for t, w in upper if t == "BALANCE" and w["x0"] > first_amount["x1"]]
+    others = [w["x1"] for t, w in upper if w["x0"] > first_amount["x1"]
+              and t not in _CHARGE_LABELS | _CREDIT_LABELS | {"&", "AMOUNT", "BALANCE"}]
+    return {"layout": layout, "columns": columns, "others": others,
+            "left": first_amount["x0"] - 40,      # a transaction line's date ends left of here
+            "text_right": first_amount["x0"],     # its reference words (and PO#/MEMO...) end left of here
+            "right": max([c[1] for c in columns] + others) + _COLUMN_REACH}
+
+
+def _c2_column(x1: float, geometry: dict) -> Optional[str]:
+    """The column an amount ending at x1 belongs to; "stub" right of every header; None if ambiguous."""
+    if x1 > geometry["right"]:
+        return "stub"
+    edges = sorted([(abs(x1 - edge), kind) for kind, edge in geometry["columns"]] +
+                   [(abs(x1 - edge), "other") for edge in geometry["others"]])
+    nearest = edges[0]
+    if nearest[0] > _COLUMN_REACH or nearest[1] == "other":
+        return None
+    if len(edges) > 1 and edges[1][0] - nearest[0] < _COLUMN_MARGIN:
+        return None
+    return nearest[1]
+
+
+def _norm_token(text) -> str:
+    return re.sub(r"\s+", "", str(text or "")).upper()
+
+
+def read_pdf_table(pdf_path: str) -> dict:
+    """{"layout", "lines": [{"page", "date", "tokens", "kind", "value", "text"}], "problem"}. A transaction
+    line starts with a date left of the amount columns and prints exactly one amount in an amount
+    column (charge / credit / amount); balance and remittance-stub amounts are ignored. Lines that do
+    not start with a date (invoice subtotals, carried balances, totals) are never transaction lines.
+    Rotated words (margin print) are dropped. "problem" set = the PDF can't be used."""
+    import pdfplumber
+
+    def problem(text):
+        return {"layout": None, "lines": [], "problem": text}
+
+    lines, geometry, layout, saw_text, printed_amounts = [], None, None, False, set()
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_number, page in enumerate(pdf.pages, start=1):
+            words = [w for w in page.extract_words() if w.get("upright", True)]
+            saw_text = saw_text or bool(words)
+            printed_amounts |= {round(abs(v), 2) for v in (_c2_money(w["text"]) for w in words) if v is not None}
+            for line in _group_lines(words):
+                found = _c2_header(line)
+                if found:
+                    if layout and found["layout"] != layout:
+                        return problem(f"p{page_number}: a second, different column header")
+                    geometry, layout = found, found["layout"]
+                    continue
+                if not _C2_DATE_RE.match(line[0]["text"]):
+                    continue
+                text = " ".join(w["text"] for w in line)
+                if geometry is None:
+                    return problem(f"p{page_number}: transaction line before any column header: {text!r}")
+                if line[0]["x1"] >= geometry["left"]:
+                    continue   # a date printed right of the table (remittance stub, footer): not a transaction
+                amounts, tokens = [], []
+                for w in line[1:]:
+                    value = _c2_money(w["text"])
+                    if value is None:
+                        if w["x1"] < geometry["text_right"]:
+                            tokens.append(_norm_token(w["text"]))
+                        continue
+                    column = _c2_column(w["x1"], geometry)
+                    if column is None:
+                        return problem(f"p{page_number}: amount {w['text']} can't be placed in one column: {text!r}")
+                    if column in (CHARGE, CREDIT, AMOUNT):
+                        amounts.append((column, value))
+                if len(amounts) != 1 or not tokens:
+                    return problem(f"p{page_number}: line without exactly one amount in an amount column "
+                                   f"and a reference: {text!r}")
+                kind, value = amounts[0]
+                if kind == CREDIT and value < 0:
+                    return problem(f"p{page_number}: negative amount under the credit column: {text!r}")
+                lines.append({"page": page_number, "date": line[0]["text"], "tokens": tokens, "kind": kind,
+                              "value": round(value, 2), "text": text})
+    if not saw_text:
+        return problem("no text layer (scan)")
+    if geometry is None:
+        return problem("no CHARGES / CREDITS or AMOUNT column header")
+    if not lines:
+        return problem("no transaction lines found")
+    return {"layout": layout, "lines": lines, "problem": None, "printed_amounts": printed_amounts}
+
+
+def _c2_raw_keys(invoices: list, layout: str) -> Optional[dict]:
+    """The extraction's own raw column names for the layout's amount columns (exactly one each)."""
+    keys = set()
+    for inv in invoices:
+        keys |= set((inv.get("_raw_row") or {}).keys())
+    found = {}
+    for kind in ((CHARGE, CREDIT) if layout == "charge_credit" else (AMOUNT,)):
+        names = [k for k in keys if isinstance(k, str) and re.sub(r"[^A-Z]", "", k.upper()) in _RAW_KEYS[kind]]
+        if len(names) != 1:
+            return None
+        found[kind] = names[0]
+    return found
+
+
+def _c2_row_amount(inv: dict, layout: str) -> tuple:
+    """(kind, value) the row carries now: (None, None) when it has no amount; ("both", None) when it has
+    a charge and a credit (never corrected)."""
+    charge, credit = inv.get("outstanding_amount"), inv.get("credit")
+    has_charge, has_credit = charge not in (None, 0), credit not in (None, 0)
+    if has_charge and has_credit:
+        return "both", None
+    if layout == "amount":
+        if has_credit:
+            return AMOUNT, round(-abs(credit), 2)
+        return (AMOUNT, round(charge, 2)) if has_charge else (None, None)
+    if has_credit:
+        return CREDIT, round(abs(credit), 2)
+    return (CHARGE, round(charge, 2)) if has_charge else (None, None)
+
+
+def _c2_row_tokens(inv: dict, raw_keys: dict) -> list:
+    """The row's printed text words (reference, PO#/MEMO, source, description...), used only to tell
+    apart printed lines that share a reference and a date."""
+    amount_keys = set(raw_keys.values())
+    out = []
+    for key, value in (inv.get("_raw_row") or {}).items():
+        if key in amount_keys or key == "confidence" or not isinstance(value, str) or _C2_DATE_RE.match(value.strip()):
+            continue
+        out += [_norm_token(t) for t in value.split() if t.strip()]
+    return out
+
+
+def plan_text_row_corrections(invoices: list, pdf_path: Optional[str], printed: Optional[float]) -> dict:
+    """{"applicable": bool, "reason": str, "corrections": [...], "pdf_total": float or None}. Reads only."""
+    def refuse(reason, **extra):
+        return {"applicable": False, "reason": reason, "corrections": [], **extra}
+
+    if not pdf_path or not os.path.exists(pdf_path):
+        return refuse("no PDF")
+    if printed is None:
+        return refuse("no printed total")
+    rows = [inv for inv in invoices or [] if not inv.get("informational")]
+    if not rows:
+        return refuse("no extracted rows")
+    try:
+        pdf = read_pdf_table(pdf_path)
+    except Exception as e:   # an unreadable PDF never changes anything
+        return refuse(f"PDF not readable ({type(e).__name__})")
+    if pdf["problem"]:
+        return refuse(pdf["problem"])
+    layout, lines = pdf["layout"], pdf["lines"]
+    raw_keys = _c2_raw_keys(rows, layout)
+    if raw_keys is None:
+        return refuse("the extraction's columns do not match the PDF's " +
+                      ("CHARGES / CREDITS columns" if layout == "charge_credit" else "AMOUNT column"))
+    pdf_total = round(sum(-l["value"] if l["kind"] == CREDIT else l["value"] for l in lines), 2)
+    if abs(pdf_total - printed) > _CENT:
+        return refuse(f"the PDF's columns total {pdf_total:,.2f}, not the printed {printed:,.2f}", pdf_total=pdf_total)
+
+    # Identity: reference + date must pick exactly one printed line; where several lines share them
+    # (RH Long's payment batch 220830, an NYE invoice and its credit memo on one day), the row's printed
+    # words (reference, PO#/MEMO, source...) must be exactly the words the line prints left of its amounts.
+    claimed, pairs = {}, []
+    for index, inv in enumerate(rows):
+        number = inv.get("row_number") or index + 1
+        label = f"row {number} ({inv.get('invoice_number')})"
+        ref, date = _norm_token(inv.get("invoice_number")), str(inv.get("invoice_date") or "").strip()
+        if not ref or not date:
+            return refuse(f"{label} has no reference or date", pdf_total=pdf_total)
+        candidates = [i for i, l in enumerate(lines) if l["date"] == date and ref in l["tokens"]]
+        if len(candidates) > 1:
+            words = sorted(_c2_row_tokens(inv, raw_keys))
+            candidates = [i for i in candidates if sorted(lines[i]["tokens"]) == words]
+        if len(candidates) != 1:
+            return refuse(f"{label} {date}: matches {len(candidates)} printed lines, not exactly one", pdf_total=pdf_total)
+        if candidates[0] in claimed:
+            return refuse(f"{label} and row {claimed[candidates[0]]} claim the same printed line", pdf_total=pdf_total)
+        claimed[candidates[0]] = number
+        kind, value = _c2_row_amount(inv, layout)
+        if kind == "both":
+            return refuse(f"{label} has both a charge and a credit", pdf_total=pdf_total)
+        pairs.append((inv, kind, value, lines[candidates[0]]))
+    left = len(lines) - len(claimed)
+    if left:
+        return refuse(f"{left} printed line(s) match no extracted row", pdf_total=pdf_total)
+
+    corrections, changes = [], []
+    for inv, kind, value, line in pairs:
+        if (kind, value) == (line["kind"], line["value"]):
+            continue
+        if kind is None:
+            change = "filled"
+        elif kind != line["kind"] and abs(value) == abs(line["value"]):
+            change = "moved"
+        elif round(abs(value), 2) in pdf["printed_amounts"]:
+            change = "replaced"   # the model took another printed number (NYE: a subtotal, the next line's amount)
+        else:
+            return refuse(f"row {inv.get('row_number')} ({inv.get('invoice_number')}): extracted {value:,.2f} differs "
+                          f"from its printed {line['value']:,.2f} and is printed nowhere on the PDF", pdf_total=pdf_total)
+        corrections.append({"row_number": inv.get("row_number"), "invoice_number": inv.get("invoice_number"),
+                            "date": line["date"], "change": change, "extracted_field": kind,
+                            "extracted_value": value, "field": line["kind"], "printed_value": line["value"],
+                            "page": line["page"], "printed_line": line["text"]})
+        changes.append((inv, line["kind"], line["value"]))
+    if not corrections:
+        return refuse("the extraction already agrees with the PDF line by line", pdf_total=pdf_total)
+    return {"applicable": True, "reason": "", "corrections": corrections, "pdf_total": pdf_total,
+            "layout": layout, "raw_keys": raw_keys, "_changes": changes}
+
+
+def apply_text_row_corrections(plan: dict) -> int:
+    """Writes each planned row's printed amount into its printed column, in place (the fields
+    apply_text_column_corrections uses, plus the extraction's raw column). Returns the rows changed."""
+    raw_keys = plan["raw_keys"]
+    for inv, kind, value in plan["_changes"]:
+        raw = inv.get("_raw_row")
+        if kind == CREDIT:
+            for key in ("outstanding_amount", "amount", "charges"):
+                inv[key] = None
+            inv["credit"] = inv["credits"] = value
+            if isinstance(raw, dict):
+                raw[raw_keys[CHARGE]], raw[raw_keys[CREDIT]] = None, value
+        else:
+            for key in ("credit", "credits"):
+                inv[key] = None
+            inv["outstanding_amount"] = inv["amount"] = inv["charges"] = value
+            if isinstance(raw, dict):
+                if kind == CHARGE:
+                    raw[raw_keys[CREDIT]], raw[raw_keys[CHARGE]] = None, value
+                else:
+                    raw[raw_keys[AMOUNT]] = value
+    return len(plan["_changes"])
