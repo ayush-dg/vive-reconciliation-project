@@ -235,9 +235,9 @@ class TestRoutes(unittest.TestCase):
 
     def test_closed_exception_missing_record_and_conflict_match_nothing(self):
         resp, accept = self._post(exception=lambda _: dict(EXCEPTION, exception_status="RESOLVED"))
-        self.assertIn("no+longer+open", resp.headers["location"]); accept.assert_not_called()
+        self.assertIn("already+resolved", resp.headers["location"]); accept.assert_not_called()
         resp, accept = self._post(fetch=lambda t, i: None)
-        self.assertIn("wasn%27t+found", resp.headers["location"]); accept.assert_not_called()
+        self.assertIn("no+longer+exists", resp.headers["location"]); accept.assert_not_called()
         resp, _ = self._post(accept=mock.Mock(side_effect=rt.MatchConflict("bill 23 is already matched")))
         self.assertIn("Not+matched", resp.headers["location"])
 

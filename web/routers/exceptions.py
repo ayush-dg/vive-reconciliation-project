@@ -449,13 +449,14 @@ def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depe
 
     exception = queries.get_recon_exception(exception_id)
     if not exception or exception.get("exception_status") != "OPEN":
-        return _message("This exception is no longer open -- nothing was matched.")
+        return _message("Not matched: this exception was already resolved (by you or someone else), "
+                        "so there's nothing left to match. Nothing was changed.")
     try:
         record = fetch_record(record_type, internal_id)
     except Exception:
-        return _message("NetSuite data is unavailable right now -- nothing was matched.")
+        return _message("Not matched: couldn't reach NetSuite just now. Nothing was changed -- try again in a minute.")
     if not record:
-        return _message("That NetSuite record wasn't found -- nothing was matched.")
+        return _message("Not matched: that NetSuite bill or credit no longer exists. Nothing was changed.")
     try:
         netsuite = queries.accept_manual_match(exception, record, vendor_name, user, note.strip() or None) or {}
     except (MatchConflict, ValueError) as exc:

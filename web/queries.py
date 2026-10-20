@@ -213,8 +213,13 @@ def get_outlook_synced_jobs() -> list:
     the exact same definition."""
     # job_id (2026-10-16): Statement Processing places a failed extraction --
     # a job with no statement_id -- in its sync by job.
+    # Duplicates are left out (2026-10-20): a re-sent PDF that was already
+    # processed adds nothing, so it isn't counted in a sync, a sync of only
+    # duplicates isn't listed, and it never moves its original statement
+    # into the later sync.
     return execute_query(
         "SELECT job_id, submitted_at, statement_id, status FROM jobs WHERE source_blob_path IS NOT NULL "
+        "AND (error_message IS NULL OR error_message NOT LIKE 'Duplicate of%') "
         "ORDER BY submitted_at DESC"
     )
 
