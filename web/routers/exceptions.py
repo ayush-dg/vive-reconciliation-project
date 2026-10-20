@@ -14,6 +14,7 @@ swallow it whole (a :path converter matches slashes too, so no sub-path
 under /exceptions/ is safe from it).
 """
 
+import os
 from collections import Counter
 from urllib.parse import quote, unquote, urlencode
 
@@ -24,6 +25,7 @@ from web.netsuite_status import writeback_pill
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
 from web import time_window as tw
+from web.routers.statements import _inline_filename
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
 from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, fetch_record, search_open_ap
@@ -244,6 +246,24 @@ def _writeback_status(statement_id):
     return writeback_pill(runs[0]) if runs else None
 
 
+def _statement_pdf_url(statement_id):
+    """The "View PDF" link for a statement -- the short
+    /statements/<statement id>/<name>.pdf route -- or None when there is no
+    archived PDF to open (e.g. a run from before archiving, or one whose
+    archive upload failed), so the page can grey the button out instead of
+    linking to a 404. Any database problem also just greys it out."""
+    if not statement_id:
+        return None
+    try:
+        archived = queries.get_archived_pdf_for_statement(statement_id)
+    except Exception:
+        return None
+    if not archived:
+        return None
+    name = _inline_filename(os.path.basename((archived.get("original_filename") or "").replace("\\", "/")) or None)
+    return f"/statements/{statement_id}/{quote(name)}"
+
+
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
                        filter: str = "all", selected: str = None, statement_id: str = None,
@@ -339,6 +359,9 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
         "writeback": None if exceptions_only else _writeback_status(statement_id),
+        # "View PDF" in the top bar (2026-10-20): opens the statement's PDF
+        # in a new tab; None greys the button out.
+        "pdf_url": None if exceptions_only else _statement_pdf_url(statement_id),
         "searchable_reasons": SEARCHABLE_REASONS,
         # The Find in NetSuite panel's Shop filter: NetSuite's own location
         # names (config/netsuite_locations.json), starting on "Any shop".

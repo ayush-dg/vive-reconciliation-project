@@ -9,6 +9,12 @@
   </div>
   {% if not not_found %}
   <div class="topbar-actions">
+    {# The statement's PDF in a new tab -- greyed out when no archived copy exists. #}
+    {% if pdf_url %}
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" title="Open the statement PDF in a new tab"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
+    {% else %}
+    <span class="pdf-btn is-disabled" aria-disabled="true" title="PDF not available"><svg class="icon"><use href="#i-file"/></svg>View PDF</span>
+    {% endif %}
     {% if writeback %}
     <span class="badge {{ writeback.css }}" style="margin-right:10px" title="{{ writeback.tooltip }}{% if writeback.finished_at %} · {{ writeback.finished_at | friendly_dt }}{% endif %}">{% if writeback.ok %}<svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>{% endif %}{{ writeback.label }}</span>
     {% endif %}
