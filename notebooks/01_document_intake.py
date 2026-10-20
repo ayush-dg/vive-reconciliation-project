@@ -24,7 +24,10 @@ What it does:
 """
 
 import argparse
+import contextlib
+import copy
 import hashlib
+import io
 import json
 import os
 import re
@@ -76,6 +79,7 @@ from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_printed_total
+from src.validation import text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1275,6 +1279,61 @@ def _rows_only_status(validation: dict, invoices: list, pdf_path) -> dict:
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
+    validation dict. Used by run_intake() and by the re-run tool
+    (src/rerun/in_place.py new_from_schema), both BEFORE any Bronze write.
+
+    The gate itself is _validate_extraction(). When it fails, a text-layer
+    column correction is tried (src/validation/text_columns.py, 2026-10-19;
+    TEXT_COLUMN_CORRECTION_ENABLED=false switches it off): on a CDK
+    statement whose PDF prints PURCHASES / PAYMENTS & CREDITS / BALANCE,
+    every extracted row is matched to its printed line and put on the side
+    the PDF prints it, but ONLY if the PDF's columns total the printed total
+    exactly and the corrected rows then pass the whole gate (tried on a
+    copy first). Then the rows are corrected IN PLACE in
+    schema_result["invoices"] -- the same dicts the callers write to Bronze
+    (Azure SQL raw_payload, bronze.raw_statement, unnested lines/fields) --
+    and every move is listed in detail["text_column_corrections"]. Otherwise
+    nothing changes and detail["text_column_check"] says why.
+    """
+    validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+    if validation.get("status") != "mismatch" or not text_columns.enabled():
+        return validation
+    printed = validation.get("printed")
+    plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = text_columns.plan_text_column_corrections(trial.get("invoices") or [], pdf_path, printed)
+        text_columns.apply_text_column_corrections(trial_plan)
+        trial.setdefault("statement_metadata", {})["statement_total_computed"] = \
+            compute_statement_total_from_invoices(trial.get("invoices") or [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+        if trial_validation.get("status") == "matches":
+            moved = text_columns.apply_text_column_corrections(plan)
+            schema_result.setdefault("statement_metadata", {})["statement_total_computed"] = \
+                compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+            for c in plan["corrections"]:
+                print(f"  Text-layer column correction: row {c['row_number']} {c['invoice_number']} {c['date']} "
+                      f"{c['amount']:,.2f} {c['from']} -> {c['to']} (printed on p{c['page']})")
+            print(f"  {moved} row(s) put on the side the PDF prints them; PDF columns total "
+                  f"{plan['pdf_total']:,.2f} = printed. Re-validating.")
+            validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+            corrections = [{k: v for k, v in c.items()} for c in plan["corrections"]]
+            validation["detail"] = {**(validation.get("detail") or {}), "text_column_corrections": corrections}
+            schema_result["validation"] = validation
+            return validation
+        reason = f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    validation["detail"] = {**(validation.get("detail") or {}),
+                            "text_column_check": {"applied": False, "reason": reason}}
+    schema_result["validation"] = validation
+    return validation
+
+
+def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
+    """The Arithmetic Validation Gate for one extraction (see
+    apply_arithmetic_validation). Sets schema_result["validation"] (and the
+    verified previous balance in statement_metadata). Returns the
     validation dict.
 
     Text-based checks (2026-10-07) read the PDF's text layer, or for a scan

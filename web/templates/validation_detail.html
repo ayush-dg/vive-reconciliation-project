@@ -145,6 +145,32 @@
   </tbody>
 </table>
 {% endif %}
+{% if intake.text_column_corrections %}
+<div class="section-header">
+  <div class="section-title">Column corrections from the PDF</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="text-column-corrections">
+  {{ intake.text_column_corrections | length }} row{{ "" if intake.text_column_corrections | length == 1 else "s" }} were extracted in the wrong column and moved to the column the PDF prints them in (read from the PDF's text layer). The statement passed only after these corrections.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Reference</th><th>Date</th><th>Amount</th><th>Extracted as</th><th>PDF prints it as</th><th>Page</th></tr>
+  </thead>
+  <tbody>
+    {% for c in intake.text_column_corrections %}
+    <tr>
+      <td>{{ c.row_number }}</td>
+      <td>{{ c.invoice_number }}</td>
+      <td>{{ c.date }}</td>
+      <td>{{ c.amount | money }}</td>
+      <td>{{ c["from"] }}</td>
+      <td>{{ c.to }}</td>
+      <td>{{ c.page }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% if intake.invoice_balance and intake.invoice_balance.flags %}
 <div class="section-header">
   <div class="section-title">Invoice balance check</div>
