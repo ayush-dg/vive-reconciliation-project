@@ -51,7 +51,11 @@ scratchpad/oct1_report and the replay notes):
   buckets are corroboration only, never a pass on their own (Goodwins
   STMT-57632B0C passed on aging with an extra subtotal row);
 - a dated, unlabelled line printing only a balance is a PDF row that must be
-  extracted, never an opening balance (Town Fair STMT-00DDF55B).
+  extracted -- with ONE exception since 2026-10-19 (user decision, reversing
+  the prototype's rule for Town Fair STMT-00DDF55B): the statement's first
+  line on the text layer, printing only a date and one amount under BALANCE,
+  with every other line matched one-to-one and opening + rows = printed to
+  the cent, is the opening balance (_opening_balance_line).
 
 A scanned cell or line OCR disputes may be re-read once (REREAD_DPI, binarised) with a
 character whitelist; the re-read is accepted only when it EQUALS the extracted
@@ -1034,6 +1038,46 @@ def _row_result(pages, table, rows, matches, failures, rereads, started):
     return result
 
 
+def _opening_balance_line(table, matches, failures):
+    """The statement's opening-balance line, or None (2026-10-19, Town Fair
+    STMT-00DDF55B: "07-31-26 887.00" printed alone under BALANCE before the
+    first transaction; the extraction correctly has no row for it). It is
+    accepted ONLY when every one of these holds -- otherwise it stays a
+    missing row:
+      - the only problem is exactly one unmatched PDF line (no wrong, extra or
+        unverifiable row, no other missing line);
+      - that line comes from the PDF's text layer (never OCR: a scan could
+        hide a real transaction's reference and charge);
+      - it is the first transaction-area line: every matched line is below it;
+      - it prints a date and exactly one amount, under the BALANCE column, and
+        nothing else (no reference, no charge or credit, no label);
+      - no labelled previous/opening balance is printed anywhere (that path
+        is the printed previous-balance equation's);
+    the caller then requires opening + rows = printed to the cent."""
+    if any(f["problem"] != "missing" for f in failures) or len(failures) != 1:
+        return None
+    matched = {id(line) for _, line in matches}
+    order = {id(line): k for k, line in enumerate(table)}
+    missing = [line for line in table if line["is_transaction"] and id(line) not in matched]
+    if len(missing) != 1:
+        return None
+    line = missing[0]
+    if line["source"] != "text_layer" or line.get("is_subtotal") or line.get("is_store_header"):
+        return None
+    if matched and order[id(line)] > min(order[i] for i in matched):
+        return None
+    money = [m for m in line["money"] if abs(m["value"]) > _CENT]
+    if len(money) != 1 or money[0]["role"] != "balance" or not line["dates"]:
+        return None
+    for w in line["words"]:
+        if w is money[0]["word"] or parse_date(w["text"]) is not None:
+            continue
+        return None  # anything else printed on the line: a reference, a label, a second figure
+    if any(any(k in l["text"].lower() for k in _PREVIOUS_BALANCE_LABELS) for l in table):
+        return None
+    return line
+
+
 def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
     """Gate method "pdf_row_match" (see the module docstring)."""
     started = time.monotonic()
@@ -1049,12 +1093,31 @@ def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_
         return {"applicable": True, "passed": False, "computed": None, "reason": f"not verified: {e}",
                 "seconds": round(time.monotonic() - started, 2)}
     result = _row_result(pages, table, rows, matches, failures, rereads, started)
-    if failures:
+    opening = _opening_balance_line(table, matches, failures) if failures else None
+    if failures and opening is None:
         return result
+    if opening is not None:
+        # The only unmatched PDF line is a verified opening-balance line
+        # (2026-10-19): it is not a missing row, and it only takes part in
+        # the "opening_balance_line" equation below.
+        result.pop("offending_rows", None)
+        result.pop("problem_counts", None)
+        result["opening_balance_line"] = {"page": opening["page"], "date": opening["dates"][0].isoformat(),
+                                          "amount": opening["money"][0]["value"], "text": opening["text"][:80]}
     if not _printed_anywhere(table, printed, exclude={id(l) for _, l in matches}):
         result["reason"] = f"printed total {printed:,.2f} is not printed on the PDF outside the rows"
         return result
     eqs = equations(table, matches, printed, tolerance)
+    if opening is not None:
+        # With an opening line every other equation is moot: only opening + rows may reconcile.
+        rows_total = next(e["computed"] for e in eqs if e["equation"] == "rows")
+        value = opening["money"][0]["value"]
+        computed = round(value + rows_total, 2)
+        # Exactly to the cent -- stricter than the gate's usual 0.01 tolerance.
+        eqs = [{"equation": "opening_balance_line", "computed": computed,
+                "reconciles": abs(round(printed - computed, 2)) < _CENT, "carried_by_extraction": True,
+                "detail": f"opening balance {value:,.2f} printed alone on the first line (p{opening['page']}) "
+                          f"+ rows {rows_total:,.2f}"}]
     result["equations"] = eqs
     passing = [e for e in eqs if e["reconciles"]]
     if not passing:

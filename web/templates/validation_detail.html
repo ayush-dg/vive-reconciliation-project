@@ -114,6 +114,9 @@
     {% if intake.previous_balance is not none %}
     <tr><td style="color:var(--text-secondary)">Printed previous balance</td><td>{{ intake.previous_balance | money }} <span style="color:var(--text-secondary)">({{ intake.previous_balance_source }})</span></td></tr>
     {% endif %}
+    {% if intake.opening_balance_line %}
+    <tr id="opening-balance-line"><td style="color:var(--text-secondary)">Opening balance line</td><td>{{ intake.opening_balance_line.amount | money }} <span style="color:var(--text-secondary)">(printed alone under Balance on {{ intake.opening_balance_line.date }}, page {{ intake.opening_balance_line.page }}; checked against every other line of the PDF)</span></td></tr>
+    {% endif %}
   </tbody>
 </table>
 

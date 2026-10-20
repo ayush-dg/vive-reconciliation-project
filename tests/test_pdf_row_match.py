@@ -135,16 +135,24 @@ class TestPdfRowMatch(_PdfCase):
         self.assertFalse(result["passed"])
         self.assertEqual(result["problem_counts"]["extra"], 1)
 
-    def test_town_fair_shape_unlabelled_balance_line_is_a_row_not_an_opening(self):
+    def test_town_fair_shape_first_balance_only_line_is_the_opening(self):
         # Reconstruction: the first table line prints only a date and a value
         # under BALANCE (887.00, no label). It was not extracted; charges -
-        # payment = -678.00, and 887.00 + rows = 209.00 = printed. It must
-        # fail as a missing row, never pass as an opening balance.
+        # payment = -678.00, and 887.00 + rows = 209.00 = printed. Until
+        # 2026-10-19 this failed as a missing row; by user decision a verified
+        # first balance-only line on the text layer is now the opening balance
+        # (_opening_balance_line; its refusals are in test_opening_balance_line.py).
         lines = [{"date": "07-31-26", "bal": "887.00"},
                  {"date": "08-20-26", "inv": "72838580", "charge": "209.00"},
                  {"date": "08-24-26", "desc": "PAYMENT", "credit": "887.00"}]
         path = self.pdf([statement_page(lines, total="209.00")])
         rows = [row("72838580", "08-20-26", 209.0), row(None, "08-24-26", credit=887.0)]
+        result = m.check_pdf_row_match(209.0, rows, pdf_path=path)
+        self.assertTrue(result["passed"], result.get("reason"))
+        self.assertEqual(result["equation"], "opening_balance_line")
+        # ...and a balance-only line that is NOT the first line is still a missing row.
+        moved = [lines[1], lines[0], lines[2]]
+        path = self.pdf([statement_page(moved, total="209.00")])
         result = m.check_pdf_row_match(209.0, rows, pdf_path=path)
         self.assertFalse(result["passed"])
         self.assertEqual(result["problem_counts"]["missing"], 1)

@@ -648,6 +648,9 @@ def validate_with_fallbacks(
                     "primary_computed": statement_total_computed,
                     "primary_difference": result["difference"],
                     "attempts": attempts,
+                    # What a PDF check relied on, lifted for the Validation page
+                    # (2026-10-19): the verified opening-balance line.
+                    **{k: outcome[k] for k in ("opening_balance_line",) if k in outcome},
                 },
             }
     result["detail"] = {"attempts": attempts}

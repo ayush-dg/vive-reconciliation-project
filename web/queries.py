@@ -2540,6 +2540,8 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
     # Text-layer column correction (2026-10-19): rows moved to the side the
     # PDF prints them before the gate passed.
     intake["text_column_corrections"] = (detail or {}).get("text_column_corrections") or []
+    # The verified opening-balance line a pdf_row_match pass used (2026-10-19).
+    intake["opening_balance_line"] = (detail or {}).get("opening_balance_line")
     printed = intake["statement_total_as_printed"]
     difference = intake["validation_difference"]
     computed_total = (
