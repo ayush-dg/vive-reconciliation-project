@@ -20,7 +20,7 @@ from tests.test_exceptions_writeback_status import _render, _topbar
 
 
 def _url(archived):
-    with mock.patch.object(exceptions.queries, "get_archived_pdf_for_statement", return_value=archived):
+    with mock.patch.object(exceptions.queries, "get_statement_pdf", return_value=archived):
         return exceptions._statement_pdf_url("STMT-60A970B4")
 
 
@@ -45,11 +45,11 @@ class PdfUrlTests(unittest.TestCase):
         self.assertIsNone(_url(None))
 
     def test_a_database_problem_means_no_link(self):
-        with mock.patch.object(exceptions.queries, "get_archived_pdf_for_statement", side_effect=RuntimeError("down")):
+        with mock.patch.object(exceptions.queries, "get_statement_pdf", side_effect=RuntimeError("down")):
             self.assertIsNone(exceptions._statement_pdf_url("STMT-1"))
 
     def test_no_statement_id_means_no_lookup(self):
-        with mock.patch.object(exceptions.queries, "get_archived_pdf_for_statement") as lookup:
+        with mock.patch.object(exceptions.queries, "get_statement_pdf") as lookup:
             self.assertIsNone(exceptions._statement_pdf_url(None))
         lookup.assert_not_called()
 

@@ -54,7 +54,7 @@ def _logged_in_client():
 class StatementPdfRouteTests(unittest.TestCase):
     def test_serves_the_archived_pdf_inline(self):
         client = _logged_in_client()
-        with mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash", return_value=ARCHIVED), \
+        with mock.patch.object(statements.queries, "get_statement_pdf_for_document_hash", return_value=ARCHIVED), \
              mock.patch.object(statements, "_fetch_pdf_bytes", return_value=PDF_BYTES) as fetch:
             resp = client.get(f"/statements/{HASH}/pdf")
         self.assertEqual(resp.status_code, 200)
@@ -62,11 +62,11 @@ class StatementPdfRouteTests(unittest.TestCase):
         self.assertTrue(resp.headers["content-disposition"].startswith("inline;"))
         self.assertIn("Gates GMC New Britain 0826.pdf", resp.headers["content-disposition"])
         self.assertEqual(resp.content, PDF_BYTES)
-        fetch.assert_called_once_with(ARCHIVED["blob_storage_path"])
+        fetch.assert_called_once_with(ARCHIVED["blob_storage_path"], None)
 
     def test_malformed_hash_is_404_without_touching_the_db(self):
         client = _logged_in_client()
-        with mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash") as lookup:
+        with mock.patch.object(statements.queries, "get_statement_pdf_for_document_hash") as lookup:
             for bad in ("abc", "A" * 64, "g" * 64, "../etc/passwd", "a" * 65):
                 with self.subTest(bad=bad):
                     self.assertEqual(client.get(f"/statements/{bad}/pdf").status_code, 404)
@@ -74,12 +74,12 @@ class StatementPdfRouteTests(unittest.TestCase):
 
     def test_unknown_hash_is_404(self):
         client = _logged_in_client()
-        with mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash", return_value=None):
+        with mock.patch.object(statements.queries, "get_statement_pdf_for_document_hash", return_value=None):
             self.assertEqual(client.get(f"/statements/{HASH}/pdf").status_code, 404)
 
     def test_blob_download_failure_is_404(self):
         client = _logged_in_client()
-        with mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash", return_value=ARCHIVED), \
+        with mock.patch.object(statements.queries, "get_statement_pdf_for_document_hash", return_value=ARCHIVED), \
              mock.patch.object(statements, "_fetch_pdf_bytes", return_value=None):
             self.assertEqual(client.get(f"/statements/{HASH}/pdf").status_code, 404)
 
@@ -94,8 +94,8 @@ class ShortLinkRouteTests(unittest.TestCase):
 
     def _get(self, path, archived=ARCHIVED):
         client = _logged_in_client()
-        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement", return_value=archived) as by_id, \
-             mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash", return_value=ARCHIVED) as by_hash, \
+        with mock.patch.object(statements.queries, "get_statement_pdf", return_value=archived) as by_id, \
+             mock.patch.object(statements.queries, "get_statement_pdf_for_document_hash", return_value=ARCHIVED) as by_hash, \
              mock.patch.object(statements, "_fetch_pdf_bytes", return_value=PDF_BYTES):
             return client.get(path), by_id, by_hash
 
@@ -118,7 +118,7 @@ class ShortLinkRouteTests(unittest.TestCase):
 
     def test_a_name_that_is_not_a_pdf_or_a_malformed_id_is_404_without_a_lookup(self):
         client = _logged_in_client()
-        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement") as by_id:
+        with mock.patch.object(statements.queries, "get_statement_pdf") as by_id:
             for path in ("/statements/STMT-60A970B4/BMW.txt", "/statements/STMT-60A970B4/BMW",
                          "/statements/NOTANID/BMW.pdf", "/statements/STMT-%27%3B--/BMW.pdf"):
                 with self.subTest(path=path):
@@ -197,3 +197,67 @@ class LoginRedirectTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MAILBOX = {"mailbox_blob_path": "mailbox/2026/10/15/raw_statement/u__Gates_20261015T120000Z.pdf",
+           "original_filename": "Gates.pdf"}
+
+
+class MailboxFallbackTests(unittest.TestCase):
+    """No archived copy (prod kept none before 2026-10-20): a statement that
+    came by mail is served from the mailbox raw blob it arrived as."""
+
+    def test_the_archive_wins_when_there_is_one(self):
+        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement", return_value=ARCHIVED), \
+             mock.patch.object(statements.queries, "get_mailbox_pdf_for_statement") as mailbox:
+            self.assertEqual(statements.queries.get_statement_pdf("STMT-1"), ARCHIVED)
+        mailbox.assert_not_called()
+
+    def test_without_an_archive_the_mailbox_blob_is_used(self):
+        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement", return_value=None), \
+             mock.patch.object(statements.queries, "execute_query",
+                               return_value=[{"source_blob_path": MAILBOX["mailbox_blob_path"], "pdf_filename": "Gates.pdf"}]) as q:
+            self.assertEqual(statements.queries.get_statement_pdf("STMT-1"), MAILBOX)
+        self.assertEqual(q.call_args[0][1], ["STMT-1", "STMT-1"])
+
+    def test_the_hash_link_falls_back_the_same_way(self):
+        with mock.patch.object(statements.queries, "get_archived_pdf_for_document_hash", return_value=None), \
+             mock.patch.object(statements.queries, "execute_query",
+                               return_value=[{"source_blob_path": MAILBOX["mailbox_blob_path"], "pdf_filename": "Gates.pdf"}]):
+            self.assertEqual(statements.queries.get_statement_pdf_for_document_hash(HASH), MAILBOX)
+
+    def test_neither_gives_none(self):
+        with mock.patch.object(statements.queries, "get_archived_pdf_for_statement", return_value=None), \
+             mock.patch.object(statements.queries, "execute_query", return_value=[]):
+            self.assertIsNone(statements.queries.get_statement_pdf("STMT-1"))
+
+    def test_the_route_reads_the_mailbox_blob_by_name(self):
+        client = _logged_in_client()
+        with mock.patch.object(statements.queries, "get_statement_pdf", return_value=MAILBOX), \
+             mock.patch.object(statements, "_fetch_pdf_bytes", return_value=PDF_BYTES) as fetch:
+            resp = client.get("/statements/STMT-60A970B4/Gates.pdf")
+        self.assertEqual((resp.status_code, resp.content), (200, PDF_BYTES))
+        fetch.assert_called_once_with(None, MAILBOX["mailbox_blob_path"])
+
+    def test_the_mailbox_download_uses_the_mailbox_container_and_connection(self):
+        made = []
+
+        class FakeClient:
+            def __init__(self, **kwargs):
+                made.append(kwargs)
+
+            def download_blob_by_name(self, name, dest):
+                with open(dest, "wb") as f:
+                    f.write(PDF_BYTES)
+                return True
+
+        with mock.patch.object(statements, "BlobStorageClient", FakeClient):
+            self.assertEqual(statements._fetch_pdf_bytes(None, MAILBOX["mailbox_blob_path"]), PDF_BYTES)
+        self.assertEqual(made, [{"container_name": "raw",
+                                 "connection_string_env_var": "AZURE_BLOB_MAILBOX_CONNECTION_STRING"}])
+
+    def test_a_failed_mailbox_download_is_404(self):
+        client = _logged_in_client()
+        with mock.patch.object(statements.queries, "get_statement_pdf", return_value=MAILBOX), \
+             mock.patch.object(statements, "_fetch_pdf_bytes", return_value=None):
+            self.assertEqual(client.get("/statements/STMT-60A970B4/Gates.pdf").status_code, 404)

@@ -1609,6 +1609,53 @@ def get_archived_pdf_for_statement(statement_id: str):
     return get_archived_pdf_for_document_hash(jobs[0]["document_hash"]) if jobs else None
 
 
+def _mailbox_pdf(rows):
+    if not rows:
+        return None
+    return {"mailbox_blob_path": rows[0]["source_blob_path"], "original_filename": rows[0]["pdf_filename"]}
+
+
+def get_mailbox_pdf_for_statement(statement_id: str):
+    """The mailbox raw blob a statement's PDF came in as -- or None. Every
+    mailbox job keeps its source_blob_path, so this finds the PDF even where
+    nothing was archived (prod has no archive storage before 2026-10-20). A
+    duplicate re-upload's job carries the statement id too, so any job of the
+    statement, or of the same file (document_hash), will do."""
+    return _mailbox_pdf(execute_query(
+        """
+        SELECT source_blob_path, pdf_filename FROM jobs
+        WHERE source_blob_path IS NOT NULL
+          AND (statement_id = ? OR document_hash IN
+               (SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL))
+        ORDER BY submitted_at DESC
+        """,
+        [statement_id, statement_id],
+    ))
+
+
+def get_mailbox_pdf_for_document_hash(document_hash: str):
+    """As get_mailbox_pdf_for_statement, by the file's SHA-256."""
+    return _mailbox_pdf(execute_query(
+        """
+        SELECT source_blob_path, pdf_filename FROM jobs
+        WHERE source_blob_path IS NOT NULL AND document_hash = ?
+        ORDER BY submitted_at DESC
+        """,
+        [document_hash],
+    ))
+
+
+def get_statement_pdf(statement_id: str):
+    """Where to read a statement's PDF from: the archived copy, else the
+    mailbox blob it arrived as ({"mailbox_blob_path": ...}), else None."""
+    return get_archived_pdf_for_statement(statement_id) or get_mailbox_pdf_for_statement(statement_id)
+
+
+def get_statement_pdf_for_document_hash(document_hash: str):
+    """As get_statement_pdf, by the file's SHA-256."""
+    return get_archived_pdf_for_document_hash(document_hash) or get_mailbox_pdf_for_document_hash(document_hash)
+
+
 def list_users() -> list:
     return execute_query(
         "SELECT id, name, email, is_active, created_at, created_by FROM users ORDER BY created_at"

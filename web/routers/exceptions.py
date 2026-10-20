@@ -249,13 +249,14 @@ def _writeback_status(statement_id):
 def _statement_pdf_url(statement_id):
     """The "View PDF" link for a statement -- the short
     /statements/<statement id>/<name>.pdf route -- or None when there is no
-    archived PDF to open (e.g. a run from before archiving, or one whose
-    archive upload failed), so the page can grey the button out instead of
-    linking to a 404. Any database problem also just greys it out."""
+    PDF to open: neither an archived copy nor the mailbox blob it came in as
+    (e.g. a web upload from before archiving), so the page can grey the
+    button out instead of linking to a 404. Any database problem also just
+    greys it out."""
     if not statement_id:
         return None
     try:
-        archived = queries.get_archived_pdf_for_statement(statement_id)
+        archived = queries.get_statement_pdf(statement_id)
     except Exception:
         return None
     if not archived:
