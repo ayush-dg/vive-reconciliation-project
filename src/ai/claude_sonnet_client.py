@@ -391,6 +391,27 @@ EXACT_CREDIT_HEADERS = ("payment",)
 # credit column. Mirrors adapter.py's pdfplumber signed_field handling.
 SIGNED_COLUMN_CHARGE_WORDS = ("invoice", "charge", "debit")
 SIGNED_COLUMN_EXCLUDE_WORDS = ("#", " no", "number", "num.", "date")
+# Likewise a header naming a purchase/charge AND "payment" (2026-10-20):
+# Lithia's "Purchase/Payments Amount" prints sales positive and payments /
+# credit memos negative in one column. Matched as a credit column
+# ("payments"), every sale became a credit and the value-based fallback put
+# the same cell into outstanding_amount too (charges - credits -14,575.11
+# instead of the rows' signed sum 3,779.91).
+SIGNED_PAYMENT_COLUMN_CHARGE_WORDS = ("purchase", "charge")
+
+
+def is_signed_amount_header(header_norm: str) -> bool:
+    """One signed amount column (positive = charge, negative = credit): a
+    normalized header naming a charge word together with "credit" (see
+    SIGNED_COLUMN_CHARGE_WORDS) or a purchase/charge together with "payment"
+    (SIGNED_PAYMENT_COLUMN_CHARGE_WORDS), and no identifier/date word."""
+    h = header_norm
+    if any(k in f" {h}" for k in SIGNED_COLUMN_EXCLUDE_WORDS):
+        return False
+    return (("credit" in h and any(k in h for k in SIGNED_COLUMN_CHARGE_WORDS))
+            or ("payment" in h and any(k in h for k in SIGNED_PAYMENT_COLUMN_CHARGE_WORDS)))
+
+
 # Never a credit column despite containing "applied": Yerty's "Applied To"
 # holds a PO number, which was subtracted as a 7,700,922 credit per row.
 NOT_CREDIT_PHRASES = ("applied to",)
@@ -1172,8 +1193,7 @@ class ClaudeSonnetClient(AIClient):
             # OUTSTANDING branch below as before -- it can't be split here.
             elif h.startswith("unalloc") and "due" not in h:
                 field_map.setdefault("unallocated", header)
-            elif ("credit" in h and self._match_any(h, SIGNED_COLUMN_CHARGE_WORDS)
-                    and not self._match_any(f" {h}", SIGNED_COLUMN_EXCLUDE_WORDS)):
+            elif is_signed_amount_header(h):
                 field_map.setdefault("signed_amount", header)
             elif self._match_any(h, OUTSTANDING_KEYWORDS):
                 field_map.setdefault("outstanding_amount", header)

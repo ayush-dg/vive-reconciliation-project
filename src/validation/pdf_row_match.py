@@ -392,12 +392,14 @@ def _line_has_money(line):
     return any(parse_money(w["text"]) is not None for w in line["words"])
 
 
-def _find_header(lines):
+def _find_header(lines, classify=None):
     """(index, columns) of the best header line on a page, or (None, None).
     A header has no money values, at least two recognised column roles, at
     least one amount-type role, and amounts within the next few lines. A
     wrapped header line directly above is merged into the phrases it
-    overlaps ("Amount" over "Due")."""
+    overlaps ("Amount" over "Due"). classify: the header classifier
+    (default classify_header; see account_blocks.py)."""
+    classify = classify or classify_header
     best = (None, None, 0)
     for i, line in enumerate(lines):
         if _line_has_money(line) or len(line["words"]) < 2:
@@ -412,7 +414,7 @@ def _find_header(lines):
                 host = next((p for p in phrases if w["x0"] < p["x1"] and w["x1"] > p["x0"]), None)
                 if host is not None:
                     host["text"] = w["text"] + " " + host["text"]
-        columns = [{**p, "role": classify_header(p["text"])} for p in phrases]
+        columns = [{**p, "role": classify(p["text"])} for p in phrases]
         roles = [c["role"] for c in columns]
         known = sum(1 for r in roles if r != "other")
         if known < 2 or not any(r in _AMOUNT_ROLES + ("balance", "total") for r in roles):
@@ -517,17 +519,17 @@ def _annotate_line(line, columns, in_region):
     return {"money": money, "dates": dates, "is_transaction": is_transaction, "row_number_printed": row_number}
 
 
-def build_table(pages):
+def build_table(pages, classify=None):
     """Every line of every page, annotated (see _annotate_line). Pages
     without a header reuse the last header's columns; a printed store header
     ("<store> Invoices: N | Amount Due: $X") sets the store of the lines
-    below it."""
+    below it. classify: passed to _find_header (None = classify_header)."""
     table = []
     columns = None
     store = None
     for page in pages:
         lines = page["lines"]
-        header_index, page_columns = _find_header(lines)
+        header_index, page_columns = _find_header(lines, classify)
         if page_columns:
             columns = page_columns
         for i, line in enumerate(lines):

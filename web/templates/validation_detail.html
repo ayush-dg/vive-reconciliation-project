@@ -76,7 +76,9 @@
 <div class="kpi-grid">
   <div class="kpi">
     <div class="kpi-label">PDF printed total</div>
-    <div class="kpi-value">{{ intake.statement_total_as_printed | money if intake.statement_total_as_printed is not none else "—" }}</div>
+    {% set blocks_total = intake.account_blocks.printed_total if intake.account_blocks and intake.account_blocks.passed else none %}
+    <div class="kpi-value">{{ intake.statement_total_as_printed | money if intake.statement_total_as_printed is not none else (blocks_total | money if blocks_total is not none else "—") }}</div>
+    {% if intake.statement_total_as_printed is none and blocks_total is not none %}<div class="kpi-sub">Sum of {{ intake.account_blocks.blocks | length }} account blocks' printed totals</div>{% endif %}
   </div>
   <div class="kpi">
     <div class="kpi-label">Extracted amount sum</div>
@@ -122,6 +124,31 @@
     {% endif %}
   </tbody>
 </table>
+{% if intake.account_blocks and intake.account_blocks.blocks %}
+<div class="section-header">
+  <div class="section-title">Account blocks in this PDF</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="account-blocks">
+  {% if intake.account_blocks.passed %}This PDF holds {{ intake.account_blocks.blocks | length }} account statements, each with its own printed Total Amount Due and no single total for the file. Every extracted row matched exactly one printed line (and every printed line one row), and each block's rows add up to its own printed total to the cent. The printed total {{ intake.account_blocks.printed_total | money }} is the sum of the blocks' printed totals.
+  {% else %}Account-blocks check did not pass: {{ intake.account_blocks.reason }}{% endif %}
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Account</th><th>Pages</th><th>Printed Total Amount Due</th><th>Rows</th><th>Rows' signed sum</th></tr>
+  </thead>
+  <tbody>
+    {% for b in intake.account_blocks.blocks %}
+    <tr>
+      <td>{{ b.name }}</td>
+      <td>{{ b.pages }}</td>
+      <td>{{ b.printed_total_amount_due | money }}</td>
+      <td>{{ b.rows }}</td>
+      <td>{{ b.rows_signed_sum | money }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 {% if intake.validation_attempts %}
 <div class="section-header">

@@ -2546,7 +2546,13 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
     # sections' printed lines it set aside (2026-10-19).
     intake["section_used"] = (detail or {}).get("section_used")
     intake["lines_ignored"] = (detail or {}).get("lines_ignored") or []
+    # The account blocks a pdf_account_blocks check read (2026-10-20): one PDF
+    # with several account statements, each with its own printed total. Their
+    # sum is the result's printed total; the statement keeps none of its own.
+    intake["account_blocks"] = (detail or {}).get("account_blocks")
     printed = intake["statement_total_as_printed"]
+    if printed is None and (intake["account_blocks"] or {}).get("passed"):
+        printed = intake["account_blocks"].get("printed_total")
     difference = intake["validation_difference"]
     computed_total = (
         round(printed - difference, 2)

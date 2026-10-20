@@ -659,6 +659,7 @@ class TestValidationPageBadge(unittest.TestCase):
         self.assertEqual(validation_method_label("pdf_row_match"), "PDF row-by-row match")
         self.assertEqual(validation_method_label("pdf_store_sections"), "PDF store sections")
         self.assertEqual(validation_method_label("pdf_rows_no_total"), "PDF rows, no printed total")
+        self.assertEqual(validation_method_label("pdf_account_blocks"), "PDF account blocks (each account's own printed total)")
 
 
 if __name__ == "__main__":

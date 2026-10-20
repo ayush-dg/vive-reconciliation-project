@@ -79,7 +79,7 @@ from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_printed_total
-from src.validation import due_column, text_columns
+from src.validation import account_blocks, due_column, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1276,6 +1276,39 @@ def _rows_only_status(validation: dict, invoices: list, pdf_path) -> dict:
     return {**validation, "detail": detail}
 
 
+PDF_ACCOUNT_BLOCKS_METHOD = account_blocks.METHOD
+
+
+def _account_blocks_status(validation: dict, invoices: list, pdf_path) -> dict:
+    """A total_not_found statement the no-total rule did not pass (2026-10-20,
+    Lithia STMT-142DA134): a text-layer PDF holding two or more account
+    statements, each with its own printed "Total Amount Due" and transaction
+    table (src/validation/account_blocks.py). It passes only when every row
+    is matched one-to-one to its printed line, each block's rows equal that
+    block's own printed total to the cent, and charges - credits equals their
+    sum -> "matches", method "pdf_account_blocks", printed = the SUM of the
+    blocks' printed totals (detail["account_blocks"] records the blocks; the
+    statement's own statement_total_as_printed stays empty). Not applicable
+    -> unchanged; applicable but failing -> stays total_not_found with the
+    reason in detail["account_blocks"]."""
+    if validation.get("printed") is not None or not pdf_path:
+        return validation
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    computed = validation.get("computed")
+    outcome = account_blocks.check_pdf_account_blocks(rows, pdf_path, computed)
+    if not outcome.get("applicable"):
+        return validation
+    detail = {**(validation.get("detail") or {}), "account_blocks": outcome}
+    if not outcome["passed"]:
+        print(f"  Account-blocks check: {outcome['reason']} -- stays total_not_found")
+        return {**validation, "detail": detail}
+    printed = outcome["printed_total"]
+    print(f"  Account-blocks check: {len(outcome['blocks'])} account blocks, each block's rows = its printed "
+          f"Total Amount Due; printed total {printed:,.2f} (their sum) = charges - credits -- passes.")
+    return {**validation, "status": "matches", "method": PDF_ACCOUNT_BLOCKS_METHOD, "printed": printed,
+            "computed": computed, "difference": round(printed - computed, 2), "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
@@ -1508,6 +1541,10 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
         validation = try_pdf_full_match(validation, schema_result.get("invoices") or [], pdf_path)
         if validation["status"] == "total_not_found":
             validation = _rows_only_status(validation, schema_result.get("invoices") or [], pdf_path)
+        # Several account statements in one PDF, each with its own printed
+        # total (2026-10-20): only after the no-total rule, so it only adds a pass.
+        if validation["status"] == "total_not_found":
+            validation = _account_blocks_status(validation, schema_result.get("invoices") or [], pdf_path)
         # Invoice-balance check (2026-10-19), on the finished result: an
         # extracted amount-due column that disagrees with the row amounts is
         # recorded in the detail; only for a vendor listed in config/
