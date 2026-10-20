@@ -1,0 +1,138 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workflowName": { "type": "string" },
+    "location": { "type": "string" },
+    "tenantId": { "type": "string" },
+    "graphClientId": { "type": "string" },
+    "graphClientSecret": { "type": "securestring" },
+    "targetMailbox": { "type": "string" },
+    "notificationUrl": { "type": "securestring" },
+    "clientState": { "type": "securestring" },
+    "subscriptionMinutes": { "type": "int" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('workflowName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "state": "Enabled",
+        "parameters": {
+          "tenantId": { "value": "[parameters('tenantId')]" },
+          "graphClientId": { "value": "[parameters('graphClientId')]" },
+          "graphClientSecret": { "value": "[parameters('graphClientSecret')]" },
+          "targetMailbox": { "value": "[parameters('targetMailbox')]" },
+          "notificationUrl": { "value": "[parameters('notificationUrl')]" },
+          "clientState": { "value": "[parameters('clientState')]" },
+          "subscriptionMinutes": { "value": "[parameters('subscriptionMinutes')]" }
+        },
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "tenantId": { "type": "String" },
+            "graphClientId": { "type": "String" },
+            "graphClientSecret": { "type": "SecureString" },
+            "targetMailbox": { "type": "String" },
+            "notificationUrl": { "type": "SecureString" },
+            "clientState": { "type": "SecureString" },
+            "subscriptionMinutes": { "type": "Int" }
+          },
+          "triggers": {
+            "Every_12_hours": {
+              "type": "Recurrence",
+              "recurrence": { "frequency": "Hour", "interval": 12 }
+            }
+          },
+          "actions": {
+            "List_subscriptions": {
+              "type": "Http",
+              "description": "App-only: lists the subscriptions this app registration owns.",
+              "inputs": {
+                "method": "GET",
+                "uri": "https://graph.microsoft.com/v1.0/subscriptions",
+                "authentication": {
+                  "type": "ActiveDirectoryOAuth",
+                  "tenant": "@parameters('tenantId')",
+                  "audience": "https://graph.microsoft.com",
+                  "clientId": "@parameters('graphClientId')",
+                  "secret": "@parameters('graphClientSecret')"
+                }
+              },
+              "runtimeConfiguration": { "secureData": { "properties": [ "inputs", "outputs" ] } },
+              "runAfter": {}
+            },
+            "Find_ours": {
+              "type": "Query",
+              "description": "Ours = pointing at the notify Logic App (compared without the query string, which carries its signature).",
+              "inputs": {
+                "from": "@coalesce(body('List_subscriptions')?['value'], json('[]'))",
+                "where": "@startsWith(toLower(coalesce(item()?['notificationUrl'], '')), toLower(first(split(parameters('notificationUrl'), '?'))))"
+              },
+              "runtimeConfiguration": { "secureData": { "properties": [ "inputs", "outputs" ] } },
+              "runAfter": { "List_subscriptions": [ "Succeeded" ] }
+            },
+            "Subscription_exists": {
+              "type": "If",
+              "expression": {
+                "and": [ { "greater": [ "@length(body('Find_ours'))", 0 ] } ]
+              },
+              "runAfter": { "Find_ours": [ "Succeeded" ] },
+              "actions": {
+                "Renew_subscription": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "PATCH",
+                    "uri": "https://graph.microsoft.com/v1.0/subscriptions/@{first(body('Find_ours'))?['id']}",
+                    "body": { "expirationDateTime": "@{addMinutes(utcNow(), parameters('subscriptionMinutes'))}" },
+                    "authentication": {
+                      "type": "ActiveDirectoryOAuth",
+                      "tenant": "@parameters('tenantId')",
+                      "audience": "https://graph.microsoft.com",
+                      "clientId": "@parameters('graphClientId')",
+                      "secret": "@parameters('graphClientSecret')"
+                    }
+                  },
+                  "runtimeConfiguration": { "secureData": { "properties": [ "inputs" ] } },
+                  "runAfter": {}
+                }
+              },
+              "else": {
+                "actions": {
+                  "Create_subscription": {
+                    "type": "Http",
+                    "description": "Every new message in the mailbox (any folder, like the Function's query). Graph validates the notify URL before this returns.",
+                    "inputs": {
+                      "method": "POST",
+                      "uri": "https://graph.microsoft.com/v1.0/subscriptions",
+                      "body": {
+                        "changeType": "created",
+                        "notificationUrl": "@{parameters('notificationUrl')}",
+                        "resource": "users/@{parameters('targetMailbox')}/messages",
+                        "expirationDateTime": "@{addMinutes(utcNow(), parameters('subscriptionMinutes'))}",
+                        "clientState": "@{parameters('clientState')}"
+                      },
+                      "authentication": {
+                        "type": "ActiveDirectoryOAuth",
+                        "tenant": "@parameters('tenantId')",
+                        "audience": "https://graph.microsoft.com",
+                        "clientId": "@parameters('graphClientId')",
+                        "secret": "@parameters('graphClientSecret')"
+                      }
+                    },
+                    "runtimeConfiguration": { "secureData": { "properties": [ "inputs" ] } },
+                    "runAfter": {}
+                  }
+                }
+              }
+            }
+          },
+          "outputs": {}
+        }
+      }
+    }
+  ]
+}

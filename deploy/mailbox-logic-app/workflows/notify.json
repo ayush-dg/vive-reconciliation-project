@@ -1,0 +1,243 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workflowName": { "type": "string" },
+    "location": { "type": "string" },
+    "tenantId": { "type": "string" },
+    "graphClientId": { "type": "string" },
+    "graphClientSecret": { "type": "securestring" },
+    "targetMailbox": { "type": "string" },
+    "blobContainerUrl": { "type": "string" },
+    "blobSas": { "type": "securestring" },
+    "webappAutosyncUrl": { "type": "string" },
+    "webappAutosyncSecret": { "type": "securestring" },
+    "clientState": { "type": "securestring" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('workflowName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "state": "Enabled",
+        "parameters": {
+          "tenantId": { "value": "[parameters('tenantId')]" },
+          "graphClientId": { "value": "[parameters('graphClientId')]" },
+          "graphClientSecret": { "value": "[parameters('graphClientSecret')]" },
+          "targetMailbox": { "value": "[parameters('targetMailbox')]" },
+          "blobContainerUrl": { "value": "[parameters('blobContainerUrl')]" },
+          "blobSas": { "value": "[parameters('blobSas')]" },
+          "webappAutosyncUrl": { "value": "[parameters('webappAutosyncUrl')]" },
+          "webappAutosyncSecret": { "value": "[parameters('webappAutosyncSecret')]" },
+          "clientState": { "value": "[parameters('clientState')]" }
+        },
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "tenantId": { "type": "String" },
+            "graphClientId": { "type": "String" },
+            "graphClientSecret": { "type": "SecureString" },
+            "targetMailbox": { "type": "String" },
+            "blobContainerUrl": { "type": "String" },
+            "blobSas": { "type": "SecureString" },
+            "webappAutosyncUrl": { "type": "String" },
+            "webappAutosyncSecret": { "type": "SecureString" },
+            "clientState": { "type": "SecureString" }
+          },
+          "triggers": {
+            "manual": {
+              "type": "Request",
+              "kind": "Http",
+              "inputs": {}
+            }
+          },
+          "actions": {
+            "Initialize_pdf_count": {
+              "type": "InitializeVariable",
+              "inputs": { "variables": [ { "name": "pdfCount", "type": "integer", "value": 0 } ] },
+              "runAfter": {}
+            },
+            "Is_validation_request": {
+              "type": "If",
+              "description": "Graph checks the URL when a subscription is created or renewed: echo validationToken back as plain text within 10 seconds.",
+              "expression": {
+                "and": [ { "not": { "equals": [ "@coalesce(triggerOutputs()?['queries']?['validationToken'], '')", "" ] } } ]
+              },
+              "runAfter": { "Initialize_pdf_count": [ "Succeeded" ] },
+              "actions": {
+                "Return_validation_token": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "inputs": {
+                    "statusCode": 200,
+                    "headers": { "Content-Type": "text/plain" },
+                    "body": "@{triggerOutputs()?['queries']?['validationToken']}"
+                  },
+                  "runAfter": {}
+                }
+              },
+              "else": {
+                "actions": {
+                  "Acknowledge": {
+                    "type": "Response",
+                    "kind": "Http",
+                    "description": "Answer Graph straight away (it retries slow endpoints), then do the work.",
+                    "inputs": { "statusCode": 202 },
+                    "runAfter": {}
+                  },
+                  "For_each_notification": {
+                    "type": "Foreach",
+                    "foreach": "@coalesce(triggerBody()?['value'], json('[]'))",
+                    "runAfter": { "Acknowledge": [ "Succeeded" ] },
+                    "runtimeConfiguration": { "concurrency": { "repetitions": 1 } },
+                    "actions": {
+                      "Client_state_matches": {
+                        "type": "If",
+                        "expression": {
+                          "and": [ { "equals": [ "@items('For_each_notification')?['clientState']", "@parameters('clientState')" ] } ]
+                        },
+                        "runAfter": {},
+                        "actions": {
+                          "Get_message": {
+                            "type": "Http",
+                            "inputs": {
+                              "method": "GET",
+                              "uri": "https://graph.microsoft.com/v1.0/users/@{parameters('targetMailbox')}/messages/@{items('For_each_notification')?['resourceData']?['id']}?$select=id,subject,receivedDateTime,hasAttachments",
+                              "authentication": {
+                                "type": "ActiveDirectoryOAuth",
+                                "tenant": "@parameters('tenantId')",
+                                "audience": "https://graph.microsoft.com",
+                                "clientId": "@parameters('graphClientId')",
+                                "secret": "@parameters('graphClientSecret')"
+                              }
+                            },
+                            "runtimeConfiguration": { "secureData": { "properties": [ "inputs" ] } },
+                            "runAfter": {}
+                          },
+                          "Has_attachments": {
+                            "type": "If",
+                            "expression": {
+                              "and": [ { "equals": [ "@body('Get_message')?['hasAttachments']", true ] } ]
+                            },
+                            "runAfter": { "Get_message": [ "Succeeded" ] },
+                            "actions": {
+                              "Get_attachments": {
+                                "type": "Http",
+                                "inputs": {
+                                  "method": "GET",
+                                  "uri": "https://graph.microsoft.com/v1.0/users/@{parameters('targetMailbox')}/messages/@{items('For_each_notification')?['resourceData']?['id']}/attachments",
+                                  "authentication": {
+                                    "type": "ActiveDirectoryOAuth",
+                                    "tenant": "@parameters('tenantId')",
+                                    "audience": "https://graph.microsoft.com",
+                                    "clientId": "@parameters('graphClientId')",
+                                    "secret": "@parameters('graphClientSecret')"
+                                  }
+                                },
+                                "runtimeConfiguration": { "secureData": { "properties": [ "inputs", "outputs" ] } },
+                                "runAfter": {}
+                              },
+                              "Filter_pdfs": {
+                                "type": "Query",
+                                "description": "Same rule as the Function's extract_pdf_attachments: file attachments only, with content, whose contentType is application/pdf OR whose name ends in .pdf (forwarding often turns the contentType into octet-stream).",
+                                "inputs": {
+                                  "from": "@coalesce(body('Get_attachments')?['value'], json('[]'))",
+                                  "where": "@and(equals(item()?['@odata.type'], '#microsoft.graph.fileAttachment'), not(empty(item()?['contentBytes'])), or(equals(item()?['contentType'], 'application/pdf'), endsWith(toLower(coalesce(item()?['name'], '')), '.pdf')))"
+                                },
+                                "runtimeConfiguration": { "secureData": { "properties": [ "inputs", "outputs" ] } },
+                                "runAfter": { "Get_attachments": [ "Succeeded" ] }
+                              },
+                              "For_each_pdf": {
+                                "type": "Foreach",
+                                "foreach": "@body('Filter_pdfs')",
+                                "runAfter": { "Filter_pdfs": [ "Succeeded" ] },
+                                "runtimeConfiguration": { "concurrency": { "repetitions": 1 } },
+                                "actions": {
+                                  "Base_name": {
+                                    "type": "Compose",
+                                    "inputs": "@last(split(replace(if(empty(items('For_each_pdf')?['name']), 'statement.pdf', items('For_each_pdf')?['name']), '\\', '/'), '/'))",
+                                    "runAfter": {}
+                                  },
+                                  "Extension_start": {
+                                    "type": "Compose",
+                                    "description": "Where the extension starts, like Python's os.path.splitext (a leading dot is not an extension).",
+                                    "inputs": "@if(greater(lastIndexOf(outputs('Base_name'), '.'), 0), lastIndexOf(outputs('Base_name'), '.'), length(outputs('Base_name')))",
+                                    "runAfter": { "Base_name": [ "Succeeded" ] }
+                                  },
+                                  "Blob_path": {
+                                    "type": "Compose",
+                                    "description": "The Function's write_to_raw_zone format: mailbox/{yyyy}/{mm}/{dd}/raw_statement/{uuid}__{stem}_{yyyyMMddTHHmmssZ}{ext}, dated by the message's receivedDateTime. The web app strips the uuid and timestamp back off.",
+                                    "inputs": "@concat('mailbox/', formatDateTime(body('Get_message')?['receivedDateTime'], 'yyyy'), '/', formatDateTime(body('Get_message')?['receivedDateTime'], 'MM'), '/', formatDateTime(body('Get_message')?['receivedDateTime'], 'dd'), '/raw_statement/', encodeUriComponent(concat(guid(), '__', substring(outputs('Base_name'), 0, outputs('Extension_start')), '_', formatDateTime(body('Get_message')?['receivedDateTime'], 'yyyyMMdd'), 'T', formatDateTime(body('Get_message')?['receivedDateTime'], 'HHmmss'), 'Z', substring(outputs('Base_name'), outputs('Extension_start'), sub(length(outputs('Base_name')), outputs('Extension_start'))))))",
+                                    "runAfter": { "Extension_start": [ "Succeeded" ] }
+                                  },
+                                  "Upload_blob": {
+                                    "type": "Http",
+                                    "inputs": {
+                                      "method": "PUT",
+                                      "uri": "@{parameters('blobContainerUrl')}/@{outputs('Blob_path')}@{parameters('blobSas')}",
+                                      "headers": {
+                                        "x-ms-blob-type": "BlockBlob",
+                                        "x-ms-version": "2023-11-03",
+                                        "If-None-Match": "*",
+                                        "Content-Type": "application/pdf"
+                                      },
+                                      "body": "@base64ToBinary(items('For_each_pdf')?['contentBytes'])"
+                                    },
+                                    "runtimeConfiguration": { "secureData": { "properties": [ "inputs" ] } },
+                                    "runAfter": { "Blob_path": [ "Succeeded" ] }
+                                  },
+                                  "Count_pdf": {
+                                    "type": "IncrementVariable",
+                                    "inputs": { "name": "pdfCount", "value": 1 },
+                                    "runAfter": { "Upload_blob": [ "Succeeded" ] }
+                                  }
+                                }
+                              }
+                            },
+                            "else": { "actions": {} }
+                          }
+                        },
+                        "else": { "actions": {} }
+                      }
+                    }
+                  },
+                  "Notify_web_app": {
+                    "type": "If",
+                    "description": "Runs even if one notification failed, so the PDFs that did land are queued now.",
+                    "expression": {
+                      "and": [ { "greater": [ "@variables('pdfCount')", 0 ] } ]
+                    },
+                    "runAfter": { "For_each_notification": [ "Succeeded", "Failed" ] },
+                    "actions": {
+                      "Queue_in_web_app": {
+                        "type": "Http",
+                        "inputs": {
+                          "method": "POST",
+                          "uri": "@parameters('webappAutosyncUrl')",
+                          "headers": { "x-vive-autosync-secret": "@parameters('webappAutosyncSecret')" }
+                        },
+                        "runtimeConfiguration": { "secureData": { "properties": [ "inputs" ] } },
+                        "runAfter": {}
+                      }
+                    },
+                    "else": { "actions": {} }
+                  }
+                }
+              }
+            }
+          },
+          "outputs": {}
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "callbackUrl": {
+      "type": "string",
+      "value": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows/triggers', parameters('workflowName'), 'manual'), '2019-05-01').value]"
+    }
+  }
+}

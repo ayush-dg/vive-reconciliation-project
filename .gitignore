@@ -23,6 +23,7 @@ venv/
 backup/
 terraform.tfvars.example
 terraform.tfvars
+*.tfvars
 .terraform/
 *.tfstate
 *.tfstate.*
