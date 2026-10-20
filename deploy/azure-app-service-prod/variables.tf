@@ -233,3 +233,117 @@ variable "mailbox_watermark_blob_path" {
   type        = string
   default     = "watermark/mailbox.json"
 }
+
+variable "mailbox_auto_sync_enabled" {
+  description = "AUTO_SYNC_ENABLED on the mailbox Function: its 30-minute timer. Off since 2026-10-20 -- the mailbox Logic Apps take mail as it lands; on as well, every email comes in twice (the second as a duplicate)."
+  type        = bool
+  default     = false
+}
+
+variable "mailbox_autosync_secret" {
+  description = "MAILBOX_AUTOSYNC_SECRET, shared by the web app and the mailbox Function (and the Logic Apps' x-vive-autosync-secret header)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "archive_container_name" {
+  description = "Container in the mailbox storage account that holds archived statement PDFs."
+  type        = string
+  default     = "vendor-statements"
+}
+
+# --- NetSuite write-back (sandbox) ---
+
+variable "netsuite_writeback_enabled" {
+  description = "NETSUITE_WRITEBACK_ENABLED: write reconciliation results and Accept-as-match to the NetSuite sandbox."
+  type        = bool
+  default     = false
+}
+
+variable "netsuite_writeback_pdf_link" {
+  description = "NETSUITE_WRITEBACK_PDF_LINK: put the statement's SharePoint link on the bills (needs the SharePoint archive)."
+  type        = bool
+  default     = false
+}
+
+variable "sandbox_account_id" {
+  description = "SANDBOX_ACCOUNT_ID, e.g. 7321761_SB1."
+  type        = string
+  default     = ""
+}
+
+variable "sandbox_consumer_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "sandbox_consumer_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "sandbox_token_id" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "sandbox_token_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+# --- SharePoint statement archive ---
+
+variable "sharepoint_archive_enabled" {
+  description = "SHAREPOINT_ARCHIVE_ENABLED: archive RECONCILIATION statements to SharePoint at intake."
+  type        = bool
+  default     = false
+}
+
+variable "sharepoint_tenant_id" {
+  type    = string
+  default = ""
+}
+
+variable "sharepoint_client_id" {
+  type    = string
+  default = ""
+}
+
+variable "sharepoint_client_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "sharepoint_site_hostname" {
+  type    = string
+  default = ""
+}
+
+variable "sharepoint_site_path" {
+  type    = string
+  default = ""
+}
+
+variable "sharepoint_library" {
+  type    = string
+  default = ""
+}
+
+variable "sharepoint_base_folder" {
+  description = "Must end in /_dev_test unless sharepoint_allow_live_folder is true."
+  type        = string
+  default     = ""
+}
+
+variable "sharepoint_allow_live_folder" {
+  description = "SHAREPOINT_ALLOW_LIVE_FOLDER: allow a base folder that isn't _dev_test (the real one VIVE approved, 2026-10-20)."
+  type        = bool
+  default     = false
+}
