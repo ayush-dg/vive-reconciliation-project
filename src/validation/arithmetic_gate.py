@@ -573,9 +573,9 @@ def _check_pdf_row_match(printed, rows, *, tolerance, pdf_path=None, **_):
     return check_pdf_row_match(printed, rows, tolerance=tolerance, pdf_path=pdf_path)
 
 
-def _check_pdf_store_sections(printed, rows, *, tolerance, pdf_path=None, **_):
+def _check_pdf_store_sections(printed, rows, *, tolerance, pdf_path=None, vendor_name=None, **_):
     from src.validation.pdf_row_match import check_pdf_store_sections
-    return check_pdf_store_sections(printed, rows, tolerance=tolerance, pdf_path=pdf_path)
+    return check_pdf_store_sections(printed, rows, tolerance=tolerance, pdf_path=pdf_path, vendor_name=vendor_name)
 
 
 # Run after every check above has failed, and only when the caller passes the
@@ -597,6 +597,7 @@ def validate_with_fallbacks(
     tolerance: float = 0.01,
     chain_opening_balance: Optional[float] = None,
     pdf_path: Optional[str] = None,
+    vendor_name: Optional[str] = None,
 ) -> dict:
     """Primary check, then -- only if it mismatches -- the four fallback
     identities in order, then (only with a pdf_path) the two PDF checks,
@@ -632,7 +633,7 @@ def validate_with_fallbacks(
     for method, check in checks:
         extra = {"chain_opening_balance": chain_opening_balance} if method == VALIDATION_METHOD_RUNNING_BALANCE else {}
         if method in (VALIDATION_METHOD_PDF_ROW_MATCH, VALIDATION_METHOD_PDF_STORE_SECTIONS):
-            extra = {"pdf_path": pdf_path}
+            extra = {"pdf_path": pdf_path, "vendor_name": vendor_name}
         outcome = check(printed, rows, tolerance=tolerance,
                         previous_balance=previous_balance, section_totals=section_totals, **extra)
         attempts.append({"method": method, **outcome})
@@ -650,7 +651,9 @@ def validate_with_fallbacks(
                     "attempts": attempts,
                     # What a PDF check relied on, lifted for the Validation page
                     # (2026-10-19): the verified opening-balance line.
-                    **{k: outcome[k] for k in ("opening_balance_line",) if k in outcome},
+                    # ...and the store section a pdf_store_sections pass used, with the
+                    # other sections' lines it set aside.
+                    **{k: outcome[k] for k in ("opening_balance_line", "section_used", "lines_ignored") if k in outcome},
                 },
             }
     result["detail"] = {"attempts": attempts}

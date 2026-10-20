@@ -1128,7 +1128,72 @@ def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_
     return result
 
 
-def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
+def _name_key(name) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", str(name or "").lower()))
+
+
+def _same_vendor(a, b) -> bool:
+    """Names of one vendor: equal once case and punctuation are ignored, or
+    resolving to the same vendor id (config/vendor_aliases.json)."""
+    if _name_key(a) and _name_key(a) == _name_key(b):
+        return True
+    from src.vendor_identity import resolve_vendor_id
+    ida, idb = resolve_vendor_id(a), resolve_vendor_id(b)
+    return ida is not None and ida == idb
+
+
+def _vendor_section(table, matches, failures, vendor_name):
+    """({"section_used", "lines_ignored"}, None) when the statement is ONE
+    complete store section of its own vendor and every unmatched printed line
+    belongs to a different, explicitly headed section (2026-10-19, LV Honda
+    STMT-4E854578: the Honda section's 56 rows, then the first 11 of 39 rows
+    of the Lehigh Valley Hyundai section, which continues beyond this PDF and
+    whose rows are another statement's). Else (None, why) -- why is "" when
+    the rule does not even apply. Every condition must hold:
+      - the only problems are unmatched printed lines (no wrong, extra or
+        unverifiable row);
+      - every matched row sits under one store header, and that store is the
+        statement's vendor (_same_vendor);
+      - that section is complete: printed row numbers exactly 1..N for its
+        "Invoices: N", and its rows sum to its printed "Amount Due" to the cent;
+      - every unmatched line sits under a store header whose name is NOT this
+        vendor's."""
+    if not vendor_name or any(f["problem"] != "missing" for f in failures):
+        return None, ""
+    stores = {(line.get("store") or {}).get("name") for _, line in matches}
+    if len(stores) != 1 or None in stores:
+        return None, "the verified rows are not all under one printed store header"
+    name = next(iter(stores))
+    if not _same_vendor(name, vendor_name):
+        return None, f"the rows' section {name!r} is not the statement's vendor {vendor_name!r}"
+    store = next(line["store"] for _, line in matches)
+    lines = [line for _, line in matches]
+    numbers = sorted(l["row_number_printed"] for l in lines) if all(l["row_number_printed"] is not None for l in lines) else None
+    total = round(sum(_printed_net(l) for l in lines), 2)
+    if numbers != list(range(1, store["count"] + 1)):
+        return None, f"section {name!r} is not complete: printed row numbers are not exactly 1..{store['count']}"
+    if abs(round(total - store["amount_due"], 2)) >= _CENT:
+        return None, f"section {name!r} rows sum to {total:,.2f}, printed Amount Due {store['amount_due']:,.2f}"
+    matched = {id(l) for l in lines}
+    ignored = []
+    for line in table:
+        if not line["is_transaction"] or id(line) in matched:
+            continue
+        other = (line.get("store") or {}).get("name")
+        if other is None:
+            return None, f"an unmatched printed line is under no store header (p{line['page']}: {line['text'][:60]})"
+        if _same_vendor(other, vendor_name):
+            return None, f"an unmatched printed line is under the vendor's own section {other!r} (p{line['page']})"
+        ignored.append({"page": line["page"], "section": other, "text": line["text"][:80]})
+    if len(ignored) != len(failures):
+        return None, "the unmatched lines do not account for every problem"
+    return {"section_used": {"section": name, "invoices": store["count"], "amount_due": store["amount_due"],
+                             "rows": len(lines)},
+            "lines_ignored": ignored}, None
+
+
+def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS,
+                             vendor_name=None, **_):
     """Gate method "pdf_store_sections" (see the module docstring). A store
     is complete only when its rows sum to its printed Amount Due exactly to
     the cent. The computed figure is the sum of the complete stores' printed
@@ -1151,6 +1216,20 @@ def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, bu
         return _not_applicable("no printed store headers (\"<store> Invoices: N | Amount Due: $X\")")
     result = _row_result(pages, table, rows, matches, failures, rereads, started)
     if failures:
+        section, why = _vendor_section(table, matches, failures, vendor_name)
+        if section is None:
+            if why:
+                result["section_rule"] = why
+            return result
+        # One complete section of this vendor, everything else under other
+        # named sections (2026-10-19, LV Honda STMT-4E854578).
+        result.pop("offending_rows", None)
+        result.pop("problem_counts", None)
+        result.update(section)
+        if not _printed_anywhere(table, printed, exclude={id(l) for _, l in matches}):
+            result["reason"] = f"printed total {printed:,.2f} is not printed on the PDF outside the rows"
+            return result
+        result.update(passed=True, computed=section["section_used"]["amount_due"], reason="")
         return result
     stores = OrderedDict()
     for line in table:

@@ -1397,6 +1397,7 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
                 section_totals=stmt_meta.get("section_totals"),
                 chain_opening_balance=previous.get("chain_opening"),
                 pdf_path=pdf_path,
+                vendor_name=(schema_result.get("vendor_metadata") or {}).get("vendor_name"),
             )
 
         validation = validate(previous_balance)
