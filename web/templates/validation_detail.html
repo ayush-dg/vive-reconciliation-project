@@ -156,9 +156,15 @@
   <div class="section-title">Column corrections from the PDF</div>
 </div>
 {% if intake.text_column_corrections[0].change is defined %}
+{% if intake.text_column_corrections[0].change == "due_from_description" %}
+<p style="color:var(--text-secondary);margin:0 0 8px" id="due-column-corrections">
+  {{ intake.text_column_corrections | length }} Due amount{{ "" if intake.text_column_corrections | length == 1 else "s" }} had been extracted at the front of the "Due Description" text; each was moved into Due because the PDF prints exactly that amount in the Due column of the row's own line (read from the text layer, or by OCR for a scan; every row matched exactly one printed line). The statement passed only after these corrections.
+</p>
+{% else %}
 <p style="color:var(--text-secondary);margin:0 0 8px" id="text-row-corrections">
   {{ intake.text_column_corrections | length }} row{{ "" if intake.text_column_corrections | length == 1 else "s" }} were set to the amount and column printed on their own line of the PDF (read from the PDF's text layer; every row matched exactly one printed line). The statement passed only after these corrections.
 </p>
+{% endif %}
 <table class="table" style="margin-bottom:28px">
   <thead>
     <tr><th>Row</th><th>Reference</th><th>Date</th><th>Change</th><th>Extracted</th><th>PDF prints</th><th>Page</th></tr>
@@ -169,7 +175,7 @@
       <td>{{ c.row_number }}</td>
       <td>{{ c.invoice_number }}</td>
       <td>{{ c.date }}</td>
-      <td>{{ {"moved": "moved to its printed column", "filled": "amount filled in", "replaced": "amount replaced"}.get(c.change, c.change) }}</td>
+      <td>{{ {"moved": "moved to its printed column", "filled": "amount filled in", "replaced": "amount replaced", "due_from_description": "Due moved out of the description"}.get(c.change, c.change) }}</td>
       <td>{% if c.extracted_value is none %}no amount{% else %}{{ c.extracted_value | money }} ({{ c.extracted_field }}){% endif %}</td>
       <td>{{ c.printed_value | money }} ({{ c.field }})</td>
       <td>{{ c.page }}</td>

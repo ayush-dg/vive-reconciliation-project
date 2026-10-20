@@ -79,7 +79,7 @@ from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_printed_total
-from src.validation import text_columns
+from src.validation import due_column, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1307,8 +1307,10 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     printed value; otherwise detail["text_column_check"]["row_check"] says why.
     """
     validation = _validate_extraction(schema_result, pdf_text, pdf_path)
-    if validation.get("status") != "mismatch" or not text_columns.enabled():
+    if validation.get("status") != "mismatch":
         return validation
+    if not text_columns.enabled():
+        return _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path)
     printed = validation.get("printed")
     plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
     reason = plan["reason"]
@@ -1341,6 +1343,51 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     validation["detail"] = {**(validation.get("detail") or {}),
                             "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
     schema_result["validation"] = validation
+    return _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path)
+
+
+def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """C3 (src/validation/due_column.py, 2026-10-20; DUE_COLUMN_CORRECTION_ENABLED=false switches it
+    off): an Autoly row whose merged "Due Description" cell starts with its printed Due amount gets that
+    amount as its Due (amount_due), but ONLY if every row is proven against its own printed line (text
+    layer or OCR word positions), the PDF's Due - Unalloc. equals the printed total, the corrected rows'
+    open-balance equation reconciles exactly, and the corrected rows pass the whole gate (tried on a
+    copy first). Returns the validation to keep; every move is listed in
+    detail["text_column_corrections"], or detail["due_column_check"] says why nothing changed."""
+    if not due_column.enabled():
+        return validation
+    printed = validation.get("printed")
+    plan = due_column.plan_due_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = due_column.plan_due_column_corrections(trial.get("invoices") or [], pdf_path, printed)
+        due_column.apply_due_column_corrections(trial_plan)
+        rows = [inv for inv in trial.get("invoices") or [] if not inv.get("informational")]
+        open_total = round(sum(inv.get("amount_due") or 0 for inv in rows)
+                           - sum(abs(inv.get("unallocated") or 0) for inv in rows), 2)
+        if abs(open_total - printed) >= 0.005:
+            reason = f"the corrected rows' Due - Unalloc. is {open_total:,.2f}, not the printed {printed:,.2f}"
+        else:
+            with contextlib.redirect_stdout(io.StringIO()):
+                trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+            if trial_validation.get("status") == "matches":
+                moved = due_column.apply_due_column_corrections(plan)
+                for c in plan["corrections"]:
+                    print(f"  Due column correction: row {c['row_number']} {c['invoice_number']} {c['date']} "
+                          f"Due {c['amount']:,.2f} moved out of \"Due Description\" (printed on p{c['page']})")
+                print(f"  {moved} Due amount(s) read from the printed Due column; Due - Unalloc. = "
+                      f"{plan['pdf_total']:,.2f} = printed. Re-validating.")
+                validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+                validation["detail"] = {**(validation.get("detail") or {}),
+                                        "text_column_corrections": [dict(c) for c in plan["corrections"]]}
+                schema_result["validation"] = validation
+                return validation
+            reason = f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    if reason != due_column.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}),
+                                "due_column_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
     return validation
 
 
