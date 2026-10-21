@@ -21,7 +21,7 @@
 {% set stage_sub = {
   "extraction": ((extracted | length) ~ " line" ~ ("" if extracted | length == 1 else "s")) if ex.state == "ok" else "",
   "validation": ("Diff " ~ (intake.validation_difference | money_signed)) if intake and intake.validation_difference is not none else "",
-  "reconciliation": (recon.tiles.matched ~ " of " ~ recon.tiles.invoices ~ " invoices matched") if recon else "",
+  "reconciliation": (recon.tiles.matched ~ " of " ~ recon.tiles.invoices ~ " matched") if recon else "",
 } %}
 <div class="sp-stages" role="tablist" aria-label="Processing stages">
   {% for stage in card.stages %}
@@ -188,6 +188,7 @@
   <button type="button" class="filter-chip" data-line="mismatch">Amount mismatch {{ recon.counts.mismatch }}</button>
   <button type="button" class="filter-chip" data-line="missing">Not in NetSuite {{ recon.counts.missing }}</button>
   {% if recon.counts.other %}<button type="button" class="filter-chip" data-line="other">Other {{ recon.counts.other }}</button>{% endif %}
+  {% if recon.counts.set_aside %}<button type="button" class="filter-chip" data-line="set_aside" title="Payments closing an invoice, and duplicate lines -- not checked on their own">Set aside {{ recon.counts.set_aside }}</button>{% endif %}
   {% if recon.counts.none %}<button type="button" class="filter-chip" data-line="none">Not reconciled {{ recon.counts.none }}</button>{% endif %}
 </div>
 {% if recon.rows %}
@@ -204,7 +205,7 @@
         <td class="num">{{ r.amount | money if r.amount is not none else "—" }}</td>
         <td class="num">{{ r.netsuite_amount | money if r.netsuite_amount is not none else "—" }}</td>
         <td class="num{{ ' sp-bad' if r.difference }}">{{ r.difference | money_signed if r.difference is not none else "—" }}</td>
-        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger'}.get(r.status, 'neutral') }}">{{ ('✓ ' if r.status == 'matched') ~ r.label }}</span></td>
+        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger'}.get(r.status, 'neutral') }}"{% if r.note %} title="{{ r.note }}"{% endif %}>{{ ('✓ ' if r.status == 'matched') ~ r.label }}</span></td>
       </tr>
       {% endfor %}
     </tbody>

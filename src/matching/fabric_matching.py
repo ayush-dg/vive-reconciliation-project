@@ -84,7 +84,7 @@ import uuid
 from datetime import datetime, timezone
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection, get_warehouse_connection
-from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, replace_auto_rows, status_for_reason
+from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, line_amount, replace_auto_rows, status_for_reason
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.shop_owners import get_shop_owner
@@ -186,6 +186,105 @@ def _drop_payment_closing_lines(lines: list) -> list:
         l for l in lines
         if not (l.get("line_type") == "PAYMENT" and l.get("invoice_number") in charge_invoice_numbers)
     ]
+
+
+def _generic_lines_enabled() -> bool:
+    """The vendor-agnostic line handling of 2026-10-21 (exact-duplicate
+    lines, _credit_containing_invoice(), _settle_unmatched_lines()). On by
+    default; MATCHING_GENERIC_LINES=false restores the previous behaviour
+    (also how scripts/dry_run_matching.py compares the two)."""
+    return os.getenv("MATCHING_GENERIC_LINES", "true").strip().lower() != "false"
+
+
+def _drop_exact_duplicate_lines(lines: list) -> list:
+    """Any vendor: a line identical to an earlier one in every field the
+    statement prints -- invoice, type, code, amounts, date and reference --
+    is the same row extracted twice (a reprint), not a second transaction.
+    Seen live 2026-10-21 on Conicelli Toyota (CM274949 $30.06 twice),
+    Dover Dodge (CM830329 $201.11 twice) and others, each raising the same
+    exception twice. Lines that differ in anything -- even just the date or
+    the '*1' reference marking a second credit memo -- are all kept."""
+    seen, kept = set(), []
+    for line in lines:
+        key = (line.get("invoice_number"), line.get("line_type"), line.get("transaction_code"),
+               _rounded(line.get("charge_amount")), _rounded(line.get("payment_amount")),
+               str(line.get("line_date")), line.get("invoice_number_ref"), line.get("document_number"))
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(line)
+    return kept
+
+
+def _rounded(value):
+    try:
+        return None if value is None else round(float(value), 2)
+    except (TypeError, ValueError):
+        return value
+
+
+def _credit_containing_invoice(credits, inv: str, stmt_amount):
+    """(tranid, total) of the one NetSuite credit whose number CONTAINS the
+    invoice number and whose total ties out exactly, or None. Any vendor
+    (2026-10-21) -- Keystone's _match_credit() idea, made safe for everyone
+    by requiring the exact amount and a single record: Columbia Ford files
+    its credits as 243726cr / 243726cr-1 against invoice 243726. Numbers
+    shorter than 5 characters are skipped (too likely to sit inside an
+    unrelated tranid)."""
+    if not inv or stmt_amount is None or len(inv) < 5 or credits is None:
+        return None
+    needle = inv.lower()
+    hits = [(tranid, total) for tranid, totals in credits.items() if needle in tranid
+            for total in totals if _amounts_tie_out(total, stmt_amount)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _settle_unmatched_lines(decisions: list, lines: list) -> None:
+    """Any vendor (2026-10-21), after every line has been tried against
+    NetSuite. Each statement invoice is one bill: the lines printed under it
+    (the charge, the payment that paid it, credits against it) are not
+    separate invoices. So, for lines that did NOT match:
+
+    1. A mismatch against a NetSuite record another line matched exactly is
+       not a mismatch -- that record is accounted for (Nucar: CM6303960's
+       $125 line was compared with CM6303960-1, which its own $75 line had
+       already matched). It becomes Not Found.
+    2. A credit/payment line whose amount equals a charge on the same
+       invoice is that invoice being paid off or reversed (Gates GMC
+       322756: $1,272.32 charge, -$1,272.32 two months later; Columbia
+       Ford's code-50 and NYE's code-5 payments) -- set aside, not an
+       exception. It runs only after matching, so a genuine credit memo for
+       the full amount (NYE CM251052C-2, $67.01, in NetSuite) has already
+       matched and is untouched.
+    Lines that still don't match stay exceptions -- a partial credit no
+    NetSuite record explains is a real thing to review."""
+    used = {_record_key(d["ns_record"]) for d in decisions
+            if d.get("kind") == "match" and d.get("ns_record")}
+    used.discard(None)
+    for d in decisions:
+        if d.get("kind") == "Amount Mismatch" and _record_key(d.get("ns_record")) in used:
+            d.update(kind="Not Found in NetSuite", netsuite_total=None, ns_record=None, rule=None)
+
+    charges = {}
+    for line in lines:
+        if line.get("line_type") == "CHARGE" and line.get("invoice_number"):
+            amount = _rounded(line.get("charge_amount"))
+            if amount is not None:
+                charges.setdefault(line["invoice_number"], set()).add(abs(amount))
+    for d in decisions:
+        item = d["item"]
+        if d.get("kind") == "match" or item.get("line_type") not in ("CREDIT", "PAYMENT"):
+            continue
+        amount = _rounded(d.get("stmt_amount"))
+        if amount is not None and abs(amount) in charges.get(item.get("invoice_number"), ()):
+            d.update(kind="set_aside",
+                     note=f"payment/reversal of invoice {item.get('invoice_number')}'s charge -- set aside, not an exception")
+
+
+def _record_key(record):
+    if not record:
+        return None
+    return (record.get("record_type"), str(record.get("id")))
 
 
 def _apply_line_selection(vendor_id: str, lines: list, rules: dict) -> list:
@@ -636,9 +735,14 @@ def _shape_target(shape: dict) -> tuple:
     return (shape["charge_amt"] or shape["credit_amt"] or shape["payment_amt"]), None
 
 
-def run_fabric_matching(statement_id: str) -> dict:
+def run_fabric_matching(statement_id: str, dry_run: bool = False) -> dict:
     """Best-effort: never raises. Returns a summary dict; check
-    result.get("error") for a description of what went wrong, if anything."""
+    result.get("error") for a description of what went wrong, if anything.
+
+    dry_run=True reads everything and decides every line exactly as a real
+    run would, but writes nothing (no DELETE, no INSERT, no recon table) and
+    returns the rows it would have written under "would_write" --
+    scripts/dry_run_matching.py compares two such runs."""
     if not _fabric_configured():
         logger.debug("Fabric not configured -- skipping Fabric NetSuite matching")
         return {"skipped": True, "reason": "fabric_not_configured"}
@@ -668,7 +772,7 @@ def run_fabric_matching(statement_id: str) -> dict:
         # Warehouse flags as write-write conflicts -- skipping the no-op
         # DELETE is what lets concurrent jobs run matching without
         # fabric_pipeline_lock() (see scripts/run_full_pipeline.py).
-        if _has_prior_results(wh_cur, statement_id):
+        if not dry_run and _has_prior_results(wh_cur, statement_id):
             wh_cur.execute("DELETE FROM silver.recon_matched_invoices WHERE statement_id = ?", [statement_id])
             wh_cur.execute("DELETE FROM silver.recon_exceptions WHERE statement_id = ?", [statement_id])
             wh_cur.execute("DELETE FROM silver.recon_summary WHERE statement_id = ?", [statement_id])
@@ -684,6 +788,10 @@ def run_fabric_matching(statement_id: str) -> dict:
         all_lines = list(lines)
         lines = _drop_payment_closing_lines(lines)
         _note_set_aside(all_lines, lines, "payment line closing a charge on the same invoice -- set aside before matching")
+        generic_lines = _generic_lines_enabled()
+        if generic_lines:
+            lines = _drop_exact_duplicate_lines(lines)
+            _note_set_aside(all_lines, lines, "exact duplicate of another line on this statement -- counted once")
 
         # select_lines() dedup applies to any vendor with a
         # vendor_line_selection_rule row -- today that's Fred Beans/
@@ -784,49 +892,36 @@ def run_fabric_matching(statement_id: str) -> dict:
                     (l, _line_target(l)) for l in lines if l.get("invoice_number")
                 ]
 
+            # Decide every item first, write afterwards (2026-10-21): the
+            # generic checks in _settle_unmatched_lines() look across the
+            # whole statement -- which NetSuite records other lines already
+            # matched, which invoices have a charge -- before anything counts.
+            decisions = []
+
             for item, (stmt_amount, table) in items:
                 inv = item["invoice_number"]
-                ro = item["ro_number"]
-                orig_inv = item.get("document_number")
-                statement_total += stmt_amount or 0.0
+                decision = {"item": item, "stmt_amount": stmt_amount, "table": table,
+                            "netsuite_total": None, "ns_record": None, "rule": None}
+                decisions.append(decision)
 
                 if table == "netsuite_vendorcredit":
                     inv = _apply_ordinal_suffix(inv, item.get("invoice_number_ref"))
+                decision["inv"] = inv
 
                 if table == "netsuite_vendorcredit" and keystone_credit_candidates is not None:
                     netsuite_total, candidate_count = _match_credit(
                         inv.lower(), stmt_amount, keystone_credit_candidates
                     )
                     ks_record = _keystone_credit_record(credits, keystone_credit_candidates, inv, netsuite_total)
+                    decision.update(netsuite_total=netsuite_total, ns_record=ks_record,
+                                    rule="credit number contains the invoice")
                     if netsuite_total is None:
-                        reason = "Possible Duplicate in NetSuite" if candidate_count > 1 else "Not Found in NetSuite"
-                        exception_id = _write_exception(
-                            writes, statement_id, vendor_id, shop, shop_owner, inv,
-                            ro, stmt_amount, None, reason, now,
-                            original_invoice_number=orig_inv,
-                        )
-                        _record(item, inv, status_for_reason(reason), stmt_amount, exception_id, reason)
-                        exception_count += 1
+                        decision["kind"] = "Possible Duplicate in NetSuite" if candidate_count > 1 else "Not Found in NetSuite"
+                        decision["rule"] = None
                     elif _amounts_tie_out(stmt_amount, netsuite_total):
-                        _write_match(
-                            writes, statement_id, vendor_id, shop, inv,
-                            ro, stmt_amount, netsuite_total, now,
-                            original_invoice_number=orig_inv,
-                        )
-                        _record(item, inv, STATUS_MATCHED, stmt_amount, netsuite=ks_record,
-                                rule="credit number contains the invoice")
-                        matched_count += 1
-                        erp_total += netsuite_total
+                        decision["kind"] = "match"
                     else:
-                        exception_id = _write_exception(
-                            writes, statement_id, vendor_id, shop, shop_owner, inv,
-                            ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
-                            original_invoice_number=orig_inv,
-                        )
-                        _record(item, inv, status_for_reason("Amount Mismatch"), stmt_amount, exception_id,
-                                "Amount Mismatch", netsuite=ks_record, rule="credit number contains the invoice")
-                        exception_count += 1
-                        erp_total += netsuite_total
+                        decision["kind"] = "Amount Mismatch"
                     continue
 
                 candidates = netsuite_by_table.get(table, {}).get(inv.lower(), []) if table else []
@@ -881,40 +976,64 @@ def run_fabric_matching(statement_id: str) -> dict:
                             matched_key, match_rule = alt.lower(), f"alternate number ({alt})"
                             break
 
+                if netsuite_total is None and table == "netsuite_vendorcredit" and generic_lines:
+                    # Any vendor (2026-10-21): a credit NetSuite filed under a
+                    # number that CONTAINS the invoice (Columbia Ford: 243726
+                    # -> 243726cr, 243726cr-1), exact amount, exactly one
+                    # record -- see _credit_containing_invoice().
+                    contained = _credit_containing_invoice(credits, inv, stmt_amount)
+                    if contained:
+                        matched_key, netsuite_total = contained
+                        is_exact, match_rule = True, "credit number contains the invoice"
+
                 ns_record = (netsuite_by_table.get(table).record_for(matched_key, netsuite_total)
                              if table and netsuite_total is not None else None)
+                decision.update(netsuite_total=netsuite_total, ns_record=ns_record, rule=match_rule)
                 if netsuite_total is None:
-                    exception_id = _write_exception(
-                        writes, statement_id, vendor_id, shop, shop_owner, inv,
-                        ro, stmt_amount, None, "Not Found in NetSuite", now,
-                        original_invoice_number=orig_inv,
-                    )
-                    _record(item, inv, status_for_reason("Not Found in NetSuite"), stmt_amount,
-                            exception_id, "Not Found in NetSuite")
-                    exception_count += 1
+                    decision["kind"] = "Not Found in NetSuite"
                 elif is_exact:
-                    _write_match(
-                        writes, statement_id, vendor_id, shop, inv,
-                        ro, stmt_amount, netsuite_total, now,
-                        original_invoice_number=orig_inv,
-                    )
-                    _record(item, inv, STATUS_MATCHED, stmt_amount, netsuite=ns_record, rule=match_rule)
-                    matched_count += 1
-                    erp_total += netsuite_total
+                    decision["kind"] = "match"
                 else:
                     # No candidate for this tranid tied out exactly --
                     # netsuite_total here is the single CLOSEST candidate
                     # (see _best_candidate()), surfaced so the UI can show
                     # what the nearest real NetSuite record actually was,
                     # not just "not found."
-                    exception_id = _write_exception(
-                        writes, statement_id, vendor_id, shop, shop_owner, inv,
-                        ro, stmt_amount, netsuite_total, "Amount Mismatch", now,
+                    decision["kind"] = "Amount Mismatch"
+
+            if generic_lines and not vendor_uses_shapes:
+                _settle_unmatched_lines(decisions, lines)
+
+            for decision in decisions:
+                item, inv, kind = decision["item"], decision["inv"], decision["kind"]
+                stmt_amount, netsuite_total = decision["stmt_amount"], decision["netsuite_total"]
+                ro, orig_inv = item["ro_number"], item.get("document_number")
+                if kind == "set_aside":
+                    item["_recon_note"] = decision["note"]
+                    continue
+                statement_total += stmt_amount or 0.0
+                if kind == "match":
+                    _write_match(
+                        writes, statement_id, vendor_id, shop, inv,
+                        ro, stmt_amount, netsuite_total, now,
                         original_invoice_number=orig_inv,
                     )
-                    _record(item, inv, status_for_reason("Amount Mismatch"), stmt_amount, exception_id,
-                            "Amount Mismatch", netsuite=ns_record, rule=match_rule)
-                    exception_count += 1
+                    _record(item, inv, STATUS_MATCHED, stmt_amount, netsuite=decision["ns_record"],
+                            rule=decision["rule"])
+                    matched_count += 1
+                    erp_total += netsuite_total
+                    continue
+                exception_id = _write_exception(
+                    writes, statement_id, vendor_id, shop, shop_owner, inv,
+                    ro, stmt_amount, netsuite_total, kind, now,
+                    original_invoice_number=orig_inv,
+                )
+                has_record = netsuite_total is not None
+                _record(item, inv, status_for_reason(kind), stmt_amount, exception_id, kind,
+                        netsuite=decision["ns_record"] if has_record else None,
+                        rule=decision["rule"] if has_record else None)
+                exception_count += 1
+                if has_record:
                     erp_total += netsuite_total
 
         total_count = matched_count + exception_count
@@ -929,6 +1048,16 @@ def run_fabric_matching(statement_id: str) -> dict:
             statement_total, erp_total, total_count, matched_count, exception_count,
             match_pct, overall_status, now,
         )
+
+        if dry_run:
+            return {
+                "matched": matched_count, "exceptions": exception_count,
+                "vendor_id": vendor_id, "lines": len(all_lines),
+                "would_write": {table: rows for table, (_, rows) in writes._rows.items()},
+                "set_aside": [(l.get("line_number"), l.get("invoice_number"), l.get("_recon_note"),
+                               _rounded(abs(line_amount(l))) if line_amount(l) is not None else None)
+                              for l in all_lines if l.get("_recon_note")],
+            }
 
         writes.flush(wh_cur)
         wh_conn.commit()

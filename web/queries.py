@@ -2649,6 +2649,22 @@ def get_processing_jobs() -> list:
     )
 
 
+def get_set_aside_lines(statement_id: str) -> dict:
+    """{line_number: note} for the lines matching set aside on purpose (a
+    payment closing its invoice, an exact duplicate) -- from the recon table,
+    so Statement Processing can say "Set aside" instead of "Not reconciled".
+    Empty when the statement has no recon rows (matched before 2026-10-19)
+    or the table can't be read."""
+    try:
+        from src.lakehouse import recon_table
+        rows = recon_table.rows_for_statement(statement_id)
+    except Exception:
+        return {}
+    return {r["line_number"]: r["note"] for r in rows
+            if r.get("source") == recon_table.SOURCE_AUTO and r.get("status") == recon_table.STATUS_NOT_RECONCILED
+            and r.get("note") and r.get("line_number") is not None}
+
+
 def get_latest_job_for_statement(statement_id: str):
     """The newest job for one statement (Statement Processing detail), or None."""
     rows = execute_query(

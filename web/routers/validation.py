@@ -103,11 +103,12 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
     # result). Opens on the stage that needs attention (sp.default_tab()).
     # get_statement_report() is mostly Fabric (summary, matched,
     # exceptions); the other three are mostly Azure SQL.
-    report, (data, job, extracted) = _alongside(
+    report, (data, job, extracted, set_aside) = _alongside(
         lambda: queries.get_statement_report(statement_id),
         lambda: queries.get_extraction_validation_detail(statement_id),
         lambda: queries.get_latest_job_for_statement(statement_id),
-        lambda: queries.get_extracted_rows_for_statement(statement_id))
+        lambda: queries.get_extracted_rows_for_statement(statement_id),
+        lambda: queries.get_set_aside_lines(statement_id))
     intake = data.get("intake")
     summary, matched, exceptions = report.get("summary"), report.get("matched") or [], report.get("exceptions") or []
 
@@ -132,7 +133,8 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
         "job": job,
         "summary": summary,
         "extracted": extracted if card else [],
-        "recon": sp.line_results(data.get("lines") or [], matched, exceptions) if summary is not None else None,
+        "recon": (sp.line_results(data.get("lines") or [], matched, exceptions, set_aside)
+                  if summary is not None else None),
         "active_tab": tab if tab in tabs else (sp.default_tab(card) if card else "validation"),
         **sidebar_context(request),
     }

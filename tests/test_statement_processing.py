@@ -150,7 +150,45 @@ class TestLineResults(unittest.TestCase):
         self.assertEqual(rows[4]["amount"], -10.0)
         self.assertEqual(out["tiles"], {"matched": 1, "matched_amount": 138.35, "mismatch": 1, "mismatch_amount": 7.03,
                                         "missing": 1, "missing_amount": 30.06, "other": 0, "invoices": 3})
-        self.assertEqual(out["counts"], {"matched": 1, "mismatch": 2, "missing": 1, "other": 0, "none": 1})
+        self.assertEqual(out["counts"], {"matched": 1, "mismatch": 2, "missing": 1, "other": 0,
+                                         "set_aside": 0, "none": 1})
+
+    def test_each_line_gets_its_own_result_not_its_invoices(self):
+        # Gates GMC 322756 (2026-10-21): the charge matched, the -$75 credit
+        # line did not -- the credit must show Not in NetSuite, not Matched.
+        lines = [
+            {"line_number": 1, "invoice_number": "322756", "charge_amount": 1272.32},
+            {"line_number": 2, "invoice_number": "322756", "charge_amount": -1272.32},
+            {"line_number": 3, "invoice_number": "322756", "charge_amount": -75.0},
+        ]
+        matched = [{"invoice_number": "322756", "statement_amount": 1272.32, "erp_amount": 1272.32}]
+        exceptions = [{"invoice_number": "322756", "statement_amount": 75.0, "erp_amount": None,
+                       "exception_reason": "Not Found in NetSuite"}]
+        out = sp.line_results(lines, matched, exceptions, {2: "payment/reversal of invoice 322756's charge"})
+        self.assertEqual([r["status"] for r in out["rows"]], ["matched", "set_aside", "missing"])
+        self.assertFalse(any(r["shared"] for r in out["rows"]))
+        self.assertEqual(out["rows"][1]["note"], "payment/reversal of invoice 322756's charge")
+        self.assertEqual(out["counts"]["missing"], out["tiles"]["missing"])
+        self.assertEqual(out["counts"]["matched"], out["tiles"]["matched"])
+
+    def test_a_result_under_the_ordinal_number_pairs_with_its_line(self):
+        # Nucar: the $125 line of CM6303960 was checked as CM6303960-1.
+        lines = [
+            {"line_number": 46, "invoice_number": "CM6303960", "charge_amount": -125.0},
+            {"line_number": 49, "invoice_number": "CM6303960-1", "charge_amount": -75.0},
+        ]
+        matched = [{"invoice_number": "CM6303960-1", "statement_amount": 75.0, "erp_amount": 75.0}]
+        exceptions = [{"invoice_number": "CM6303960-1", "statement_amount": 125.0, "erp_amount": None,
+                       "exception_reason": "Not Found in NetSuite"}]
+        out = sp.line_results(lines, matched, exceptions)
+        self.assertEqual([r["status"] for r in out["rows"]], ["missing", "matched"])
+
+    def test_a_result_is_used_by_one_line_only(self):
+        lines = [{"line_number": 1, "invoice_number": "A1", "charge_amount": 10.0},
+                 {"line_number": 2, "invoice_number": "A1", "charge_amount": 10.0}]
+        matched = [{"invoice_number": "A1", "statement_amount": 10.0, "erp_amount": 10.0}]
+        out = sp.line_results(lines, matched, [])
+        self.assertEqual([(r["status"], r["shared"]) for r in out["rows"]], [("matched", False), ("matched", True)])
 
 
 def _client(fns):

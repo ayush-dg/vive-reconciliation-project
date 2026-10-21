@@ -191,14 +191,53 @@ def _num(v):
     return float(v) if v is not None else None
 
 
-def line_results(lines: list, matched: list, exceptions: list) -> dict:
-    """Each Silver line next to its invoice's reconciliation result.
-    Matching works per invoice, so every line of one invoice shows that
-    invoice's result; `shared` marks those lines. Also the summary tiles."""
-    by_match = {}
+def _line_amount(line: dict):
+    """A Silver line's own amount: line_net_amount, else charge - payment."""
+    amount = _num(line.get("line_net_amount"))
+    if amount is None:
+        charge, payment = _num(line.get("charge_amount")), _num(line.get("payment_amount"))
+        amount = None if charge is None and payment is None else (charge or 0) - (payment or 0)
+    return amount
+
+
+def _same_invoice(line_inv, result_inv) -> bool:
+    """A result belongs to a line's invoice: the same number, or the
+    matcher's '-N' ordinal form of it (Nucar CM6303960 -> CM6303960-1)."""
+    if not line_inv or not result_inv:
+        return False
+    a, b = str(line_inv).lower(), str(result_inv).lower()
+    return a == b or b.startswith(a + "-")
+
+
+def line_results(lines: list, matched: list, exceptions: list, set_aside: dict = None) -> dict:
+    """Each Silver line next to ITS OWN reconciliation result (2026-10-21).
+    Matching decides line by line, so each match/exception row belongs to the
+    line on that invoice with the same amount -- paired here first, so an
+    invoice whose charge matched and whose payment line did not shows one
+    Matched line and one exception line, never both as Matched (Gates GMC,
+    Nucar). Only a line no row pairs with falls back to its invoice's result
+    (`shared`: a vendor matched per invoice), or to "Set aside" when matching
+    set it aside (`set_aside`: {line_number: note}, from the recon table).
+    Also the summary tiles."""
+    set_aside = set_aside or {}
+    results = [("match", m) for m in matched] + [("exception", e) for e in exceptions]
+    used = set()
+    own = {}
+    for idx, line in enumerate(lines):
+        amount = _line_amount(line)
+        if amount is None:
+            continue
+        for rid, (kind, result) in enumerate(results):
+            stmt = _num(result.get("statement_amount"))
+            if (rid not in used and stmt is not None and abs(abs(stmt) - abs(amount)) < 0.005
+                    and _same_invoice(line.get("invoice_number"), result.get("invoice_number"))):
+                used.add(rid)
+                own[idx] = (kind, result)
+                break
+
+    by_match, by_exc = {}, {}
     for m in matched:
         by_match.setdefault(m.get("invoice_number"), m)
-    by_exc = {}
     for e in exceptions:
         by_exc.setdefault(e.get("invoice_number"), e)
     per_invoice = {}
@@ -206,25 +245,36 @@ def line_results(lines: list, matched: list, exceptions: list) -> dict:
         per_invoice[line.get("invoice_number")] = per_invoice.get(line.get("invoice_number"), 0) + 1
 
     rows = []
-    for line in lines:
+    for idx, line in enumerate(lines):
         inv = line.get("invoice_number")
-        amount = _num(line.get("line_net_amount"))
-        if amount is None:
-            charge, payment = _num(line.get("charge_amount")), _num(line.get("payment_amount"))
-            amount = None if charge is None and payment is None else (charge or 0) - (payment or 0)
-        result, status, label = by_match.get(inv), "matched", "Matched"
-        if result is None:
-            result = by_exc.get(inv)
-            reason = (result or {}).get("exception_reason")
-            status = {MISMATCH: "mismatch", NOT_FOUND: "missing"}.get(reason, "other" if result else "none")
-            label = {MISMATCH: "Amount mismatch", NOT_FOUND: "Not in NetSuite"}.get(
-                reason, reason or "Not reconciled")
+        amount = _line_amount(line)
+        shared = False
+        if idx in own:
+            kind, result = own[idx]
+        elif line.get("line_number") in set_aside:
+            kind, result = "set_aside", None
+        elif inv in by_exc:
+            kind, result, shared = "exception", by_exc[inv], True
+        elif inv in by_match:
+            kind, result, shared = "match", by_match[inv], True
+        else:
+            kind, result = None, None
+        if kind == "match":
+            status, label = "matched", "Matched"
+        elif kind == "exception":
+            reason = result.get("exception_reason")
+            status = {MISMATCH: "mismatch", NOT_FOUND: "missing"}.get(reason, "other")
+            label = {MISMATCH: "Amount mismatch", NOT_FOUND: "Not in NetSuite"}.get(reason, reason or "Exception")
+        elif kind == "set_aside":
+            status, label = "set_aside", "Set aside"
+        else:
+            status, label = "none", "Not reconciled"
         stmt, ns = _num((result or {}).get("statement_amount")), _num((result or {}).get("erp_amount"))
         rows.append({
             "line_number": line.get("line_number"), "invoice_number": inv, "amount": amount,
             "netsuite_amount": ns, "difference": round(stmt - ns, 2) if stmt is not None and ns is not None else None,
-            "status": status, "label": label,
-            "shared": bool(inv) and per_invoice.get(inv, 0) > 1, "invoice_lines": per_invoice.get(inv, 0),
+            "status": status, "label": label, "note": set_aside.get(line.get("line_number")),
+            "shared": shared and bool(inv) and per_invoice.get(inv, 0) > 1, "invoice_lines": per_invoice.get(inv, 0),
         })
 
     def total(items, fn):
@@ -240,5 +290,6 @@ def line_results(lines: list, matched: list, exceptions: list) -> dict:
         "missing": len(missing), "missing_amount": total(missing, lambda r: _num(r.get("statement_amount"))),
         "other": len(other), "invoices": len(matched) + len(exceptions),
     }
-    counts = {s: sum(1 for r in rows if r["status"] == s) for s in ("matched", "mismatch", "missing", "other", "none")}
+    counts = {s: sum(1 for r in rows if r["status"] == s)
+              for s in ("matched", "mismatch", "missing", "other", "set_aside", "none")}
     return {"rows": rows, "tiles": tiles, "counts": counts}
