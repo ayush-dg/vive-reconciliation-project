@@ -79,7 +79,7 @@ from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
-from src.validation import account_blocks, due_column, net_lines, text_columns
+from src.validation import account_blocks, due_column, full_match_no_total, net_lines, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1320,6 +1320,34 @@ def _account_blocks_status(validation: dict, invoices: list, pdf_path) -> dict:
             "computed": computed, "difference": round(printed - computed, 2), "detail": detail}
 
 
+PDF_FULL_MATCH_NO_TOTAL_METHOD = full_match_no_total.METHOD
+
+
+def _full_match_no_total_status(validation: dict, invoices: list, pdf_path, text) -> dict:
+    """A total_not_found statement neither the no-total rule nor the account-blocks check passed
+    (2026-10-22, src/validation/full_match_no_total.py; FULL_MATCH_NO_TOTAL_ENABLED=false switches it
+    off): every row and every cell matches the PDF one to one (the pdf_full_match standard) and every
+    total-like amount the PDF prints equals the rows' charges - credits -> "matches", method
+    "pdf_full_match_no_total", printed None, difference None (like pdf_rows_no_total). Not applicable
+    -> unchanged; applicable but failing -> stays total_not_found with the reason in
+    detail["full_match_no_total"]."""
+    if validation.get("printed") is not None or not pdf_path or not full_match_no_total.enabled():
+        return validation
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    computed = validation.get("computed")
+    outcome = full_match_no_total.check_full_match_no_total(rows, pdf_path, computed, text)
+    if not outcome.get("applicable"):
+        return validation
+    detail = {**(validation.get("detail") or {}), "full_match_no_total": outcome}
+    if not outcome["passed"]:
+        print(f"  Full match, no printed total: {outcome['reason'][:160]} -- stays total_not_found")
+        return {**validation, "detail": detail}
+    print(f"  Full match, no printed total: all {outcome['full_match'].get('rows')} rows and every cell match the PDF; "
+          f"{outcome['safety']['result']} -- passes.")
+    return {**validation, "status": "matches", "method": PDF_FULL_MATCH_NO_TOTAL_METHOD, "difference": None,
+            "computed": outcome["computed"], "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
@@ -1595,6 +1623,10 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
         # total (2026-10-20): only after the no-total rule, so it only adds a pass.
         if validation["status"] == "total_not_found":
             validation = _account_blocks_status(validation, schema_result.get("invoices") or [], pdf_path)
+        # Full match with no printed total (2026-10-22): the last no-total step, only after the
+        # no-total rule and the account-blocks check, so it only adds a pass.
+        if validation["status"] == "total_not_found":
+            validation = _full_match_no_total_status(validation, schema_result.get("invoices") or [], pdf_path, text)
         # Invoice-balance check (2026-10-19), on the finished result: an
         # extracted amount-due column that disagrees with the row amounts is
         # recorded in the detail; only for a vendor listed in config/

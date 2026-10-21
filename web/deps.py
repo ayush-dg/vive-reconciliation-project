@@ -304,6 +304,7 @@ VALIDATION_METHOD_LABELS = {
     "pdf_rows_no_total": "PDF rows, no printed total",
     "pdf_full_match": "PDF full match (every row and column)",
     "pdf_account_blocks": "PDF account blocks (each account's own printed total)",
+    "pdf_full_match_no_total": "PDF full match, no printed total",
 }
 
 

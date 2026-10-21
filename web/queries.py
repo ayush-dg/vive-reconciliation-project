@@ -2555,6 +2555,9 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
     intake["printed_total_read_from"] = (detail or {}).get("printed_total_read_from") or []
     # A printed invoice-net line dropped as an extra row (2026-10-21).
     intake["net_line_drops"] = (detail or {}).get("net_line_drops") or []
+    # Full match with no printed total (2026-10-22): rows verified, columns, and the
+    # safety check of every total-like amount the PDF prints.
+    intake["full_match_no_total"] = (detail or {}).get("full_match_no_total")
     printed = intake["statement_total_as_printed"]
     if printed is None and (intake["account_blocks"] or {}).get("passed"):
         printed = intake["account_blocks"].get("printed_total")

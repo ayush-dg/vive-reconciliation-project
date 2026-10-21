@@ -120,6 +120,10 @@
     {% if intake.section_used %}
     <tr id="section-used"><td style="color:var(--text-secondary)">Store section checked</td><td>{{ intake.section_used.section }}: {{ intake.section_used.rows }} of {{ intake.section_used.invoices }} invoices, Amount Due {{ intake.section_used.amount_due | money }} <span style="color:var(--text-secondary)">({{ intake.lines_ignored | length }} printed line{{ "" if intake.lines_ignored | length == 1 else "s" }} of other sections set aside{% if intake.lines_ignored %}: {{ intake.lines_ignored | map(attribute="section") | unique | join(", ") }}{% endif %})</span></td></tr>
     {% endif %}
+    {% if intake.full_match_no_total %}
+    {% set fm = intake.full_match_no_total %}
+    <tr id="full-match-no-total"><td style="color:var(--text-secondary)">Full match, no printed total</td><td>{% if fm.passed %}{{ fm.full_match.rows_verified }} of {{ fm.full_match.rows }} rows and {{ fm.full_match.columns | length }} columns matched cell by cell{% else %}Did not pass: {{ fm.reason }}{% endif %}{% if fm.safety %} <span style="color:var(--text-secondary)">(printed totals checked: {% if fm.safety.total_like_amounts %}{% for a in fm.safety.total_like_amounts %}{{ a.label }}{% if a.page %} p{{ a.page }}{% endif %} {{ a.amount | money }}{% if not loop.last %}, {% endif %}{% endfor %} -- {{ fm.safety.result }}{% else %}none printed{% endif %})</span>{% endif %}</td></tr>
+    {% endif %}
     {% if intake.opening_balance_line %}
     <tr id="opening-balance-line"><td style="color:var(--text-secondary)">Opening balance line</td><td>{{ intake.opening_balance_line.amount | money }} <span style="color:var(--text-secondary)">(printed alone under Balance on {{ intake.opening_balance_line.date }}, page {{ intake.opening_balance_line.page }}; checked against every other line of the PDF)</span></td></tr>
     {% endif %}
