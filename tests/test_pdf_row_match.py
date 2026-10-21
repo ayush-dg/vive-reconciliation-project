@@ -479,7 +479,7 @@ def schema(invoices, printed, **stmt):
 class TestIntakeRowsOnly(_PdfCase):
 
     def _validate(self, rows, pdf, printed=None):
-        with mock.patch.object(intake(), "_fill_printed_total", return_value=None):
+        with mock.patch.object(intake(), "_fill_printed_total", return_value=(None, None)):
             return intake().apply_arithmetic_validation(schema(rows, printed), "", pdf)
 
     def test_no_printed_total_and_every_row_verified_passes(self):
@@ -525,7 +525,7 @@ class TestIntakeRowsOnly(_PdfCase):
         self.assertEqual(result["detail"]["rows_only"]["status"], "rows_do_not_match")
 
     def test_without_a_pdf_nothing_changes(self):
-        with mock.patch.object(intake(), "_fill_printed_total", return_value=None):
+        with mock.patch.object(intake(), "_fill_printed_total", return_value=(None, None)):
             result = intake().apply_arithmetic_validation(schema(healey_rows(), None), "", None)
         self.assertEqual(result["status"], "total_not_found")
 

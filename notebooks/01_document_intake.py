@@ -78,7 +78,7 @@ from src.validation.arithmetic_gate import (
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
-from src.validation.printed_total import find_printed_total
+from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
 from src.validation import account_blocks, due_column, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
@@ -1218,18 +1218,29 @@ def _validation_text(pdf_text: str, pdf_path, stmt_meta: dict, is_statement: boo
     return (ocr, "ocr") if has_text_layer(ocr) else ("", None)
 
 
-def _fill_printed_total(stmt_meta: dict, text: str, source) -> str:
-    """The printed total read from the text (printed_total.py) when the
-    extraction returned none. Returns the text's source when a total was
-    filled in, else None -- an extracted printed total is never replaced."""
+def _fill_printed_total(stmt_meta: dict, text: str, source, pdf_path=None) -> tuple:
+    """(source, places): the printed total read from the text (printed_total.py)
+    when the extraction returned none. source is the text's source when a total
+    was filled in, else None -- an extracted printed total is never replaced.
+    Only when the text has no total-labelled amount at all, a bare BALANCE /
+    NET DUE box read from the PDF's positioned lines is tried (find_box_total,
+    2026-10-21): source "pdf_box_labels", places = where each amount was read."""
     if stmt_meta.get("statement_total_as_printed") is not None or not text:
-        return None
+        return None, None
     found = find_printed_total(text)
     if found is None:
-        return None
+        if labelled_amounts(text):
+            return None, None  # the labels disagree: no total, as before
+        box = find_box_total(pdf_path)
+        if box is None:
+            return None, None
+        stmt_meta["statement_total_as_printed"] = box["amount"]
+        print(f"  Printed total read from {len(box['places'])} box labels on the PDF: {box['amount']:,.2f} ("
+              + ", ".join(f"{p['label']} p{p['page']}" for p in box["places"]) + ")")
+        return "pdf_box_labels", box["places"]
     stmt_meta["statement_total_as_printed"] = found
     print(f"  Printed total read from the {source.replace('_', ' ')}: {found:,.2f}")
-    return source
+    return source, None
 
 
 def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source) -> tuple:
@@ -1506,7 +1517,8 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
         stmt_meta["statement_total_computed"] = column_total
     is_statement = schema_result.get("document_metadata", {}).get("document_type") != NOT_A_STATEMENT
     text, text_source = _validation_text(pdf_text, pdf_path, stmt_meta, is_statement)
-    printed_source = _fill_printed_total(stmt_meta, text, text_source) if is_statement else None
+    printed_source, printed_places = (_fill_printed_total(stmt_meta, text, text_source, pdf_path) if is_statement
+                                      else (None, None))
     previous_balance, ocr_previous_balance = _resolve_previous_balance(stmt_meta, pdf_text, text, text_source)
     if not is_statement:
         validation = {
@@ -1553,6 +1565,7 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
             validation, schema_result.get("invoices") or [],
             vendor_id=resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")))
         sources = {k: v for k, v in (("printed_total_source", printed_source),
+                                       ("printed_total_read_from", printed_places),
                                        ("text_source", "ocr" if text_source == "ocr" else None)) if v}
         if sources:
             validation["detail"] = {**(validation.get("detail") or {}), **sources}

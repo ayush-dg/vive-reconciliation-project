@@ -2550,6 +2550,9 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
     # with several account statements, each with its own printed total. Their
     # sum is the result's printed total; the statement keeps none of its own.
     intake["account_blocks"] = (detail or {}).get("account_blocks")
+    # Where a printed total read from bare BALANCE / NET DUE boxes was found
+    # (2026-10-21): [{"page", "label", "amount", "read"}].
+    intake["printed_total_read_from"] = (detail or {}).get("printed_total_read_from") or []
     printed = intake["statement_total_as_printed"]
     if printed is None and (intake["account_blocks"] or {}).get("passed"):
         printed = intake["account_blocks"].get("printed_total")

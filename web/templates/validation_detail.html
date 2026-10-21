@@ -79,6 +79,7 @@
     {% set blocks_total = intake.account_blocks.printed_total if intake.account_blocks and intake.account_blocks.passed else none %}
     <div class="kpi-value">{{ intake.statement_total_as_printed | money if intake.statement_total_as_printed is not none else (blocks_total | money if blocks_total is not none else "—") }}</div>
     {% if intake.statement_total_as_printed is none and blocks_total is not none %}<div class="kpi-sub">Sum of {{ intake.account_blocks.blocks | length }} account blocks' printed totals</div>{% endif %}
+    {% if intake.printed_total_read_from %}<div class="kpi-sub" id="printed-total-read-from">Read from the PDF: {% for p in intake.printed_total_read_from %}{{ p.label }} p{{ p.page }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
   </div>
   <div class="kpi">
     <div class="kpi-label">Extracted amount sum</div>
