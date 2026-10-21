@@ -79,7 +79,7 @@ from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
-from src.validation import account_blocks, due_column, text_columns
+from src.validation import account_blocks, due_column, net_lines, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1354,7 +1354,8 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     if validation.get("status") != "mismatch":
         return validation
     if not text_columns.enabled():
-        return _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path)
+        return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
+                                                                       pdf_path), pdf_text, pdf_path)
     printed = validation.get("printed")
     plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
     reason = plan["reason"]
@@ -1387,7 +1388,8 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     validation["detail"] = {**(validation.get("detail") or {}),
                             "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
     schema_result["validation"] = validation
-    return _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path)
+    return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
+                                                                       pdf_path), pdf_text, pdf_path)
 
 
 def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
@@ -1431,6 +1433,42 @@ def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text:
     if reason != due_column.NOT_APPLICABLE:
         validation["detail"] = {**(validation.get("detail") or {}),
                                 "due_column_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
+    return validation
+
+
+def _try_net_line_drop(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """The last correction (src/validation/net_lines.py, 2026-10-21; NET_LINE_DROP_ENABLED=false switches
+    it off): on a statement that still fails, ONE row with no invoice / reference / description whose
+    amount is the exact net of the invoice rows directly above it -- printed on the PDF as a line with
+    nothing before the amount, under the invoice's last row, and repeated with the invoice on the
+    remittance stub -- is dropped, but ONLY if the whole gate then passes (tried on a copy first).
+    The drop is recorded in detail["net_line_drops"]; otherwise detail["net_line_check"] says why."""
+    if validation.get("status") != "mismatch" or not net_lines.enabled():
+        return validation
+    plan = net_lines.plan_net_line_drop(schema_result.get("invoices") or [], pdf_path)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = net_lines.plan_net_line_drop(trial.get("invoices") or [], pdf_path)
+        if trial_plan["applicable"] and net_lines.apply_net_line_drop(trial["invoices"], trial_plan):
+            trial.setdefault("statement_metadata", {})["statement_total_computed"] =                 compute_statement_total_from_invoices(trial.get("invoices") or [])
+            with contextlib.redirect_stdout(io.StringIO()):
+                trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+            if trial_validation.get("status") == "matches":
+                drop = net_lines.record(plan)
+                net_lines.apply_net_line_drop(schema_result["invoices"], plan)
+                schema_result.setdefault("statement_metadata", {})["statement_total_computed"] =                     compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+                print(f"  Net line dropped: row {drop['row_number']} {drop['amount']:,.2f} (dated {drop['date_extracted']}) "
+                      f"is the net of invoice {drop['invoice_number']}'s rows above it, printed with nothing before it "
+                      f"(p{drop['page']}) and again with the invoice on the stub. Re-validating.")
+                validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+                validation["detail"] = {**(validation.get("detail") or {}), "net_line_drops": [drop]}
+                schema_result["validation"] = validation
+                return validation
+            reason = f"the rows without it still do not pass (status {trial_validation.get('status')})"
+    if reason != net_lines.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}), "net_line_check": {"applied": False, "reason": reason}}
         schema_result["validation"] = validation
     return validation
 

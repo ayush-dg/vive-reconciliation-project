@@ -235,6 +235,31 @@
 </table>
 {% endif %}
 {% endif %}
+{% if intake.net_line_drops %}
+<div class="section-header">
+  <div class="section-title">Invoice-net line removed</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="net-line-drops">
+  {{ intake.net_line_drops | length }} extracted row{{ "" if intake.net_line_drops | length == 1 else "s" }} had no invoice, reference or description and equalled the net of one invoice's rows directly above it. The PDF prints that amount on a line of its own (nothing before it) and again with the invoice on the remittance stub, so the row is the invoice's printed net, not a transaction. The statement passed only after it was removed.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Amount</th><th>Date (extracted)</th><th>Invoice it nets</th><th>Rows netted</th><th>Printed line</th></tr>
+  </thead>
+  <tbody>
+    {% for d in intake.net_line_drops %}
+    <tr>
+      <td>{{ d.row_number }}</td>
+      <td>{{ d.amount | money }}</td>
+      <td>{{ d.date_extracted or "—" }}</td>
+      <td>{{ d.invoice_number }}</td>
+      <td>{% for r in d.nets_rows %}row {{ r.row_number }} {{ r.amount | money }}{% if not loop.last %} + {% endif %}{% endfor %}</td>
+      <td>p{{ d.page }}: {{ d.printed_line }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% if intake.invoice_balance and intake.invoice_balance.flags %}
 <div class="section-header">
   <div class="section-title">Invoice balance check</div>
