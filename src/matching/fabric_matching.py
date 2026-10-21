@@ -735,14 +735,20 @@ def _shape_target(shape: dict) -> tuple:
     return (shape["charge_amt"] or shape["credit_amt"] or shape["payment_amt"]), None
 
 
-def run_fabric_matching(statement_id: str, dry_run: bool = False) -> dict:
+def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time: bool = False) -> dict:
     """Best-effort: never raises. Returns a summary dict; check
     result.get("error") for a description of what went wrong, if anything.
 
     dry_run=True reads everything and decides every line exactly as a real
     run would, but writes nothing (no DELETE, no INSERT, no recon table) and
     returns the rows it would have written under "would_write" --
-    scripts/dry_run_matching.py compares two such runs."""
+    scripts/dry_run_matching.py compares two such runs.
+
+    keep_run_time=True (re-matching a stored statement, 2026-10-21) reuses
+    the statement's existing reconciliation_timestamp for every row written,
+    so the statement stays on its original day in the Home/Exceptions date
+    filters and its exceptions keep their age. Ignored when there is no
+    earlier result."""
     if not _fabric_configured():
         logger.debug("Fabric not configured -- skipping Fabric NetSuite matching")
         return {"skipped": True, "reason": "fabric_not_configured"}
@@ -761,6 +767,8 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False) -> dict:
         shop = header["shop_name_raw"]
         shop_owner = get_shop_owner(vendor_id)
         now = datetime.now(timezone.utc).isoformat()
+        if keep_run_time:
+            now = _previous_run_time(wh_cur, statement_id) or now
 
         # Idempotent: a re-run of the same statement_id (e.g. after fixing
         # a matching rule) replaces its prior results rather than
@@ -1204,6 +1212,18 @@ def _write_recon_rows(statement: dict, all_lines: list, results: dict, now: str)
         logger.exception("recon table write failed for statement_id=%s (non-fatal)",
                          statement.get("statement_id"))
         return None
+
+
+def _previous_run_time(cur, statement_id):
+    """The statement's current recon_summary.reconciliation_timestamp, as
+    written (ISO text), or None."""
+    cur.execute("SELECT TOP 1 reconciliation_timestamp FROM silver.recon_summary WHERE statement_id = ? "
+                "ORDER BY reconciliation_timestamp DESC", [statement_id])
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    value = row[0]
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
 def _has_prior_results(cur, statement_id) -> bool:

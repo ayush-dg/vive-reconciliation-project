@@ -130,6 +130,27 @@ class CreditContainingInvoiceTests(unittest.TestCase):
         self.assertIsNone(fm._credit_containing_invoice(self._credits(**{"cm1234x": [10.0]}), "1234", 10.0))
 
 
+class PreviousRunTimeTests(unittest.TestCase):
+    class _Cur:
+        def __init__(self, row):
+            self.row, self.sql = row, None
+
+        def execute(self, sql, params):
+            self.sql = sql
+
+        def fetchone(self):
+            return self.row
+
+    def test_the_stored_timestamp_is_reused(self):
+        from datetime import datetime
+        cur = self._Cur((datetime(2026, 10, 13, 13, 42, 19),))
+        self.assertEqual(fm._previous_run_time(cur, "STMT-1"), "2026-10-13T13:42:19")
+        self.assertIn("silver.recon_summary", cur.sql)
+
+    def test_no_earlier_result_gives_none(self):
+        self.assertIsNone(fm._previous_run_time(self._Cur(None), "STMT-1"))
+
+
 class SwitchTests(unittest.TestCase):
     def test_on_by_default_and_off_with_false(self):
         with mock.patch.dict(os.environ, {}, clear=False):
