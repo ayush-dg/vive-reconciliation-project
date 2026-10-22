@@ -2649,6 +2649,38 @@ def get_processing_jobs() -> list:
     )
 
 
+_OPEN_RECON_REASON = {"Amount mismatch": "Amount Mismatch", "Not found in NetSuite": "Not Found in NetSuite",
+                      "Possible duplicate": "Possible Duplicate in NetSuite",
+                      "Vendor not resolved": "Vendor Not Resolved in NetSuite"}
+
+
+def get_recon_card_status() -> dict:
+    """{statement_id: {"exceptions": open, "reasons": {reason: open n},
+    "resolved": n, "matched": lines}} from the recon table, for every statement
+    that has rows there -- the Statement Processing list cards (2026-10-22),
+    so they say the same as the detail page. One grouped query; exceptions
+    are counted once each (by id). {} when the table can't be read."""
+    try:
+        rows = execute_query(
+            "SELECT statement_id, status, COUNT(DISTINCT exception_id) AS exc, COUNT(*) AS n "
+            "FROM recon WHERE is_active = 1 GROUP BY statement_id, status")
+    except Exception:
+        return {}
+    out = {}
+    for r in rows:
+        card = out.setdefault(r["statement_id"], {"exceptions": 0, "reasons": {}, "resolved": 0, "matched": 0})
+        status = r["status"]
+        if status in _OPEN_RECON_REASON:
+            reason = _OPEN_RECON_REASON[status]
+            card["reasons"][reason] = card["reasons"].get(reason, 0) + (r["exc"] or 0)
+            card["exceptions"] += r["exc"] or 0
+        elif status in ("Accepted", "Rejected"):
+            card["resolved"] += r["exc"] or 0
+        elif status in ("Matched", "Matched manually"):
+            card["matched"] += r["n"] or 0
+    return out
+
+
 def get_recon_rows(statement_id: str) -> list:
     """The statement's active recon rows (auto + manual), or [] when it has
     none yet or the table can't be read -- Statement Processing then falls

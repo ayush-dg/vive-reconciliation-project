@@ -36,9 +36,14 @@ def _alongside(fabric_call, *azure_sql_calls):
 
 @router.get("/validation")
 def validation_list(request: Request, user: str = Depends(require_login)):
-    recon, (intake_rows, jobs, outlook_jobs) = _alongside(
+    recon, (intake_rows, jobs, outlook_jobs, recon_cards) = _alongside(
         queries.get_recon_status,
-        queries.get_validation_report, queries.get_processing_jobs, queries.get_outlook_synced_jobs)
+        queries.get_validation_report, queries.get_processing_jobs, queries.get_outlook_synced_jobs,
+        queries.get_recon_card_status)
+    # Statements with recon-table rows show their CURRENT open/resolved counts
+    # from there (2026-10-22), the same as the detail page; the rest keep
+    # the stored matching results.
+    recon = {**recon, **{sid: status for sid, status in recon_cards.items() if sid in recon}}
     cards = sp.build_cards(intake_rows, jobs, recon)
 
     # "Last run" dropdown (2026-09-30) -- same Outlook-sync definitions as
@@ -125,7 +130,8 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
     if intake:
         recon = None
         if summary is not None and recon_rows:
-            recon = {"exceptions": lines_view["tiles"]["open"], "reasons": lines_view["open_reasons"]}
+            recon = {"exceptions": lines_view["tiles"]["open"], "reasons": lines_view["open_reasons"],
+                     "resolved": lines_view["tiles"]["resolved"]}
         elif summary is not None:
             recon = {"exceptions": summary.get("exception_count") or 0,
                      "reasons": dict(Counter(e.get("exception_reason") or "Other" for e in exceptions))}

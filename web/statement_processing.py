@@ -92,11 +92,20 @@ def intake_card(intake: dict, job: dict = None, recon: dict = None) -> dict:
     job_status = (job or {}).get("status")
     note, tone = "", None
     if recon is not None:
-        n = recon.get("exceptions") or 0
-        reconciliation = (_stage("Reconciliation", "warn", _plural(n, "exception")) if n
-                          else _stage("Reconciliation", "ok", "Done"))
+        # recon["resolved"] (2026-10-22, from the recon table): exceptions a
+        # reviewer already accepted/rejected -- then "exceptions" and
+        # "reasons" are the OPEN ones only, and the card says both.
+        n, resolved = recon.get("exceptions") or 0, recon.get("resolved") or 0
+        done = f"{resolved} resolved"
         if n:
-            note, tone = reason_summary(recon.get("reasons")) or f"{_plural(n, 'exception')}.", "w"
+            label = f"{n} open · {done}" if resolved else _plural(n, "exception")
+            reconciliation = _stage("Reconciliation", "warn", label)
+            note = reason_summary(recon.get("reasons")) or f"{_plural(n, 'exception')}."
+            if resolved:
+                note = f"{note[:-1]} ({done})." if note.endswith(".") else f"{note} ({done})"
+            tone = "w"
+        else:
+            reconciliation = _stage("Reconciliation", "ok", f"Done · {done}" if resolved else "Done")
     elif passed and job_status in ACTIVE_JOB:
         reconciliation = _stage("Reconciliation", "run", "Running")
         note, tone = "Reconciling against NetSuite.", "r"

@@ -191,6 +191,25 @@ class TestLineResults(unittest.TestCase):
         self.assertEqual([(r["status"], r["shared"]) for r in out["rows"]], [("matched", False), ("matched", True)])
 
 
+class TestCardWithResolved(unittest.TestCase):
+    """List cards read the recon table's open/resolved counts (2026-10-22)."""
+    INTAKE = {"statement_id": "S1", "validation_status": "matches", "vendor_name": "Columbia Ford"}
+
+    def test_open_and_resolved_are_both_said(self):
+        card = sp.intake_card(self.INTAKE, None, {"exceptions": 1, "reasons": {"Not Found in NetSuite": 1},
+                                                  "resolved": 1})
+        self.assertEqual(card["stages"][2]["label"], "1 open · 1 resolved")
+        self.assertEqual(card["note"], "1 invoice not found in NetSuite (1 resolved).")
+
+    def test_everything_resolved_is_done(self):
+        card = sp.intake_card(self.INTAKE, None, {"exceptions": 0, "reasons": {}, "resolved": 2})
+        self.assertEqual((card["stages"][2]["state"], card["stages"][2]["label"]), ("ok", "Done · 2 resolved"))
+
+    def test_without_resolved_it_reads_as_before(self):
+        card = sp.intake_card(self.INTAKE, None, {"exceptions": 2, "reasons": {"Not Found in NetSuite": 2}})
+        self.assertEqual((card["stages"][2]["label"], card["note"]), ("2 exceptions", "2 invoices not found in NetSuite."))
+
+
 class TestReconView(unittest.TestCase):
     """The Reconciliation tab read from the recon table only (2026-10-22)."""
 
