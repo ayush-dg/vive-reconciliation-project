@@ -1062,6 +1062,13 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
                 "matched": matched_count, "exceptions": exception_count,
                 "vendor_id": vendor_id, "lines": len(all_lines),
                 "would_write": {table: rows for table, (_, rows) in writes._rows.items()},
+                # The recon rows a real run would write (exception ids are this
+                # dry run's own) -- scripts/backfill_recon.py links them to the
+                # stored exceptions.
+                "recon_rows": build_auto_rows(
+                    {"statement_id": statement_id, "vendor_id": vendor_id, "vendor_name": vendor_name,
+                     "statement_period": header.get("statement_period")},
+                    all_lines, recon_results, now),
                 "set_aside": [(l.get("line_number"), l.get("invoice_number"), l.get("_recon_note"),
                                _rounded(abs(line_amount(l))) if line_amount(l) is not None else None)
                               for l in all_lines if l.get("_recon_note")],
