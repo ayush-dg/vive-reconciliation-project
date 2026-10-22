@@ -45,6 +45,8 @@ def _exception_key(invoice, reason, amount):
 
 FALLBACK_RULE = "backfill: paired with the stored result"
 FALLBACK_NOTE = "not checked against NetSuite on its own (backfilled from the stored results)"
+COVERED_NOTE = ("set aside: invoice {invoice}'s result is on line {line} -- this line is a reprint/payment "
+                "of it (backfilled from the stored results)")
 
 
 def _same_invoice(line_inv, result_inv, exact_only=False) -> bool:
@@ -61,9 +63,12 @@ def paired_rows(fm, recon_table, statement_id, stored_matches, stored_exceptions
     no longer reproduces (NetSuite changed since): every Silver line paired
     with its stored match/exception by invoice and amount -- exactly as
     Statement Processing shows it -- so recon agrees with the Exceptions page.
-    A line no stored result pairs with shares its invoice's result when it has
-    one, else is set aside with FALLBACK_NOTE. No NetSuite record ids (the
-    stored results don't have them)."""
+    A line no stored result pairs with is set aside when its invoice's result
+    already sits on another line (Fred Beans' '99 57' reprints of a matched
+    '65 35' charge, 2026-10-22); it shares its invoice's result only when no
+    line holds that result (an invoice matched as a whole), else it is set
+    aside with FALLBACK_NOTE. No NetSuite record ids (the stored results
+    don't have them)."""
     cur = fm.get_warehouse_connection().cursor()
     header = fm._fetch_statement(cur, statement_id)
     lines = fm._fetch_lines(cur, statement_id)
@@ -87,10 +92,20 @@ def paired_rows(fm, recon_table, statement_id, stored_matches, stored_exceptions
     by_invoice = {}
     for kind, result in results:
         by_invoice.setdefault(str(result.get("invoice_number") or "").lower(), (kind, result))
+    # Which line already carries a result for each invoice number.
+    holder = {}
+    for line in lines:
+        if line["statement_line_id"] in own:
+            holder.setdefault(str(line.get("invoice_number") or "").lower(), line.get("line_number"))
 
     per_line = {}
     for line in lines:
-        pair = own.get(line["statement_line_id"]) or by_invoice.get(str(line.get("invoice_number") or "").lower())
+        inv = str(line.get("invoice_number") or "").lower()
+        pair = own.get(line["statement_line_id"])
+        if not pair and inv in holder:
+            line["_recon_note"] = COVERED_NOTE.format(invoice=line.get("invoice_number"), line=holder[inv])
+            continue
+        pair = pair or by_invoice.get(inv)
         if not pair:
             line["_recon_note"] = FALLBACK_NOTE
             continue

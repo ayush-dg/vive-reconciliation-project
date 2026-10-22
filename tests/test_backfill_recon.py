@@ -157,6 +157,16 @@ class FallbackTests(unittest.TestCase):
               "statement_amount": 50.0, "erp_amount": None, "exception_status": "OPEN"}])
         return bf.plan_statement(fm, _FakeRecon(), queries, "STMT-1", fallback=fallback)
 
+    def test_an_invoice_matched_as_a_whole_still_shares_its_result(self):
+        # No line carries the amount of the stored result (a per-invoice total):
+        # every line of that invoice shares it.
+        fm = self._FM([_match_row("Z9", 1.0)], [], [])
+        fm.lines = [{"statement_line_id": "L1", "line_number": 1, "invoice_number": "A1", "charge_amount": 60.0},
+                    {"statement_line_id": "L2", "line_number": 2, "invoice_number": "A1", "charge_amount": 40.0}]
+        queries = _FakeQueries([{"invoice_number": "A1", "statement_amount": 100.0, "erp_amount": 100.0}], [])
+        rows, _ = bf.plan_statement(fm, _FakeRecon(), queries, "STMT-1", fallback=True)
+        self.assertEqual([r["status"] for r in rows], [recon_table.STATUS_MATCHED] * 2)
+
     def test_without_fallback_it_is_skipped(self):
         rows, report = self._plan(False)
         self.assertIsNone(rows)
@@ -167,7 +177,9 @@ class FallbackTests(unittest.TestCase):
         by_line = {r["line_number"]: r for r in rows}
         self.assertEqual(by_line[1]["status"], recon_table.STATUS_MATCHED)
         self.assertEqual((by_line[2]["status"], by_line[2]["exception_id"]), ("Not found in NetSuite", "real-9"))
-        self.assertEqual(by_line[3]["status"], recon_table.STATUS_MATCHED)   # shares invoice A1's match
+        # Line 3 is another line of A1, whose match already sits on line 1 -> set aside.
+        self.assertEqual(by_line[3]["status"], recon_table.STATUS_NOT_RECONCILED)
+        self.assertIn("result is on line 1", by_line[3]["note"])
         self.assertEqual(by_line[4]["status"], recon_table.STATUS_NOT_RECONCILED)
         self.assertEqual(by_line[4]["note"], bf.FALLBACK_NOTE)
         self.assertEqual(by_line[1]["created_at"], "2026-10-14T15:02:21")
