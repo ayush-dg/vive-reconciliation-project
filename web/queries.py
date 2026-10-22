@@ -9,6 +9,7 @@ SQL abstraction). Routers stay thin; this module owns the SQL.
 
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -40,6 +41,8 @@ from src.matching.engine import score_exception_confidence, score_overall_status
 from src.shop_owners import get_shop_owner
 from src.vendor_identity import display_name as vendor_display_name
 from web.time_window import TimeWindow
+
+logger = logging.getLogger(__name__)
 
 REASON_LABELS = {
     "Invoice Missing": "missing",
@@ -210,8 +213,13 @@ def get_outlook_synced_jobs() -> list:
     the exact same definition."""
     # job_id (2026-10-16): Statement Processing places a failed extraction --
     # a job with no statement_id -- in its sync by job.
+    # Duplicates are left out (2026-10-20): a re-sent PDF that was already
+    # processed adds nothing, so it isn't counted in a sync, a sync of only
+    # duplicates isn't listed, and it never moves its original statement
+    # into the later sync.
     return execute_query(
         "SELECT job_id, submitted_at, statement_id, status FROM jobs WHERE source_blob_path IS NOT NULL "
+        "AND (error_message IS NULL OR error_message NOT LIKE 'Duplicate of%') "
         "ORDER BY submitted_at DESC"
     )
 
@@ -1263,6 +1271,123 @@ def resolve_exception(exception_id: str, statement_id: str, vendor_name: str,
         [now, exception_id],
     )
     _recompute_summary_counts(statement_id)
+    # The recon table (src/lakehouse/recon_table.py, 2026-10-19): this
+    # invoice's lines become Accepted / Rejected. Best-effort -- never
+    # blocks resolving the exception itself.
+    try:
+        from src.lakehouse.recon_table import mark_resolved
+        mark_resolved(statement_id, invoice_number, disposition_status, disposed_by, notes)
+    except Exception:
+        logger.exception("recon table update failed for %s / %s (non-fatal)", statement_id, invoice_number)
+
+
+def get_recon_exception(exception_id: str):
+    """One silver.recon_exceptions row, or None."""
+    rows = recon_query("SELECT * FROM silver.recon_exceptions WHERE exception_id = ?", [exception_id])
+    return rows[0] if rows else None
+
+
+def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepted_by: str,
+                        note: str = None) -> None:
+    """"Accept as match" (2026-10-19): the person picked NetSuite `record`
+    (a netsuite_search row, re-read by internal id) for this OPEN exception.
+    The recon table gets Matched-manually rows first -- so a conflict
+    (record already matched elsewhere) stops here before anything is
+    resolved -- then the exception is resolved like Accept, with the match
+    in its note. If resolving fails, the recon rows are undone again.
+    NetSuite itself is not written here (that's the NetSuite step)."""
+    from src.lakehouse import recon_table
+    statement_id, invoice_number = exception["statement_id"], exception["invoice_number"]
+    recon_table.accept_manual_match(
+        statement_id, invoice_number, exception["exception_id"], exception.get("exception_reason"),
+        exception.get("statement_amount"), record, accepted_by, note,
+        vendor_id=exception.get("vendor_id"), vendor_name=vendor_name,
+    )
+    match_note = f"Matched to NetSuite {record['record_type'].lower()} {record.get('tranid')}"
+    try:
+        resolve_exception(exception["exception_id"], statement_id, vendor_name, invoice_number,
+                          exception.get("exception_reason"), "ACCEPTED",
+                          f"{match_note}. {note}" if note else match_note, accepted_by)
+    except Exception:
+        recon_table.undo_manual_match(statement_id, invoice_number, accepted_by)
+        raise
+    return _write_manual_match_to_netsuite(exception, record, vendor_name)
+
+
+def _write_manual_match_to_netsuite(exception: dict, record: dict, vendor_name: str) -> dict:
+    """The NetSuite sandbox write for an accepted manual match
+    (src/netsuite/manual_match.py), with its outcome saved on the recon rows.
+    Best-effort: the match and the resolution are already saved, so a
+    NetSuite problem is reported, never raised."""
+    from src.lakehouse import recon_table
+    from src.netsuite.manual_match import STATUS_FAILED, write_manual_match
+    statement_id, invoice_number = exception["statement_id"], exception["invoice_number"]
+    try:
+        from src.matching.netsuite_vendor_resolver import resolve_entity_ids
+        entity_ids = resolve_entity_ids(exception.get("vendor_id") or "", vendor_name or "") or []
+    except Exception:
+        entity_ids = []
+    result = write_manual_match(statement_id, invoice_number, exception.get("statement_amount"), record,
+                                statement_entity_ids=[str(e) for e in entity_ids], shop=exception.get("shop"))
+    try:
+        recon_table.set_writeback(statement_id, invoice_number, result)
+    except Exception:
+        logger.exception("saving the NetSuite outcome failed for %s / %s", statement_id, invoice_number)
+        result = dict(result, status=result.get("status") or STATUS_FAILED)
+    return result
+
+
+def undo_manual_match(statement_id: str, invoice_number: str, vendor_name: str, undone_by: str) -> bool:
+    """Undo of "Accept as match": the recon table's manual rows become
+    history and the invoice's lines get their exception status back; each
+    exception the match resolved is OPEN again, with a PENDING disposition
+    recording the undo. Returns False when there was nothing to undo."""
+    from src.lakehouse import recon_table
+    # NetSuite first (src/netsuite/manual_match.py): put back what the
+    # accept wrote, then record the outcome on the rows before they become
+    # history. Best-effort -- the app-side undo always goes ahead.
+    try:
+        before = recon_table.manual_writeback_before(statement_id, invoice_number)
+        if before:
+            from src.netsuite.manual_match import undo_manual_match_writes
+            ns_undo = undo_manual_match_writes(before)
+            recon_table.set_writeback(statement_id, invoice_number, {
+                "status": f"undo: {ns_undo['status']}", "detail": ns_undo["detail"],
+                "statement_line_id": None, "before": before})
+    except Exception:
+        logger.exception("NetSuite undo failed for %s / %s (non-fatal)", statement_id, invoice_number)
+    undone = recon_table.undo_manual_match(statement_id, invoice_number, undone_by)
+    if not undone:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    for exception_id in undone["exception_ids"]:
+        recon_sql(
+            "UPDATE silver.recon_exceptions SET exception_status = 'OPEN', date_resolved = NULL WHERE exception_id = ?",
+            [exception_id],
+        )
+        execute_sql(
+            """
+            INSERT INTO exception_dispositions (
+                exception_id, statement_id, vendor_name, invoice_number, reason_code,
+                disposition_status, disposition_notes, disposed_by, disposed_at
+            ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+            """,
+            [exception_id, statement_id, vendor_name, invoice_number, None,
+             f"Undo: manual match to NetSuite {undone.get('tranid')} removed", undone_by, now],
+        )
+    _recompute_summary_counts(statement_id)
+    return True
+
+
+def get_manual_matches(statement_id: str) -> list:
+    """Active manual matches on a statement for the review page; [] when the
+    recon table can't be read (the page must still load)."""
+    try:
+        from src.lakehouse.recon_table import manual_matches
+        return manual_matches(statement_id) if statement_id else []
+    except Exception:
+        logger.exception("reading manual matches failed for %s (non-fatal)", statement_id)
+        return []
 
 
 def escalate_exception(exception_id: str, escalated_by: str) -> None:
@@ -1463,6 +1588,77 @@ def get_archived_pdf_for_document_hash(document_hash: str):
         [document_hash],
     )
     return rows[0] if rows else None
+
+
+def get_archived_pdf_for_statement(statement_id: str):
+    """The archived blob URL and original filename for a statement's PDF,
+    found by statement id -- or None. Tries the intake log row first; a
+    statement whose extraction was reused from an earlier identical upload
+    can have no intake row of its own, so it falls back to the job's
+    document_hash. Backs the short /statements/<statement id>/<name>.pdf
+    link the NetSuite write-back stores."""
+    rows = execute_query(
+        """
+        SELECT blob_storage_path, original_filename FROM document_intake_log
+        WHERE statement_id = ? AND blob_storage_path IS NOT NULL
+        ORDER BY uploaded_at DESC
+        """,
+        [statement_id],
+    )
+    if rows:
+        return rows[0]
+    jobs = execute_query(
+        "SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL",
+        [statement_id],
+    )
+    return get_archived_pdf_for_document_hash(jobs[0]["document_hash"]) if jobs else None
+
+
+def _mailbox_pdf(rows):
+    if not rows:
+        return None
+    return {"mailbox_blob_path": rows[0]["source_blob_path"], "original_filename": rows[0]["pdf_filename"]}
+
+
+def get_mailbox_pdf_for_statement(statement_id: str):
+    """The mailbox raw blob a statement's PDF came in as -- or None. Every
+    mailbox job keeps its source_blob_path, so this finds the PDF even where
+    nothing was archived (prod has no archive storage before 2026-10-20). A
+    duplicate re-upload's job carries the statement id too, so any job of the
+    statement, or of the same file (document_hash), will do."""
+    return _mailbox_pdf(execute_query(
+        """
+        SELECT source_blob_path, pdf_filename FROM jobs
+        WHERE source_blob_path IS NOT NULL
+          AND (statement_id = ? OR document_hash IN
+               (SELECT document_hash FROM jobs WHERE statement_id = ? AND document_hash IS NOT NULL))
+        ORDER BY submitted_at DESC
+        """,
+        [statement_id, statement_id],
+    ))
+
+
+def get_mailbox_pdf_for_document_hash(document_hash: str):
+    """As get_mailbox_pdf_for_statement, by the file's SHA-256."""
+    return _mailbox_pdf(execute_query(
+        """
+        SELECT source_blob_path, pdf_filename FROM jobs
+        WHERE source_blob_path IS NOT NULL AND document_hash = ?
+        ORDER BY submitted_at DESC
+        """,
+        [document_hash],
+    ))
+
+
+def get_statement_pdf(statement_id: str):
+    """Where to read a statement's PDF from: the archived copy, else the
+    mailbox blob it arrived as ({"mailbox_blob_path": ...}), else None."""
+    return get_archived_pdf_for_statement(statement_id) or get_mailbox_pdf_for_statement(statement_id)
+
+
+def get_statement_pdf_for_document_hash(document_hash: str):
+    """As get_statement_pdf, by the file's SHA-256."""
+    return get_archived_pdf_for_document_hash(document_hash) or get_mailbox_pdf_for_document_hash(document_hash)
 
 
 def list_users() -> list:
@@ -2451,6 +2647,66 @@ def get_processing_jobs() -> list:
         "SELECT job_id, pdf_filename, status, statement_id, vendor_name, error_message, "
         "submitted_at, completed_at FROM jobs ORDER BY submitted_at DESC"
     )
+
+
+_OPEN_RECON_REASON = {"Amount mismatch": "Amount Mismatch", "Not found in NetSuite": "Not Found in NetSuite",
+                      "Possible duplicate": "Possible Duplicate in NetSuite",
+                      "Vendor not resolved": "Vendor Not Resolved in NetSuite"}
+
+
+def get_recon_card_status() -> dict:
+    """{statement_id: {"exceptions": open, "reasons": {reason: open n},
+    "resolved": n, "matched": lines}} from the recon table, for every statement
+    that has rows there -- the Statement Processing list cards (2026-10-22),
+    so they say the same as the detail page. One grouped query; exceptions
+    are counted once each (by id). {} when the table can't be read."""
+    try:
+        rows = execute_query(
+            "SELECT statement_id, status, COUNT(DISTINCT exception_id) AS exc, COUNT(*) AS n "
+            "FROM recon WHERE is_active = 1 GROUP BY statement_id, status")
+    except Exception:
+        return {}
+    out = {}
+    for r in rows:
+        card = out.setdefault(r["statement_id"], {"exceptions": 0, "reasons": {}, "resolved": 0, "matched": 0})
+        status = r["status"]
+        if status in _OPEN_RECON_REASON:
+            reason = _OPEN_RECON_REASON[status]
+            card["reasons"][reason] = card["reasons"].get(reason, 0) + (r["exc"] or 0)
+            card["exceptions"] += r["exc"] or 0
+        elif status in ("Accepted", "Rejected", "Matched manually"):
+            card["resolved"] += r["exc"] or 0
+        elif status == "Matched":
+            card["matched"] += r["n"] or 0
+    return out
+
+
+def get_recon_rows(statement_id: str) -> list:
+    """The statement's active recon rows (auto + manual), or [] when it has
+    none yet or the table can't be read -- Statement Processing then falls
+    back to the stored matching results."""
+    try:
+        from src.lakehouse import recon_table
+        rows = recon_table.rows_for_statement(statement_id)
+    except Exception:
+        return []
+    return rows if any(r.get("source") == "auto" for r in rows) else []
+
+
+def get_set_aside_lines(statement_id: str) -> dict:
+    """{line_number: note} for the lines matching set aside on purpose (a
+    payment closing its invoice, an exact duplicate) -- from the recon table,
+    so Statement Processing can say "Set aside" instead of "Not reconciled".
+    Empty when the statement has no recon rows (matched before 2026-10-19)
+    or the table can't be read."""
+    try:
+        from src.lakehouse import recon_table
+        rows = recon_table.rows_for_statement(statement_id)
+    except Exception:
+        return {}
+    return {r["line_number"]: r["note"] for r in rows
+            if r.get("source") == recon_table.SOURCE_AUTO and r.get("status") == recon_table.STATUS_NOT_RECONCILED
+            and r.get("note") and r.get("line_number") is not None}
 
 
 def get_latest_job_for_statement(statement_id: str):

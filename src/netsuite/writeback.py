@@ -74,6 +74,9 @@ CAT_NEEDS_REVIEW = "needs review"
 # Why a WRITE that was attempted did not succeed.
 CAT_PERIOD_LOCKED = "period locked"
 CAT_WRITE_FAILED = "failed"
+CAT_HELD_BY_OTHER = "reconciled by another statement"
+# A planned write the run never reached because it stopped early (see _stops_the_run).
+CAT_NOT_ATTEMPTED = "not attempted (run stopped early)"
 CAT_LINK_ONLY_FAILED = "link-only write failed"
 
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
@@ -312,12 +315,24 @@ def skip_category(plan: Plan) -> str:
     return _CATEGORY_BY_ACTION.get(plan.action) or plan.category or CAT_NEEDS_REVIEW
 
 
-def skip_counts(plans: list) -> dict:
-    """{reason: count} over every plan that is not a write."""
+def unattempted_plans(plans: list, results: list) -> list:
+    """The write plans with no result: the run stopped before reaching them.
+    Without this they would vanish -- neither written, failed nor skipped."""
+    attempted = {id(r.plan) for r in results}
+    return [p for p in plans if p.action in WRITE_ACTIONS and id(p) not in attempted]
+
+
+def skip_counts(plans: list, results: list = None) -> dict:
+    """{reason: count} over every plan that was not written. With `results`,
+    the writes the run never reached are counted too."""
     counts = {}
     for plan in plans:
         if plan.action not in WRITE_ACTIONS:
             counts[skip_category(plan)] = counts.get(skip_category(plan), 0) + 1
+    if results is not None:
+        stopped = len(unattempted_plans(plans, results))
+        if stopped:
+            counts[CAT_NOT_ATTEMPTED] = stopped
     return counts
 
 
@@ -430,6 +445,8 @@ def _index_line_dates(lines: list) -> dict:
     from the statement's own lines (silver.statement_line.line_date)."""
     index = {}
     for line in lines:
+        if not line.get("invoice_number"):
+            continue  # payment/summary lines carry no invoice number; nothing to index
         amount = line.get("charge_amount")
         amount = line.get("payment_amount") if amount is None else amount
         date_value = line["line_date"]
@@ -636,6 +653,50 @@ def apply_plan(ns, plan: Plan) -> ApplyResult:
     return result
 
 
+_RECORD_CHANGED_RETRIES = 2
+_RETRY_PAUSE_SECONDS = 2
+
+
+def _is_record_changed(exc) -> bool:
+    """True for NetSuite's optimistic-locking refusal ("Record has been
+    changed"): someone else saved that record after our write began. Two
+    statements covering the same bills, processed at the same moment, hit
+    this."""
+    return "record has been changed" in f"{exc} {getattr(exc, 'body', '') or ''}".lower()
+
+
+def _held_by_another_statement(ns, plan: Plan) -> str:
+    """The statement id now stamped on this bill/credit when it is not ours,
+    else ""."""
+    rows = ns.suiteql(
+        "SELECT t.custbody_statement_reference AS ref FROM transaction t "
+        f"WHERE t.id = {int(plan.record_id)}")
+    held = rows[0].get("ref") if rows else None
+    return held if held and held != plan.fields.get("custbody_statement_reference") else ""
+
+
+def _patch_with_retry(ns, plan: Plan) -> str:
+    """PATCHes the bill/credit, retrying a "Record has been changed"
+    conflict a couple of times. Before each retry the record is re-read: if
+    another statement has stamped it meanwhile, ours must not overwrite
+    that, so its id is returned and nothing more is sent. Returns "" when
+    the write went through."""
+    for attempt in range(_RECORD_CHANGED_RETRIES + 1):
+        try:
+            ns.patch_record(plan.record_type, plan.record_id, plan.fields)
+            return ""
+        except Exception as exc:
+            if not _is_record_changed(exc) or attempt == _RECORD_CHANGED_RETRIES:
+                raise
+            time.sleep(_RETRY_PAUSE_SECONDS)
+            # A link-only plan sends no statement reference, and its bill already carries
+            # THIS statement's result by definition, so "held by another statement" cannot apply.
+            holder = "" if _is_link_only(plan) else _held_by_another_statement(ns, plan)
+            if holder:
+                return holder
+    return ""
+
+
 def _is_period_locked(exc) -> bool:
     """True for NetSuite's refusal to change a transaction in a locked or
     closed accounting period ("You cannot make changes to this period
@@ -651,7 +712,10 @@ def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
             new_id = ns.create_record(STATEMENT_LINE_RECORD, plan.fields)
             problem = _read_back_statement_line(ns, new_id, plan)
             return ApplyResult(plan, not problem, problem or "created", new_id)
-        ns.patch_record(plan.record_type, plan.record_id, plan.fields)
+        holder = _patch_with_retry(ns, plan)
+        if holder:
+            return ApplyResult(plan, False, f"{holder} saved this record first; left as it set it",
+                               plan.record_id, category=CAT_HELD_BY_OTHER)
         problem = _read_back_bill(ns, plan)
         if problem == LINK_NOT_STORED and not _is_link_only(plan):
             # The reconciliation result itself was stored: a link problem must
@@ -678,7 +742,7 @@ def _stops_the_run(result: ApplyResult, attempts_so_far: int) -> bool:
     or permission error at any point, or any other failure on the very
     first write (a bad field or format). A link-only write never stops the
     run (they come last; `attempts_so_far` counts result writes only)."""
-    if result.category == CAT_PERIOD_LOCKED or result.plan.action == PATCH_LINK_ONLY:
+    if result.category in (CAT_PERIOD_LOCKED, CAT_HELD_BY_OTHER) or result.plan.action == PATCH_LINK_ONLY:
         return False
     return result.status_code in _AUTH_STATUS_CODES or attempts_so_far == 1
 
@@ -817,6 +881,26 @@ _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.
                         "logs", "netsuite_writeback")
 
 
+def write_error_log(statement_id: str, exc: Exception) -> str:
+    """Saves why a write-back run failed as a whole (not a single write): a
+    planning or connection error. Without this the only trace was one
+    console line, which is how two Oct 16 statements went unexplained.
+    Returns the path, or "" if the file could not be written."""
+    import traceback
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(_LOG_DIR, f"{statement_id}_{stamp}_ERROR.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"statement_id": statement_id, "failed_at": datetime.now().isoformat(timespec="seconds"),
+                       "error_type": type(exc).__name__, "error": str(exc),
+                       "traceback": traceback.format_exception(type(exc), exc, exc.__traceback__)},
+                      f, indent=2)
+        return path
+    except OSError:
+        return ""
+
+
 def write_apply_log(ns, statement_id: str, results: list, plans: list = None) -> str:
     """Saves exactly what was sent to NetSuite, record by record, so a
     write can be audited -- and undone (build_revert_actions) -- later.
@@ -839,10 +923,40 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
         "record_type": p.record_type, "record_id": p.record_id,
         "reason": skip_category(p), "detail": p.note,
     } for p in (plans or []) if p.action not in WRITE_ACTIONS]
+    not_written += [{
+        "action": p.action, "invoice_number": p.invoice_number,
+        "statement_amount": None if p.statement_amount is None else str(p.statement_amount),
+        "record_type": p.record_type, "record_id": p.record_id,
+        "reason": CAT_NOT_ATTEMPTED, "detail": "the run stopped before this write was attempted",
+    } for p in unattempted_plans(plans or [], results)]
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
                    "applied_at": datetime.now().isoformat(timespec="seconds"),
                    "writes": entries, "failed_counts": failure_counts(results),
                    "not_written": not_written,
-                   "not_written_counts": skip_counts(plans or [])}, f, indent=2, default=str)
+                   "not_written_counts": skip_counts(plans or [], results)}, f, indent=2, default=str)
     return path
+
+
+def write_revert_log(ns, statement_id: str, results: list) -> str:
+    """Saves an undo run -- which records were reset or deleted, and what
+    failed -- next to the apply logs. `results` are (action, ok, detail)
+    tuples from apply_revert(). Returns the path, or "" if it could not be
+    written."""
+    try:
+        os.makedirs(_LOG_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(_LOG_DIR, f"{statement_id}_{stamp}_REVERT.json")
+        reverts = [{
+            "op": a["op"], "record_type": a["record_type"], "record_id": a["record_id"],
+            "invoice_number": a["invoice_number"], "body": a.get("body"), "ok": ok, "detail": detail,
+        } for a, ok, detail in results]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
+                       "reverted_at": datetime.now().isoformat(timespec="seconds"),
+                       "reverted": sum(1 for r in reverts if r["ok"]),
+                       "failed": sum(1 for r in reverts if not r["ok"]),
+                       "reverts": reverts}, f, indent=2, default=str)
+        return path
+    except OSError:
+        return ""

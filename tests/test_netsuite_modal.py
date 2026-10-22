@@ -129,8 +129,8 @@ class TestModalIsLookOnly(unittest.TestCase):
         self.assertNotRegex(rendered, r"\baction\s*=")
 
     def test_results_partial_has_no_checkbox(self):
-        """Rows were selectable via a checkbox until 2026-09-30; that and
-        the footer totals it drove are both gone."""
+        """A row without a NetSuite internal id can't be picked for "Accept
+        as match" (2026-10-19), so it gets no pick checkbox."""
         rendered = templates.get_template(RESULTS_PARTIAL).render(
             result={"rows": [{
                 "record_type": "Bill", "is_credit": False, "tranid": "1", "vendor_name": "V",

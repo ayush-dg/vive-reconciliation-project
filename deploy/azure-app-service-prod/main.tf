@@ -121,6 +121,21 @@ resource "azurerm_storage_container" "mailbox_deployment" {
   container_access_type = "private"
 }
 
+# Archived statement PDFs (src/storage/blob_client.py, intake Step 8 --
+# the web app's AZURE_BLOB_CONNECTION_STRING below). Created by hand
+# 2026-10-20 in the mailbox account (no separate archive account), then
+# brought under Terraform by the import block.
+resource "azurerm_storage_container" "statement_archive" {
+  name                  = var.archive_container_name
+  storage_account_id    = azurerm_storage_account.mailbox.id
+  container_access_type = "private"
+}
+
+import {
+  to = azurerm_storage_container.statement_archive
+  id = "${data.azurerm_resource_group.this.id}/providers/Microsoft.Storage/storageAccounts/vivecollisionprodmbxjo79/blobServices/default/containers/vendor-statements"
+}
+
 resource "azurerm_application_insights" "mailbox_sync" {
   name                = "${var.name_prefix}-mailbox-sync-ai"
   resource_group_name = data.azurerm_resource_group.this.name
@@ -166,6 +181,14 @@ resource "azurerm_function_app_flex_consumption" "mailbox_sync" {
     TARGET_MAILBOX      = var.mailbox_target_mailbox
     MAILBOX_CONTAINER   = var.mailbox_container_name
     WATERMARK_BLOB_PATH = var.mailbox_watermark_blob_path
+
+    # The 30-minute timer (off since 2026-10-20: the mailbox Logic Apps in
+    # deploy/mailbox-logic-app take mail as it lands) and the web app call
+    # it makes after each run. Built from app_service_name, not the web
+    # app resource, which already depends on this Function.
+    AUTO_SYNC_ENABLED       = var.mailbox_auto_sync_enabled ? "true" : "false"
+    WEBAPP_AUTOSYNC_URL     = "https://${var.app_service_name}.azurewebsites.net/mailbox-sync/auto"
+    MAILBOX_AUTOSYNC_SECRET = var.mailbox_autosync_secret
   }
 }
 
@@ -249,11 +272,35 @@ resource "azurerm_linux_web_app" "app" {
     AZURE_CLAUDE_SONNET_DEPLOYMENT = var.claude_sonnet_deployment_name
     AZURE_CLAUDE_DEPLOYMENT        = var.claude_haiku_deployment_name
 
-    # No archival storage account for prod (removed 2026-09-23, not
-    # needed) -- src/storage/blob_client.py's PDF archival step is
-    # best-effort/non-fatal when AZURE_BLOB_CONNECTION_STRING is unset
-    # ("Warning: PDF was not archived to Blob Storage -- continuing
-    # without it"), so this is a safe, deliberate gap, not a bug.
+    # Statement PDF archive (the vendor-statements container above, in the
+    # mailbox account). Prod ran without one from 2026-09-23 to 2026-10-20;
+    # View PDF falls back to the mailbox blob for statements from then.
+    AZURE_BLOB_CONNECTION_STRING = azurerm_storage_account.mailbox.primary_connection_string
+
+    # Lets the mailbox Function / Logic Apps call /mailbox-sync/auto.
+    MAILBOX_AUTOSYNC_SECRET = var.mailbox_autosync_secret
+
+    # NetSuite write-back (sandbox) and Accept as match. The PDF link needs
+    # the SharePoint archive below; APP_PUBLIC_BASE_URL builds app links.
+    NETSUITE_WRITEBACK_ENABLED  = var.netsuite_writeback_enabled ? "true" : "false"
+    NETSUITE_WRITEBACK_PDF_LINK = var.netsuite_writeback_pdf_link ? "true" : "false"
+    SANDBOX_ACCOUNT_ID          = var.sandbox_account_id
+    SANDBOX_CONSUMER_KEY        = var.sandbox_consumer_key
+    SANDBOX_CONSUMER_SECRET     = var.sandbox_consumer_secret
+    SANDBOX_TOKEN_ID            = var.sandbox_token_id
+    SANDBOX_TOKEN_SECRET        = var.sandbox_token_secret
+    APP_PUBLIC_BASE_URL         = "https://${var.app_service_name}.azurewebsites.net/"
+
+    # SharePoint statement archive (src/storage/sharepoint_client.py).
+    SHAREPOINT_ARCHIVE_ENABLED   = var.sharepoint_archive_enabled ? "true" : "false"
+    SHAREPOINT_TENANT_ID         = var.sharepoint_tenant_id
+    SHAREPOINT_CLIENT_ID         = var.sharepoint_client_id
+    SHAREPOINT_CLIENT_SECRET     = var.sharepoint_client_secret
+    SHAREPOINT_SITE_HOSTNAME     = var.sharepoint_site_hostname
+    SHAREPOINT_SITE_PATH         = var.sharepoint_site_path
+    SHAREPOINT_LIBRARY           = var.sharepoint_library
+    SHAREPOINT_BASE_FOLDER       = var.sharepoint_base_folder
+    SHAREPOINT_ALLOW_LIVE_FOLDER = var.sharepoint_allow_live_folder ? "true" : "false"
 
     # Wired to the mailbox-sync Function App provisioned above --
     # web/routers/mailbox_sync.py's "Sync Outlook Now" button calls this.

@@ -806,5 +806,9 @@
   "BENNETTS_AUTO_RECOVERY": {
     "entity_ids": ["152957"],
     "note": "Bennett's Auto Recovery (152957). Added 2026-10-14 from prod Bennetts (M3 Hwy35) / (M3 S Main): NetSuite holds Call # as yy-<call> (26-36498), see fabric_matching._alternate_tranids; 98 of 112 lines tie out, exact amount."
+  },
+  "ASBURY_AUTOMOTIVE_GROUP": {
+    "entity_ids": ["203119"],
+    "note": "Jaguar Land Rover Sudbury (203119). Added 2026-10-19 from HEBWorc0926.pdf (Asbury Automotive Group, Tekion layout, billed to Vive of Worcester): the statement groups its invoices by franchise ('Land Rover Sudbury') and NetSuite holds each franchise as its own vendor, so no vendor carries 'Asbury' in its name and name matching finds nothing. This covers ONLY the Land Rover Sudbury franchise: a statement listing another Asbury franchise needs that franchise's entity added here. The NetSuite tranid equals the printed invoice number as is (71-100428-2, $674.87 ties exactly)."
   }
 }

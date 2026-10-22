@@ -58,6 +58,10 @@ RANGES = ("last", "today", "month_current", "all", "date", "month")
 # 30 minutes the most recent sync is usually empty, so Home and Exceptions
 # opened on an empty page. "Last run" stays one click away as a chip.
 DEFAULT_RANGE = "all"
+# Home opens on "Last run" again (2026-10-20): duplicate re-uploads no longer
+# count as a sync (queries.get_outlook_synced_jobs()), and the mailbox Logic
+# Apps only queue when mail actually lands, so the newest sync is a real one.
+HOME_DEFAULT_RANGE = "last"
 
 
 @dataclass(frozen=True)
@@ -262,10 +266,12 @@ def month_options(timestamps) -> list:
 
 
 def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
-                   timestamps=(), outlook_jobs=(), now: datetime = None, sync_: str = None) -> TimeWindow:
+                   timestamps=(), outlook_jobs=(), now: datetime = None, sync_: str = None,
+                   default: str = DEFAULT_RANGE) -> TimeWindow:
     """URL params -> TimeWindow. ?date= alone implies range=date and
     ?month= alone range=month. Anything unknown or malformed falls back to
-    the default (DEFAULT_RANGE, "all" since 2026-10-14). `now` is injectable for tests only.
+    the default (`default`: DEFAULT_RANGE, "all" since 2026-10-14; Home
+    passes HOME_DEFAULT_RANGE). `now` is injectable for tests only.
 
     `timestamps` (silver.recon_summary run timestamps, via
     queries.get_run_timestamps()) drives the Month dropdown's options
@@ -283,22 +289,24 @@ def resolve_window(range_: str = None, date_: str = None, month_: str = None, *,
     if not range_:
         # A bare ?sync= (a sync-picker link or bookmark) still means that
         # sync, i.e. "last", now that the default range is "all".
-        range_ = "date" if date_ else "month" if month_ else "last" if sync_ else DEFAULT_RANGE
+        range_ = "date" if date_ else "month" if month_ else "last" if sync_ else default
     if range_ not in RANGES:
-        range_ = DEFAULT_RANGE
+        range_ = default
     now_et = (now or datetime.now(timezone.utc)).astimezone(EASTERN)
 
     if range_ == "date":
         d = parse_date(date_)
         if d is None:
-            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now, sync_=sync_)
+            return resolve_window(default, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now, sync_=sync_,
+                                  default=default)
         start, end = day_bounds(d)
         return TimeWindow("date", start, end, date=d.isoformat())
 
     if range_ == "month":
         ym = parse_month(month_)
         if ym is None:
-            return resolve_window(DEFAULT_RANGE, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now, sync_=sync_)
+            return resolve_window(default, timestamps=timestamps, outlook_jobs=outlook_jobs, now=now, sync_=sync_,
+                                  default=default)
         start, end = month_bounds(*ym)
         return TimeWindow("month", start, end, month=f"{ym[0]:04d}-{ym[1]:02d}")
 

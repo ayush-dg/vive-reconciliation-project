@@ -324,8 +324,9 @@ class TestReviewPageCarriesSort(unittest.TestCase):
         self.assertIn('class="filter-tab ">Invoice #', html)
 
     def test_both_post_forms_carry_sort(self):
+        # Escalate, Accept/Reject and (2026-10-19) Accept as match.
         html = _render_review(sort="amount")
-        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 2)
+        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 3)
 
     def test_modal_still_has_no_form(self):
         html = _render_review()
@@ -441,11 +442,11 @@ class TestHomeRoute(unittest.TestCase):
     def test_filters_are_passed_through(self):
         resp = self.client.get("/?status=exceptions&period=2026-07")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(self.calls, [("all", "exceptions", "2026-07", 10)])  # default range "all" since 2026-10-14
+        self.assertEqual(self.calls, [("last", "exceptions", "2026-07", 10)])  # Home opens on "last" again since 2026-10-20
 
     def test_bad_status_becomes_all(self):
         self.client.get("/?status=nope")
-        self.assertEqual(self.calls, [("all", "all", None, 10)])  # default range "all" since 2026-10-14
+        self.assertEqual(self.calls, [("last", "all", None, 10)])  # Home opens on "last" again since 2026-10-20
 
     def test_n_of_m_and_reconciled_card(self):
         html = self.client.get("/").text

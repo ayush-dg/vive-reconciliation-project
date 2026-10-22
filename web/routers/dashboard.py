@@ -32,7 +32,7 @@ def home_url(filters: dict, **changes) -> str:
     stays canonical."""
     merged = {**filters, **changes}
     params = []
-    if merged.get("range") and merged["range"] != tw.DEFAULT_RANGE:
+    if merged.get("range") and merged["range"] != tw.HOME_DEFAULT_RANGE:
         params.append(("range", merged["range"]))
     if merged.get("range") == "date" and merged.get("date"):
         params.append(("date", merged["date"]))
@@ -73,7 +73,8 @@ def home(request: Request, user: str = Depends(require_login),
     timestamps = queries.get_run_timestamps()
     outlook_jobs = queries.get_outlook_synced_jobs()
     window = tw.resolve_window(range or None, date or None, month or None,
-                               timestamps=timestamps, outlook_jobs=outlook_jobs, sync_=sync or None)
+                               timestamps=timestamps, outlook_jobs=outlook_jobs, sync_=sync or None,
+                               default=tw.HOME_DEFAULT_RANGE)
     if status not in queries.RECON_RUN_STATUS_FILTERS:
         status = "all"
     data = queries.get_home_dashboard(window=window, status=status, period=period or None, limit=10)

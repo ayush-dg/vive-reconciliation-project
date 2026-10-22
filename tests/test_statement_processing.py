@@ -150,7 +150,122 @@ class TestLineResults(unittest.TestCase):
         self.assertEqual(rows[4]["amount"], -10.0)
         self.assertEqual(out["tiles"], {"matched": 1, "matched_amount": 138.35, "mismatch": 1, "mismatch_amount": 7.03,
                                         "missing": 1, "missing_amount": 30.06, "other": 0, "invoices": 3})
-        self.assertEqual(out["counts"], {"matched": 1, "mismatch": 2, "missing": 1, "other": 0, "none": 1})
+        self.assertEqual(out["counts"], {"matched": 1, "mismatch": 2, "missing": 1, "other": 0,
+                                         "set_aside": 0, "none": 1})
+
+    def test_each_line_gets_its_own_result_not_its_invoices(self):
+        # Gates GMC 322756 (2026-10-21): the charge matched, the -$75 credit
+        # line did not -- the credit must show Not in NetSuite, not Matched.
+        lines = [
+            {"line_number": 1, "invoice_number": "322756", "charge_amount": 1272.32},
+            {"line_number": 2, "invoice_number": "322756", "charge_amount": -1272.32},
+            {"line_number": 3, "invoice_number": "322756", "charge_amount": -75.0},
+        ]
+        matched = [{"invoice_number": "322756", "statement_amount": 1272.32, "erp_amount": 1272.32}]
+        exceptions = [{"invoice_number": "322756", "statement_amount": 75.0, "erp_amount": None,
+                       "exception_reason": "Not Found in NetSuite"}]
+        out = sp.line_results(lines, matched, exceptions, {2: "payment/reversal of invoice 322756's charge"})
+        self.assertEqual([r["status"] for r in out["rows"]], ["matched", "set_aside", "missing"])
+        self.assertFalse(any(r["shared"] for r in out["rows"]))
+        self.assertEqual(out["rows"][1]["note"], "payment/reversal of invoice 322756's charge")
+        self.assertEqual(out["counts"]["missing"], out["tiles"]["missing"])
+        self.assertEqual(out["counts"]["matched"], out["tiles"]["matched"])
+
+    def test_a_result_under_the_ordinal_number_pairs_with_its_line(self):
+        # Nucar: the $125 line of CM6303960 was checked as CM6303960-1.
+        lines = [
+            {"line_number": 46, "invoice_number": "CM6303960", "charge_amount": -125.0},
+            {"line_number": 49, "invoice_number": "CM6303960-1", "charge_amount": -75.0},
+        ]
+        matched = [{"invoice_number": "CM6303960-1", "statement_amount": 75.0, "erp_amount": 75.0}]
+        exceptions = [{"invoice_number": "CM6303960-1", "statement_amount": 125.0, "erp_amount": None,
+                       "exception_reason": "Not Found in NetSuite"}]
+        out = sp.line_results(lines, matched, exceptions)
+        self.assertEqual([r["status"] for r in out["rows"]], ["missing", "matched"])
+
+    def test_an_exact_invoice_number_wins_over_the_ordinal_form(self):
+        # Quirk STMT-A7E43CB4: 563967E (not found) and 563967E-1 (matched), both $144.60.
+        lines = [{"line_number": 77, "invoice_number": "563967E", "charge_amount": 144.6},
+                 {"line_number": 78, "invoice_number": "563967E-1", "charge_amount": 144.6}]
+        matched = [{"invoice_number": "563967E-1", "statement_amount": 144.6, "erp_amount": 144.6}]
+        exceptions = [{"invoice_number": "563967E", "statement_amount": 144.6, "erp_amount": None,
+                       "exception_reason": "Not Found in NetSuite"}]
+        out = sp.line_results(lines, matched, exceptions)
+        self.assertEqual([r["status"] for r in out["rows"]], ["missing", "matched"])
+
+    def test_a_result_is_used_by_one_line_only(self):
+        lines = [{"line_number": 1, "invoice_number": "A1", "charge_amount": 10.0},
+                 {"line_number": 2, "invoice_number": "A1", "charge_amount": 10.0}]
+        matched = [{"invoice_number": "A1", "statement_amount": 10.0, "erp_amount": 10.0}]
+        out = sp.line_results(lines, matched, [])
+        self.assertEqual([(r["status"], r["shared"]) for r in out["rows"]], [("matched", False), ("matched", True)])
+
+
+class TestCardWithResolved(unittest.TestCase):
+    """List cards read the recon table's open/resolved counts (2026-10-22)."""
+    INTAKE = {"statement_id": "S1", "validation_status": "matches", "vendor_name": "Columbia Ford"}
+
+    def test_open_and_resolved_are_both_said(self):
+        card = sp.intake_card(self.INTAKE, None, {"exceptions": 1, "reasons": {"Not Found in NetSuite": 1},
+                                                  "resolved": 1})
+        self.assertEqual(card["stages"][2]["label"], "1 open · 1 resolved")
+        self.assertEqual(card["note"], "1 invoice not found in NetSuite (1 resolved).")
+
+    def test_everything_resolved_is_done(self):
+        card = sp.intake_card(self.INTAKE, None, {"exceptions": 0, "reasons": {}, "resolved": 2})
+        self.assertEqual((card["stages"][2]["state"], card["stages"][2]["label"]), ("ok", "Done · 2 resolved"))
+
+    def test_without_resolved_it_reads_as_before(self):
+        card = sp.intake_card(self.INTAKE, None, {"exceptions": 2, "reasons": {"Not Found in NetSuite": 2}})
+        self.assertEqual((card["stages"][2]["label"], card["note"]), ("2 exceptions", "2 invoices not found in NetSuite."))
+
+
+class TestReconView(unittest.TestCase):
+    """The Reconciliation tab read from the recon table only (2026-10-22)."""
+
+    def _row(self, n, inv, status, amount, exc=None, reason=None, **extra):
+        return dict({"line_number": n, "invoice_number": inv, "status": status, "line_amount": amount,
+                     "exception_id": exc, "exception_reason": reason, "netsuite_amount": None,
+                     "difference": None, "source": "auto", "note": None, "matched_by": "system",
+                     "matched_at": "2026-10-20T13:09:30"}, **extra)
+
+    def _nucar(self):
+        # Nucar STMT-7409AF91 as it stands: 54 matched, 4 open not-found, the
+        # $125 one accepted by a reviewer, 3 payoff lines set aside.
+        rows = [self._row(i, f"INV{i}", "Matched", 10.0) for i in range(1, 55)]
+        rows += [self._row(60 + i, f"CM{i}", "Not found in NetSuite", -20.0, exc=f"E{i}",
+                           reason="Not Found in NetSuite") for i in range(4)]
+        rows.append(self._row(99, "CM6303960-1", "Accepted", -125.0, exc="E9", reason="Not Found in NetSuite",
+                              matched_by="admin@vivecollision.com", matched_at="2026-10-21T15:19:50"))
+        rows += [self._row(70 + i, f"P{i}", "Not reconciled", -500.0, note="payment of the invoice") for i in range(3)]
+        return sp.recon_view(rows)
+
+    def test_tiles_header_and_filters_agree(self):
+        out = self._nucar()
+        t, c = out["tiles"], out["counts"]
+        self.assertEqual((t["matched"], t["missing"], t["mismatch"], t["open"], t["resolved"]), (54, 4, 0, 4, 1))
+        self.assertEqual((c["matched"], c["missing"], c["mismatch"], c["resolved"], c["set_aside"]), (54, 4, 0, 1, 3))
+        self.assertEqual(len(out["rows"]), 62)
+        self.assertEqual(t["invoices"], 59)
+
+    def test_a_resolved_line_says_so_and_who(self):
+        line = next(r for r in self._nucar()["rows"] if r["line_number"] == 99)
+        self.assertEqual((line["status"], line["label"]), ("resolved", "Accepted (was not in NetSuite)"))
+        self.assertEqual((line["by"], line["at"]), ("admin@vivecollision.com", "2026-10-21"))
+
+    def test_a_manual_match_is_a_resolved_exception(self):
+        # As on the Exceptions page ("Reconciled · matches ..."): found, then resolved.
+        out = sp.recon_view([self._row(1, "338630", "Matched manually", 144.96, exc="E1", source="manual",
+                                       netsuite_tranid="338630", matched_by="admin@vive.com")])
+        self.assertEqual((out["tiles"]["matched"], out["tiles"]["open"], out["tiles"]["resolved"],
+                          out["counts"]["resolved"]), (0, 0, 1, 1))
+        self.assertEqual(out["rows"][0]["label"], "Matched manually to 338630")
+        self.assertEqual(out["rows"][0]["by"], "admin@vive.com")
+
+    def test_an_exception_on_two_lines_counts_once_in_the_tiles(self):
+        out = sp.recon_view([self._row(1, "A", "Not found in NetSuite", 5.0, exc="E1", reason="Not Found in NetSuite"),
+                             self._row(2, "A", "Not found in NetSuite", 5.0, exc="E1", reason="Not Found in NetSuite")])
+        self.assertEqual((out["tiles"]["missing"], out["counts"]["missing"]), (1, 2))
 
 
 def _client(fns):

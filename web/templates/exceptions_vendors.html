@@ -113,11 +113,16 @@
           <div class="vendor-card-meta">{{ meta_parts | join(" · ") }}</div>
         </div>
       </div>
-      {% if v.exception_count > 0 %}
-      <span class="badge badge-exception">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
-      {% else %}
-      <span class="badge badge-matched"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
-      {% endif %}
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+        {% if v.exception_count > 0 %}
+        <span class="badge badge-exception">{{ v.exception_count }} exception{{ "s" if v.exception_count != 1 }}</span>
+        {% else %}
+        <span class="badge badge-matched"><svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>Reconciled</span>
+        {% endif %}
+        {% if v.writeback %}
+        <span class="badge {{ v.writeback.css }}" style="white-space:nowrap" title="{{ v.writeback.label }} — {{ v.writeback.tooltip }}{% if v.writeback.finished_at %} · {{ v.writeback.finished_at | friendly_dt }}{% endif %}">{% if v.writeback.ok %}<svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>{% endif %}{{ v.writeback.short }}</span>
+        {% endif %}
+      </div>
     </div>
     <div class="vendor-card-body">
       <div class="vc-metric"><div class="num" style="color:var(--matched)">{{ v.matched_count }}</div><div class="lbl">Matched</div></div>

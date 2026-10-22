@@ -14,18 +14,22 @@ swallow it whole (a :path converter matches slashes too, so no sub-path
 under /exceptions/ is safe from it).
 """
 
+import os
 from collections import Counter
 from urllib.parse import quote, unquote, urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
+from web.netsuite_status import writeback_pill
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
 from web import time_window as tw
+from web.routers.statements import _inline_filename
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
-from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, search_open_ap
+from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, fetch_record, search_open_ap
+from src.lakehouse.recon_table import MatchConflict
 from src.matching.netsuite_status_codes import decode_netsuite_status
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.locations import known_codes, shop_options
@@ -121,6 +125,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     # appended inside get_exception_runs() AFTER the window filter, so
     # they always show and always count below, regardless of `window`.
     runs = queries.get_exception_runs(window)
+    _attach_writeback_status(runs)
     summary_backed_count = sum(1 for v in runs if v.get("statement_id"))
     for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
@@ -213,10 +218,57 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     return render(request, "exceptions_vendors.html", ctx)
 
 
+def _attach_writeback_status(cards):
+    """Adds each card's NetSuite write-back status as card["writeback"] (None
+    when it has none). One batched lookup for the whole page; any database
+    problem just leaves the cards without the line."""
+    ids = [c["statement_id"] for c in cards if c.get("statement_id")]
+    try:
+        from src.netsuite.log_store import get_latest_runs
+        latest = get_latest_runs(ids)
+    except Exception:
+        latest = {}
+    for card in cards:
+        card["writeback"] = writeback_pill(latest.get(card.get("statement_id")))
+
+
+def _writeback_status(statement_id):
+    """The NetSuite write-back pill for a statement, or None. Reads the
+    latest saved run; any database problem (e.g. the log tables not created
+    yet on this database) just hides the pill instead of breaking the page."""
+    if not statement_id:
+        return None
+    try:
+        from src.netsuite.log_store import get_runs
+        runs = get_runs(statement_id)
+    except Exception:
+        return None
+    return writeback_pill(runs[0]) if runs else None
+
+
+def _statement_pdf_url(statement_id):
+    """The "View PDF" link for a statement -- the short
+    /statements/<statement id>/<name>.pdf route -- or None when there is no
+    PDF to open: neither an archived copy nor the mailbox blob it came in as
+    (e.g. a web upload from before archiving), so the page can grey the
+    button out instead of linking to a 404. Any database problem also just
+    greys it out."""
+    if not statement_id:
+        return None
+    try:
+        archived = queries.get_statement_pdf(statement_id)
+    except Exception:
+        return None
+    if not archived:
+        return None
+    name = _inline_filename(os.path.basename((archived.get("original_filename") or "").replace("\\", "/")) or None)
+    return f"/statements/{statement_id}/{quote(name)}"
+
+
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
                        filter: str = "all", selected: str = None, statement_id: str = None,
-                       sort: str = None):
+                       sort: str = None, match_msg: str = None):
     vendor_name = unquote(vendor_name)
     # Unrecognised values collapse to the default order here, so every
     # link/redirect built from `sort` below carries only a known value.
@@ -307,10 +359,19 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
         "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
+        "writeback": None if exceptions_only else _writeback_status(statement_id),
+        # "View PDF" in the top bar (2026-10-20): opens the statement's PDF
+        # in a new tab; None greys the button out.
+        "pdf_url": None if exceptions_only else _statement_pdf_url(statement_id),
         "searchable_reasons": SEARCHABLE_REASONS,
         # The Find in NetSuite panel's Shop filter: NetSuite's own location
         # names (config/netsuite_locations.json), starting on "Any shop".
         "shop_options": shop_options(),
+        # "Accept as match" (2026-10-19): this statement's active manual
+        # matches (the recon table), each with Undo, and the message an
+        # accept/undo redirect carries back.
+        "manual_matches": [] if exceptions_only else queries.get_manual_matches((statement or {}).get("statement_id")),
+        "match_msg": (match_msg or "")[:300] or None,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
@@ -365,6 +426,60 @@ def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(
     queries.escalate_exception(exception_id, escalated_by=user)
     suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
+
+
+@router.post("/exceptions/{vendor_name}/accept-match")
+def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depends(require_login),
+                            exception_id: str = Form(...), record_type: str = Form(...),
+                            internal_id: str = Form(...), note: str = Form(""),
+                            filter: str = Form("all"), statement_id: str = Form(""), sort: str = Form("")):
+    """"Accept as match" from the Find in NetSuite panel (2026-10-19): links
+    the open exception's statement invoice to the picked NetSuite bill or
+    credit -- re-read here by internal id, never taken from the page -- in
+    the recon table, and resolves the exception (queries.accept_manual_match()).
+    Registered ahead of the {vendor_name:path} POST route below, like escalate.
+    A conflict comes back as a message on the page, not an error."""
+    vendor_name = unquote(vendor_name)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{suffix}"
+    joiner = "&" if "?" in back else "?"
+
+    def _message(text):
+        return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
+
+    exception = queries.get_recon_exception(exception_id)
+    if not exception or exception.get("exception_status") != "OPEN":
+        return _message("Not matched: this exception was already resolved (by you or someone else), "
+                        "so there's nothing left to match. Nothing was changed.")
+    try:
+        record = fetch_record(record_type, internal_id)
+    except Exception:
+        return _message("Not matched: couldn't reach NetSuite just now. Nothing was changed -- try again in a minute.")
+    if not record:
+        return _message("Not matched: that NetSuite bill or credit no longer exists. Nothing was changed.")
+    try:
+        netsuite = queries.accept_manual_match(exception, record, vendor_name, user, note.strip() or None) or {}
+    except (MatchConflict, ValueError) as exc:
+        return _message(f"Not matched: {exc}")
+    return _message(f"Invoice {exception['invoice_number']} matched to NetSuite "
+                    f"{record['record_type'].lower()} {record.get('tranid')}. "
+                    f"NetSuite sandbox: {netsuite.get('status') or 'not written'}.")
+
+
+@router.post("/exceptions/{vendor_name}/undo-match")
+def exceptions_undo_match(vendor_name: str, request: Request, user: str = Depends(require_login),
+                          invoice_number: str = Form(...), statement_id: str = Form(...),
+                          filter: str = Form("all"), sort: str = Form("")):
+    """Undo of "Accept as match": reopens the exception and puts the recon
+    rows back (queries.undo_manual_match())."""
+    vendor_name = unquote(vendor_name)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{suffix}"
+    joiner = "&" if "?" in back else "?"
+    undone = queries.undo_manual_match(statement_id, invoice_number, vendor_name, user)
+    text = (f"Match for invoice {invoice_number} undone -- the exception is open again." if undone
+            else f"Invoice {invoice_number} had no manual match to undo.")
+    return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
 
 
 @router.post("/exceptions/{vendor_name:path}")

@@ -36,9 +36,14 @@ def _alongside(fabric_call, *azure_sql_calls):
 
 @router.get("/validation")
 def validation_list(request: Request, user: str = Depends(require_login)):
-    recon, (intake_rows, jobs, outlook_jobs) = _alongside(
+    recon, (intake_rows, jobs, outlook_jobs, recon_cards) = _alongside(
         queries.get_recon_status,
-        queries.get_validation_report, queries.get_processing_jobs, queries.get_outlook_synced_jobs)
+        queries.get_validation_report, queries.get_processing_jobs, queries.get_outlook_synced_jobs,
+        queries.get_recon_card_status)
+    # Statements with recon-table rows show their CURRENT open/resolved counts
+    # from there (2026-10-22), the same as the detail page; the rest keep
+    # the stored matching results.
+    recon = {**recon, **{sid: status for sid, status in recon_cards.items() if sid in recon}}
     cards = sp.build_cards(intake_rows, jobs, recon)
 
     # "Last run" dropdown (2026-09-30) -- same Outlook-sync definitions as
@@ -103,18 +108,31 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
     # result). Opens on the stage that needs attention (sp.default_tab()).
     # get_statement_report() is mostly Fabric (summary, matched,
     # exceptions); the other three are mostly Azure SQL.
-    report, (data, job, extracted) = _alongside(
+    report, (data, job, extracted, set_aside, recon_rows) = _alongside(
         lambda: queries.get_statement_report(statement_id),
         lambda: queries.get_extraction_validation_detail(statement_id),
         lambda: queries.get_latest_job_for_statement(statement_id),
-        lambda: queries.get_extracted_rows_for_statement(statement_id))
+        lambda: queries.get_extracted_rows_for_statement(statement_id),
+        lambda: queries.get_set_aside_lines(statement_id),
+        lambda: queries.get_recon_rows(statement_id))
     intake = data.get("intake")
     summary, matched, exceptions = report.get("summary"), report.get("matched") or [], report.get("exceptions") or []
+
+    # The Reconciliation tab reads the recon table when the statement has
+    # rows there (2026-10-22) -- every number and status from one source --
+    # else the stored matching results as before.
+    lines_view = None
+    if summary is not None:
+        lines_view = (sp.recon_view(recon_rows) if recon_rows
+                      else sp.line_results(data.get("lines") or [], matched, exceptions, set_aside))
 
     card = None
     if intake:
         recon = None
-        if summary is not None:
+        if summary is not None and recon_rows:
+            recon = {"exceptions": lines_view["tiles"]["open"], "reasons": lines_view["open_reasons"],
+                     "resolved": lines_view["tiles"]["resolved"]}
+        elif summary is not None:
             recon = {"exceptions": summary.get("exception_count") or 0,
                      "reasons": dict(Counter(e.get("exception_reason") or "Other" for e in exceptions))}
         card = sp.intake_card(intake, job, recon)
@@ -132,7 +150,7 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
         "job": job,
         "summary": summary,
         "extracted": extracted if card else [],
-        "recon": sp.line_results(data.get("lines") or [], matched, exceptions) if summary is not None else None,
+        "recon": lines_view,
         "active_tab": tab if tab in tabs else (sp.default_tab(card) if card else "validation"),
         **sidebar_context(request),
     }

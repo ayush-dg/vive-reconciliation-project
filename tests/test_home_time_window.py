@@ -501,7 +501,7 @@ class TestHomeDashboardQuery(unittest.TestCase):
         self.local.row_factory = sqlite3.Row
         self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT)")
         self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT, "
-                           "status TEXT)")
+                           "status TEXT, error_message TEXT)")
         for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):
             patcher = mock.patch(target, _query_fn(conn))
             patcher.start()
@@ -721,17 +721,20 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
     def _window(self):
         return self.windows[-1][0]
 
-    def test_default_is_all(self):
+    def test_default_is_last_run(self):
+        # Home opens on "Last run" again since 2026-10-20 (was "all" from
+        # 2026-10-14): duplicate-only syncs are no longer counted.
         html = self._get("/")
-        self.assertEqual(self._window().range, "all")
-        self.assertIn("All time · 4 statements", html)
-        self.assertIn('href="/" class="filter-chip active">All', html)
+        self.assertEqual(self._window().range, "last")
+        self.assertIn("Last sync · Sep 29, 8:08 AM ET · 4 statements", html)
+        self.assertIn('href="/" class="filter-chip active">Last run', html)
+        self.assertIn('href="/?range=all" class="filter-chip ">All', html)
 
     def test_last_run_chip_with_label(self):
         html = self._get("/?range=last")
         self.assertEqual(self._window().range, "last")
         self.assertIn("Last sync · Sep 29, 8:08 AM ET · 4 statements", html)
-        self.assertIn('href="/?range=last" class="filter-chip active">Last run', html)
+        self.assertIn('href="/" class="filter-chip active">Last run', html)
 
     def test_sync_wording_no_longer_names_outlook_except_the_top_bar_badge(self):
         # 2026-10-06: "Past Outlook syncs"/"Last Outlook sync" became
@@ -808,7 +811,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
         for url in ("/?range=bogus", "/?range=date&date=nope", "/?month=2026-99", "/?date=2026-02-30"):
             with self.subTest(url=url):
                 self._get(url)
-                self.assertEqual(self._window().range, "all")
+                self.assertEqual(self._window().range, "last")  # Home's default since 2026-10-20
 
     def test_range_chips_are_all_today_last_run(self):
         # "All" chip added 2026-10-14 with the new "all" default (the old
@@ -820,8 +823,8 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
 
     def test_range_chips_keep_status_and_clear_period(self):
         html = self._get("/?range=date&date=2026-09-28&status=exceptions&period=2026-08")
-        self.assertIn('href="/?status=exceptions" class="filter-chip ">All', html)
-        self.assertIn('href="/?range=last&status=exceptions" class="filter-chip ">Last run', html)
+        self.assertIn('href="/?range=all&status=exceptions" class="filter-chip ">All', html)
+        self.assertIn('href="/?status=exceptions" class="filter-chip ">Last run', html)
         self.assertIn('href="/?range=today&status=exceptions" class="filter-chip ">Today', html)
 
     def test_calendar_button_and_hidden_date_input(self):
@@ -864,7 +867,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
                                 "statement_total": 0, "vendor_count": 0, "match_rate": None}}
         html = self._get("/?range=today&status=exceptions")
         self.assertIn("No reconciliation runs today yet.", html)
-        self.assertIn('<a href="/?range=last&status=exceptions" class="link">Last run</a>', html)
+        self.assertIn('<a href="/?status=exceptions" class="link">Last run</a>', html)
         # No "All time" link since 2026-10-01 (the All time option is gone).
         self.assertNotIn('class="link">All time</a>', html)
         self.assertIn("—% matched · today", html)
@@ -942,7 +945,7 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
         self.assertIn("Sep 28, 8:00 AM ET · 1 statement", select)
         # No explicit ?sync=, so Last run is the highlighted control and the
         # picker's button is not.
-        self.assertIn('href="/?range=last" class="filter-chip active">Last run', html)
+        self.assertIn('href="/" class="filter-chip active">Last run', html)
         self.assertRegex(html, r'class="filter-chip sync-picker-btn\s*" id="window-sync-btn"')
 
     def test_choosing_an_older_sync_narrows_the_window(self):
@@ -962,3 +965,43 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicatesAreNotSyncsTests(unittest.TestCase):
+    """A re-sent PDF that was already processed (job note "Duplicate of
+    STMT-...") is not part of any sync (2026-10-20): it isn't counted, a sync
+    of only duplicates isn't listed, and "Last run" skips it."""
+
+    def setUp(self):
+        import sqlite3
+        self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
+        self.db.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, "
+                        "source_blob_path TEXT, status TEXT, error_message TEXT)")
+        self.db.executemany("INSERT INTO jobs VALUES (?,?,?,?,?,?)", [
+            ("J1", "S1", "2026-10-20T08:00:00", "mailbox/a.pdf", "COMPLETED", None),
+            ("J2", "S2", "2026-10-20T08:01:00", "mailbox/b.pdf", "COMPLETED", "Not reconciled -- totals differ"),
+            ("J3", "S1", "2026-10-20T10:00:00", "mailbox/a2.pdf", "COMPLETED", "Duplicate of S1 -- this exact PDF..."),
+            ("J4", "S2", "2026-10-20T10:00:01", "mailbox/b2.pdf", "COMPLETED", "Duplicate of S2 -- this exact PDF..."),
+            ("J5", None, "2026-10-20T08:02:00", None, "COMPLETED", None),  # a manual upload
+        ])
+
+        def run(sql, params=None):
+            return [dict(r) for r in self.db.execute(sql, params or [])]
+        patcher = mock.patch("web.queries.execute_query", run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_duplicates_are_left_out_of_the_synced_jobs(self):
+        from web import queries
+        self.assertEqual([j["job_id"] for j in queries.get_outlook_synced_jobs()], ["J2", "J1"])
+
+    def test_a_sync_of_only_duplicates_is_not_listed_and_last_run_is_the_real_one(self):
+        from web import queries
+        jobs = queries.get_outlook_synced_jobs()
+        options, _ = tw.outlook_sync_options(jobs)
+        self.assertEqual(len(options), 1)
+        self.assertIn("2 statements", options[0]["label"])
+        window = tw.resolve_window("last", outlook_jobs=jobs)
+        self.assertEqual(window.statement_ids, frozenset({"S1", "S2"}))
+

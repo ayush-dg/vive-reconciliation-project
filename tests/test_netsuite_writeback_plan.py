@@ -319,6 +319,8 @@ class _FakeNs:
     """Records PATCHes and answers the read-back with `row` (SuiteQL leaves
     out null columns, so an absent key means empty)."""
 
+    domain_id = "7321761-sb1"
+
     def __init__(self, row):
         self.row = row
         self.patches = []
@@ -556,7 +558,8 @@ class LinkOnlyApplyTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": "true"}, clear=True), \
              mock.patch.object(pipeline_hook, "NetSuiteClient", return_value=ns), \
              mock.patch.object(pipeline_hook, "build_plans", return_value=(mock.Mock(), plans)), \
-             mock.patch.object(pipeline_hook, "write_apply_log", return_value="log.json"):
+             mock.patch.object(pipeline_hook, "write_apply_log", return_value="log.json"), \
+             mock.patch.object(pipeline_hook, "save_run"):
             summary = pipeline_hook.run_netsuite_writeback(STMT)
         self.assertEqual({k: summary[k] for k in ("written", "failed", "period_locked", "links_added",
                                                   "link_only_failed", "link_mismatch")},
@@ -649,6 +652,159 @@ class LockedPeriodRunControlTests(unittest.TestCase):
         self.assertEqual(log["failed_counts"], {"period locked": 1})
 
 
+class RecordChangedRetryTests(unittest.TestCase):
+    CHANGED = "Error while accessing a resource. Record has been changed."
+
+    def _plan(self):
+        return wb.plan_matched(_row(), [dict(_txn("-100"), id="501")], _ctx())
+
+    def _changed(self):
+        from src.netsuite.client import NetSuiteAPIError
+        return NetSuiteAPIError(400, "Bad Request", '{"detail":"' + self.CHANGED + '"}')
+
+    def _apply(self, errors, held_by=""):
+        ns = mock.Mock()
+        ns.patch_record.side_effect = errors
+        ns.suiteql.return_value = [{"ref": held_by}] if held_by else [{}]
+        with mock.patch.object(wb, "_read_back_bill", return_value=""), \
+             mock.patch.object(wb.time, "sleep"):
+            return wb.apply_plan(ns, self._plan()), ns
+
+    def test_a_conflict_is_retried_and_then_succeeds(self):
+        result, ns = self._apply([self._changed(), None])
+        self.assertTrue(result.ok)
+        self.assertEqual(ns.patch_record.call_count, 2)
+
+    def test_if_another_statement_saved_first_ours_does_not_overwrite_it(self):
+        result, ns = self._apply([self._changed(), None], held_by="STMT-OTHER")
+        self.assertFalse(result.ok)
+        self.assertEqual(result.category, wb.CAT_HELD_BY_OTHER)
+        self.assertIn("STMT-OTHER", result.detail)
+        self.assertEqual(ns.patch_record.call_count, 1)   # no second write
+
+    def test_a_record_stamped_with_our_own_id_is_not_treated_as_someone_elses(self):
+        result, ns = self._apply([self._changed(), None], held_by=STMT)
+        self.assertTrue(result.ok)
+        self.assertEqual(ns.patch_record.call_count, 2)
+
+    def test_persistent_conflicts_give_up_as_an_ordinary_failure(self):
+        result, ns = self._apply([self._changed()] * 3)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.category, wb.CAT_WRITE_FAILED)
+        self.assertEqual(ns.patch_record.call_count, 3)   # first try + 2 retries
+
+    def test_other_errors_are_not_retried(self):
+        from src.netsuite.client import NetSuiteAPIError
+        result, ns = self._apply([NetSuiteAPIError(400, "Bad Request", "Invalid field value")])
+        self.assertEqual(ns.patch_record.call_count, 1)
+        self.assertEqual(result.category, wb.CAT_WRITE_FAILED)
+
+    def test_a_bill_another_statement_saved_first_does_not_stop_the_run(self):
+        ns = mock.Mock()
+        ns.patch_record.side_effect = [self._changed(), None, None]
+        ns.suiteql.return_value = [{"ref": "STMT-OTHER"}]
+        plans = [wb.plan_matched(_row(invoice=f"INV{i}"), [dict(_txn("-100"), id=str(600 + i), tranid=f"INV{i}")], _ctx())
+                 for i in range(3)]
+        with mock.patch.object(wb, "_read_back_bill", return_value=""), mock.patch.object(wb.time, "sleep"):
+            results = wb.apply_plans(ns, plans)
+        self.assertEqual([r.ok for r in results], [False, True, True])
+        self.assertEqual(wb.failure_counts(results), {wb.CAT_HELD_BY_OTHER: 1})
+
+
+class ErrorLogTests(unittest.TestCase):
+    def test_a_failed_run_leaves_a_log_naming_the_error(self):
+        import json, tempfile
+        try:
+            raise AttributeError("'NoneType' object has no attribute 'lower'")
+        except AttributeError as exc:
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+                path = wb.write_error_log(STMT, exc)
+                log = json.load(open(path, encoding="utf-8"))
+        self.assertTrue(path.endswith("_ERROR.json"))
+        self.assertEqual((log["statement_id"], log["error_type"]), (STMT, "AttributeError"))
+        self.assertIn("has no attribute 'lower'", log["error"])
+        self.assertTrue(any("raise AttributeError" in line for line in log["traceback"]))
+
+    def test_an_unwritable_log_directory_is_not_fatal(self):
+        with mock.patch.object(wb.os, "makedirs", side_effect=OSError("read-only")):
+            self.assertEqual(wb.write_error_log(STMT, RuntimeError("x")), "")
+
+
+class UnattemptedWritesTests(unittest.TestCase):
+    """A run that stops early must not make the writes it never reached vanish."""
+
+    def _plans(self, n=3):
+        return [wb.plan_matched(_row(invoice=f"INV{i}"), [dict(_txn("-100"), id=str(700 + i), tranid=f"INV{i}")], _ctx())
+                for i in range(n)]
+
+    def _stopped_run(self, plans):
+        """First write fails for a reason that ends the run, so only one result exists."""
+        from src.netsuite.client import NetSuiteAPIError
+        ns = mock.Mock()
+        ns.patch_record.side_effect = NetSuiteAPIError(400, "Bad Request", "Invalid field value")
+        with mock.patch.object(wb, "_read_back_bill", return_value=""):
+            return wb.apply_plans(ns, plans)
+
+    def test_the_writes_a_stopped_run_never_reached_are_identified(self):
+        plans = self._plans(3)
+        results = self._stopped_run(plans)
+        self.assertEqual(len(results), 1)
+        self.assertEqual([p.invoice_number for p in wb.unattempted_plans(plans, results)], ["INV1", "INV2"])
+
+    def test_plans_that_are_not_writes_are_never_called_unattempted(self):
+        skipped = wb._skip("X", None, "nope", category=wb.CAT_NOT_IN_SANDBOX)
+        self.assertEqual(wb.unattempted_plans([skipped], []), [])
+
+    def test_a_complete_run_has_nothing_unattempted(self):
+        plans = self._plans(2)
+        ns = mock.Mock()
+        with mock.patch.object(wb, "_read_back_bill", return_value=""):
+            results = wb.apply_plans(ns, plans)
+        self.assertEqual(wb.unattempted_plans(plans, results), [])
+
+    def test_the_counts_include_them_only_when_results_are_given(self):
+        plans = self._plans(3) + [wb._skip("S", None, "gone", category=wb.CAT_NOT_IN_SANDBOX)]
+        results = self._stopped_run(plans)
+        self.assertEqual(wb.skip_counts(plans, results),
+                         {wb.CAT_NOT_IN_SANDBOX: 1, wb.CAT_NOT_ATTEMPTED: 2})
+        self.assertEqual(wb.skip_counts(plans), {wb.CAT_NOT_IN_SANDBOX: 1})      # old call still works
+
+    def test_the_file_log_lists_each_one_with_its_reason(self):
+        import json, tempfile
+        plans = self._plans(3)
+        results = self._stopped_run(plans)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+            path = wb.write_apply_log(mock.Mock(domain_id="x-sb1"), STMT, results, plans)
+            log = json.load(open(path, encoding="utf-8"))
+        self.assertEqual([n["invoice_number"] for n in log["not_written"]], ["INV1", "INV2"])
+        self.assertEqual({n["reason"] for n in log["not_written"]}, {wb.CAT_NOT_ATTEMPTED})
+        self.assertEqual(log["not_written_counts"], {wb.CAT_NOT_ATTEMPTED: 2})
+        self.assertEqual(len(log["writes"]), 1)
+
+
+class RevertLogTests(unittest.TestCase):
+    def _results(self):
+        patch = {"op": "PATCH", "record_type": "vendorbill", "record_id": "1", "invoice_number": "A",
+                 "body": {"custbody_reconciled": False}}
+        delete = {"op": "DELETE", "record_type": "customrecord_statement_line", "record_id": "9", "invoice_number": "B"}
+        return [(patch, True, "reverted"), (delete, False, "HTTPError: nope")]
+
+    def test_an_undo_run_is_written_to_its_own_file_with_the_counts(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(wb, "_LOG_DIR", tmp):
+            path = wb.write_revert_log(mock.Mock(domain_id="x-sb1"), STMT, self._results())
+            log = json.load(open(path, encoding="utf-8"))
+        self.assertTrue(path.endswith("_REVERT.json"))
+        self.assertEqual((log["statement_id"], log["reverted"], log["failed"]), (STMT, 1, 1))
+        self.assertEqual([r["op"] for r in log["reverts"]], ["PATCH", "DELETE"])
+        self.assertEqual(log["reverts"][0]["body"], {"custbody_reconciled": False})
+        self.assertFalse(log["reverts"][1]["ok"])
+
+    def test_an_unwritable_log_directory_is_not_fatal(self):
+        with mock.patch.object(wb.os, "makedirs", side_effect=OSError("read-only")):
+            self.assertEqual(wb.write_revert_log(mock.Mock(domain_id="x"), STMT, self._results()), "")
+
+
 class StatementLineDateTests(unittest.TestCase):
     def _line_ctx(self, lines):
         ctx = _ctx()
@@ -683,6 +839,15 @@ class StatementLineDateTests(unittest.TestCase):
         lines = [self._line("INV1", "2026-08-13", -10.0), self._line("INV1", "2026-07-03", 20.0)]
         plan = self._plan(self._line_ctx(lines), amount="999.00")
         self.assertEqual(plan.fields["custrecord_sl_date"], "2026-07-03")
+
+    def test_lines_without_an_invoice_number_do_not_break_planning(self):
+        # Regression: a payment/summary line with a NULL invoice_number made
+        # the whole statement fail to plan, so nothing was written for it.
+        lines = [self._line("INV1", "2026-08-13", 75.0),
+                 {"invoice_number": None, "line_date": __import__("datetime").date(2026, 8, 1),
+                  "charge_amount": None, "payment_amount": -50.0}]
+        plan = self._plan(self._line_ctx(lines))
+        self.assertEqual(plan.fields["custrecord_sl_date"], "2026-08-13")
 
     def test_invoice_lookup_ignores_case(self):
         plan = self._plan(self._line_ctx([self._line("inv1", "2026-08-13", 75.0)]))
