@@ -131,21 +131,32 @@ def build_auto_rows(statement: dict, lines: list, results: dict, now: str = None
     return rows
 
 
-def _manual_invoices(statement_id: str) -> set:
+def _manual_coverage(statement_id: str) -> tuple:
+    """(statement_line_ids, invoice_numbers) an active manual match covers --
+    invoice numbers only for manual rows with no line (a statement matched
+    before the recon table existed)."""
     rows = execute_query(
-        "SELECT DISTINCT invoice_number FROM recon WHERE statement_id = ? AND source = ? AND is_active = 1",
+        "SELECT statement_line_id, invoice_number FROM recon WHERE statement_id = ? AND source = ? AND is_active = 1",
         [statement_id, SOURCE_MANUAL],
     )
-    return {r["invoice_number"] for r in rows if r.get("invoice_number")}
+    lines = {r["statement_line_id"] for r in rows if r.get("statement_line_id")}
+    invoices = {r["invoice_number"] for r in rows if not r.get("statement_line_id") and r.get("invoice_number")}
+    return lines, invoices
 
 
 def replace_auto_rows(statement_id: str, rows: list) -> int:
     """Replaces this statement's "auto" rows with `rows`, in one transaction
     on one connection (a statement can have hundreds of lines). Lines whose
-    invoice has an active manual match keep their manual rows and get no
-    auto row. Returns the number of rows written."""
-    manual = _manual_invoices(statement_id)
-    keep = [row for row in rows if row.get("invoice_number") not in manual]
+    invoice has an active manual match keep their manual rows; their auto row
+    is stored inactive (for Undo). Returns the number of ACTIVE rows written."""
+    manual_lines, manual_invoices = _manual_coverage(statement_id)
+    keep = []
+    for row in rows:
+        covered = (row.get("statement_line_id") in manual_lines
+                   or row.get("invoice_number") in manual_invoices)
+        # A line under an active manual match is stored INACTIVE, so an Undo
+        # after this re-run still has its own auto result to bring back.
+        keep.append(dict(row, is_active=0) if covered else row)
     placeholders = ",".join("?" * len(COLUMNS))
     insert = f"INSERT INTO recon ({', '.join(COLUMNS)}) VALUES ({placeholders})"
     conn = get_connection()
@@ -165,7 +176,7 @@ def replace_auto_rows(statement_id: str, rows: list) -> int:
         raise
     finally:
         conn.close()
-    return len(keep)
+    return sum(1 for row in keep if row.get("is_active", 1))
 
 
 def mark_resolved(statement_id: str, invoice_number: str, disposition_status: str,
@@ -233,8 +244,17 @@ def accept_manual_match(statement_id: str, invoice_number: str, exception_id: st
         if taken:
             raise MatchConflict(f"NetSuite {record['record_type'].lower()} {record.get('tranid')} is already "
                                 f"matched to invoice {taken[0]['invoice_number']} on {taken[0]['statement_id']}.")
-        auto = _rows(cur, "SELECT * FROM recon WHERE statement_id = ? AND invoice_number = ? AND source = ? "
-                          "AND is_active = 1 ORDER BY line_number", [statement_id, invoice_number, SOURCE_AUTO])
+        # Only the exception's own line(s) (2026-10-22): another line printed
+        # under the same invoice number keeps its own result -- Nucar line 49
+        # ($75, matched) was overwritten by line 46's manual match.
+        auto = []
+        if exception_id:
+            auto = _rows(cur, "SELECT * FROM recon WHERE statement_id = ? AND exception_id = ? AND source = ? "
+                              "AND is_active = 1 ORDER BY line_number", [statement_id, exception_id, SOURCE_AUTO])
+        if not auto:
+            auto = _rows(cur, "SELECT * FROM recon WHERE statement_id = ? AND invoice_number = ? AND source = ? "
+                              "AND is_active = 1 AND status NOT IN (?, ?) ORDER BY line_number",
+                         [statement_id, invoice_number, SOURCE_AUTO, *_MATCHED_STATUSES])
         lines = auto or [{"vendor_id": vendor_id, "vendor_name": vendor_name, "line_amount": _float(statement_amount)}]
         ns_amount, stmt_amount = _float(record.get("total")), _float(statement_amount)
         difference = (round(abs(stmt_amount) - ns_amount, 2)
@@ -259,8 +279,8 @@ def accept_manual_match(statement_id: str, invoice_number: str, exception_id: st
             })
         insert = f"INSERT INTO recon ({', '.join(COLUMNS)}) VALUES ({','.join('?' * len(COLUMNS))})"
         cur.executemany(insert, [[row.get(c) for c in COLUMNS] for row in rows])
-        cur.execute("UPDATE recon SET is_active = 0, updated_at = ? WHERE statement_id = ? AND invoice_number = ? "
-                    "AND source = ? AND is_active = 1", [now, statement_id, invoice_number, SOURCE_AUTO])
+        for line in auto:
+            cur.execute("UPDATE recon SET is_active = 0, updated_at = ? WHERE recon_id = ?", [now, line["recon_id"]])
         conn.commit()
         return len(rows)
     except Exception:
@@ -289,8 +309,13 @@ def undo_manual_match(statement_id: str, invoice_number: str, undone_by: str) ->
         cur.execute("UPDATE recon SET is_active = 0, undone_by = ?, undone_at = ?, updated_at = ? "
                     "WHERE statement_id = ? AND invoice_number = ? AND source = ? AND is_active = 1",
                     [undone_by, now, now, statement_id, invoice_number, SOURCE_MANUAL])
-        for row in _rows(cur, "SELECT recon_id, exception_reason FROM recon WHERE statement_id = ? AND "
-                              "invoice_number = ? AND source = ?", [statement_id, invoice_number, SOURCE_AUTO]):
+        covered = {m.get("statement_line_id") for m in manual if m.get("statement_line_id")}
+        auto_rows = _rows(cur, "SELECT recon_id, exception_reason, statement_line_id, is_active FROM recon "
+                               "WHERE statement_id = ? AND invoice_number = ? AND source = ?",
+                          [statement_id, invoice_number, SOURCE_AUTO])
+        for row in auto_rows:
+            if covered and row.get("statement_line_id") not in covered:
+                continue  # another line under the same number -- not part of this match
             status = status_for_reason(row["exception_reason"]) if row.get("exception_reason") else STATUS_MATCHED
             cur.execute("UPDATE recon SET is_active = 1, status = ?, updated_at = ? WHERE recon_id = ?",
                         [status, now, row["recon_id"]])

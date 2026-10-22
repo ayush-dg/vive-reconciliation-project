@@ -150,12 +150,15 @@ class TestReplaceAutoRows(_DbTest):
         self.conn.execute("DELETE FROM recon WHERE source = 'auto' AND invoice_number = 'INV123'")
         self.conn.commit()
 
-        # Re-run: auto rows are replaced, INV123 keeps its manual rows only.
+        # Re-run: auto rows are replaced; INV123's active rows stay the manual
+        # ones, its auto rows are kept inactive so an Undo can bring them back.
         rerun = rt.build_auto_rows(STATEMENT, _lines(), _results())
         self.assertEqual(rt.replace_auto_rows("STMT-1", rerun), 3)
         inv123 = self._rows(statement_id="STMT-1", invoice_number="INV123")
-        self.assertEqual({(r["source"], r["status"]) for r in inv123}, {("manual", "Matched manually")})
-        self.assertEqual(len(self._rows(statement_id="STMT-1")), 5)
+        self.assertEqual({(r["source"], r["status"]) for r in inv123 if r["is_active"]},
+                         {("manual", "Matched manually")})
+        self.assertEqual({r["source"] for r in inv123 if not r["is_active"]}, {"auto"})
+        self.assertEqual(len([r for r in self._rows(statement_id="STMT-1") if r["is_active"]]), 5)
 
     def test_other_statements_are_untouched(self):
         rt.replace_auto_rows("STMT-1", rt.build_auto_rows(STATEMENT, _lines(), _results()))

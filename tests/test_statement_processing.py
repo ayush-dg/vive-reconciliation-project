@@ -253,11 +253,14 @@ class TestReconView(unittest.TestCase):
         self.assertEqual((line["status"], line["label"]), ("resolved", "Accepted (was not in NetSuite)"))
         self.assertEqual((line["by"], line["at"]), ("admin@vivecollision.com", "2026-10-21"))
 
-    def test_a_manual_match_counts_as_matched(self):
+    def test_a_manual_match_is_a_resolved_exception(self):
+        # As on the Exceptions page ("Reconciled · matches ..."): found, then resolved.
         out = sp.recon_view([self._row(1, "338630", "Matched manually", 144.96, exc="E1", source="manual",
                                        netsuite_tranid="338630", matched_by="admin@vive.com")])
-        self.assertEqual((out["tiles"]["matched"], out["tiles"]["open"], out["counts"]["matched"]), (1, 0, 1))
+        self.assertEqual((out["tiles"]["matched"], out["tiles"]["open"], out["tiles"]["resolved"],
+                          out["counts"]["resolved"]), (0, 0, 1, 1))
         self.assertEqual(out["rows"][0]["label"], "Matched manually to 338630")
+        self.assertEqual(out["rows"][0]["by"], "admin@vive.com")
 
     def test_an_exception_on_two_lines_counts_once_in_the_tiles(self):
         out = sp.recon_view([self._row(1, "A", "Not found in NetSuite", 5.0, exc="E1", reason="Not Found in NetSuite"),

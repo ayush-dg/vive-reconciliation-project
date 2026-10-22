@@ -107,6 +107,36 @@ class TestReconAcceptAndUndo(_Db):
                          {(-7.03, "ap@vive.com", "vendor confirmed", "EXC-1")})
         self.assertEqual({r["is_active"] for r in self.rows(source="auto", invoice_number="INV123")}, {0})
 
+    def test_accept_leaves_another_line_with_the_same_number_alone(self):
+        # Nucar STMT-7409AF91 (2026-10-22): line 46 ($125, not found) and line 49
+        # ($75, matched) are both CM6303960-1; matching line 46 by hand must not
+        # overwrite line 49's own match -- and Undo must not touch it either.
+        lines = [{"statement_line_id": "L46", "line_number": 46, "invoice_number": "CM6303960-1", "charge_amount": -125.0},
+                 {"statement_line_id": "L49", "line_number": 49, "invoice_number": "CM6303960-1", "charge_amount": -75.0}]
+        results = {
+            "L46": {"invoice_number": "CM6303960-1", "status": "Not found in NetSuite", "statement_amount": 125.0,
+                    "exception_id": "EXC-46", "exception_reason": "Not Found in NetSuite"},
+            "L49": {"invoice_number": "CM6303960-1", "status": "Matched", "statement_amount": 75.0,
+                    "netsuite": {"record_type": "credit", "id": 75, "tranid": "CM6303960-1", "amount": 75.0}},
+        }
+        rt.replace_auto_rows("STMT-1", rt.build_auto_rows(STATEMENT, lines, results))
+        credit = dict(BILL_23, record_type="Credit", internal_id="125", tranid="CM6303960.1", total=125.0)
+        added = rt.accept_manual_match("STMT-1", "CM6303960-1", "EXC-46", "Not Found in NetSuite", 125.0, credit,
+                                       "admin@vivecollision.com")
+        self.assertEqual(added, 1)
+        self.assertEqual([r["line_number"] for r in self.rows(source="manual")], [46])
+        active = {(r["line_number"], r["source"], r["status"]) for r in self.rows() if r["is_active"]}
+        self.assertEqual(active, {(46, "manual", "Matched manually"), (49, "auto", "Matched")})
+
+        # A re-run keeps line 49's auto row and line 46's manual one.
+        rt.replace_auto_rows("STMT-1", rt.build_auto_rows(STATEMENT, lines, results))
+        active = {(r["line_number"], r["source"]) for r in self.rows() if r["is_active"]}
+        self.assertEqual(active, {(46, "manual"), (49, "auto")})
+
+        rt.undo_manual_match("STMT-1", "CM6303960-1", "admin@vivecollision.com")
+        active = {(r["line_number"], r["source"], r["status"]) for r in self.rows() if r["is_active"]}
+        self.assertEqual(active, {(46, "auto", "Not found in NetSuite"), (49, "auto", "Matched")})
+
     def test_accept_without_auto_rows_still_records_the_match(self):
         self.assertEqual(self._accept(record=dict(BILL_23, internal_id="7777")), 1)
         row = self.rows(source="manual")[0]

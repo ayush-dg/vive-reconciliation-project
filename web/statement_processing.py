@@ -223,7 +223,7 @@ def _same_invoice(line_inv, result_inv, exact_only=False) -> bool:
 # recon table status -> (filter group, label) for the Reconciliation tab.
 _RECON_GROUPS = {
     "Matched": ("matched", "Matched"),
-    "Matched manually": ("matched", "Matched manually"),
+    "Matched manually": ("resolved", "Matched manually"),
     "Amount mismatch": ("mismatch", "Amount mismatch"),
     "Not found in NetSuite": ("missing", "Not in NetSuite"),
     "Accepted": ("resolved", "Accepted"),
@@ -247,11 +247,11 @@ def recon_view(recon_rows: list) -> dict:
             group = "set_aside" if status == "Not reconciled" and r.get("note") else (
                 "none" if status in ("", "Not reconciled") else "other")
             label = "Set aside" if group == "set_aside" else (label or "Not reconciled")
-        if group == "resolved":
+        if group == "resolved" and status != "Matched manually":
             was = _REASON_LABEL.get(r.get("exception_reason"), (r.get("exception_reason") or "").lower())
             label = f"{label}{' (was ' + was + ')' if was else ''}"
-            if r.get("exception_id"):
-                resolved_ids.add(r["exception_id"])
+        if group == "resolved":
+            resolved_ids.add(r.get("exception_id") or ("line", r.get("line_number")))
         elif group in ("mismatch", "missing", "other") and r.get("exception_id"):
             open_ids.setdefault(r["exception_id"], (group, r))
         if status == "Matched manually" and r.get("netsuite_tranid"):

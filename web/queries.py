@@ -2674,9 +2674,9 @@ def get_recon_card_status() -> dict:
             reason = _OPEN_RECON_REASON[status]
             card["reasons"][reason] = card["reasons"].get(reason, 0) + (r["exc"] or 0)
             card["exceptions"] += r["exc"] or 0
-        elif status in ("Accepted", "Rejected"):
+        elif status in ("Accepted", "Rejected", "Matched manually"):
             card["resolved"] += r["exc"] or 0
-        elif status in ("Matched", "Matched manually"):
+        elif status == "Matched":
             card["matched"] += r["n"] or 0
     return out
 
