@@ -56,6 +56,10 @@ class _FakeRecon:
     STATUS_MATCHED = recon_table.STATUS_MATCHED
     STATUS_NOT_RECONCILED = recon_table.STATUS_NOT_RECONCILED
 
+    line_amount = staticmethod(recon_table.line_amount)
+    status_for_reason = staticmethod(recon_table.status_for_reason)
+    build_auto_rows = staticmethod(recon_table.build_auto_rows)
+
     def __init__(self, existing=()):
         self.existing = list(existing)
 
@@ -116,6 +120,59 @@ class PlanStatementTests(unittest.TestCase):
     def test_only_manual_rows_do_not_count_as_already_backfilled(self):
         rows, _ = self._plan(existing=[{"source": recon_table.SOURCE_MANUAL}])
         self.assertIsNotNone(rows)
+
+
+class FallbackTests(unittest.TestCase):
+    """Stored results matching no longer reproduces (NetSuite changed since):
+    --fallback pairs every line with its stored result by invoice and amount."""
+
+    class _FM(_FakeMatching):
+        lines = [
+            {"statement_line_id": "L1", "line_number": 1, "invoice_number": "A1", "charge_amount": 100.0},
+            {"statement_line_id": "L2", "line_number": 2, "invoice_number": "B2", "charge_amount": 50.0},
+            {"statement_line_id": "L3", "line_number": 3, "invoice_number": "A1", "charge_amount": -100.0},
+            {"statement_line_id": "L4", "line_number": 4, "invoice_number": "C3", "charge_amount": 7.0},
+        ]
+
+        def get_warehouse_connection(self):
+            class _C:
+                def cursor(self):
+                    return None
+            return _C()
+
+        def _fetch_statement(self, cur, sid):
+            return {"vendor_id": "V", "vendor_name_raw": "Vendor"}
+
+        def _fetch_lines(self, cur, sid):
+            return [dict(l) for l in self.lines]
+
+        def _previous_run_time(self, cur, sid):
+            return "2026-10-14T15:02:21"
+
+    def _plan(self, fallback):
+        fm = self._FM([_match_row("A1", 100.0), _match_row("Z9", 1.0)], [], [])  # matching today differs
+        queries = _FakeQueries(
+            [{"invoice_number": "A1", "statement_amount": 100.0, "erp_amount": 100.0}],
+            [{"exception_id": "real-9", "invoice_number": "B2", "exception_reason": "Not Found in NetSuite",
+              "statement_amount": 50.0, "erp_amount": None, "exception_status": "OPEN"}])
+        return bf.plan_statement(fm, _FakeRecon(), queries, "STMT-1", fallback=fallback)
+
+    def test_without_fallback_it_is_skipped(self):
+        rows, report = self._plan(False)
+        self.assertIsNone(rows)
+        self.assertIn("--fallback", report["detail"])
+
+    def test_with_fallback_each_line_gets_its_stored_result(self):
+        rows, report = self._plan(True)
+        by_line = {r["line_number"]: r for r in rows}
+        self.assertEqual(by_line[1]["status"], recon_table.STATUS_MATCHED)
+        self.assertEqual((by_line[2]["status"], by_line[2]["exception_id"]), ("Not found in NetSuite", "real-9"))
+        self.assertEqual(by_line[3]["status"], recon_table.STATUS_MATCHED)   # shares invoice A1's match
+        self.assertEqual(by_line[4]["status"], recon_table.STATUS_NOT_RECONCILED)
+        self.assertEqual(by_line[4]["note"], bf.FALLBACK_NOTE)
+        self.assertEqual(by_line[1]["created_at"], "2026-10-14T15:02:21")
+        self.assertTrue(report["detail"].startswith("fallback"))
+        self.assertEqual(report["exceptions"], 1)
 
 
 if __name__ == "__main__":

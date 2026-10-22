@@ -43,9 +43,76 @@ def _exception_key(invoice, reason, amount):
     return (str(invoice or "").lower(), reason, _amount(amount))
 
 
-def plan_statement(fm, recon_table, queries, statement_id):
+FALLBACK_RULE = "backfill: paired with the stored result"
+FALLBACK_NOTE = "not checked against NetSuite on its own (backfilled from the stored results)"
+
+
+def _same_invoice(line_inv, result_inv) -> bool:
+    """The same number, or the matcher's '-N' ordinal form of it
+    (web/statement_processing.py pairs lines the same way)."""
+    if not line_inv or not result_inv:
+        return False
+    a, b = str(line_inv).lower(), str(result_inv).lower()
+    return a == b or b.startswith(a + "-")
+
+
+def paired_rows(fm, recon_table, statement_id, stored_matches, stored_exceptions):
+    """The fallback (--fallback) for a statement whose stored results matching
+    no longer reproduces (NetSuite changed since): every Silver line paired
+    with its stored match/exception by invoice and amount -- exactly as
+    Statement Processing shows it -- so recon agrees with the Exceptions page.
+    A line no stored result pairs with shares its invoice's result when it has
+    one, else is set aside with FALLBACK_NOTE. No NetSuite record ids (the
+    stored results don't have them)."""
+    cur = fm.get_warehouse_connection().cursor()
+    header = fm._fetch_statement(cur, statement_id)
+    lines = fm._fetch_lines(cur, statement_id)
+    run_time = fm._previous_run_time(cur, statement_id)
+    results = [("match", m) for m in stored_matches] + [("exception", e) for e in stored_exceptions]
+    used, own = set(), {}
+    for line in lines:
+        amount = recon_table.line_amount(line)
+        if amount is None:
+            continue
+        for rid, (kind, result) in enumerate(results):
+            stmt = result.get("statement_amount")
+            if (rid not in used and stmt is not None and abs(abs(float(stmt)) - abs(amount)) < 0.005
+                    and _same_invoice(line.get("invoice_number"), result.get("invoice_number"))):
+                used.add(rid)
+                own[line["statement_line_id"]] = (kind, result)
+                break
+    by_invoice = {}
+    for kind, result in results:
+        by_invoice.setdefault(str(result.get("invoice_number") or "").lower(), (kind, result))
+
+    per_line = {}
+    for line in lines:
+        pair = own.get(line["statement_line_id"]) or by_invoice.get(str(line.get("invoice_number") or "").lower())
+        if not pair:
+            line["_recon_note"] = FALLBACK_NOTE
+            continue
+        kind, result = pair
+        erp = result.get("erp_amount")
+        per_line[line["statement_line_id"]] = {
+            "invoice_number": result.get("invoice_number"),
+            "status": (recon_table.STATUS_MATCHED if kind == "match"
+                       else recon_table.status_for_reason(result.get("exception_reason"))),
+            "statement_amount": result.get("statement_amount"),
+            "exception_id": result.get("exception_id") if kind == "exception" else None,
+            "exception_reason": result.get("exception_reason") if kind == "exception" else None,
+            "netsuite": {"amount": erp} if erp is not None else None,
+            "match_rule": FALLBACK_RULE,
+        }
+    statement = {"statement_id": statement_id, "vendor_id": (header or {}).get("vendor_id"),
+                 "vendor_name": (header or {}).get("vendor_name_raw"), "statement_period": None}
+    return recon_table.build_auto_rows(statement, lines, per_line, run_time)
+
+
+def plan_statement(fm, recon_table, queries, statement_id, fallback=False):
     """(rows_to_insert, report_row) for one statement. rows_to_insert is None
-    when the statement is skipped -- the report row says why."""
+    when the statement is skipped -- the report row says why. fallback=True
+    pairs a statement whose stored results differ (paired_rows()) instead of
+    skipping it."""
     report = {"statement_id": statement_id, "vendor_id": "", "action": "skipped", "detail": "",
               "rows": 0, "matched": 0, "exceptions": 0, "resolved": 0, "set_aside": 0}
 
@@ -61,10 +128,11 @@ def plan_statement(fm, recon_table, queries, statement_id):
     report["vendor_id"] = dry["vendor_id"]
 
     stored_matches = queries.recon_query(
-        "SELECT invoice_number, statement_amount FROM silver.recon_matched_invoices WHERE statement_id = ?",
+        "SELECT invoice_number, statement_amount, erp_amount FROM silver.recon_matched_invoices "
+        "WHERE statement_id = ?",
         [statement_id])
     stored_exceptions = queries.recon_query(
-        "SELECT exception_id, invoice_number, exception_reason, statement_amount, exception_status "
+        "SELECT exception_id, invoice_number, exception_reason, statement_amount, erp_amount, exception_status "
         "FROM silver.recon_exceptions WHERE statement_id = ?", [statement_id])
 
     # 2. The stored results must be what matching gives today.
@@ -75,18 +143,23 @@ def plan_statement(fm, recon_table, queries, statement_id):
     old_exc = Counter(_exception_key(r["invoice_number"], r["exception_reason"], r["statement_amount"])
                       for r in stored_exceptions)
     if dry_matches != old_matches or dry_exc != old_exc:
-        report["detail"] = (f"stored results differ from matching today (matches {sum(old_matches.values())} vs "
-                            f"{sum(dry_matches.values())}, exceptions {sum(old_exc.values())} vs "
-                            f"{sum(dry_exc.values())}) -- re-match or review")
-        return None, report
-
-    # 3. Link each dry-run exception id to the stored exception.
-    stored_by_key = defaultdict(list)
-    for e in stored_exceptions:
-        stored_by_key[_exception_key(e["invoice_number"], e["exception_reason"], e["statement_amount"])].append(e)
-    id_map = {}
-    for r in written["silver.recon_exceptions"]:
-        id_map[r[0]] = stored_by_key[_exception_key(r[3], r[9], r[6])].pop(0)
+        detail = (f"stored results differ from matching today (matches {sum(old_matches.values())} vs "
+                  f"{sum(dry_matches.values())}, exceptions {sum(old_exc.values())} vs {sum(dry_exc.values())})")
+        if not fallback:
+            report["detail"] = detail + " -- re-match, or --fallback"
+            return None, report
+        rows = paired_rows(fm, recon_table, statement_id, stored_matches, stored_exceptions)
+        id_map = {e["exception_id"]: e for e in stored_exceptions}
+        report["detail"] = "fallback (paired with stored results): " + detail
+    else:
+        # 3. Link each dry-run exception id to the stored exception.
+        stored_by_key = defaultdict(list)
+        for e in stored_exceptions:
+            stored_by_key[_exception_key(e["invoice_number"], e["exception_reason"], e["statement_amount"])].append(e)
+        id_map = {}
+        for r in written["silver.recon_exceptions"]:
+            id_map[r[0]] = stored_by_key[_exception_key(r[3], r[9], r[6])].pop(0)
+        rows = dry["recon_rows"]
 
     decisions = {}
     for d in queries.execute_query(
@@ -94,7 +167,6 @@ def plan_statement(fm, recon_table, queries, statement_id):
             "FROM exception_dispositions WHERE statement_id = ? ORDER BY disposed_at, id", [statement_id]):
         decisions[d["exception_id"]] = d  # latest wins
 
-    rows = dry["recon_rows"]
     for row in rows:
         stored = id_map.get(row.get("exception_id"))
         if not stored:
@@ -120,6 +192,8 @@ def main():
     parser.add_argument("--since", help="statements reconciled on/after this date (YYYY-MM-DD)")
     parser.add_argument("--statement", action="append")
     parser.add_argument("--apply", action="store_true", help="insert the rows (default: report only)")
+    parser.add_argument("--fallback", action="store_true",
+                        help="pair lines with the stored results when matching no longer reproduces them")
     parser.add_argument("--report", default="backfill_recon_report.csv")
     parser.add_argument("--undo", metavar="REPORT", help="delete the auto rows this report backfilled")
     args = parser.parse_args()
@@ -154,7 +228,7 @@ def main():
     reports = []
     for n, sid in enumerate(statement_ids, 1):
         try:
-            rows, report = plan_statement(fm, recon_table, queries, sid)
+            rows, report = plan_statement(fm, recon_table, queries, sid, fallback=args.fallback)
             if rows is not None and args.apply:
                 recon_table.replace_auto_rows(sid, rows)
                 report["action"] = "backfilled"
