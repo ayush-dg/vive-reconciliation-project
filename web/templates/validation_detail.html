@@ -21,7 +21,8 @@
 {% set stage_sub = {
   "extraction": ((extracted | length) ~ " line" ~ ("" if extracted | length == 1 else "s")) if ex.state == "ok" else "",
   "validation": ("Diff " ~ (intake.validation_difference | money_signed)) if intake and intake.validation_difference is not none else "",
-  "reconciliation": (recon.tiles.matched ~ " of " ~ recon.tiles.invoices ~ " matched") if recon else "",
+  "reconciliation": ((recon.tiles.matched ~ " of " ~ recon.tiles.invoices ~ " matched")
+                     ~ ((" · " ~ recon.tiles.resolved ~ " resolved") if recon.tiles.resolved else "")) if recon else "",
 } %}
 <div class="sp-stages" role="tablist" aria-label="Processing stages">
   {% for stage in card.stages %}
@@ -160,12 +161,12 @@
     <div class="kpi-sub">{{ recon.tiles.matched_amount | money }}</div>
   </div>
   <div class="kpi">
-    <div class="kpi-label">Amount mismatch</div>
+    <div class="kpi-label">Amount mismatch{% if recon.source == "recon" %} · open{% endif %}</div>
     <div class="kpi-value{{ ' amber' if recon.tiles.mismatch }}">{{ recon.tiles.mismatch }}</div>
     <div class="kpi-sub">{{ recon.tiles.mismatch_amount | money }} difference</div>
   </div>
   <div class="kpi">
-    <div class="kpi-label">Not in NetSuite</div>
+    <div class="kpi-label">Not in NetSuite{% if recon.source == "recon" %} · open{% endif %}</div>
     <div class="kpi-value{{ ' amber' if recon.tiles.missing }}">{{ recon.tiles.missing }}</div>
     <div class="kpi-sub">{{ recon.tiles.missing_amount | money }} on statement</div>
   </div>
@@ -174,6 +175,13 @@
     <div class="kpi-label">Other exceptions</div>
     <div class="kpi-value amber">{{ recon.tiles.other }}</div>
     <div class="kpi-sub">e.g. possible duplicates</div>
+  </div>
+  {% endif %}
+  {% if recon.tiles.resolved %}
+  <div class="kpi">
+    <div class="kpi-label">Resolved</div>
+    <div class="kpi-value">{{ recon.tiles.resolved }}</div>
+    <div class="kpi-sub">accepted or rejected by a reviewer</div>
   </div>
   {% endif %}
 </div>
@@ -188,6 +196,7 @@
   <button type="button" class="filter-chip" data-line="mismatch">Amount mismatch {{ recon.counts.mismatch }}</button>
   <button type="button" class="filter-chip" data-line="missing">Not in NetSuite {{ recon.counts.missing }}</button>
   {% if recon.counts.other %}<button type="button" class="filter-chip" data-line="other">Other {{ recon.counts.other }}</button>{% endif %}
+  {% if recon.counts.resolved %}<button type="button" class="filter-chip" data-line="resolved">Resolved {{ recon.counts.resolved }}</button>{% endif %}
   {% if recon.counts.set_aside %}<button type="button" class="filter-chip" data-line="set_aside" title="Payments closing an invoice, and duplicate lines -- not checked on their own">Set aside {{ recon.counts.set_aside }}</button>{% endif %}
   {% if recon.counts.none %}<button type="button" class="filter-chip" data-line="none">Not reconciled {{ recon.counts.none }}</button>{% endif %}
 </div>
@@ -205,7 +214,7 @@
         <td class="num">{{ r.amount | money if r.amount is not none else "—" }}</td>
         <td class="num">{{ r.netsuite_amount | money if r.netsuite_amount is not none else "—" }}</td>
         <td class="num{{ ' sp-bad' if r.difference }}">{{ r.difference | money_signed if r.difference is not none else "—" }}</td>
-        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger'}.get(r.status, 'neutral') }}"{% if r.note %} title="{{ r.note }}"{% endif %}>{{ ('✓ ' if r.status == 'matched') ~ r.label }}</span></td>
+        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger', 'resolved': 'info'}.get(r.status, 'neutral') }}"{% if r.note %} title="{{ r.note }}"{% endif %}>{{ ('✓ ' if r.status in ('matched', 'resolved')) ~ r.label }}</span>{% if r.by %}<div class="sp-shared">{{ r.by }}{% if r.at %} · {{ r.at }}{% endif %}</div>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

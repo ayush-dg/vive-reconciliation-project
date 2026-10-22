@@ -191,6 +191,51 @@ class TestLineResults(unittest.TestCase):
         self.assertEqual([(r["status"], r["shared"]) for r in out["rows"]], [("matched", False), ("matched", True)])
 
 
+class TestReconView(unittest.TestCase):
+    """The Reconciliation tab read from the recon table only (2026-10-22)."""
+
+    def _row(self, n, inv, status, amount, exc=None, reason=None, **extra):
+        return dict({"line_number": n, "invoice_number": inv, "status": status, "line_amount": amount,
+                     "exception_id": exc, "exception_reason": reason, "netsuite_amount": None,
+                     "difference": None, "source": "auto", "note": None, "matched_by": "system",
+                     "matched_at": "2026-10-20T13:09:30"}, **extra)
+
+    def _nucar(self):
+        # Nucar STMT-7409AF91 as it stands: 54 matched, 4 open not-found, the
+        # $125 one accepted by a reviewer, 3 payoff lines set aside.
+        rows = [self._row(i, f"INV{i}", "Matched", 10.0) for i in range(1, 55)]
+        rows += [self._row(60 + i, f"CM{i}", "Not found in NetSuite", -20.0, exc=f"E{i}",
+                           reason="Not Found in NetSuite") for i in range(4)]
+        rows.append(self._row(99, "CM6303960-1", "Accepted", -125.0, exc="E9", reason="Not Found in NetSuite",
+                              matched_by="admin@vivecollision.com", matched_at="2026-10-21T15:19:50"))
+        rows += [self._row(70 + i, f"P{i}", "Not reconciled", -500.0, note="payment of the invoice") for i in range(3)]
+        return sp.recon_view(rows)
+
+    def test_tiles_header_and_filters_agree(self):
+        out = self._nucar()
+        t, c = out["tiles"], out["counts"]
+        self.assertEqual((t["matched"], t["missing"], t["mismatch"], t["open"], t["resolved"]), (54, 4, 0, 4, 1))
+        self.assertEqual((c["matched"], c["missing"], c["mismatch"], c["resolved"], c["set_aside"]), (54, 4, 0, 1, 3))
+        self.assertEqual(len(out["rows"]), 62)
+        self.assertEqual(t["invoices"], 59)
+
+    def test_a_resolved_line_says_so_and_who(self):
+        line = next(r for r in self._nucar()["rows"] if r["line_number"] == 99)
+        self.assertEqual((line["status"], line["label"]), ("resolved", "Accepted (was not in NetSuite)"))
+        self.assertEqual((line["by"], line["at"]), ("admin@vivecollision.com", "2026-10-21"))
+
+    def test_a_manual_match_counts_as_matched(self):
+        out = sp.recon_view([self._row(1, "338630", "Matched manually", 144.96, exc="E1", source="manual",
+                                       netsuite_tranid="338630", matched_by="admin@vive.com")])
+        self.assertEqual((out["tiles"]["matched"], out["tiles"]["open"], out["counts"]["matched"]), (1, 0, 1))
+        self.assertEqual(out["rows"][0]["label"], "Matched manually to 338630")
+
+    def test_an_exception_on_two_lines_counts_once_in_the_tiles(self):
+        out = sp.recon_view([self._row(1, "A", "Not found in NetSuite", 5.0, exc="E1", reason="Not Found in NetSuite"),
+                             self._row(2, "A", "Not found in NetSuite", 5.0, exc="E1", reason="Not Found in NetSuite")])
+        self.assertEqual((out["tiles"]["missing"], out["counts"]["missing"]), (1, 2))
+
+
 def _client(fns):
     from web.routers import validation
     for name, fn in fns.items():

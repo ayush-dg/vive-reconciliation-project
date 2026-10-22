@@ -13,6 +13,7 @@ Stage states: "ok", "fail", "warn" (reconciled with exceptions), "run"
 """
 
 import re
+from collections import Counter
 
 from web.deps import friendly_error
 
@@ -207,6 +208,73 @@ def _same_invoice(line_inv, result_inv) -> bool:
         return False
     a, b = str(line_inv).lower(), str(result_inv).lower()
     return a == b or b.startswith(a + "-")
+
+
+# recon table status -> (filter group, label) for the Reconciliation tab.
+_RECON_GROUPS = {
+    "Matched": ("matched", "Matched"),
+    "Matched manually": ("matched", "Matched manually"),
+    "Amount mismatch": ("mismatch", "Amount mismatch"),
+    "Not found in NetSuite": ("missing", "Not in NetSuite"),
+    "Accepted": ("resolved", "Accepted"),
+    "Rejected": ("resolved", "Rejected"),
+}
+_REASON_LABEL = {MISMATCH: "amount mismatch", NOT_FOUND: "not in NetSuite"}
+
+
+def recon_view(recon_rows: list) -> dict:
+    """The Reconciliation tab from the recon table ONLY (2026-10-22): one
+    active row per statement line with its CURRENT status -- so a manual
+    Accept / Reject / Accept-as-match shows on the line, the tiles, the
+    filters and the header at once, and they can't disagree. Exceptions are
+    counted once each (by exception id) in the tiles and header, as on the
+    Exceptions page; the filters count lines. Same shape as line_results()."""
+    rows, open_ids, resolved_ids = [], {}, set()
+    for r in recon_rows:
+        status = r.get("status") or ""
+        group, label = _RECON_GROUPS.get(status, (None, status))
+        if group is None:
+            group = "set_aside" if status == "Not reconciled" and r.get("note") else (
+                "none" if status in ("", "Not reconciled") else "other")
+            label = "Set aside" if group == "set_aside" else (label or "Not reconciled")
+        if group == "resolved":
+            was = _REASON_LABEL.get(r.get("exception_reason"), (r.get("exception_reason") or "").lower())
+            label = f"{label}{' (was ' + was + ')' if was else ''}"
+            if r.get("exception_id"):
+                resolved_ids.add(r["exception_id"])
+        elif group in ("mismatch", "missing", "other") and r.get("exception_id"):
+            open_ids.setdefault(r["exception_id"], (group, r))
+        if status == "Matched manually" and r.get("netsuite_tranid"):
+            label = f"Matched manually to {r['netsuite_tranid']}"
+        who = r.get("matched_by") if r.get("source") == "manual" or group == "resolved" else None
+        rows.append({
+            "line_number": r.get("line_number"), "invoice_number": r.get("invoice_number"),
+            "amount": _num(r.get("line_amount")), "netsuite_amount": _num(r.get("netsuite_amount")),
+            "difference": _num(r.get("difference")), "status": group, "label": label,
+            "note": r.get("note") if group in ("set_aside", "resolved") or r.get("source") == "manual" else None,
+            "by": who, "at": str(r.get("matched_at") or "")[:10] if who else None,
+            "shared": False, "invoice_lines": 1,
+        })
+    rows.sort(key=lambda x: (x["line_number"] is None, x["line_number"] or 0))
+
+    def open_of(group):
+        return [r for g, r in open_ids.values() if g == group]
+    matched = [r for r in rows if r["status"] == "matched"]
+    checked = [r for r in rows if r["status"] not in ("set_aside", "none")]
+    mismatches, missing, other = open_of("mismatch"), open_of("missing"), open_of("other")
+    tiles = {
+        "matched": len(matched), "matched_amount": round(sum(abs(r["amount"] or 0) for r in matched), 2),
+        "mismatch": len(mismatches),
+        "mismatch_amount": round(sum(abs(_num(r.get("difference")) or 0) for r in mismatches), 2),
+        "missing": len(missing), "missing_amount": round(sum(abs(_num(r.get("line_amount")) or 0) for r in missing), 2),
+        "other": len(other), "invoices": len(checked),
+        "open": len(open_ids), "resolved": len(resolved_ids),
+    }
+    counts = {s: sum(1 for r in rows if r["status"] == s)
+              for s in ("matched", "mismatch", "missing", "other", "resolved", "set_aside", "none")}
+    reasons = Counter({"mismatch": MISMATCH, "missing": NOT_FOUND}.get(g, "Other") for g, _ in open_ids.values())
+    return {"rows": rows, "tiles": tiles, "counts": counts, "source": "recon",
+            "open_reasons": dict(reasons)}
 
 
 def line_results(lines: list, matched: list, exceptions: list, set_aside: dict = None) -> dict:

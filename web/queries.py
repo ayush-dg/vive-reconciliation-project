@@ -2649,6 +2649,18 @@ def get_processing_jobs() -> list:
     )
 
 
+def get_recon_rows(statement_id: str) -> list:
+    """The statement's active recon rows (auto + manual), or [] when it has
+    none yet or the table can't be read -- Statement Processing then falls
+    back to the stored matching results."""
+    try:
+        from src.lakehouse import recon_table
+        rows = recon_table.rows_for_statement(statement_id)
+    except Exception:
+        return []
+    return rows if any(r.get("source") == "auto" for r in rows) else []
+
+
 def get_set_aside_lines(statement_id: str) -> dict:
     """{line_number: note} for the lines matching set aside on purpose (a
     payment closing its invoice, an exact duplicate) -- from the recon table,

@@ -103,19 +103,30 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
     # result). Opens on the stage that needs attention (sp.default_tab()).
     # get_statement_report() is mostly Fabric (summary, matched,
     # exceptions); the other three are mostly Azure SQL.
-    report, (data, job, extracted, set_aside) = _alongside(
+    report, (data, job, extracted, set_aside, recon_rows) = _alongside(
         lambda: queries.get_statement_report(statement_id),
         lambda: queries.get_extraction_validation_detail(statement_id),
         lambda: queries.get_latest_job_for_statement(statement_id),
         lambda: queries.get_extracted_rows_for_statement(statement_id),
-        lambda: queries.get_set_aside_lines(statement_id))
+        lambda: queries.get_set_aside_lines(statement_id),
+        lambda: queries.get_recon_rows(statement_id))
     intake = data.get("intake")
     summary, matched, exceptions = report.get("summary"), report.get("matched") or [], report.get("exceptions") or []
+
+    # The Reconciliation tab reads the recon table when the statement has
+    # rows there (2026-10-22) -- every number and status from one source --
+    # else the stored matching results as before.
+    lines_view = None
+    if summary is not None:
+        lines_view = (sp.recon_view(recon_rows) if recon_rows
+                      else sp.line_results(data.get("lines") or [], matched, exceptions, set_aside))
 
     card = None
     if intake:
         recon = None
-        if summary is not None:
+        if summary is not None and recon_rows:
+            recon = {"exceptions": lines_view["tiles"]["open"], "reasons": lines_view["open_reasons"]}
+        elif summary is not None:
             recon = {"exceptions": summary.get("exception_count") or 0,
                      "reasons": dict(Counter(e.get("exception_reason") or "Other" for e in exceptions))}
         card = sp.intake_card(intake, job, recon)
@@ -133,8 +144,7 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
         "job": job,
         "summary": summary,
         "extracted": extracted if card else [],
-        "recon": (sp.line_results(data.get("lines") or [], matched, exceptions, set_aside)
-                  if summary is not None else None),
+        "recon": lines_view,
         "active_tab": tab if tab in tabs else (sp.default_tab(card) if card else "validation"),
         **sidebar_context(request),
     }
