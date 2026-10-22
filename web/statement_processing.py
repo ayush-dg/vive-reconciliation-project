@@ -210,13 +210,14 @@ def _line_amount(line: dict):
     return amount
 
 
-def _same_invoice(line_inv, result_inv) -> bool:
-    """A result belongs to a line's invoice: the same number, or the
-    matcher's '-N' ordinal form of it (Nucar CM6303960 -> CM6303960-1)."""
+def _same_invoice(line_inv, result_inv, exact_only=False) -> bool:
+    """A result belongs to a line's invoice: the same number, or (unless
+    exact_only) the matcher's '-N' ordinal form of it (Nucar CM6303960 ->
+    CM6303960-1)."""
     if not line_inv or not result_inv:
         return False
     a, b = str(line_inv).lower(), str(result_inv).lower()
-    return a == b or b.startswith(a + "-")
+    return a == b or (not exact_only and b.startswith(a + "-"))
 
 
 # recon table status -> (filter group, label) for the Reconciliation tab.
@@ -300,17 +301,20 @@ def line_results(lines: list, matched: list, exceptions: list, set_aside: dict =
     results = [("match", m) for m in matched] + [("exception", e) for e in exceptions]
     used = set()
     own = {}
-    for idx, line in enumerate(lines):
-        amount = _line_amount(line)
-        if amount is None:
-            continue
-        for rid, (kind, result) in enumerate(results):
-            stmt = _num(result.get("statement_amount"))
-            if (rid not in used and stmt is not None and abs(abs(stmt) - abs(amount)) < 0.005
-                    and _same_invoice(line.get("invoice_number"), result.get("invoice_number"))):
-                used.add(rid)
-                own[idx] = (kind, result)
-                break
+    # Exact invoice number first, the '-N' form only for lines still unpaired
+    # -- else '563967E' takes '563967E-1''s result (Quirk, 2026-10-22).
+    for exact_only in (True, False):
+        for idx, line in enumerate(lines):
+            amount = _line_amount(line)
+            if amount is None or idx in own:
+                continue
+            for rid, (kind, result) in enumerate(results):
+                stmt = _num(result.get("statement_amount"))
+                if (rid not in used and stmt is not None and abs(abs(stmt) - abs(amount)) < 0.005
+                        and _same_invoice(line.get("invoice_number"), result.get("invoice_number"), exact_only)):
+                    used.add(rid)
+                    own[idx] = (kind, result)
+                    break
 
     by_match, by_exc = {}, {}
     for m in matched:

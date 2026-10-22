@@ -47,13 +47,13 @@ FALLBACK_RULE = "backfill: paired with the stored result"
 FALLBACK_NOTE = "not checked against NetSuite on its own (backfilled from the stored results)"
 
 
-def _same_invoice(line_inv, result_inv) -> bool:
-    """The same number, or the matcher's '-N' ordinal form of it
-    (web/statement_processing.py pairs lines the same way)."""
+def _same_invoice(line_inv, result_inv, exact_only=False) -> bool:
+    """The same number, or (unless exact_only) the matcher's '-N' ordinal
+    form of it (web/statement_processing.py pairs lines the same way)."""
     if not line_inv or not result_inv:
         return False
     a, b = str(line_inv).lower(), str(result_inv).lower()
-    return a == b or b.startswith(a + "-")
+    return a == b or (not exact_only and b.startswith(a + "-"))
 
 
 def paired_rows(fm, recon_table, statement_id, stored_matches, stored_exceptions):
@@ -70,17 +70,20 @@ def paired_rows(fm, recon_table, statement_id, stored_matches, stored_exceptions
     run_time = fm._previous_run_time(cur, statement_id)
     results = [("match", m) for m in stored_matches] + [("exception", e) for e in stored_exceptions]
     used, own = set(), {}
-    for line in lines:
-        amount = recon_table.line_amount(line)
-        if amount is None:
-            continue
-        for rid, (kind, result) in enumerate(results):
-            stmt = result.get("statement_amount")
-            if (rid not in used and stmt is not None and abs(abs(float(stmt)) - abs(amount)) < 0.005
-                    and _same_invoice(line.get("invoice_number"), result.get("invoice_number"))):
-                used.add(rid)
-                own[line["statement_line_id"]] = (kind, result)
-                break
+    # Exact invoice number first; the '-N' ordinal form only for lines still
+    # unpaired -- else '563967E' takes '563967E-1''s result (Quirk, 2026-10-22).
+    for exact_only in (True, False):
+        for line in lines:
+            amount = recon_table.line_amount(line)
+            if amount is None or line["statement_line_id"] in own:
+                continue
+            for rid, (kind, result) in enumerate(results):
+                stmt = result.get("statement_amount")
+                if (rid not in used and stmt is not None and abs(abs(float(stmt)) - abs(amount)) < 0.005
+                        and _same_invoice(line.get("invoice_number"), result.get("invoice_number"), exact_only)):
+                    used.add(rid)
+                    own[line["statement_line_id"]] = (kind, result)
+                    break
     by_invoice = {}
     for kind, result in results:
         by_invoice.setdefault(str(result.get("invoice_number") or "").lower(), (kind, result))

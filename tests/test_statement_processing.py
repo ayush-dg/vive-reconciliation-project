@@ -183,6 +183,16 @@ class TestLineResults(unittest.TestCase):
         out = sp.line_results(lines, matched, exceptions)
         self.assertEqual([r["status"] for r in out["rows"]], ["missing", "matched"])
 
+    def test_an_exact_invoice_number_wins_over_the_ordinal_form(self):
+        # Quirk STMT-A7E43CB4: 563967E (not found) and 563967E-1 (matched), both $144.60.
+        lines = [{"line_number": 77, "invoice_number": "563967E", "charge_amount": 144.6},
+                 {"line_number": 78, "invoice_number": "563967E-1", "charge_amount": 144.6}]
+        matched = [{"invoice_number": "563967E-1", "statement_amount": 144.6, "erp_amount": 144.6}]
+        exceptions = [{"invoice_number": "563967E", "statement_amount": 144.6, "erp_amount": None,
+                       "exception_reason": "Not Found in NetSuite"}]
+        out = sp.line_results(lines, matched, exceptions)
+        self.assertEqual([r["status"] for r in out["rows"]], ["missing", "matched"])
+
     def test_a_result_is_used_by_one_line_only(self):
         lines = [{"line_number": 1, "invoice_number": "A1", "charge_amount": 10.0},
                  {"line_number": 2, "invoice_number": "A1", "charge_amount": 10.0}]
