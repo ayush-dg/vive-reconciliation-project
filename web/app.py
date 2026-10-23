@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
-from web.routers import auth, batches, dashboard, exceptions, intake_trigger, jobs, mailbox_sync, reports, review_queue, statements, upload, users, validation
+from web.routers import auth, batches, dashboard, exceptions, intake_trigger, jobs, mailbox_sync, netsuite_connect, reports, review_queue, statements, upload, users, validation
 from web.worker import start_worker, stop_workers
 
 
@@ -69,3 +69,4 @@ app.include_router(jobs.router)
 app.include_router(intake_trigger.router)
 app.include_router(batches.router)
 app.include_router(statements.router)
+app.include_router(netsuite_connect.router)

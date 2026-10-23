@@ -37,12 +37,36 @@ RUN apt-get update \
     && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc \
     && rm -rf /var/lib/apt/lists/*
 
+# NetSuite SuiteAnalytics Connect ODBC driver (Linux 64-bit, used by
+# src/netsuite/connect_client.py). NOT in git: the driver files are copied
+# into vendor/netsuite_odbc/ of the build context just before `az acr build`
+# (see vendor/netsuite_odbc/README.md); without them this step is a no-op and
+# the image builds as before. The driver is registered by its full path in
+# the system odbcinst.ini -- its own oaodbc64.sh is NOT sourced, because the
+# package also ships a libodbc.so that must not stand in for unixODBC's
+# (msodbcsql18 / Azure SQL / Fabric). The check after pip install fails the
+# build if either driver can't be loaded.
+ENV OASDK_ODBC_HOME=/opt/netsuite/odbcclient/lib64 \
+    LD_LIBRARY_PATH=/opt/netsuite/odbcclient/lib64
+COPY vendor/netsuite_odbc/ /opt/netsuite/odbcclient/
+RUN if [ -f /opt/netsuite/odbcclient/lib64/ivoa27.so ]; then \
+        printf '\n[NetSuite ODBC Drivers 9.0]\nDescription=NetSuite SuiteAnalytics Connect\nDriver=/opt/netsuite/odbcclient/lib64/ivoa27.so\n' >> /etc/odbcinst.ini \
+        && echo "--- ldd ivoa27.so" && ldd /opt/netsuite/odbcclient/lib64/ivoa27.so \
+        && ! ldd /opt/netsuite/odbcclient/lib64/ivoa27.so | grep -q "not found"; \
+    else echo "NetSuite ODBC driver not in the build context -- skipped"; fi
+
 WORKDIR /app
 
 # Install Python dependencies first so this layer is cached unless
 # requirements.txt changes.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Both ODBC drivers must LOAD (not just be listed): a connect attempt to a
+# closed local port fails with a connection error, whereas a driver that
+# can't load fails with "Can't open lib".
+COPY scripts/check_odbc_drivers.py /tmp/check_odbc_drivers.py
+RUN python /tmp/check_odbc_drivers.py
 
 # Application code. .dockerignore keeps .env, venv/, lakehouse/*.db,
 # sample_data/, and other local-only files out of the build context.

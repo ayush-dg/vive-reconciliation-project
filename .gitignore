@@ -5,6 +5,7 @@ __pycache__/
 .env.local
 .env.prod
 .env.dev
+.env.*
 dbt/profiles.yml
 dbt/.user.yml
 dbt/.fabric_pipeline.lock
@@ -47,3 +48,7 @@ reconciliation.db
 
 # Per-container compiled Silver SQL cache (src/lakehouse/silver_build.py)
 dbt/.compiled_silver/
+
+# NetSuite ODBC driver files (vendor binaries) -- see vendor/netsuite_odbc/README.md
+vendor/netsuite_odbc/*
+!vendor/netsuite_odbc/README.md
