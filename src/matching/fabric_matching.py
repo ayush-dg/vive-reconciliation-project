@@ -87,6 +87,7 @@ from src.lakehouse.fabric_sql import get_lakehouse_connection, get_warehouse_con
 from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, line_amount, replace_auto_rows, status_for_reason
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
+from src.netsuite import connect_source
 from src.shop_owners import get_shop_owner
 
 logger = logging.getLogger(__name__)
@@ -301,6 +302,22 @@ def _apply_line_selection(vendor_id: str, lines: list, rules: dict) -> list:
     return lines
 
 
+def _netsuite_rows(read_connect, what: str):
+    """NETSUITE_SOURCE=connect: the rows from live NetSuite
+    (src/netsuite/connect_source.py), or None after a failed Connect read so
+    the caller uses the Fabric copy instead. NETSUITE_SOURCE=fabric: None."""
+    if not connect_source.use_connect():
+        connect_source.note_used(connect_source.SOURCE_FABRIC)
+        return None
+    try:
+        rows = read_connect()
+    except Exception:
+        connect_source.note_fallback(what)
+        return None
+    connect_source.note_used(connect_source.SOURCE_CONNECT)
+    return rows
+
+
 def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     """Returns {tranid: [total, total, ...]} -- EVERY non-voided total for
     each tranid among these entities, not collapsed into a single value.
@@ -315,12 +332,15 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     near-miss (Amount Mismatch) rather than a blanket "unresolved.\""""
     if not entity_ids:
         return _Candidates()
-    placeholders = ",".join("?" * len(entity_ids))
-    cur.execute(
-        f"SELECT tranid, total, id, transactionnumber, entity, location FROM bronze.{table} "
-        f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
-        entity_ids,
-    )
+    rows = _netsuite_rows(lambda: connect_source.candidate_rows(entity_ids, table), table)
+    if rows is None:
+        placeholders = ",".join("?" * len(entity_ids))
+        cur.execute(
+            f"SELECT tranid, total, id, transactionnumber, entity, location FROM bronze.{table} "
+            f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
+            entity_ids,
+        )
+        rows = cur.fetchall()
     # Keyed lowercase -- confirmed live 2026-09-18 that NetSuite's own
     # tranid casing is inconsistent even within one vendor (NYE: a
     # stripped TOW invoice ties out to an uppercase tranid, e.g.
@@ -335,7 +355,7 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     # from, so the recon table can say which bill/credit a line matched.
     by_tranid = _Candidates()
     record_type = "credit" if table == "netsuite_vendorcredit" else "bill"
-    for tranid, total, record_id, transaction_number, entity, location in cur.fetchall():
+    for tranid, total, record_id, transaction_number, entity, location in rows:
         try:
             total_f = float(total)
         except (TypeError, ValueError):
@@ -436,14 +456,17 @@ def _fetch_netsuite_credit_candidates(cur, entity_ids: list) -> list:
     that NetSuite's own tranid casing is inconsistent)."""
     if not entity_ids:
         return []
-    placeholders = ",".join("?" * len(entity_ids))
-    cur.execute(
-        f"SELECT tranid, total FROM bronze.netsuite_vendorcredit "
-        f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
-        entity_ids,
-    )
+    rows = _netsuite_rows(lambda: connect_source.credit_rows(entity_ids), "netsuite_vendorcredit (contains)")
+    if rows is None:
+        placeholders = ",".join("?" * len(entity_ids))
+        cur.execute(
+            f"SELECT tranid, total FROM bronze.netsuite_vendorcredit "
+            f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
+            entity_ids,
+        )
+        rows = cur.fetchall()
     candidates = []
-    for tranid, total in cur.fetchall():
+    for tranid, total in rows:
         try:
             total_f = float(total)
         except (TypeError, ValueError):
@@ -754,6 +777,7 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
         return {"skipped": True, "reason": "fabric_not_configured"}
 
     wh_conn = None
+    connect_source.reset_used()
     try:
         wh_conn = get_warehouse_connection()
         wh_cur = wh_conn.cursor()
@@ -1061,6 +1085,7 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
             return {
                 "matched": matched_count, "exceptions": exception_count,
                 "vendor_id": vendor_id, "lines": len(all_lines),
+                "netsuite_source": connect_source.used_summary(),
                 "would_write": {table: rows for table, (_, rows) in writes._rows.items()},
                 # The recon rows a real run would write (exception ids are this
                 # dry run's own) -- scripts/backfill_recon.py links them to the
@@ -1086,6 +1111,7 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
         return {
             "matched": matched_count, "exceptions": exception_count,
             "vendor_resolved": entity_ids is not None, "recon_rows": recon_rows,
+            "netsuite_source": connect_source.used_summary(),
         }
 
     except Exception:

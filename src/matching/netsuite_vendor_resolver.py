@@ -36,6 +36,7 @@ import os
 import re
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection
+from src.netsuite import connect_source
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,41 @@ def _load_overrides() -> dict:
     return _overrides_cache
 
 
+def _active_vendor_rows() -> list:
+    """(id, companyname, entityid, altname) of every active vendor -- live
+    from NetSuite when NETSUITE_SOURCE=connect (src/netsuite/connect_source.py),
+    else (or if that read fails) from the Fabric copy."""
+    if connect_source.use_connect():
+        try:
+            rows = connect_source.active_vendor_rows()
+            connect_source.note_used(connect_source.SOURCE_CONNECT)
+            return rows
+        except Exception:
+            connect_source.note_fallback("vendor list")
+    cur = get_lakehouse_connection().cursor()
+    cur.execute("SELECT id, companyname, entityid, altname FROM bronze.netsuite_vendor WHERE isinactive = 'F'")
+    return cur.fetchall()
+
+
+def _active_vendor_ids_like(pattern: str) -> list:
+    """Ids of active vendors whose companyname/entityid/altname contains
+    `pattern` (lowercase, with % wildcards) -- same source rule as above."""
+    if connect_source.use_connect():
+        try:
+            ids = connect_source.active_vendor_ids_like(pattern)
+            connect_source.note_used(connect_source.SOURCE_CONNECT)
+            return ids
+        except Exception:
+            connect_source.note_fallback("vendor name search")
+    cur = get_lakehouse_connection().cursor()
+    cur.execute(
+        "SELECT id FROM bronze.netsuite_vendor WHERE isinactive = 'F' AND "
+        "(LOWER(companyname) LIKE ? OR LOWER(entityid) LIKE ? OR LOWER(altname) LIKE ?)",
+        [pattern, pattern, pattern],
+    )
+    return [row[0] for row in cur.fetchall()]
+
+
 def _dynamic_lookup(vendor_name: str) -> list:
     """Exact normalized name match against bronze.netsuite_vendor, active
     only. Checks companyname, entityid, and altname -- companyname is NULL
@@ -76,14 +112,8 @@ def _dynamic_lookup(vendor_name: str) -> list:
         return []
     target = _normalize(vendor_name)
     try:
-        conn = get_lakehouse_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, companyname, entityid, altname FROM bronze.netsuite_vendor "
-            "WHERE isinactive = 'F'"
-        )
         matches = {
-            row[0] for row in cur.fetchall()
+            row[0] for row in _active_vendor_rows()
             if target in (_normalize(row[1]), _normalize(row[2]), _normalize(row[3]))
         }
         return list(matches) if len(matches) == 1 else []
@@ -108,14 +138,7 @@ def _first_word_like_lookup(vendor_name: str) -> list:
         return []
     pattern = f"%{first_word.lower()}%"
     try:
-        conn = get_lakehouse_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id FROM bronze.netsuite_vendor WHERE isinactive = 'F' AND "
-            "(LOWER(companyname) LIKE ? OR LOWER(entityid) LIKE ? OR LOWER(altname) LIKE ?)",
-            [pattern, pattern, pattern],
-        )
-        return [row[0] for row in cur.fetchall()]
+        return _active_vendor_ids_like(pattern)
     except Exception:
         logger.exception("First-word LIKE NetSuite vendor lookup failed for %r (non-fatal)", vendor_name)
         return []

@@ -80,7 +80,8 @@ def _run_matching(statement_id):
         print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
     else:
         print(f"    NetSuite matching: {match_result['matched']} matched, "
-              f"{match_result['exceptions']} exceptions")
+              f"{match_result['exceptions']} exceptions "
+              f"(NetSuite data: {match_result.get('netsuite_source', 'fabric')})")
         _run_netsuite_writeback(statement_id)
 
 
