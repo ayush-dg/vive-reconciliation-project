@@ -22,6 +22,13 @@ TOTAL_COLUMNS_PATH = os.path.join(
 
 _total_columns_cache = None
 
+INVOICE_BALANCE_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "config", "validation_invoice_balance.json",
+)
+
+_invoice_balance_cache = None  # (path, frozenset of vendor ids)
+
 
 def compute_arithmetic_validation(
     statement_total_as_printed: Optional[float],
@@ -305,6 +312,9 @@ VALIDATION_METHOD_OPEN_BALANCE = "open_balance"
 VALIDATION_METHOD_STATEMENT_EQUATION = "statement_equation"
 VALIDATION_METHOD_RUNNING_BALANCE = "running_balance"
 VALIDATION_METHOD_SECTION_SUBTOTAL = "section_subtotal"
+VALIDATION_METHOD_PDF_ROW_MATCH = "pdf_row_match"
+VALIDATION_METHOD_PDF_STORE_SECTIONS = "pdf_store_sections"
+VALIDATION_METHOD_PDF_FULL_MATCH = "pdf_full_match"
 
 _MONEY_EPSILON = 0.005  # float noise only -- never widens the 0.01 match rule
 
@@ -556,6 +566,27 @@ _FALLBACK_CHECKS = (
 )
 
 
+def _check_pdf_row_match(printed, rows, *, tolerance, pdf_path=None, **_):
+    # Imported here: it pulls in pdfplumber/PyMuPDF/Tesseract, which only
+    # these last-resort checks need (see src/validation/pdf_row_match.py).
+    from src.validation.pdf_row_match import check_pdf_row_match
+    return check_pdf_row_match(printed, rows, tolerance=tolerance, pdf_path=pdf_path)
+
+
+def _check_pdf_store_sections(printed, rows, *, tolerance, pdf_path=None, vendor_name=None, **_):
+    from src.validation.pdf_row_match import check_pdf_store_sections
+    return check_pdf_store_sections(printed, rows, tolerance=tolerance, pdf_path=pdf_path, vendor_name=vendor_name)
+
+
+# Run after every check above has failed, and only when the caller passes the
+# statement's PDF: they read the PDF itself, so they are the slowest checks
+# and can only add a pass (2026-10-12).
+_PDF_CHECKS = (
+    (VALIDATION_METHOD_PDF_ROW_MATCH, _check_pdf_row_match),
+    (VALIDATION_METHOD_PDF_STORE_SECTIONS, _check_pdf_store_sections),
+)
+
+
 def validate_with_fallbacks(
     statement_total_as_printed: Optional[float],
     statement_total_computed: Optional[float],
@@ -565,11 +596,15 @@ def validate_with_fallbacks(
     section_totals: Optional[list] = None,
     tolerance: float = 0.01,
     chain_opening_balance: Optional[float] = None,
+    pdf_path: Optional[str] = None,
+    vendor_name: Optional[str] = None,
 ) -> dict:
     """Primary check, then -- only if it mismatches -- the four fallback
-    identities in order. Returns compute_arithmetic_validation()'s dict plus
-    "method" (which check passed, or None) and "detail" (every fallback that
-    was tried and why it did or didn't pass).
+    identities in order, then (only with a pdf_path) the two PDF checks,
+    pdf_row_match and pdf_store_sections. Returns
+    compute_arithmetic_validation()'s dict plus "method" (which check
+    passed, or None) and "detail" (every fallback that was tried and why it
+    did or didn't pass).
 
     chain_opening_balance (an unlabelled opening figure from a scan -- see
     previous_balance.py) is passed to the running_balance check only; it is
@@ -594,8 +629,11 @@ def validate_with_fallbacks(
     rows = _rows_for_checks(invoices)
     printed = statement_total_as_printed
     attempts = []
-    for method, check in _FALLBACK_CHECKS:
+    checks = _FALLBACK_CHECKS + (_PDF_CHECKS if pdf_path else ())
+    for method, check in checks:
         extra = {"chain_opening_balance": chain_opening_balance} if method == VALIDATION_METHOD_RUNNING_BALANCE else {}
+        if method in (VALIDATION_METHOD_PDF_ROW_MATCH, VALIDATION_METHOD_PDF_STORE_SECTIONS):
+            extra = {"pdf_path": pdf_path, "vendor_name": vendor_name}
         outcome = check(printed, rows, tolerance=tolerance,
                         previous_balance=previous_balance, section_totals=section_totals, **extra)
         attempts.append({"method": method, **outcome})
@@ -611,7 +649,177 @@ def validate_with_fallbacks(
                     "primary_computed": statement_total_computed,
                     "primary_difference": result["difference"],
                     "attempts": attempts,
+                    # What a PDF check relied on, lifted for the Validation page
+                    # (2026-10-19): the verified opening-balance line.
+                    # ...and the store section a pdf_store_sections pass used, with the
+                    # other sections' lines it set aside.
+                    **{k: outcome[k] for k in ("opening_balance_line", "section_used", "lines_ignored") if k in outcome},
                 },
             }
     result["detail"] = {"attempts": attempts}
     return result
+
+
+INVOICE_BALANCE_RULE_ROW_SIGN = "due_opposite_sign"
+INVOICE_BALANCE_RULE_ROW_EXCEEDS = "due_exceeds_row_amount"
+INVOICE_BALANCE_RULE_DUE_ONLY = "due_without_amount"
+INVOICE_BALANCE_RULE_INVOICE = "invoice_does_not_net"
+_INVOICE_BALANCE_MAX_FLAGS = 50
+
+
+def _balance_group_key(invoice_number):
+    """_invoice_group_key() plus a credit memo's trailing letter:
+    "CM9460269A" groups with "9460269" (Fred Beans Rockland, STMT-6A9842BA).
+    A letter on a plain invoice number is kept -- only a credit memo's
+    suffix is dropped."""
+    key = _invoice_group_key(invoice_number)
+    if key is None:
+        return None
+    match = re.match(r"^CM(.*\d)[A-Z]$", str(invoice_number).strip(), flags=re.IGNORECASE)
+    return match.group(1) if match else key
+
+
+def check_invoice_balance(invoices: list) -> Optional[dict]:
+    """The invoice-balance check (2026-10-19): an extracted amount-due
+    (open balance) column must agree with the extracted row amounts, per
+    row and per invoice. Built from _check_open_balance()'s two guards, with
+    three refinements found on the three saved AI extractions of Fred Beans
+    Rockland (STMT-6A9842BA), where the printed AMOUNT DUE column sums to
+    the printed total even when rows are wrong:
+
+      - a credit memo groups with its invoice including a trailing letter
+        (_balance_group_key);
+      - row rule: an amount due must not exceed its own row's amount or
+        have the opposite sign -- EXCEPT when the row's invoice group nets
+        to its amount due overall and the due has the group's sign (the
+        invoice's due printed once, on its last line: 942002 22.67 + 34.34
+        = 57.01);
+      - a row with an amount due but no amount of its own is flagged when
+        its invoice has other rows (a credit read into AMOUNT DUE: 9391887
+        113.20, one of six rows). A line of its own that prints only a
+        balance is a real layout (Healey 1401474: no Amount, Balance
+        -100.54) and is not flagged;
+      - invoice rule: the rows of one invoice (2 or more rows) must net to
+        the sum of its amount-due values.
+
+    Returns None when it does not apply (no amount-due values, or the column
+    is a running balance), else {"rows_with_due", "invoices_checked",
+    "flag_count", "flags": [...]} -- each flag names its rule, invoice and
+    amounts. It never computes a total and never passes anything."""
+    rows = _rows_for_checks(invoices)
+    if not any(inv.get("amount_due") not in (None, 0, 0.0) for inv in rows):
+        return None
+    if _is_running_balance(rows):
+        return None
+    groups = {}
+    for inv in rows:
+        key = _balance_group_key(inv.get("invoice_number"))
+        if key is not None:
+            groups.setdefault(key, []).append(inv)
+    group_totals = {key: (round(sum(_row_net(inv) for inv in members), 2),
+                          round(sum(inv.get("amount_due") or 0 for inv in members), 2))
+                    for key, members in groups.items() if len(members) >= 2}
+    unbalanced = {key for key, (net, due) in group_totals.items() if abs(net - due) > _MONEY_EPSILON}
+
+    flags = []
+    for inv in rows:
+        due = inv.get("amount_due")
+        if due in (None, 0, 0.0):
+            continue
+        net = round(_row_net(inv), 2)
+        base = {"invoice_number": inv.get("invoice_number"), "row_number": inv.get("row_number"),
+                "row_amount": net, "amount_due": round(due, 2)}
+        key = _balance_group_key(inv.get("invoice_number"))
+        if abs(net) <= _MONEY_EPSILON:
+            if key in group_totals:
+                flags.append({"rule": INVOICE_BALANCE_RULE_DUE_ONLY, **base})
+            continue
+        if due * net >= 0 and abs(due) <= abs(net) + _MONEY_EPSILON:
+            continue
+        if key in group_totals and key not in unbalanced and due * group_totals[key][0] >= 0:
+            continue
+        flags.append({"rule": INVOICE_BALANCE_RULE_ROW_SIGN if due * net < 0 else INVOICE_BALANCE_RULE_ROW_EXCEEDS,
+                      **base})
+    for key in sorted(unbalanced):
+        net, due = group_totals[key]
+        flags.append({"rule": INVOICE_BALANCE_RULE_INVOICE, "invoice_number": key, "rows": len(groups[key]),
+                      "rows_net": net, "amount_due": due})
+    return {"rows_with_due": sum(1 for inv in rows if inv.get("amount_due") not in (None, 0, 0.0)),
+            "invoices_checked": len(group_totals), "flag_count": len(flags),
+            "flags": flags[:_INVOICE_BALANCE_MAX_FLAGS]}
+
+
+INVOICE_BALANCE_MODE_FAIL = "fail"
+INVOICE_BALANCE_MODE_FLAG_ONLY = "flag_only"
+
+
+def invoice_balance_fail_vendors() -> frozenset:
+    """Vendor ids listed under "fail_vendors" in config/validation_invoice_
+    balance.json. A missing, unreadable or malformed file gives an empty set
+    -- flag-only for every vendor: a config problem never fails a statement."""
+    global _invoice_balance_cache
+    path = INVOICE_BALANCE_CONFIG_PATH
+    if _invoice_balance_cache is None or _invoice_balance_cache[0] != path:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                listed = json.load(f).get("fail_vendors") or {}
+            vendors = frozenset(str(v) for v in listed if isinstance(v, str) and v and not v.startswith("_"))
+        except (OSError, ValueError, AttributeError, TypeError):
+            vendors = frozenset()
+        _invoice_balance_cache = (path, vendors)
+    return _invoice_balance_cache[1]
+
+
+def apply_invoice_balance_check(validation: dict, invoices: list, vendor_id: Optional[str] = None) -> dict:
+    """Runs check_invoice_balance() on a finished gate result (after
+    try_pdf_full_match and the no-total rule). Its report goes into
+    detail["invoice_balance"] with a "mode". It never adds a pass:
+
+      - a failed statement only gains the flags (which rows disagree);
+      - a passed statement with flags of a vendor listed in config/
+        validation_invoice_balance.json (mode "fail") becomes "mismatch"
+        (the passing method and its difference are kept in
+        detail["blocked_pass"]);
+      - for every other vendor (mode "flag_only", also when the config is
+        missing or unreadable) the status and method are never changed.
+
+    Not applied to a running_balance pass: that check has just proved the
+    amount-due column is a running balance, which _is_running_balance()
+    cannot see on a two-row statement."""
+    if validation.get("method") == VALIDATION_METHOD_RUNNING_BALANCE:
+        return validation
+    report = check_invoice_balance(invoices)
+    if report is None:
+        return validation
+    fail = bool(vendor_id) and vendor_id in invoice_balance_fail_vendors()
+    report["mode"] = INVOICE_BALANCE_MODE_FAIL if fail else INVOICE_BALANCE_MODE_FLAG_ONLY
+    detail = {**(validation.get("detail") or {}), "invoice_balance": report}
+    if validation.get("status") != "matches" or not report["flags"] or not fail:
+        return {**validation, "detail": detail}
+    detail["blocked_pass"] = {"method": validation.get("method"), "computed": validation.get("computed"),
+                              "difference": validation.get("difference")}
+    return {**validation, "status": "mismatch", "method": None, "detail": detail}
+
+
+def try_pdf_full_match(validation: dict, invoices: list, pdf_path: Optional[str], tolerance: float = 0.01) -> dict:
+    """The gate's LAST fallback (2026-10-16, user decision): called by the
+    intake once every other method -- validate_with_fallbacks() and its
+    retry with a scan's OCR previous balance -- has failed. A pass when the
+    extraction matches the PDF cell by cell (src/validation/pdf_row_match.py
+    check_pdf_full_match), whether or not any total equation reconciles. It
+    only runs on a "mismatch" with a PDF, and can only add a pass; its
+    attempt (with the per-column results) is appended to the detail either
+    way."""
+    if validation.get("status") != "mismatch" or not pdf_path:
+        return validation
+    from src.validation.pdf_row_match import check_pdf_full_match
+    printed = validation.get("printed")
+    outcome = check_pdf_full_match(printed, _rows_for_checks(invoices), tolerance=tolerance, pdf_path=pdf_path)
+    detail = dict(validation.get("detail") or {})
+    detail["attempts"] = list(detail.get("attempts") or []) + [{"method": VALIDATION_METHOD_PDF_FULL_MATCH, **outcome}]
+    if not outcome.get("passed"):
+        return {**validation, "detail": detail}
+    computed = outcome["computed"]
+    detail.update(primary_computed=validation.get("computed"), primary_difference=validation.get("difference"))
+    return {"status": "matches", "printed": printed, "computed": computed, "difference": round(printed - computed, 2),
+            "method": VALIDATION_METHOD_PDF_FULL_MATCH, "detail": detail}

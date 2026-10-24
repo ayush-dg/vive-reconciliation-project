@@ -87,6 +87,25 @@ class TestFindPrintedTotal(unittest.TestCase):
         self.assertIsNone(find_printed_total(""))
         self.assertIsNone(find_printed_total(None))
 
+    def test_cdk_aging_boxes_on_the_this_amount_line(self):
+        # Bowser Klapec 1.pdf (OCR, 2026-10-19): past due 450.00 and current 63,380.20 share the line
+        # with the total -- only the amount after "THIS AMOUNT" counts.
+        self.assertEqual(find_printed_total("STATUS 450.00 63,380.20 | PLEASE PAY THIS AMOUNT 63,830.20"), 63830.20)
+        self.assertEqual(find_printed_total("ST A T US 450.00 63,380.20 T H IS A M O U N T 63,830.20"), 63830.20)
+
+    def test_this_amount_with_nothing_after_the_label_uses_the_line_as_before(self):
+        self.assertEqual(find_printed_total("63,830.20 PLEASE PAY THIS AMOUNT"), 63830.20)
+
+    def test_adversarial_two_different_labelled_amounts_on_different_lines(self):
+        self.assertIsNone(find_printed_total("STATUS 450.00 63,380.20 THIS AMOUNT 63,830.20\nBalance due 63,380.20"))
+
+    def test_adversarial_two_amounts_after_the_label_still_disagree(self):
+        self.assertIsNone(find_printed_total("PLEASE PAY THIS AMOUNT 63,830.20 63,380.20"))
+
+    def test_other_labels_still_count_the_whole_line(self):
+        # only "THIS AMOUNT" lines changed: "Total due" with two figures still disagrees
+        self.assertIsNone(find_printed_total("Total due 100.00 200.00"))
+
 
 # ---------------------------------------------------------------------------
 # previous_balance on OCR text

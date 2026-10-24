@@ -2789,7 +2789,34 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
         detail = None
     intake["validation_attempts"] = (detail or {}).get("attempts") or []
     intake["primary_computed"] = (detail or {}).get("primary_computed")
+    # Invoice-balance check (2026-10-19): the flagged rows, and the pass it
+    # turned into a mismatch, if any.
+    intake["invoice_balance"] = (detail or {}).get("invoice_balance")
+    intake["blocked_pass"] = (detail or {}).get("blocked_pass")
+    # Text-layer column correction (2026-10-19): rows moved to the side the
+    # PDF prints them before the gate passed.
+    intake["text_column_corrections"] = (detail or {}).get("text_column_corrections") or []
+    # The verified opening-balance line a pdf_row_match pass used (2026-10-19).
+    intake["opening_balance_line"] = (detail or {}).get("opening_balance_line")
+    # The vendor's store section a pdf_store_sections pass used, and the other
+    # sections' printed lines it set aside (2026-10-19).
+    intake["section_used"] = (detail or {}).get("section_used")
+    intake["lines_ignored"] = (detail or {}).get("lines_ignored") or []
+    # The account blocks a pdf_account_blocks check read (2026-10-20): one PDF
+    # with several account statements, each with its own printed total. Their
+    # sum is the result's printed total; the statement keeps none of its own.
+    intake["account_blocks"] = (detail or {}).get("account_blocks")
+    # Where a printed total read from bare BALANCE / NET DUE boxes was found
+    # (2026-10-21): [{"page", "label", "amount", "read"}].
+    intake["printed_total_read_from"] = (detail or {}).get("printed_total_read_from") or []
+    # A printed invoice-net line dropped as an extra row (2026-10-21).
+    intake["net_line_drops"] = (detail or {}).get("net_line_drops") or []
+    # Full match with no printed total (2026-10-22): rows verified, columns, and the
+    # safety check of every total-like amount the PDF prints.
+    intake["full_match_no_total"] = (detail or {}).get("full_match_no_total")
     printed = intake["statement_total_as_printed"]
+    if printed is None and (intake["account_blocks"] or {}).get("passed"):
+        printed = intake["account_blocks"].get("printed_total")
     difference = intake["validation_difference"]
     computed_total = (
         round(printed - difference, 2)

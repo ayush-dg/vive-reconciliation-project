@@ -147,7 +147,11 @@ def resolve_previous_balance(model_value, model_label: Optional[str], pdf_text: 
         if label:
             return {"value": None, "source": "rejected: label is not a balance-forward label", "label": label,
                     "chain_opening": value}
-        return {"value": None, "source": "rejected: no printed label", "label": None}
+        # 2026-10-16: a scan's value with NO label at all (Northeast Coffee's
+        # unlabelled opening line "80.40") is still never a previous balance,
+        # but it may open the running_balance chain -- the same rule as a
+        # date-labelled one above.
+        return {"value": None, "source": "rejected: no printed label", "label": None, "chain_opening": value}
 
     distinct = sorted(set(candidates))
     if len(distinct) == 1:

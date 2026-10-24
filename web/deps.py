@@ -299,6 +299,12 @@ VALIDATION_METHOD_LABELS = {
     "statement_equation": "Previous balance + activity",
     "running_balance": "Running balance",
     "section_subtotal": "Section subtotals",
+    "pdf_row_match": "PDF row-by-row match",
+    "pdf_store_sections": "PDF store sections",
+    "pdf_rows_no_total": "PDF rows, no printed total",
+    "pdf_full_match": "PDF full match (every row and column)",
+    "pdf_account_blocks": "PDF account blocks (each account's own printed total)",
+    "pdf_full_match_no_total": "PDF full match, no printed total",
 }
 
 
@@ -309,6 +315,15 @@ def validation_method_label(value):
 
 
 templates.env.filters["validation_method_label"] = validation_method_label
+
+
+def invoice_balance_flag(flag):
+    """A flag of the invoice-balance check (detail["invoice_balance"]) in words."""
+    from src.validation.gate import describe_invoice_balance_flag
+    return describe_invoice_balance_flag(flag)
+
+
+templates.env.filters["invoice_balance_flag"] = invoice_balance_flag
 
 # ---------------------------------------------------------------------------
 # Static asset cache busting

@@ -77,7 +77,10 @@
 <div class="kpi-grid">
   <div class="kpi">
     <div class="kpi-label">PDF printed total</div>
-    <div class="kpi-value">{{ intake.statement_total_as_printed | money if intake.statement_total_as_printed is not none else "—" }}</div>
+    {% set blocks_total = intake.account_blocks.printed_total if intake.account_blocks and intake.account_blocks.passed else none %}
+    <div class="kpi-value">{{ intake.statement_total_as_printed | money if intake.statement_total_as_printed is not none else (blocks_total | money if blocks_total is not none else "—") }}</div>
+    {% if intake.statement_total_as_printed is none and blocks_total is not none %}<div class="kpi-sub">Sum of {{ intake.account_blocks.blocks | length }} account blocks' printed totals</div>{% endif %}
+    {% if intake.printed_total_read_from %}<div class="kpi-sub" id="printed-total-read-from">Read from the PDF: {% for p in intake.printed_total_read_from %}{{ p.label }} p{{ p.page }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
   </div>
   <div class="kpi">
     <div class="kpi-label">Extracted amount sum</div>
@@ -115,8 +118,43 @@
     {% if intake.previous_balance is not none %}
     <tr><td style="color:var(--text-secondary)">Printed previous balance</td><td>{{ intake.previous_balance | money }} <span style="color:var(--text-secondary)">({{ intake.previous_balance_source }})</span></td></tr>
     {% endif %}
+    {% if intake.section_used %}
+    <tr id="section-used"><td style="color:var(--text-secondary)">Store section checked</td><td>{{ intake.section_used.section }}: {{ intake.section_used.rows }} of {{ intake.section_used.invoices }} invoices, Amount Due {{ intake.section_used.amount_due | money }} <span style="color:var(--text-secondary)">({{ intake.lines_ignored | length }} printed line{{ "" if intake.lines_ignored | length == 1 else "s" }} of other sections set aside{% if intake.lines_ignored %}: {{ intake.lines_ignored | map(attribute="section") | unique | join(", ") }}{% endif %})</span></td></tr>
+    {% endif %}
+    {% if intake.full_match_no_total %}
+    {% set fm = intake.full_match_no_total %}
+    <tr id="full-match-no-total"><td style="color:var(--text-secondary)">Full match, no printed total</td><td>{% if fm.passed %}{{ fm.full_match.rows_verified }} of {{ fm.full_match.rows }} rows and {{ fm.full_match.columns | length }} columns matched cell by cell{% else %}Did not pass: {{ fm.reason }}{% endif %}{% if fm.safety %} <span style="color:var(--text-secondary)">(printed totals checked: {% if fm.safety.total_like_amounts %}{% for a in fm.safety.total_like_amounts %}{{ a.label }}{% if a.page %} p{{ a.page }}{% endif %} {{ a.amount | money }}{% if not loop.last %}, {% endif %}{% endfor %} -- {{ fm.safety.result }}{% else %}none printed{% endif %})</span>{% endif %}</td></tr>
+    {% endif %}
+    {% if intake.opening_balance_line %}
+    <tr id="opening-balance-line"><td style="color:var(--text-secondary)">Opening balance line</td><td>{{ intake.opening_balance_line.amount | money }} <span style="color:var(--text-secondary)">(printed alone under Balance on {{ intake.opening_balance_line.date }}, page {{ intake.opening_balance_line.page }}; checked against every other line of the PDF)</span></td></tr>
+    {% endif %}
   </tbody>
 </table>
+{% if intake.account_blocks and intake.account_blocks.blocks %}
+<div class="section-header">
+  <div class="section-title">Account blocks in this PDF</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="account-blocks">
+  {% if intake.account_blocks.passed %}This PDF holds {{ intake.account_blocks.blocks | length }} account statements, each with its own printed Total Amount Due and no single total for the file. Every extracted row matched exactly one printed line (and every printed line one row), and each block's rows add up to its own printed total to the cent. The printed total {{ intake.account_blocks.printed_total | money }} is the sum of the blocks' printed totals.
+  {% else %}Account-blocks check did not pass: {{ intake.account_blocks.reason }}{% endif %}
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Account</th><th>Pages</th><th>Printed Total Amount Due</th><th>Rows</th><th>Rows' signed sum</th></tr>
+  </thead>
+  <tbody>
+    {% for b in intake.account_blocks.blocks %}
+    <tr>
+      <td>{{ b.name }}</td>
+      <td>{{ b.pages }}</td>
+      <td>{{ b.printed_total_amount_due | money }}</td>
+      <td>{{ b.rows }}</td>
+      <td>{{ b.rows_signed_sum | money }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 {% if intake.validation_attempts %}
 <div class="section-header">
@@ -141,6 +179,114 @@
         <div style="color:var(--text-secondary)">First broken row: {{ attempt.first_broken_row.invoice_number or ("row " ~ attempt.first_broken_row.row_number) }} — expected balance {{ attempt.first_broken_row.expected_balance | money }}, printed {{ attempt.first_broken_row.printed_balance | money }}</div>
         {% endif %}
       </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if intake.text_column_corrections %}
+<div class="section-header">
+  <div class="section-title">Column corrections from the PDF</div>
+</div>
+{% if intake.text_column_corrections[0].change is defined %}
+{% if intake.text_column_corrections[0].change == "due_from_description" %}
+<p style="color:var(--text-secondary);margin:0 0 8px" id="due-column-corrections">
+  {{ intake.text_column_corrections | length }} Due amount{{ "" if intake.text_column_corrections | length == 1 else "s" }} had been extracted at the front of the "Due Description" text; each was moved into Due because the PDF prints exactly that amount in the Due column of the row's own line (read from the text layer, or by OCR for a scan; every row matched exactly one printed line). The statement passed only after these corrections.
+</p>
+{% else %}
+<p style="color:var(--text-secondary);margin:0 0 8px" id="text-row-corrections">
+  {{ intake.text_column_corrections | length }} row{{ "" if intake.text_column_corrections | length == 1 else "s" }} were set to the amount and column printed on their own line of the PDF (read from the PDF's text layer; every row matched exactly one printed line). The statement passed only after these corrections.
+</p>
+{% endif %}
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Reference</th><th>Date</th><th>Change</th><th>Extracted</th><th>PDF prints</th><th>Page</th></tr>
+  </thead>
+  <tbody>
+    {% for c in intake.text_column_corrections %}
+    <tr>
+      <td>{{ c.row_number }}</td>
+      <td>{{ c.invoice_number }}</td>
+      <td>{{ c.date }}</td>
+      <td>{{ {"moved": "moved to its printed column", "filled": "amount filled in", "replaced": "amount replaced", "due_from_description": "Due moved out of the description"}.get(c.change, c.change) }}</td>
+      <td>{% if c.extracted_value is none %}no amount{% else %}{{ c.extracted_value | money }} ({{ c.extracted_field }}){% endif %}</td>
+      <td>{{ c.printed_value | money }} ({{ c.field }})</td>
+      <td>{{ c.page }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:var(--text-secondary);margin:0 0 8px" id="text-column-corrections">
+  {{ intake.text_column_corrections | length }} row{{ "" if intake.text_column_corrections | length == 1 else "s" }} were extracted in the wrong column and moved to the column the PDF prints them in (read from the PDF's text layer). The statement passed only after these corrections.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Reference</th><th>Date</th><th>Amount</th><th>Extracted as</th><th>PDF prints it as</th><th>Page</th></tr>
+  </thead>
+  <tbody>
+    {% for c in intake.text_column_corrections %}
+    <tr>
+      <td>{{ c.row_number }}</td>
+      <td>{{ c.invoice_number }}</td>
+      <td>{{ c.date }}</td>
+      <td>{{ c.amount | money }}</td>
+      <td>{{ c["from"] }}</td>
+      <td>{{ c.to }}</td>
+      <td>{{ c.page }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+{% if intake.net_line_drops %}
+<div class="section-header">
+  <div class="section-title">Invoice-net line removed</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="net-line-drops">
+  {{ intake.net_line_drops | length }} extracted row{{ "" if intake.net_line_drops | length == 1 else "s" }} had no invoice, reference or description and equalled the net of one invoice's rows directly above it. The PDF prints that amount on a line of its own (nothing before it) and again with the invoice on the remittance stub, so the row is the invoice's printed net, not a transaction. The statement passed only after it was removed.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Amount</th><th>Date (extracted)</th><th>Invoice it nets</th><th>Rows netted</th><th>Printed line</th></tr>
+  </thead>
+  <tbody>
+    {% for d in intake.net_line_drops %}
+    <tr>
+      <td>{{ d.row_number }}</td>
+      <td>{{ d.amount | money }}</td>
+      <td>{{ d.date_extracted or "—" }}</td>
+      <td>{{ d.invoice_number }}</td>
+      <td>{% for r in d.nets_rows %}row {{ r.row_number }} {{ r.amount | money }}{% if not loop.last %} + {% endif %}{% endfor %}</td>
+      <td>p{{ d.page }}: {{ d.printed_line }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if intake.invoice_balance and intake.invoice_balance.flags %}
+<div class="section-header">
+  <div class="section-title">Invoice balance check</div>
+</div>
+{% if intake.passed %}
+<div class="badge warning" id="invoice-balance-notice" style="display:inline-block;margin:0 0 8px;white-space:normal">Invoice balance check flagged {{ intake.invoice_balance.flag_count }} row{{ "" if intake.invoice_balance.flag_count == 1 else "s" }} - statement still passes; review</div>
+{% endif %}
+<p style="color:var(--text-secondary);margin:0 0 8px">
+  {% if intake.blocked_pass %}The total matched ({{ intake.blocked_pass.method | validation_method_label }}), but the amount-due column disagrees with these rows, so the statement failed validation.
+  {% elif intake.passed %}The amount-due column disagrees with these rows. For this vendor the check only records what it finds; the statement's result is unchanged.
+  {% else %}The amount-due column disagrees with these rows.{% endif %}
+  {{ intake.invoice_balance.flag_count }} flagged{% if intake.invoice_balance.flag_count > intake.invoice_balance.flags | length %} (first {{ intake.invoice_balance.flags | length }} shown){% endif %}.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Invoice</th><th>Problem</th></tr>
+  </thead>
+  <tbody>
+    {% for flag in intake.invoice_balance.flags %}
+    <tr>
+      <td>{{ flag.invoice_number or ("row " ~ flag.row_number) }}</td>
+      <td>{{ flag | invoice_balance_flag }}</td>
     </tr>
     {% endfor %}
   </tbody>

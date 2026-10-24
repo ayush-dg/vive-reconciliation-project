@@ -18,6 +18,18 @@ extractor (no AI), keeping its statement_id. See src/rerun/in_place.py.
 
 --pdf uses a local copy of the PDF instead of downloading the archived one;
 either way its SHA-256 must equal the statement's document_hash.
+
+AI mode (2026-10-12) -- --allow-ai, only with an explicit --statement-id, one
+statement at a time (src/rerun/in_place.py, "AI mode"):
+  1. Extract only -- the normal AI extraction route on the local PDF; writes
+     NO database (not even ai_audit_log); saves the extraction, upload plan,
+     token usage and cost to --ai-dir; refuses if the task's cost ledger would
+     pass $3:
+    python scripts/rerun_in_place.py --allow-ai --statement-id STMT-X --extract-only --pdf <file> --expected-sha256 <document_hash>
+  2. Dry run from the saved file (never calls the AI):
+    python scripts/rerun_in_place.py --allow-ai --statement-id STMT-X --from-extraction <saved.json> --pdf <file>
+  3. Apply the same saved file:
+    python scripts/rerun_in_place.py --allow-ai --statement-id STMT-X --from-extraction <saved.json> --pdf <file> --apply --confirm <fingerprint>
 """
 
 import argparse
@@ -38,6 +50,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.rerun import in_place  # noqa: E402
 
 DEFAULT_BACKUP_DIR = os.path.join(PROJECT_ROOT, "scratchpad", "rerun_backups")
+DEFAULT_AI_DIR = os.path.join(PROJECT_ROOT, "scratchpad", "rerun_ai")
 
 
 def main(argv=None, io=None, intake=None):
@@ -49,7 +62,37 @@ def main(argv=None, io=None, intake=None):
     parser.add_argument("--backup-dir", action="append", help="repeatable; default scratchpad/rerun_backups")
     parser.add_argument("--undo", help="a backup file written by --apply")
     parser.add_argument("--resume", help="a backup file of a half-applied statement: finish its Silver + matching")
+    parser.add_argument("--allow-ai", action="store_true", help="AI re-extraction mode (one --statement-id only)")
+    parser.add_argument("--extract-only", action="store_true", help="AI mode step 1: extract and save locally, no database")
+    parser.add_argument("--expected-sha256", help="AI mode step 1: the statement's document_hash")
+    parser.add_argument("--from-extraction", help="AI mode steps 2-3: the file saved by --extract-only")
+    parser.add_argument("--ai-dir", default=DEFAULT_AI_DIR, help="where AI extractions and the cost ledger live")
     args = parser.parse_args(argv)
+
+    if args.allow_ai or args.extract_only or args.from_extraction:
+        if not args.allow_ai:
+            parser.error("--extract-only / --from-extraction need --allow-ai")
+        if not args.statement_id:
+            parser.error("--allow-ai needs an explicit --statement-id (one statement at a time, never a batch)")
+        if args.undo or args.resume:
+            parser.error("--allow-ai can't be combined with --undo or --resume")
+        if args.extract_only:
+            if args.apply or args.from_extraction:
+                parser.error("--extract-only can't be combined with --apply or --from-extraction")
+            if not args.pdf or not args.expected_sha256:
+                parser.error("--extract-only needs --pdf <local file> and --expected-sha256 <document_hash>")
+            intake = intake or in_place.load_intake()
+            try:
+                out = in_place.extract_only(intake, args.statement_id, args.pdf, args.expected_sha256, args.ai_dir)
+            except in_place.RefusedError as e:
+                print("REFUSED:", e)
+                return 2
+            print(json.dumps(out, indent=1, default=str))
+            print(f"\nSAVED -- nothing written to any database. Dry run: --allow-ai --statement-id {args.statement_id} "
+                  f"--from-extraction {out['path']} --pdf {args.pdf}")
+            return 0
+        if not args.from_extraction:
+            parser.error("--allow-ai needs --extract-only first, then --from-extraction <saved file>")
     io = io or in_place.LiveIO()
 
     if args.resume:
@@ -85,7 +128,11 @@ def main(argv=None, io=None, intake=None):
         print("WARNING:", warning)
     pdf = args.pdf or io.download_pdf(state["intake"][0]["blob_storage_path"], tempfile.mkdtemp(prefix="rerun_"))
     try:
-        new = in_place.reextract(io, intake, state, pdf)
+        if args.allow_ai:
+            doc = in_place.load_extraction(args.from_extraction, state)
+            new = in_place.new_from_extraction(io, intake, state, pdf, doc)
+        else:
+            new = in_place.reextract(io, intake, state, pdf)
     except in_place.RefusedError as e:
         print("REFUSED:", e)
         return 2

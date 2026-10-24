@@ -24,7 +24,10 @@ What it does:
 """
 
 import argparse
+import contextlib
+import copy
 import hashlib
+import io
 import json
 import os
 import re
@@ -69,13 +72,14 @@ from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
 from src.validation.arithmetic_gate import (
-    compute_arithmetic_validation, compute_statement_total_from_invoices, compute_vendor_column_total,
-    validate_with_fallbacks,
+    apply_invoice_balance_check, compute_arithmetic_validation, compute_statement_total_from_invoices,
+    compute_vendor_column_total, try_pdf_full_match, validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
-from src.validation.printed_total import find_printed_total
+from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
+from src.validation import account_blocks, due_column, full_match_no_total, net_lines, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -279,7 +283,9 @@ def validate_invoice(invoice: dict, rules: dict):
     # this required_fields check (confirmed missing from Bronze for BERLIN
     # HEW 0726 2026-08-29 before this carve-out existed).
     required = rules.get("required_fields", ["invoice_number", "outstanding_amount"])
-    has_other_content = has_value("description") or has_value("amount") or has_value("outstanding_amount")
+    # Same content fields as get_skip_reason() (2026-10-12) -- a credit-only
+    # row with no reference must not be diverted to the review queue either.
+    has_other_content = any(has_value(field) for field in _ROW_CONTENT_FIELDS)
     for field in required:
         if field == "invoice_number" and has_other_content:
             continue
@@ -412,6 +418,12 @@ def write_to_bronze(invoices: list, schema_result: dict, statement_id: str,
     return count
 
 
+_ROW_CONTENT_FIELDS = (
+    "description", "amount", "outstanding_amount", "credit", "credits", "charges", "amount_due",
+    "payment", "payment_applied", "credit_applied", "balance_forward", "period_activity",
+)
+
+
 def get_skip_reason(invoice: dict) -> str:
     """
     A row is genuinely unusable — not just low-confidence — when it has
@@ -440,11 +452,12 @@ def get_skip_reason(invoice: dict) -> str:
         return val is not None and str(val).strip() != ""
 
     has_identifier = has_value("invoice_number") or has_value("ro_number")
-    has_other_content = (
-        has_value("description")
-        or has_value("amount")
-        or has_value("outstanding_amount")
-    )
+    # Any money field is real content (2026-10-12): a credit-only row with
+    # no reference -- Northeast Coffee STMT-5D1050A6's "08/17/26 credit
+    # 80.40" -- only fills credit/credits, so it was skipped to
+    # gold_exceptions as EXTRACTION_INCOMPLETE and never reached Bronze,
+    # although the gate had already counted it.
+    has_other_content = any(has_value(field) for field in _ROW_CONTENT_FIELDS)
     if not has_identifier and not has_other_content:
         return "no invoice identifier found"
 
@@ -1205,18 +1218,29 @@ def _validation_text(pdf_text: str, pdf_path, stmt_meta: dict, is_statement: boo
     return (ocr, "ocr") if has_text_layer(ocr) else ("", None)
 
 
-def _fill_printed_total(stmt_meta: dict, text: str, source) -> str:
-    """The printed total read from the text (printed_total.py) when the
-    extraction returned none. Returns the text's source when a total was
-    filled in, else None -- an extracted printed total is never replaced."""
+def _fill_printed_total(stmt_meta: dict, text: str, source, pdf_path=None) -> tuple:
+    """(source, places): the printed total read from the text (printed_total.py)
+    when the extraction returned none. source is the text's source when a total
+    was filled in, else None -- an extracted printed total is never replaced.
+    Only when the text has no total-labelled amount at all, a bare BALANCE /
+    NET DUE box read from the PDF's positioned lines is tried (find_box_total,
+    2026-10-21): source "pdf_box_labels", places = where each amount was read."""
     if stmt_meta.get("statement_total_as_printed") is not None or not text:
-        return None
+        return None, None
     found = find_printed_total(text)
     if found is None:
-        return None
+        if labelled_amounts(text):
+            return None, None  # the labels disagree: no total, as before
+        box = find_box_total(pdf_path)
+        if box is None:
+            return None, None
+        stmt_meta["statement_total_as_printed"] = box["amount"]
+        print(f"  Printed total read from {len(box['places'])} box labels on the PDF: {box['amount']:,.2f} ("
+              + ", ".join(f"{p['label']} p{p['page']}" for p in box["places"]) + ")")
+        return "pdf_box_labels", box["places"]
     stmt_meta["statement_total_as_printed"] = found
     print(f"  Printed total read from the {source.replace('_', ' ')}: {found:,.2f}")
-    return source
+    return source, None
 
 
 def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source) -> tuple:
@@ -1235,9 +1259,285 @@ def _resolve_previous_balance(stmt_meta: dict, pdf_text: str, text: str, source)
     return resolved, {**from_ocr, "chain_opening": resolved.get("chain_opening")}
 
 
+PDF_ROWS_NO_TOTAL_METHOD = "pdf_rows_no_total"
+
+
+def _rows_only_status(validation: dict, invoices: list, pdf_path) -> dict:
+    """A statement whose PDF prints no total anywhere (status total_not_found)
+    passes or fails on its rows alone (user decision, 2026-10-12): every
+    extracted row verified on its PDF line AND every PDF transaction line
+    extracted (src/validation/pdf_row_match.py check_rows_only) -> status
+    "matches", method "pdf_rows_no_total", difference None. Any row problem,
+    an unreadable PDF, more than 12 pages, the OCR time budget, or a total the
+    PDF does print -> it stays "total_not_found" (a fail). Either way the
+    detail records the check under "rows_only"."""
+    if validation.get("printed") is not None:
+        return validation  # a statement with a printed total never takes this path
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    if not pdf_path or not rows:
+        return validation
+    from src.validation.pdf_row_match import check_rows_only
+    outcome = check_rows_only(rows, pdf_path, printed=validation.get("printed"))
+    detail = {**(validation.get("detail") or {}), "rows_only": outcome, "no_printed_total": True}
+    if outcome["status"] == "rows_verified":
+        print(f"  Rows-only check: all {outcome['rows']} rows verified on the PDF, no printed total -- passes.")
+        return {**validation, "status": "matches", "method": PDF_ROWS_NO_TOTAL_METHOD,
+                "difference": None, "detail": detail}
+    print(f"  Rows-only check: {outcome['status']} ({outcome.get('reason', '')}) -- stays total_not_found")
+    return {**validation, "detail": detail}
+
+
+PDF_ACCOUNT_BLOCKS_METHOD = account_blocks.METHOD
+
+
+def _account_blocks_status(validation: dict, invoices: list, pdf_path) -> dict:
+    """A total_not_found statement the no-total rule did not pass (2026-10-20,
+    Lithia STMT-142DA134): a text-layer PDF holding two or more account
+    statements, each with its own printed "Total Amount Due" and transaction
+    table (src/validation/account_blocks.py). It passes only when every row
+    is matched one-to-one to its printed line, each block's rows equal that
+    block's own printed total to the cent, and charges - credits equals their
+    sum -> "matches", method "pdf_account_blocks", printed = the SUM of the
+    blocks' printed totals (detail["account_blocks"] records the blocks; the
+    statement's own statement_total_as_printed stays empty). Not applicable
+    -> unchanged; applicable but failing -> stays total_not_found with the
+    reason in detail["account_blocks"]."""
+    if validation.get("printed") is not None or not pdf_path:
+        return validation
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    computed = validation.get("computed")
+    outcome = account_blocks.check_pdf_account_blocks(rows, pdf_path, computed)
+    if not outcome.get("applicable"):
+        return validation
+    detail = {**(validation.get("detail") or {}), "account_blocks": outcome}
+    if not outcome["passed"]:
+        print(f"  Account-blocks check: {outcome['reason']} -- stays total_not_found")
+        return {**validation, "detail": detail}
+    printed = outcome["printed_total"]
+    print(f"  Account-blocks check: {len(outcome['blocks'])} account blocks, each block's rows = its printed "
+          f"Total Amount Due; printed total {printed:,.2f} (their sum) = charges - credits -- passes.")
+    return {**validation, "status": "matches", "method": PDF_ACCOUNT_BLOCKS_METHOD, "printed": printed,
+            "computed": computed, "difference": round(printed - computed, 2), "detail": detail}
+
+
+PDF_FULL_MATCH_NO_TOTAL_METHOD = full_match_no_total.METHOD
+
+
+def _full_match_no_total_status(validation: dict, invoices: list, pdf_path, text) -> dict:
+    """A total_not_found statement neither the no-total rule nor the account-blocks check passed
+    (2026-10-22, src/validation/full_match_no_total.py; FULL_MATCH_NO_TOTAL_ENABLED=false switches it
+    off): every row and every cell matches the PDF one to one (the pdf_full_match standard) and every
+    total-like amount the PDF prints equals the rows' charges - credits -> "matches", method
+    "pdf_full_match_no_total", printed None, difference None (like pdf_rows_no_total). Not applicable
+    -> unchanged; applicable but failing -> stays total_not_found with the reason in
+    detail["full_match_no_total"]."""
+    if validation.get("printed") is not None or not pdf_path or not full_match_no_total.enabled():
+        return validation
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    computed = validation.get("computed")
+    outcome = full_match_no_total.check_full_match_no_total(rows, pdf_path, computed, text)
+    if not outcome.get("applicable"):
+        return validation
+    detail = {**(validation.get("detail") or {}), "full_match_no_total": outcome}
+    if not outcome["passed"]:
+        print(f"  Full match, no printed total: {outcome['reason'][:160]} -- stays total_not_found")
+        return {**validation, "detail": detail}
+    print(f"  Full match, no printed total: all {outcome['full_match'].get('rows')} rows and every cell match the PDF; "
+          f"{outcome['safety']['result']} -- passes.")
+    return {**validation, "status": "matches", "method": PDF_FULL_MATCH_NO_TOTAL_METHOD, "difference": None,
+            "computed": outcome["computed"], "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
+    validation dict. Used by run_intake() and by the re-run tool
+    (src/rerun/in_place.py new_from_schema), both BEFORE any Bronze write.
+
+    The gate itself is _validate_extraction(). When it fails, a text-layer
+    column correction is tried (src/validation/text_columns.py, 2026-10-19;
+    TEXT_COLUMN_CORRECTION_ENABLED=false switches it off): on a CDK
+    statement whose PDF prints PURCHASES / PAYMENTS & CREDITS / BALANCE,
+    every extracted row is matched to its printed line and put on the side
+    the PDF prints it, but ONLY if the PDF's columns total the printed total
+    exactly and the corrected rows then pass the whole gate (tried on a
+    copy first). Then the rows are corrected IN PLACE in
+    schema_result["invoices"] -- the same dicts the callers write to Bronze
+    (Azure SQL raw_payload, bronze.raw_statement, unnested lines/fields) --
+    and every move is listed in detail["text_column_corrections"]. Otherwise
+    nothing changes and detail["text_column_check"] says why.
+
+    If that does not pass, the row correction from the printed line is tried
+    (text_columns.plan_text_row_corrections, C2, 2026-10-20; same switch):
+    other header sets (CHARGES / CREDITS or PYMTS/CR, a single signed AMOUNT
+    column), and a row's amount may be filled or replaced from its own
+    printed line. Every row must match exactly one printed line and every
+    printed line exactly one row; kept only if the PDF's columns AND the
+    corrected rows both total the printed total to the cent and the
+    corrected rows pass the whole gate (tried on a copy first). Each change
+    is listed in detail["text_column_corrections"] with the extracted and the
+    printed value; otherwise detail["text_column_check"]["row_check"] says why.
+    """
+    validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+    if validation.get("status") != "mismatch":
+        return validation
+    if not text_columns.enabled():
+        return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
+                                                                       pdf_path), pdf_text, pdf_path)
+    printed = validation.get("printed")
+    plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = text_columns.plan_text_column_corrections(trial.get("invoices") or [], pdf_path, printed)
+        text_columns.apply_text_column_corrections(trial_plan)
+        trial.setdefault("statement_metadata", {})["statement_total_computed"] = \
+            compute_statement_total_from_invoices(trial.get("invoices") or [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+        if trial_validation.get("status") == "matches":
+            moved = text_columns.apply_text_column_corrections(plan)
+            schema_result.setdefault("statement_metadata", {})["statement_total_computed"] = \
+                compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+            for c in plan["corrections"]:
+                print(f"  Text-layer column correction: row {c['row_number']} {c['invoice_number']} {c['date']} "
+                      f"{c['amount']:,.2f} {c['from']} -> {c['to']} (printed on p{c['page']})")
+            print(f"  {moved} row(s) put on the side the PDF prints them; PDF columns total "
+                  f"{plan['pdf_total']:,.2f} = printed. Re-validating.")
+            validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+            corrections = [{k: v for k, v in c.items()} for c in plan["corrections"]]
+            validation["detail"] = {**(validation.get("detail") or {}), "text_column_corrections": corrections}
+            schema_result["validation"] = validation
+            return validation
+        reason = f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    row_validation, row_reason = _try_text_row_corrections(schema_result, pdf_text, pdf_path, printed)
+    if row_validation is not None:
+        return row_validation
+    validation["detail"] = {**(validation.get("detail") or {}),
+                            "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
+    schema_result["validation"] = validation
+    return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
+                                                                       pdf_path), pdf_text, pdf_path)
+
+
+def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """C3 (src/validation/due_column.py, 2026-10-20; DUE_COLUMN_CORRECTION_ENABLED=false switches it
+    off): an Autoly row whose merged "Due Description" cell starts with its printed Due amount gets that
+    amount as its Due (amount_due), but ONLY if every row is proven against its own printed line (text
+    layer or OCR word positions), the PDF's Due - Unalloc. equals the printed total, the corrected rows'
+    open-balance equation reconciles exactly, and the corrected rows pass the whole gate (tried on a
+    copy first). Returns the validation to keep; every move is listed in
+    detail["text_column_corrections"], or detail["due_column_check"] says why nothing changed."""
+    if not due_column.enabled():
+        return validation
+    printed = validation.get("printed")
+    plan = due_column.plan_due_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = due_column.plan_due_column_corrections(trial.get("invoices") or [], pdf_path, printed)
+        due_column.apply_due_column_corrections(trial_plan)
+        rows = [inv for inv in trial.get("invoices") or [] if not inv.get("informational")]
+        open_total = round(sum(inv.get("amount_due") or 0 for inv in rows)
+                           - sum(abs(inv.get("unallocated") or 0) for inv in rows), 2)
+        if abs(open_total - printed) >= 0.005:
+            reason = f"the corrected rows' Due - Unalloc. is {open_total:,.2f}, not the printed {printed:,.2f}"
+        else:
+            with contextlib.redirect_stdout(io.StringIO()):
+                trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+            if trial_validation.get("status") == "matches":
+                moved = due_column.apply_due_column_corrections(plan)
+                for c in plan["corrections"]:
+                    print(f"  Due column correction: row {c['row_number']} {c['invoice_number']} {c['date']} "
+                          f"Due {c['amount']:,.2f} moved out of \"Due Description\" (printed on p{c['page']})")
+                print(f"  {moved} Due amount(s) read from the printed Due column; Due - Unalloc. = "
+                      f"{plan['pdf_total']:,.2f} = printed. Re-validating.")
+                validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+                validation["detail"] = {**(validation.get("detail") or {}),
+                                        "text_column_corrections": [dict(c) for c in plan["corrections"]]}
+                schema_result["validation"] = validation
+                return validation
+            reason = f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    if reason != due_column.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}),
+                                "due_column_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
+    return validation
+
+
+def _try_net_line_drop(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """The last correction (src/validation/net_lines.py, 2026-10-21; NET_LINE_DROP_ENABLED=false switches
+    it off): on a statement that still fails, ONE row with no invoice / reference / description whose
+    amount is the exact net of the invoice rows directly above it -- printed on the PDF as a line with
+    nothing before the amount, under the invoice's last row, and repeated with the invoice on the
+    remittance stub -- is dropped, but ONLY if the whole gate then passes (tried on a copy first).
+    The drop is recorded in detail["net_line_drops"]; otherwise detail["net_line_check"] says why."""
+    if validation.get("status") != "mismatch" or not net_lines.enabled():
+        return validation
+    plan = net_lines.plan_net_line_drop(schema_result.get("invoices") or [], pdf_path)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = net_lines.plan_net_line_drop(trial.get("invoices") or [], pdf_path)
+        if trial_plan["applicable"] and net_lines.apply_net_line_drop(trial["invoices"], trial_plan):
+            trial.setdefault("statement_metadata", {})["statement_total_computed"] =                 compute_statement_total_from_invoices(trial.get("invoices") or [])
+            with contextlib.redirect_stdout(io.StringIO()):
+                trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+            if trial_validation.get("status") == "matches":
+                drop = net_lines.record(plan)
+                net_lines.apply_net_line_drop(schema_result["invoices"], plan)
+                schema_result.setdefault("statement_metadata", {})["statement_total_computed"] =                     compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+                print(f"  Net line dropped: row {drop['row_number']} {drop['amount']:,.2f} (dated {drop['date_extracted']}) "
+                      f"is the net of invoice {drop['invoice_number']}'s rows above it, printed with nothing before it "
+                      f"(p{drop['page']}) and again with the invoice on the stub. Re-validating.")
+                validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+                validation["detail"] = {**(validation.get("detail") or {}), "net_line_drops": [drop]}
+                schema_result["validation"] = validation
+                return validation
+            reason = f"the rows without it still do not pass (status {trial_validation.get('status')})"
+    if reason != net_lines.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}), "net_line_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
+    return validation
+
+
+def _try_text_row_corrections(schema_result: dict, pdf_text: str, pdf_path: str, printed) -> tuple:
+    """C2 (see apply_arithmetic_validation): (validation, None) when the rows were corrected in place
+    and now pass; (None, reason) when nothing was changed."""
+    plan = text_columns.plan_text_row_corrections(schema_result.get("invoices") or [], pdf_path, printed)
+    if not plan["applicable"]:
+        return None, plan["reason"]
+    trial = copy.deepcopy(schema_result)
+    trial_plan = text_columns.plan_text_row_corrections(trial.get("invoices") or [], pdf_path, printed)
+    text_columns.apply_text_row_corrections(trial_plan)
+    trial_total = compute_statement_total_from_invoices(trial.get("invoices") or [])
+    if trial_total is None or abs(trial_total - printed) >= 0.005:
+        return None, f"the corrected rows total {trial_total}, not the printed {printed:,.2f}"
+    trial.setdefault("statement_metadata", {})["statement_total_computed"] = trial_total
+    with contextlib.redirect_stdout(io.StringIO()):
+        trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+    if trial_validation.get("status") != "matches":
+        return None, f"the corrected rows still do not pass (status {trial_validation.get('status')})"
+    changed = text_columns.apply_text_row_corrections(plan)
+    schema_result.setdefault("statement_metadata", {})["statement_total_computed"] = \
+        compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+    for c in plan["corrections"]:
+        extracted = "none" if c["extracted_value"] is None else f"{c['extracted_value']:,.2f} {c['extracted_field']}"
+        print(f"  Text-layer row correction: row {c['row_number']} {c['invoice_number']} {c['date']} {c['change']}: "
+              f"{extracted} -> {c['printed_value']:,.2f} {c['field']} (printed on p{c['page']})")
+    print(f"  {changed} row(s) set to their printed line; PDF columns total {plan['pdf_total']:,.2f} = printed. "
+          f"Re-validating.")
+    validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+    corrections = [{k: v for k, v in c.items()} for c in plan["corrections"]]
+    validation["detail"] = {**(validation.get("detail") or {}), "text_column_corrections": corrections}
+    schema_result["validation"] = validation
+    return validation, None
+
+
+def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
+    """The Arithmetic Validation Gate for one extraction (see
+    apply_arithmetic_validation). Sets schema_result["validation"] (and the
+    verified previous balance in statement_metadata). Returns the
     validation dict.
 
     Text-based checks (2026-10-07) read the PDF's text layer, or for a scan
@@ -1283,7 +1583,8 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
         stmt_meta["statement_total_computed"] = column_total
     is_statement = schema_result.get("document_metadata", {}).get("document_type") != NOT_A_STATEMENT
     text, text_source = _validation_text(pdf_text, pdf_path, stmt_meta, is_statement)
-    printed_source = _fill_printed_total(stmt_meta, text, text_source) if is_statement else None
+    printed_source, printed_places = (_fill_printed_total(stmt_meta, text, text_source, pdf_path) if is_statement
+                                      else (None, None))
     previous_balance, ocr_previous_balance = _resolve_previous_balance(stmt_meta, pdf_text, text, text_source)
     if not is_statement:
         validation = {
@@ -1300,6 +1601,8 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
                 previous_balance=previous["value"],
                 section_totals=stmt_meta.get("section_totals"),
                 chain_opening_balance=previous.get("chain_opening"),
+                pdf_path=pdf_path,
+                vendor_name=(schema_result.get("vendor_metadata") or {}).get("vendor_name"),
             )
 
         validation = validate(previous_balance)
@@ -1311,7 +1614,28 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
             with_ocr = validate(ocr_previous_balance)
             if with_ocr["status"] == "matches":
                 validation, previous_balance = with_ocr, ocr_previous_balance
+        # The very last fallback: the extraction matches the PDF cell by cell
+        # (pdf_full_match, 2026-10-16). Only after everything above failed.
+        validation = try_pdf_full_match(validation, schema_result.get("invoices") or [], pdf_path)
+        if validation["status"] == "total_not_found":
+            validation = _rows_only_status(validation, schema_result.get("invoices") or [], pdf_path)
+        # Several account statements in one PDF, each with its own printed
+        # total (2026-10-20): only after the no-total rule, so it only adds a pass.
+        if validation["status"] == "total_not_found":
+            validation = _account_blocks_status(validation, schema_result.get("invoices") or [], pdf_path)
+        # Full match with no printed total (2026-10-22): the last no-total step, only after the
+        # no-total rule and the account-blocks check, so it only adds a pass.
+        if validation["status"] == "total_not_found":
+            validation = _full_match_no_total_status(validation, schema_result.get("invoices") or [], pdf_path, text)
+        # Invoice-balance check (2026-10-19), on the finished result: an
+        # extracted amount-due column that disagrees with the row amounts is
+        # recorded in the detail; only for a vendor listed in config/
+        # validation_invoice_balance.json does it turn a pass into "mismatch".
+        validation = apply_invoice_balance_check(
+            validation, schema_result.get("invoices") or [],
+            vendor_id=resolve_vendor_id(schema_result.get("vendor_metadata", {}).get("vendor_name")))
         sources = {k: v for k, v in (("printed_total_source", printed_source),
+                                       ("printed_total_read_from", printed_places),
                                        ("text_source", "ocr" if text_source == "ocr" else None)) if v}
         if sources:
             validation["detail"] = {**(validation.get("detail") or {}), **sources}
