@@ -60,7 +60,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.ai.document_understanding_engine import (
-    CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
+    CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text, page_texts,
 )
 # A deterministic pdfplumber extractor, used in place of
 # DocumentUnderstandingEngine for text-embedded PDFs matching the known
@@ -140,24 +140,29 @@ def _classify_pdf(pdf_path: str):
     guarantee the old _is_python_library_vendor() gate made.
     """
     try:
-        import pdfplumber
-        with pdfplumber.open(pdf_path) as pdf:
-            total_chars = 0
-            pages_checked = 0
-            matched_vendor = None
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                if i < PDF_TYPE_CHECK_PAGES:
-                    total_chars += len(text.strip())
-                    pages_checked += 1
-                if matched_vendor is None:
-                    for sig in ROUTABLE_VENDOR_SIGNATURES:
-                        if sig in text:
-                            matched_vendor = sig
-                            break
-            avg_chars = total_chars / max(pages_checked, 1)
-            pdf_type = "scanned" if avg_chars < PDF_TYPE_CHAR_THRESHOLD else "text_embedded"
-            return pdf_type, matched_vendor
+        # The page texts Step 2 (extract_pdf_text) just read, when it read this
+        # same file -- the same page.extract_text() calls, so the same result
+        # without parsing the PDF twice (2026-10-25).
+        texts = page_texts(pdf_path)
+        if texts is None:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                texts = [page.extract_text() or "" for page in pdf.pages]
+        total_chars = 0
+        pages_checked = 0
+        matched_vendor = None
+        for i, text in enumerate(texts):
+            if i < PDF_TYPE_CHECK_PAGES:
+                total_chars += len(text.strip())
+                pages_checked += 1
+            if matched_vendor is None:
+                for sig in ROUTABLE_VENDOR_SIGNATURES:
+                    if sig in text:
+                        matched_vendor = sig
+                        break
+        avg_chars = total_chars / max(pages_checked, 1)
+        pdf_type = "scanned" if avg_chars < PDF_TYPE_CHAR_THRESHOLD else "text_embedded"
+        return pdf_type, matched_vendor
     except Exception as e:
         print(f"  Warning: PDF type/vendor detection failed ({e}) — treating as unknown, routing to AI extraction.")
         return "unknown", None
@@ -1207,15 +1212,65 @@ def _validation_text(pdf_text: str, pdf_path, stmt_meta: dict, is_statement: boo
     PDF's own text layer ("text_layer"), or -- for a scan whose primary check
     cannot already pass -- its OCR text ("ocr", src/validation/ocr_text.py).
     ("", None) when there is neither. OCR is never run for a document that
-    is not a statement or whose printed and computed totals already match."""
+    is not a statement or whose printed and computed totals already match,
+    nor for one over OCR_TEXT_MAX_PAGES pages (see _ocr_validation_text)."""
     if has_text_layer(pdf_text):
         return pdf_text, "text_layer"
     primary = compute_arithmetic_validation(
         stmt_meta.get("statement_total_as_printed"), stmt_meta.get("statement_total_computed"))
     if not is_statement or primary["status"] == "matches":
         return "", None
-    ocr = ocr_pdf_text(pdf_path)
+    ocr = _ocr_validation_text(pdf_path)
     return (ocr, "ocr") if has_text_layer(ocr) else ("", None)
+
+
+# The OCR text (every page at 300 dpi, no time budget) is the slowest step
+# after the AI call: 34-38 s here for the 13- and 16-page scans Berlin City
+# and NYE 9-4-26, an estimated 6-20 min on dev, where both jobs hit the
+# 30-minute worker cap after their AI call had succeeded (2026-10-25). It was
+# read again on every gate pass -- each correction is tried on a copy first.
+# Now: read at most once per PDF per apply_arithmetic_validation() call, and
+# not at all above the page cap of the PDF checks (pdf_row_match.MAX_PAGES,
+# 12 -- the positional checks refuse such a PDF anyway); a missing printed
+# total or previous balance then has to come from the extraction itself.
+from src.validation.pdf_row_match import MAX_PAGES as OCR_TEXT_MAX_PAGES  # noqa: E402
+_OCR_TEXT_MEMO = None  # {pdf_path: text} while apply_arithmetic_validation() runs
+
+
+def _pdf_page_count(pdf_path):
+    try:
+        import fitz  # PyMuPDF
+        with fitz.open(pdf_path) as doc:
+            return doc.page_count
+    except Exception:
+        return None
+
+
+def _ocr_validation_text(pdf_path) -> str:
+    if _OCR_TEXT_MEMO is not None and pdf_path in _OCR_TEXT_MEMO:
+        return _OCR_TEXT_MEMO[pdf_path]
+    pages = _pdf_page_count(pdf_path) if pdf_path else None
+    if pages is not None and pages > OCR_TEXT_MAX_PAGES:
+        print(f"  OCR text for validation skipped: {pages} pages (cap {OCR_TEXT_MAX_PAGES})")
+        text = ""
+    else:
+        text = ocr_pdf_text(pdf_path)
+    if _OCR_TEXT_MEMO is not None:
+        _OCR_TEXT_MEMO[pdf_path] = text
+    return text
+
+
+@contextlib.contextmanager
+def _ocr_text_read_once():
+    global _OCR_TEXT_MEMO
+    if _OCR_TEXT_MEMO is not None:
+        yield
+        return
+    _OCR_TEXT_MEMO = {}
+    try:
+        yield
+    finally:
+        _OCR_TEXT_MEMO = None
 
 
 def _fill_printed_total(stmt_meta: dict, text: str, source, pdf_path=None) -> tuple:
@@ -1377,7 +1432,15 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     corrected rows pass the whole gate (tried on a copy first). Each change
     is listed in detail["text_column_corrections"] with the extracted and the
     printed value; otherwise detail["text_column_check"]["row_check"] says why.
+
+    A scan's OCR text is read at most once for all of this (see
+    _ocr_validation_text).
     """
+    with _ocr_text_read_once():
+        return _apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
+
+
+def _apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     validation = _validate_extraction(schema_result, pdf_text, pdf_path)
     if validation.get("status") != "mismatch":
         return validation
@@ -1880,7 +1943,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # Step 2: Extract PDF text
     extraction_started = time.monotonic()
     print(f"\n[Step 2] Extracting PDF text with pdfplumber...")
-    pdf_text, page_count = extract_pdf_text(pdf_path)
+    with timed_step("pdf_text"):
+        pdf_text, page_count = extract_pdf_text(pdf_path)
     print(f"  Extracted text from {page_count} pages ({len(pdf_text)} characters)")
 
     # Step 3: Document Understanding Engine
@@ -1888,7 +1952,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # vendor signature match -- see _determine_extraction_route()'s
     # docstring for the 3 cases this covers and why it replaces the old
     # signature-only gate.
-    route = _determine_extraction_route(pdf_path)
+    with timed_step("routing"):
+        route = _determine_extraction_route(pdf_path)
     print(f"\n[Step 3] PDF type: {route['pdf_type']} — {route['reason']}")
     if route["engine"] == "python_library":
         print(f"  Running deterministic pdfplumber extraction engine...")
@@ -1905,7 +1970,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Python-library extractor returned 0 line items — retrying with the Document Understanding Engine...")
         schema_result = DocumentUnderstandingEngine().understand(pdf_text, pdf_path, statement_id=statement_id)
 
-    apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
+    with timed_step("validation"):
+        apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
 
     # Three-tier billing_location fallback (src/validation/location_lookup.py)
     # -- a printed address always wins (tier 1); when extraction found none

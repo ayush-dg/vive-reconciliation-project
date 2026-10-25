@@ -43,6 +43,7 @@ from src.ai import client_factory
 from src.ai.pdfplumber_fallback import extract_with_pdfplumber
 from src.ai.audit_logger import log_ai_call
 from src.ai.page_orientation import upright_copy
+from src.pipeline_timing import timed_step
 
 
 class CorruptedPDFError(Exception):
@@ -200,7 +201,8 @@ class DocumentUnderstandingEngine:
         # Scanned pages rotated sideways or upside down are sent upright --
         # see src/ai/page_orientation.py. A no-op (same path back) for
         # upright scans, text PDFs, or if detection isn't available.
-        send_path, _rotations = upright_copy(pdf_path)
+        with timed_step("orientation"):
+            send_path, _rotations = upright_copy(pdf_path)
         try:
             return self._understand(pdf_path, send_path, source_file, statement_id)
         finally:
@@ -216,7 +218,8 @@ class DocumentUnderstandingEngine:
         provider_label = primary_client.__class__.__name__
         print(f"  [Engine] Attempting {provider_label} (primary path — handles any PDF format)...")
         try:
-            response = primary_client.generate_with_file(send_path, VISION_PROMPT)
+            with timed_step("ai_call"):
+                response = primary_client.generate_with_file(send_path, VISION_PROMPT)
 
             try:
                 log_ai_call(
@@ -265,21 +268,51 @@ def extract_pdf_text(pdf_path: str):
 
     Raises CorruptedPDFError (not the raw pdfminer/pdfplumber exception) if
     the file can't be opened as a PDF at all — see that class's docstring.
+
+    Each page's text is kept for page_texts() (the last file read only).
     """
     import pdfplumber
     from pdfplumber.utils.exceptions import PdfminerException
     from pdfminer.pdfparser import PDFSyntaxError
 
     pages_text = []
+    raw_texts = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
             page_count = len(pdf.pages)
             for i, page in enumerate(pdf.pages, start=1):
                 text = page.extract_text() or ""
+                raw_texts.append(text)
                 pages_text.append(f"--- PAGE {i} ---\n{text}")
     except (PdfminerException, PDFSyntaxError):
         raise CorruptedPDFError(
             "File is not a valid PDF or is corrupted — could not be opened"
         ) from None
 
+    _PAGE_TEXTS.clear()
+    try:
+        _PAGE_TEXTS[_file_key(pdf_path)] = raw_texts
+    except OSError:
+        pass
     return "\n\n".join(pages_text), page_count
+
+
+# Each page's text from the last extract_pdf_text() call (2026-10-25): the
+# intake's routing step (_classify_pdf) reads exactly the same text right
+# after Step 2, and parsing the PDF a second time was 44 of the 106 seconds
+# Fred Beans Lamon spent before its AI call (on dev, an estimated 7-23 min).
+_PAGE_TEXTS = {}
+
+
+def _file_key(pdf_path: str) -> tuple:
+    st = os.stat(pdf_path)
+    return os.path.abspath(pdf_path), st.st_mtime, st.st_size
+
+
+def page_texts(pdf_path: str):
+    """Each page's text (page.extract_text() or "") as extract_pdf_text()
+    read this same file (same path, modification time and size), or None."""
+    try:
+        return _PAGE_TEXTS.get(_file_key(pdf_path))
+    except OSError:
+        return None

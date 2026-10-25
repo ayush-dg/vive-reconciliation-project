@@ -26,10 +26,12 @@ to VIVE_WORKER_POOL_SIZE at once and VIVE_MAX_CONCURRENT_AI_CALLS
 concurrent Claude Sonnet calls (see src/ai/concurrency_limiter.py).
 """
 
+import codecs
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -64,6 +66,14 @@ FABRIC_STATUS_RE = re.compile(
     r"^ {4}(Fabric Silver build:.*|Fabric Silver build reason:.*|NetSuite matching:.*|NetSuite write-back:.*|Step timing:.*)$",
     re.MULTILINE,
 )
+
+# 30 min safety cap so one stuck PDF can't wedge the worker forever.
+PIPELINE_TIMEOUT_SECONDS = 1800
+# A timed-out job keeps this much of the pipeline's output (2026-10-25: the
+# four dev jobs the cap killed kept only "Worker error: ... timed out", so
+# nothing showed which step they were in).
+TIMEOUT_OUTPUT_CHARS = 4000
+LIVE_POLL_SECONDS = 0.5
 
 # Exact substring from src/matching/engine.py's run_matching() guard --
 # identifies "extraction succeeded, matching had no real ERP data to
@@ -142,6 +152,70 @@ def _restore_missing_pdf(job: dict) -> None:
         print(f"[worker] Job {job['job_id']}: could not re-download {source_blob_path}: {e}")
 
 
+def _pipeline_command(relative_pdf_path: str) -> list:
+    python_exe = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
+    return [python_exe, os.path.join("scripts", "run_full_pipeline.py"), "--pdf", relative_pdf_path]
+
+
+class _LiveStatusLines(threading.Thread):
+    """Follows the pipeline's stdout file while the subprocess runs and
+    prints each status line (FABRIC_STATUS_RE: "Step timing:", Fabric Silver
+    build, NetSuite matching / write-back) to the container log as soon as
+    the pipeline prints it, flushed (2026-10-25) -- before, they were only
+    printed after the pipeline exited, so a job killed by the 30-minute cap
+    showed none of them."""
+
+    def __init__(self, path: str, job_id: str):
+        super().__init__(name=f"live-status-{job_id}", daemon=True)
+        self.path = path
+        self.job_id = job_id
+        self.printed = 0
+        self._done = threading.Event()
+        self._offset = 0
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._pending = ""
+
+    def run(self) -> None:
+        while not self._done.wait(LIVE_POLL_SECONDS):
+            self._read()
+        self._read(final=True)
+
+    def _read(self, final: bool = False) -> None:
+        try:
+            with open(self.path, "rb") as f:
+                f.seek(self._offset)
+                chunk = f.read()
+        except OSError:
+            return
+        self._offset += len(chunk)
+        self._pending += self._decoder.decode(chunk, final=final)
+        *lines, self._pending = self._pending.split("\n")
+        if final and self._pending:
+            lines, self._pending = lines + [self._pending], ""
+        for line in lines:
+            if FABRIC_STATUS_RE.match(line.rstrip("\r")):
+                print(f"[worker] Job {self.job_id}: {line.strip()}", flush=True)
+                self.printed += 1
+
+    def finish(self) -> None:
+        self._done.set()
+        self.join(timeout=10)
+
+
+def _read_text(path: str) -> str:
+    try:
+        with open(path, "rb") as f:
+            return f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _decode(data) -> str:
+    if data is None:
+        return ""
+    return data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+
+
 def _run_job(job: dict) -> None:
     from web import queries
 
@@ -151,21 +225,32 @@ def _run_job(job: dict) -> None:
     print(f"[worker] Starting job {job_id} ({job['pdf_filename']})")
     _restore_missing_pdf(job)
 
-    python_exe = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
     relative_pdf_path = os.path.relpath(pdf_path, PROJECT_ROOT)
+    # The pipeline's stdout goes to a file the live thread follows; stderr
+    # is captured as before.
+    out_file = tempfile.NamedTemporaryFile(prefix=f"vive_job_{job_id}_", suffix=".out", delete=False)
+    live = _LiveStatusLines(out_file.name, job_id)
+    live.start()
 
     try:
-        result = subprocess.run(
-            [python_exe, os.path.join("scripts", "run_full_pipeline.py"), "--pdf", relative_pdf_path],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=1800,  # 30 min safety cap so one stuck PDF can't wedge the worker forever
-        )
-        output = (result.stdout or "") + "\n" + (result.stderr or "")
-        for line in FABRIC_STATUS_RE.findall(output):
+        try:
+            result = subprocess.run(
+                _pipeline_command(relative_pdf_path),
+                cwd=PROJECT_ROOT,
+                stdout=out_file,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=PIPELINE_TIMEOUT_SECONDS,
+            )
+        finally:
+            out_file.close()
+            live.finish()
+        stdout = result.stdout if result.stdout is not None else _read_text(out_file.name)
+        output = (stdout or "") + "\n" + (result.stderr or "")
+        # Lines the live thread already printed are not printed again.
+        for line in FABRIC_STATUS_RE.findall(output)[live.printed:]:
             print(f"[worker] Job {job_id}: {line.strip()}")
         match = STATEMENT_ID_RE.search(output)
         hash_match = DOCUMENT_HASH_RE.search(output)
@@ -290,6 +375,26 @@ def _run_job(job: dict) -> None:
             **({"error_message": note} if note else {}),
         )
         _write_blob_outcome(job, "completed")
+    except subprocess.TimeoutExpired as e:
+        # The pipeline was killed at the cap: keep the end of what it had
+        # printed (which step it was in), explanation LAST -- the UI shows the
+        # final line (web/deps.py friendly_error()).
+        partial = (_read_text(out_file.name) or _decode(e.stdout)) + "\n" + _decode(e.stderr)
+        error_message = f"Worker error: {e}"
+        if partial.strip():
+            error_message = f"{partial.strip()[-TIMEOUT_OUTPUT_CHARS:]}\n\n{error_message}"
+        print(f"[worker] Job {job_id} FAILED with worker error: {e} "
+              f"({len(partial.strip())} characters of output kept)")
+        try:
+            queries.update_job_status(
+                job_id,
+                status="FAILED",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                error_message=error_message,
+            )
+        except Exception:
+            pass  # even the failure write must never take the worker loop down
+        _write_blob_outcome(job, "failed", error_message)
     except Exception as e:
         print(f"[worker] Job {job_id} FAILED with worker error: {e}")
         try:
@@ -302,6 +407,11 @@ def _run_job(job: dict) -> None:
         except Exception:
             pass  # even the failure write must never take the worker loop down
         _write_blob_outcome(job, "failed", f"Worker error: {e}")
+    finally:
+        try:
+            os.remove(out_file.name)
+        except OSError:
+            pass
 
 
 def _worker_loop(worker_name: str) -> None:
