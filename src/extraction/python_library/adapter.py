@@ -112,12 +112,14 @@ _PRINTED_TOTAL_KEY = {
     # "Balance due" (= Total due - Unallocated), the amount the statement
     # asks for -- what the AI path stored for every Oct 1 Autoly statement.
     "extract_autoly": "balance_due_printed",
+    # The aging line's BALANCE DUE ($) (extract_ef320.py).
+    "extract_ef320": "balance_due_printed",
 }
 
 # Modules that serve many vendors: vendor_name is the letterhead name the
 # module reads off the PDF (summary["vendor_name"]), not one fixed name.
 # config/vendor_aliases.json folds each vendor's name variants to one id.
-_VENDOR_NAME_FROM_DOCUMENT = {"extract_autoly", "extract_keystone"}
+_VENDOR_NAME_FROM_DOCUMENT = {"extract_autoly", "extract_keystone", "extract_ef320"}
 
 # Which summary key holds the statement date, per module -- these
 # genuinely differ in both key name and printed format (DDMonYY, MM/DD/YY,
@@ -143,6 +145,7 @@ _STATEMENT_DATE_KEY = {
     "extract_mastria": "statement_date",
     "extract_partsauthority": "statement_date",
     "extract_autoly": "period_end",
+    "extract_ef320": "closing_date",
 }
 
 # Per-module line-item field mapping. invoice_number is a tuple tried in
@@ -377,6 +380,16 @@ _FIELD_MAP = {
         "charge_field": "charged", "credit_field": "paid",
         "amount_due_field": "due",
         "unallocated_field": "unalloc",
+    },
+    "extract_ef320": {
+        # CDK eF320 (2026-10-25, Faulkner): the module's field names are the
+        # printed headers, the same raw names the AI path stored for this
+        # form, so vendor_field_mapping.csv's existing rows map them.
+        "invoice_number": ("REFERENCE #",),
+        "date_field": "DATE", "due_date_field": None,
+        "transaction_code_field": "JOURNAL ID",
+        "charge_field": "PURCHASES ($)", "credit_field": "PAYMENTS & CREDITS ($)",
+        "amount_due_field": "BALANCE DUE ($)",
     },
 }
 
