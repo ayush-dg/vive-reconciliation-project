@@ -35,6 +35,7 @@ inside the PDF.
 import json
 import os
 import sys
+import time
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -42,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from src.ai import client_factory
 from src.ai.pdfplumber_fallback import extract_with_pdfplumber
 from src.ai.audit_logger import log_ai_call
+from src.ai.base_client import AIResponse
 from src.ai.page_orientation import upright_copy
 from src.pipeline_timing import timed_step
 
@@ -218,8 +220,13 @@ class DocumentUnderstandingEngine:
         provider_label = primary_client.__class__.__name__
         print(f"  [Engine] Attempting {provider_label} (primary path — handles any PDF format)...")
         try:
-            with timed_step("ai_call"):
-                response = primary_client.generate_with_file(send_path, VISION_PROMPT)
+            started = time.monotonic()
+            try:
+                with timed_step("ai_call"):
+                    response = primary_client.generate_with_file(send_path, VISION_PROMPT)
+            except Exception as e:
+                _log_call_exception(primary_client, e, time.monotonic() - started, source_file, statement_id)
+                raise
 
             try:
                 log_ai_call(
@@ -234,8 +241,8 @@ class DocumentUnderstandingEngine:
                     ),
                     validation_result="SUCCESS" if response.success else "FAILED",
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  [Engine] ai_audit_log row not written ({type(e).__name__}: {e})")
 
             if response.success and response.parsed_json:
                 result = response.parsed_json
@@ -256,6 +263,33 @@ class DocumentUnderstandingEngine:
         result = extract_with_pdfplumber(pdf_path)
         result["_provider_used"] = "pdfplumber"
         return result
+
+
+# The provider name each client puts on its own AIResponse.
+_PROVIDER_NAMES = {"ClaudeSonnetClient": "claude_sonnet", "ClaudeClient": "claude", "GeminiClient": "gemini",
+                   "MistralClient": "mistral", "AzureOpenAIClient": "azure_openai"}
+
+
+def _log_call_exception(client, error: Exception, seconds: float, source_file: str, statement_id: str) -> None:
+    """ai_audit_log row for an AI call that raised instead of returning a
+    response (2026-10-25): until now only a returned response was logged, so
+    on dev Receipts 47 2 fell back to pdfplumber with no audit row at all and
+    no trace of why. Logged as a failed call -- success 0, the exception as
+    error_message ("<type>: <message>"), validation_result "ERROR" (a returned
+    failure stays "FAILED"). Never raises."""
+    try:
+        name = type(client).__name__
+        log_ai_call(
+            AIResponse(success=False, provider=_PROVIDER_NAMES.get(name, name), model=getattr(client, "model", "") or "",
+                       latency_ms=seconds * 1000, error=f"{type(error).__name__}: {error}"[:4000]),
+            interaction_type="DOCUMENT_UNDERSTANDING",
+            prompt_version="vision_v1",
+            source_file=source_file,
+            statement_id=statement_id,
+            validation_result="ERROR",
+        )
+    except Exception as e:
+        print(f"  [Engine] ai_audit_log row not written ({type(e).__name__}: {e})")
 
 
 def extract_pdf_text(pdf_path: str):
