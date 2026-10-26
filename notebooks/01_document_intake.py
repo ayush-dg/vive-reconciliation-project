@@ -1905,7 +1905,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
         print(f"  Python-library extractor returned 0 line items — retrying with the Document Understanding Engine...")
         schema_result = DocumentUnderstandingEngine().understand(pdf_text, pdf_path, statement_id=statement_id)
 
-    apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
+    with timed_step("validation"):
+        apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
 
     # Three-tier billing_location fallback (src/validation/location_lookup.py)
     # -- a printed address always wins (tier 1); when extraction found none
@@ -2106,9 +2107,10 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # Step 8: Upload PDF to Blob Storage for permanent archival. Silent by
     # design — a failed upload logs a warning but never blocks the pipeline.
     print(f"\n[Step 8] Uploading PDF to Blob Storage...")
-    blob_storage_path = upload_pdf_to_blob_storage(
-        pdf_path, vendor_name, statement_period, document_hash
-    )
+    with timed_step("blob_upload"):
+        blob_storage_path = upload_pdf_to_blob_storage(
+            pdf_path, vendor_name, statement_period, document_hash
+        )
     if blob_storage_path:
         update_intake_log_blob_path(statement_id, blob_storage_path)
         print(f"  Uploaded to: {blob_storage_path}")
@@ -2119,11 +2121,12 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # mode, never blocks (see archive_statement_to_sharepoint()). Runs after
     # Step 7 so the intake row it updates exists, and before the write-back
     # (scripts/run_full_pipeline.py) reads the link.
-    archive_statement_to_sharepoint(
-        statement_id, pdf_path, vendor_name,
-        normalize_statement_month(stmt_meta.get("statement_date")), statement_period,
-        document_hash, routing, research_only,
-    )
+    with timed_step("sharepoint_archive"):
+        archive_statement_to_sharepoint(
+            statement_id, pdf_path, vendor_name,
+            normalize_statement_month(stmt_meta.get("statement_date")), statement_period,
+            document_hash, routing, research_only,
+        )
 
     # Step 9: Update cache (skipped in RESEARCH MODE -- bronze_count is 0,
     # and check_cache() already requires row_count > 0 for a valid hit, so

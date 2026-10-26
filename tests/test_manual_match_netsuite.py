@@ -83,7 +83,7 @@ class FakeSandbox:
         self.lines[str(self._next)] = dict({k: self._store(v) for k, v in body.items()}, id=str(self._next))
         return str(self._next)
 
-    def delete_record(self, record_type, record_id):
+    def delete_record(self, record_type, record_id, statement_id=None):
         self.calls.append(("DELETE", record_type, str(record_id)))
         self.lines.pop(str(record_id))
 

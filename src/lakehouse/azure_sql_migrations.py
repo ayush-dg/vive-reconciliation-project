@@ -418,6 +418,20 @@ TABLES = {
             previous_values NVARCHAR(MAX)
         )
     """,
+    # migrations/023_add_job_step_timing.sql -- per-step timings of each job, written only while
+    # JOB_TIMING_LOG_ENABLED=true. Last in TABLES, like the write-back log tables above.
+    "job_step_timing": """
+        CREATE TABLE job_step_timing (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            job_id NVARCHAR(255) NOT NULL,
+            statement_id NVARCHAR(100),
+            pdf_filename NVARCHAR(500),
+            step NVARCHAR(60) NOT NULL,
+            step_order INT NOT NULL,
+            seconds FLOAT NOT NULL,
+            logged_at NVARCHAR(40) NOT NULL
+        )
+    """,
 }
 
 INDEXES = {
@@ -449,6 +463,10 @@ INDEXES = {
     "idx_nswb_record_statement": (
         "netsuite_writeback_record",
         "CREATE INDEX idx_nswb_record_statement ON netsuite_writeback_record(statement_id, invoice_number)",
+    ),
+    "idx_job_step_timing_job": (
+        "job_step_timing",
+        "CREATE INDEX idx_job_step_timing_job ON job_step_timing(job_id)",
     ),
 }
 

@@ -68,7 +68,8 @@ def _run_matching(statement_id):
     # here instead of matching to 0 / 0 (src/lakehouse/silver_check.py).
     from src.lakehouse.silver_check import check_silver_lines
     from src.pipeline_markers import SILVER_CHECK_MARKER
-    problem = check_silver_lines(statement_id)
+    with timed_step("silver_check"):
+        problem = check_silver_lines(statement_id)
     if problem:
         print(f"    Fabric Silver build reason: {problem}")
         print(f"{SILVER_CHECK_MARKER} {problem} (statement_id {statement_id})")
@@ -131,7 +132,8 @@ def main():
     # Phase 1: Document Intake
     pipeline_started = time.monotonic()
     print(f"\n>>> PHASE 1: Document Intake")
-    intake_mod = load_notebook("intake", "notebooks/01_document_intake.py")
+    with timed_step("notebook_import"):
+        intake_mod = load_notebook("intake", "notebooks/01_document_intake.py")
     try:
         with timed_step("intake_total"):
             intake_result = intake_mod.run_intake(

@@ -369,7 +369,7 @@ class ReadBackTests(unittest.TestCase):
         class Ns(_FakeNs):
             def suiteql(self, query):
                 self.queries.append(query)
-                truncated = "WHERE id = 501" in query
+                truncated = "WHERE t.id = 501" in query
                 return [{"custbody_reconciled": "T", "custbody_statement_reference": STMT,
                          "custbody_statement_link": SP_URL[:100] if truncated else SP_URL}]
 
