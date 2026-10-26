@@ -248,7 +248,7 @@ def _find_box_total(pdf_path):
                 if page["source"] != "ocr" or page.get("rotation"):
                     unread.append({**where, "why": "no amount under the label"})
                     continue
-                rereader = rereader or prm._Rereader(pdf_path, time.monotonic() + prm.OCR_TIME_BUDGET_SECONDS)
+                rereader = rereader or prm._Rereader(pdf_path, time.monotonic() + prm.ocr_time_budget_seconds())
                 width = x1 - x0
                 got = rereader._ocr(page["page"], (x0 - width, bottom + 1, x1 + 1.75 * width,
                                                    bottom + 2.6 * height), "0123456789.,$-", 7) or []

@@ -1230,10 +1230,12 @@ def _validation_text(pdf_text: str, pdf_path, stmt_meta: dict, is_statement: boo
 # 30-minute worker cap after their AI call had succeeded (2026-10-25). It was
 # read again on every gate pass -- each correction is tried on a copy first.
 # Now: read at most once per PDF per apply_arithmetic_validation() call, and
-# not at all above the page cap of the PDF checks (pdf_row_match.MAX_PAGES,
-# 12 -- the positional checks refuse such a PDF anyway); a missing printed
-# total or previous balance then has to come from the extraction itself.
-from src.validation.pdf_row_match import MAX_PAGES as OCR_TEXT_MAX_PAGES  # noqa: E402
+# not at all above 12 pages (the default page cap of the PDF checks); a
+# missing printed total or previous balance then has to come from the
+# extraction itself. This cap stays 12 when VIVE_PDF_CHECK_MAX_PAGES raises
+# the PDF checks' cap (2026-10-26): those checks read within their OCR time
+# budget, this read has no budget at all.
+OCR_TEXT_MAX_PAGES = 12
 _OCR_TEXT_MEMO = None  # {pdf_path: text} while apply_arithmetic_validation() runs
 
 

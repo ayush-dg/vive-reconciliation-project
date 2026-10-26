@@ -41,7 +41,8 @@ MIN_ORIENTATION_CONFIDENCE = 2.0
 # A page with at least this much extractable text has a real text layer.
 TEXT_LAYER_MIN_CHARS = 40
 MAX_PAGES_CHECKED = 20
-# The page cap of the PDF checks (src/validation/pdf_row_match.MAX_PAGES).
+# The default page cap of the PDF checks (src/validation/pdf_row_match.MAX_PAGES);
+# a raised VIVE_PDF_CHECK_MAX_PAGES does not change it.
 LONG_PDF_PAGES = 12
 LONG_PDF_BUDGET_SECONDS = 30.0
 

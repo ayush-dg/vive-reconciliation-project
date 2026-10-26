@@ -75,6 +75,13 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 12
 OCR_TIME_BUDGET_SECONDS = 30.0
+# Deployment settings for the two limits above (2026-10-26): dev reads PDFs
+# 10-32x slower than a laptop, and five Oct 25 statements whose rows are
+# right (Chuck's, LV Honda, LV Hyundai, MB LV, LV Acura) stopped there at
+# "OCR time budget exhausted". Unset, blank, not a number or not positive =
+# the default above. Read on every call (max_pages(), ocr_time_budget_seconds()).
+MAX_PAGES_ENV = "VIVE_PDF_CHECK_MAX_PAGES"
+OCR_TIME_BUDGET_ENV = "VIVE_PDF_CHECK_OCR_BUDGET_SECONDS"
 OCR_MAX_WORKERS = 4
 OCR_DPI = 300
 OCR_CONFIG = "--psm 6"
@@ -103,6 +110,32 @@ _ROW_NUMBER_RE = re.compile(r"^\D{0,2}?(\d{1,4})[.,]?$")
 class NotVerified(Exception):
     """The PDF could not be read completely (page cap, OCR budget, unreadable
     page) -- the check reports "not verified", never a pass."""
+
+
+def _setting(name, default, cast):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = cast(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number -- using %s", name, raw, default)
+        return default
+    if not value > 0 or value == float("inf"):
+        logger.warning("%s=%r is not positive -- using %s", name, raw, default)
+        return default
+    return value
+
+
+def max_pages() -> int:
+    """The page cap of the PDF checks: VIVE_PDF_CHECK_MAX_PAGES, else MAX_PAGES."""
+    return _setting(MAX_PAGES_ENV, MAX_PAGES, int)
+
+
+def ocr_time_budget_seconds() -> float:
+    """The OCR time budget of the PDF checks: VIVE_PDF_CHECK_OCR_BUDGET_SECONDS,
+    else OCR_TIME_BUDGET_SECONDS."""
+    return _setting(OCR_TIME_BUDGET_ENV, OCR_TIME_BUDGET_SECONDS, float)
 
 
 # --------------------------------------------------------------------------
@@ -276,14 +309,18 @@ def _group_lines(words):
 _PAGES_CACHE: "OrderedDict" = OrderedDict()
 
 
-def read_pdf_lines(pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, max_workers=OCR_MAX_WORKERS):
+def read_pdf_lines(pdf_path, budget_seconds=None, max_workers=OCR_MAX_WORKERS):
     """[{"page", "source", "rotation", "lines"}] or raises NotVerified.
-    Cached per file (the intake can run the gate twice for one statement);
-    the cache keeps the last _PAGES_CACHE_SIZE files only."""
-    key = (os.path.abspath(pdf_path), os.path.getmtime(pdf_path), budget_seconds, max_workers)
+    budget_seconds None = ocr_time_budget_seconds(). Cached per file (the
+    intake can run the gate twice for one statement) and limits; the cache
+    keeps the last _PAGES_CACHE_SIZE reads only."""
+    if budget_seconds is None:
+        budget_seconds = ocr_time_budget_seconds()
+    cap = max_pages()
+    key = (os.path.abspath(pdf_path), os.path.getmtime(pdf_path), budget_seconds, max_workers, cap)
     if key not in _PAGES_CACHE:
         try:
-            _PAGES_CACHE[key] = _read_pdf_lines(pdf_path, budget_seconds, max_workers)
+            _PAGES_CACHE[key] = _read_pdf_lines(pdf_path, budget_seconds, max_workers, cap)
         except NotVerified as e:
             _PAGES_CACHE[key] = e
         while len(_PAGES_CACHE) > _PAGES_CACHE_SIZE:
@@ -294,17 +331,18 @@ def read_pdf_lines(pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, max_workers
     return cached
 
 
-def _read_pdf_lines(pdf_path, budget_seconds, max_workers):
+def _read_pdf_lines(pdf_path, budget_seconds, max_workers, cap=None):
     """Text-layer pages are read directly; scanned pages are OCR'd in
     parallel, one Tesseract process per page driven from a thread (the GIL
     is released while Tesseract runs), at most min(cpu count, max_workers)
-    at a time, all within one shared time budget."""
+    at a time, all within one shared time budget. cap None = max_pages()."""
     import pdfplumber
 
+    cap = max_pages() if cap is None else cap
     deadline = time.monotonic() + budget_seconds
     with pdfplumber.open(pdf_path) as pdf:
-        if len(pdf.pages) > MAX_PAGES:
-            raise NotVerified(f"{len(pdf.pages)} pages (cap {MAX_PAGES})")
+        if len(pdf.pages) > cap:
+            raise NotVerified(f"{len(pdf.pages)} pages (cap {cap})")
         text_words = [_text_layer_words(page) for page in pdf.pages]
     scans = [i for i, words in enumerate(text_words) if len(words) < MIN_TEXT_WORDS]
     ocr = {}
@@ -1006,7 +1044,10 @@ def equations(table, matches, printed, tolerance):
 # --------------------------------------------------------------------------
 
 def _analyse(rows, pdf_path, budget_seconds, allow_balance_only=False):
-    """(pages, table, matches, failures, rereads) or raises NotVerified."""
+    """(pages, table, matches, failures, rereads) or raises NotVerified.
+    budget_seconds None = ocr_time_budget_seconds()."""
+    if budget_seconds is None:
+        budget_seconds = ocr_time_budget_seconds()
     started = time.monotonic()
     try:
         pages = read_pdf_lines(pdf_path, budget_seconds)
@@ -1080,7 +1121,7 @@ def _opening_balance_line(table, matches, failures):
     return line
 
 
-def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
+def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=None, **_):
     """Gate method "pdf_row_match" (see the module docstring)."""
     started = time.monotonic()
     if not pdf_path:
@@ -1194,7 +1235,7 @@ def _vendor_section(table, matches, failures, vendor_name):
             "lines_ignored": ignored}, None
 
 
-def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS,
+def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=None,
                              vendor_name=None, **_):
     """Gate method "pdf_store_sections" (see the module docstring). A store
     is complete only when its rows sum to its printed Amount Due exactly to
@@ -1297,13 +1338,14 @@ def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, bu
 _PRINTED_TOTAL_LABELS = ("total", "balance due", "amount due", "new balance", "pay this amount", "please pay")
 
 
-def check_rows_only(rows, pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, printed=None):
+def check_rows_only(rows, pdf_path, budget_seconds=None, printed=None):
     """For a statement with NO printed total: every extracted row against its
     PDF line and every PDF transaction line against a row, with no equation
     (2026-10-12, user decision: this is the statement's pass/fail).
     Returns {"status": "rows_verified" | "rows_do_not_match" | "not_verified"
-    | "has_printed_total", ...}; only "rows_verified" is a pass. Same 30 s
-    OCR budget and 12-page cap as the other PDF checks."""
+    | "has_printed_total", ...}; only "rows_verified" is a pass. Same OCR
+    budget and page cap as the other PDF checks (ocr_time_budget_seconds(),
+    max_pages())."""
     started = time.monotonic()
     if printed is not None:
         return {"status": "has_printed_total", "reason": f"the extraction has a printed total ({printed})"}
@@ -1437,9 +1479,11 @@ def _find_value_words(words, value, free):
     return None
 
 
-def check_pdf_full_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
+def check_pdf_full_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=None, **_):
     """Gate method "pdf_full_match" (see the module docstring). Runs only
     after every other method has failed and can only add a pass."""
+    if budget_seconds is None:
+        budget_seconds = ocr_time_budget_seconds()
     started = time.monotonic()
     if not pdf_path:
         return _not_applicable("no PDF available")
