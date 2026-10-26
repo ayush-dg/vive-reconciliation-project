@@ -140,7 +140,14 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
       matched pair (an outstanding-only row and a credit-only row of the
       exact same magnitude, for the same invoice_number) are dropped
       entirely -- an invoice_number that appears only once, or whose
-      rows don't match in magnitude, is left untouched."""
+      rows don't match in magnitude, is left untouched.
+
+    One more row shape (2026-10-26, Dent Wizard STMT-B0E5C006: Charge 152.00,
+    Payments -45.00, Balance 107.00): a row printing a charge, a payment of a
+    DIFFERENT size against it and the balance left, where its amount due is
+    exactly charge - payment. It nets to that balance -- counting only the
+    payment (-45.00) lost every charge. See _charge_payment_balance(); every
+    other row nets exactly as above."""
     if not invoices:
         return None
 
@@ -186,6 +193,10 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
             # Dual-value settlement row (Keystone) -- net together on this row.
             total += _settlement_net(balance_forward, payment_applied)
             continue
+        parts = _charge_payment_balance(inv)
+        if parts:
+            total += parts[0] - parts[1]
+            continue
         credit = abs(inv.get("credit") or 0)
         if credit:
             total -= credit
@@ -207,6 +218,30 @@ def _settlement_net(balance_forward: float, payment_applied: float) -> float:
     the first into -2X, so the payment's magnitude takes balance_forward's
     sign instead: 0 for (+,+), (-,-), (+,-) and (-,+) alike."""
     return balance_forward - math.copysign(abs(payment_applied), balance_forward)
+
+
+def _is_money(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _charge_payment_balance(inv: dict):
+    """(charge, payment) of a row that prints a charge, a payment against it and
+    the balance left (2026-10-26, Dent Wizard STMT-B0E5C006: Charge 152.00,
+    Payments -45.00, Balance 107.00): a positive charge, a payment of a
+    different size, and an amount due equal to charge - payment to the cent.
+    Such a row nets to that balance, and the PDF checks verify all three of its
+    amounts. None for every other row -- in particular the ABC-pattern credit
+    memo, whose charge repeats the credit's face value (charge == payment), a
+    row with no amount due, and a row whose amount due is anything else."""
+    charge, payment, due = inv.get("outstanding_amount"), inv.get("credit"), inv.get("amount_due")
+    if not (_is_money(charge) and _is_money(payment) and _is_money(due)):
+        return None
+    payment = abs(payment)
+    if charge <= 0.005 or payment <= 0.005 or abs(charge - payment) <= 0.005:
+        return None
+    if abs(round(charge - payment - due, 2)) > 0.005:
+        return None
+    return charge, payment
 
 
 def _load_total_columns() -> dict:
@@ -333,6 +368,9 @@ def _row_net(inv: dict) -> float:
     payment_applied = inv.get("payment_applied")
     if balance_forward and payment_applied:
         return _settlement_net(balance_forward, payment_applied)
+    parts = _charge_payment_balance(inv)
+    if parts:
+        return parts[0] - parts[1]
     credit = abs(inv.get("credit") or 0)
     if credit:
         return -credit
@@ -341,6 +379,28 @@ def _row_net(inv: dict) -> float:
 
 def _rows_for_checks(invoices: list) -> list:
     return [inv for inv in invoices or [] if not _is_informational(inv)]
+
+
+INTEREST_WORDS_RE = re.compile(
+    r"\b(?:interest|finance\s*charges?|fin\.?\s*chg|service\s*charges?|late\s*(?:fees?|charges?))\b", re.IGNORECASE)
+
+
+def is_interest_balance_row(inv: dict) -> bool:
+    """An interest / finance charge printed with no invoice amount and nothing
+    paid, only its balance (2026-10-26, Sullivan Tire STMT-B0E5C002: "Interest
+    INT000081527 ... $0.00 $0.00 $21.35"): no charge, no credit, a positive
+    amount due, and an interest / finance word in the row's own cells. Such a
+    row is accepted by the open-balance row guard and the row verifier ONLY
+    when its PDF line proves it (pdf_row_match.interest_rows_on_pdf)."""
+    due = inv.get("amount_due")
+    if not _is_money(due) or due <= _MONEY_EPSILON:
+        return False
+    for key in ("outstanding_amount", "credit"):
+        value = inv.get(key)
+        if value is not None and (not _is_money(value) or abs(value) > _MONEY_EPSILON):
+            return False
+    cells = [v for v in (inv.get("_raw_row") or {}).values() if isinstance(v, str)] + [str(inv.get("description") or "")]
+    return any(INTEREST_WORDS_RE.search(cell) for cell in cells)
 
 
 def _matches(printed: float, computed: float, tolerance: float) -> bool:
@@ -402,7 +462,7 @@ def _open_balance_preconditions(rows: list):
     return True, ""
 
 
-def _check_open_balance(printed, rows, *, tolerance, **_):
+def _check_open_balance(printed, rows, *, tolerance, pdf_path=None, **_):
     applicable, reason = _open_balance_preconditions(rows)
     if not applicable:
         return {"applicable": False, "passed": False, "computed": None, "reason": reason}
@@ -414,17 +474,33 @@ def _check_open_balance(printed, rows, *, tolerance, **_):
     # Guard 1 -- per row: an open balance can never exceed the row's own
     # amount or have the opposite sign (a misplaced value, e.g. a payment
     # sitting in the Amount Due column, or a credit memo read as a charge).
-    row_failures = []
+    # One exception (2026-10-26, Sullivan Tire): an interest / finance row
+    # printed with amount 0.00, paid 0.00 and its balance -- only when its
+    # own PDF line proves exactly that (is_interest_balance_row).
+    row_failures, interest_rows = [], []
     for inv in rows:
         due = inv.get("amount_due")
         if due in (None, 0, 0.0):
             continue
         net = _row_net(inv)
         if due * net < 0 or abs(due) > abs(net) + _MONEY_EPSILON:
+            if pdf_path and is_interest_balance_row(inv):
+                interest_rows.append(inv)
+                continue
             row_failures.append({
                 "row_number": inv.get("row_number"), "invoice_number": inv.get("invoice_number"),
                 "row_amount": round(net, 2), "open_balance": round(due, 2),
             })
+    interest_verified = []
+    if interest_rows:
+        from src.validation.pdf_row_match import interest_rows_on_pdf
+        for inv, why in zip(interest_rows, interest_rows_on_pdf(interest_rows, pdf_path)):
+            entry = {"row_number": inv.get("row_number"), "invoice_number": inv.get("invoice_number"),
+                     "row_amount": 0.0, "open_balance": round(inv["amount_due"], 2)}
+            if why is None:
+                interest_verified.append(entry)
+            else:
+                row_failures.append({**entry, "interest_row_on_pdf": why})
 
     # Guard 2 -- per invoice: rows sharing one invoice number (charge, credit
     # memo, payments applied to it) must net to that invoice's open balance.
@@ -446,6 +522,8 @@ def _check_open_balance(printed, rows, *, tolerance, **_):
         "applicable": True, "computed": computed,
         "open_balance_total": round(open_total, 2), "unallocated_total": round(unallocated, 2),
     }
+    if interest_verified:
+        result["interest_rows_verified"] = interest_verified
     if row_failures or group_failures:
         result.update(passed=False, reason="open-balance column is inconsistent with the extracted row amounts",
                       row_guard_failures=row_failures[:10], invoice_guard_failures=group_failures[:10])
@@ -632,6 +710,8 @@ def validate_with_fallbacks(
     checks = _FALLBACK_CHECKS + (_PDF_CHECKS if pdf_path else ())
     for method, check in checks:
         extra = {"chain_opening_balance": chain_opening_balance} if method == VALIDATION_METHOD_RUNNING_BALANCE else {}
+        if method == VALIDATION_METHOD_OPEN_BALANCE:
+            extra = {"pdf_path": pdf_path}   # read only to prove an interest row's printed balance
         if method in (VALIDATION_METHOD_PDF_ROW_MATCH, VALIDATION_METHOD_PDF_STORE_SECTIONS):
             extra = {"pdf_path": pdf_path, "vendor_name": vendor_name}
         outcome = check(printed, rows, tolerance=tolerance,

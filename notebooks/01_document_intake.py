@@ -60,7 +60,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 from src.ai.document_understanding_engine import (
-    CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text,
+    CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text, page_texts,
 )
 # A deterministic pdfplumber extractor, used in place of
 # DocumentUnderstandingEngine for text-embedded PDFs matching the known
@@ -72,14 +72,16 @@ from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
 from src.validation.arithmetic_gate import (
-    apply_invoice_balance_check, compute_arithmetic_validation, compute_statement_total_from_invoices,
-    compute_vendor_column_total, try_pdf_full_match, validate_with_fallbacks,
+    VALIDATION_METHOD_STATEMENT_EQUATION, apply_invoice_balance_check, compute_arithmetic_validation,
+    compute_statement_total_from_invoices, compute_vendor_column_total, try_pdf_full_match, validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
-from src.validation import account_blocks, due_column, full_match_no_total, net_lines, text_columns
+from src.validation import (
+    account_blocks, due_column, full_match_no_total, net_lines, payment_column, section_totals, text_columns,
+)
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -140,24 +142,29 @@ def _classify_pdf(pdf_path: str):
     guarantee the old _is_python_library_vendor() gate made.
     """
     try:
-        import pdfplumber
-        with pdfplumber.open(pdf_path) as pdf:
-            total_chars = 0
-            pages_checked = 0
-            matched_vendor = None
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                if i < PDF_TYPE_CHECK_PAGES:
-                    total_chars += len(text.strip())
-                    pages_checked += 1
-                if matched_vendor is None:
-                    for sig in ROUTABLE_VENDOR_SIGNATURES:
-                        if sig in text:
-                            matched_vendor = sig
-                            break
-            avg_chars = total_chars / max(pages_checked, 1)
-            pdf_type = "scanned" if avg_chars < PDF_TYPE_CHAR_THRESHOLD else "text_embedded"
-            return pdf_type, matched_vendor
+        # The page texts Step 2 (extract_pdf_text) just read, when it read this
+        # same file -- the same page.extract_text() calls, so the same result
+        # without parsing the PDF twice (2026-10-25).
+        texts = page_texts(pdf_path)
+        if texts is None:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                texts = [page.extract_text() or "" for page in pdf.pages]
+        total_chars = 0
+        pages_checked = 0
+        matched_vendor = None
+        for i, text in enumerate(texts):
+            if i < PDF_TYPE_CHECK_PAGES:
+                total_chars += len(text.strip())
+                pages_checked += 1
+            if matched_vendor is None:
+                for sig in ROUTABLE_VENDOR_SIGNATURES:
+                    if sig in text:
+                        matched_vendor = sig
+                        break
+        avg_chars = total_chars / max(pages_checked, 1)
+        pdf_type = "scanned" if avg_chars < PDF_TYPE_CHAR_THRESHOLD else "text_embedded"
+        return pdf_type, matched_vendor
     except Exception as e:
         print(f"  Warning: PDF type/vendor detection failed ({e}) — treating as unknown, routing to AI extraction.")
         return "unknown", None
@@ -1207,15 +1214,67 @@ def _validation_text(pdf_text: str, pdf_path, stmt_meta: dict, is_statement: boo
     PDF's own text layer ("text_layer"), or -- for a scan whose primary check
     cannot already pass -- its OCR text ("ocr", src/validation/ocr_text.py).
     ("", None) when there is neither. OCR is never run for a document that
-    is not a statement or whose printed and computed totals already match."""
+    is not a statement or whose printed and computed totals already match,
+    nor for one over OCR_TEXT_MAX_PAGES pages (see _ocr_validation_text)."""
     if has_text_layer(pdf_text):
         return pdf_text, "text_layer"
     primary = compute_arithmetic_validation(
         stmt_meta.get("statement_total_as_printed"), stmt_meta.get("statement_total_computed"))
     if not is_statement or primary["status"] == "matches":
         return "", None
-    ocr = ocr_pdf_text(pdf_path)
+    ocr = _ocr_validation_text(pdf_path)
     return (ocr, "ocr") if has_text_layer(ocr) else ("", None)
+
+
+# The OCR text (every page at 300 dpi, no time budget) is the slowest step
+# after the AI call: 34-38 s here for the 13- and 16-page scans Berlin City
+# and NYE 9-4-26, an estimated 6-20 min on dev, where both jobs hit the
+# 30-minute worker cap after their AI call had succeeded (2026-10-25). It was
+# read again on every gate pass -- each correction is tried on a copy first.
+# Now: read at most once per PDF per apply_arithmetic_validation() call, and
+# not at all above 12 pages (the default page cap of the PDF checks); a
+# missing printed total or previous balance then has to come from the
+# extraction itself. This cap stays 12 when VIVE_PDF_CHECK_MAX_PAGES raises
+# the PDF checks' cap (2026-10-26): those checks read within their OCR time
+# budget, this read has no budget at all.
+OCR_TEXT_MAX_PAGES = 12
+_OCR_TEXT_MEMO = None  # {pdf_path: text} while apply_arithmetic_validation() runs
+
+
+def _pdf_page_count(pdf_path):
+    try:
+        import fitz  # PyMuPDF
+        with fitz.open(pdf_path) as doc:
+            return doc.page_count
+    except Exception:
+        return None
+
+
+def _ocr_validation_text(pdf_path) -> str:
+    if _OCR_TEXT_MEMO is not None and pdf_path in _OCR_TEXT_MEMO:
+        return _OCR_TEXT_MEMO[pdf_path]
+    pages = _pdf_page_count(pdf_path) if pdf_path else None
+    if pages is not None and pages > OCR_TEXT_MAX_PAGES:
+        print(f"  OCR text for validation skipped: {pages} pages (cap {OCR_TEXT_MAX_PAGES})")
+        text = ""
+    else:
+        text = ocr_pdf_text(pdf_path)
+    if _OCR_TEXT_MEMO is not None:
+        _OCR_TEXT_MEMO[pdf_path] = text
+    return text
+
+
+@contextlib.contextmanager
+def _ocr_text_read_once():
+    global _OCR_TEXT_MEMO
+    if _OCR_TEXT_MEMO is not None:
+        yield
+        return
+    _OCR_TEXT_MEMO = {}
+    try:
+        yield
+    finally:
+        _OCR_TEXT_MEMO = None
 
 
 def _fill_printed_total(stmt_meta: dict, text: str, source, pdf_path=None) -> tuple:
@@ -1348,6 +1407,38 @@ def _full_match_no_total_status(validation: dict, invoices: list, pdf_path, text
             "computed": outcome["computed"], "detail": detail}
 
 
+PDF_SECTION_TOTALS_METHOD = section_totals.METHOD
+
+
+def _section_totals_status(validation: dict, invoices: list, pdf_path, text, sections) -> dict:
+    """A total_not_found statement no other no-total step passed (2026-10-26, Blaise Alexander /
+    Matthews Auto: a scan printing several account statements, each with its own NEW BALANCE / PAY
+    THIS AMOUNT, and no grand total; src/validation/section_totals.py, SECTION_TOTALS_CHECK_ENABLED=false
+    switches it off): every row is in one extracted section, each section's rows equal its total to
+    the cent, charges - credits equals their sum, each section total is found as a labelled total on
+    the PDF itself (its text, or its positioned lines) and every labelled amount found is a section
+    total or their sum -> "matches", method "pdf_section_totals", printed = the SUM of the section
+    totals (detail["section_totals"] records where each was found; the statement's own
+    statement_total_as_printed stays empty). Not applicable -> unchanged; applicable but failing ->
+    stays total_not_found with the reason in detail["section_totals"]."""
+    if validation.get("printed") is not None or not section_totals.enabled():
+        return validation
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    computed = validation.get("computed")
+    outcome = section_totals.check_section_totals(rows, sections, text, computed, pdf_path)
+    if not outcome.get("applicable"):
+        return validation
+    detail = {**(validation.get("detail") or {}), "section_totals": outcome}
+    if not outcome["passed"]:
+        print(f"  Section totals: {outcome['reason'][:160]} -- stays total_not_found")
+        return {**validation, "detail": detail}
+    printed = outcome["printed_total"]
+    print(f"  Section totals: {len(outcome['sections'])} account sections, each section's rows = its total, each "
+          f"total printed on the PDF; their sum {printed:,.2f} = charges - credits -- passes.")
+    return {**validation, "status": "matches", "method": PDF_SECTION_TOTALS_METHOD, "printed": printed,
+            "computed": computed, "difference": round(printed - computed, 2), "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
@@ -1377,13 +1468,27 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     corrected rows pass the whole gate (tried on a copy first). Each change
     is listed in detail["text_column_corrections"] with the extracted and the
     printed value; otherwise detail["text_column_check"]["row_check"] says why.
+
+    Last, a bare "Payment" column the client left unmapped may count as
+    credits -- only when previous balance + amounts - payments = the printed
+    total and the gate then passes by statement_equation (_try_payment_column,
+    2026-10-26, Blue Sun).
+
+    A scan's OCR text is read at most once for all of this (see
+    _ocr_validation_text).
     """
+    with _ocr_text_read_once():
+        return _apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
+
+
+def _apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     validation = _validate_extraction(schema_result, pdf_text, pdf_path)
     if validation.get("status") != "mismatch":
         return validation
     if not text_columns.enabled():
-        return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
-                                                                       pdf_path), pdf_text, pdf_path)
+        return _try_payment_column(schema_result, _try_net_line_drop(
+            schema_result, _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path), pdf_text,
+            pdf_path), pdf_text, pdf_path)
     printed = validation.get("printed")
     plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
     reason = plan["reason"]
@@ -1416,8 +1521,9 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     validation["detail"] = {**(validation.get("detail") or {}),
                             "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
     schema_result["validation"] = validation
-    return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
-                                                                       pdf_path), pdf_text, pdf_path)
+    return _try_payment_column(schema_result, _try_net_line_drop(
+        schema_result, _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path), pdf_text,
+        pdf_path), pdf_text, pdf_path)
 
 
 def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
@@ -1501,6 +1607,48 @@ def _try_net_line_drop(schema_result: dict, validation: dict, pdf_text: str, pdf
     return validation
 
 
+def _try_payment_column(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """A bare "Payment" column the client left unmapped (src/validation/payment_column.py, 2026-10-26, Blue Sun
+    Quonset STMT-B0E5C001; PAYMENT_COLUMN_CORRECTION_ENABLED=false switches it off): on a statement that still
+    fails, its payments become credits ONLY if previous balance + amounts - payments = the printed total to the
+    cent and the whole gate then passes by statement_equation (tried on a copy first). The rows changed are
+    listed in detail["payment_column_corrections"]; otherwise nothing changes and detail["payment_column_check"]
+    says why."""
+    if validation.get("status") != "mismatch" or not payment_column.enabled():
+        return validation
+    printed = validation.get("printed")
+    previous = (schema_result.get("statement_metadata") or {}).get("previous_balance")
+    plan = payment_column.plan_payment_column(schema_result.get("invoices") or [], printed, previous)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = payment_column.plan_payment_column(trial.get("invoices") or [], printed, previous)
+        payment_column.apply_payment_column(trial_plan)
+        trial.setdefault("statement_metadata", {})["statement_total_computed"] = \
+            compute_statement_total_from_invoices(trial.get("invoices") or [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+        if (trial_validation.get("status"), trial_validation.get("method")) == ("matches", VALIDATION_METHOD_STATEMENT_EQUATION):
+            changed = payment_column.record(plan)
+            payment_column.apply_payment_column(plan)
+            schema_result.setdefault("statement_metadata", {})["statement_total_computed"] = \
+                compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+            for c in changed:
+                print(f"  Payment column: row {c['row_number']} {c['date']} {c['payment']:,.2f} under \"{c['column']}\" "
+                      f"counted as a credit")
+            print(f"  {plan['equation']} -- re-validating.")
+            validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+            validation["detail"] = {**(validation.get("detail") or {}), "payment_column_corrections": changed}
+            schema_result["validation"] = validation
+            return validation
+        reason = (f"with the payments the rows still do not pass by the statement equation "
+                  f"(status {trial_validation.get('status')}, method {trial_validation.get('method')})")
+    if reason != payment_column.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}), "payment_column_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
+    return validation
+
+
 def _try_text_row_corrections(schema_result: dict, pdf_text: str, pdf_path: str, printed) -> tuple:
     """C2 (see apply_arithmetic_validation): (validation, None) when the rows were corrected in place
     and now pass; (None, reason) when nothing was changed."""
@@ -1530,6 +1678,9 @@ def _try_text_row_corrections(schema_result: dict, pdf_text: str, pdf_path: str,
     validation = _validate_extraction(schema_result, pdf_text, pdf_path)
     corrections = [{k: v for k, v in c.items()} for c in plan["corrections"]]
     validation["detail"] = {**(validation.get("detail") or {}), "text_column_corrections": corrections}
+    if plan.get("identified_by_elimination"):
+        # Rows matched to their printed line by elimination (unchanged rows; see plan_text_row_corrections).
+        validation["detail"]["text_column_identified_by_elimination"] = plan["identified_by_elimination"]
     schema_result["validation"] = validation
     return validation, None
 
@@ -1627,6 +1778,11 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
         # no-total rule and the account-blocks check, so it only adds a pass.
         if validation["status"] == "total_not_found":
             validation = _full_match_no_total_status(validation, schema_result.get("invoices") or [], pdf_path, text)
+        # Several account sections and no grand total, each section's total found as a labelled total
+        # on the PDF itself (2026-10-26): after every other no-total step, so it only adds a pass.
+        if validation["status"] == "total_not_found":
+            validation = _section_totals_status(validation, schema_result.get("invoices") or [], pdf_path, text,
+                                                stmt_meta.get("section_totals"))
         # Invoice-balance check (2026-10-19), on the finished result: an
         # extracted amount-due column that disagrees with the row amounts is
         # recorded in the detail; only for a vendor listed in config/
@@ -1880,7 +2036,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # Step 2: Extract PDF text
     extraction_started = time.monotonic()
     print(f"\n[Step 2] Extracting PDF text with pdfplumber...")
-    pdf_text, page_count = extract_pdf_text(pdf_path)
+    with timed_step("pdf_text"):
+        pdf_text, page_count = extract_pdf_text(pdf_path)
     print(f"  Extracted text from {page_count} pages ({len(pdf_text)} characters)")
 
     # Step 3: Document Understanding Engine
@@ -1888,7 +2045,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # vendor signature match -- see _determine_extraction_route()'s
     # docstring for the 3 cases this covers and why it replaces the old
     # signature-only gate.
-    route = _determine_extraction_route(pdf_path)
+    with timed_step("routing"):
+        route = _determine_extraction_route(pdf_path)
     print(f"\n[Step 3] PDF type: {route['pdf_type']} — {route['reason']}")
     if route["engine"] == "python_library":
         print(f"  Running deterministic pdfplumber extraction engine...")
