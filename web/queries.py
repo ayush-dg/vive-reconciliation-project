@@ -1710,7 +1710,7 @@ def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
 STALE_PROCESSING_MINUTES = 40
 
 # Restart recovery (2026-10-26; design backups/fix_f1_20261025/restart_recovery_4d.md;
-# migrations/023_add_job_recovery_columns.sql). Off unless VIVE_JOB_RECOVERY_ENABLED=true -- turn it on
+# migrations/024_add_job_recovery_columns.sql). Off unless VIVE_JOB_RECOVERY_ENABLED=true -- turn it on
 # only after the four columns exist in the database (src/lakehouse/azure_sql_migrations.py for Azure
 # SQL). On dev, 2026-10-25: two Fred Beans jobs died with their host and waited for the 40-minute rule,
 # Berlin City / NYE 9-4-26 were killed at the 30-minute cap, and a late write from an old host could

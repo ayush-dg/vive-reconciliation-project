@@ -1,4 +1,4 @@
--- 023_add_job_recovery_columns.sql
+-- 024_add_job_recovery_columns.sql
 --
 -- Restart recovery for jobs (2026-10-26; design backups/fix_f1_20261025/restart_recovery_4d.md), used
 -- only when VIVE_JOB_RECOVERY_ENABLED=true (web/queries.py job_recovery_enabled()):
