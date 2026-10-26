@@ -79,7 +79,9 @@ from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
-from src.validation import account_blocks, due_column, full_match_no_total, net_lines, payment_column, text_columns
+from src.validation import (
+    account_blocks, due_column, full_match_no_total, net_lines, payment_column, section_totals, text_columns,
+)
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1405,6 +1407,38 @@ def _full_match_no_total_status(validation: dict, invoices: list, pdf_path, text
             "computed": outcome["computed"], "detail": detail}
 
 
+PDF_SECTION_TOTALS_METHOD = section_totals.METHOD
+
+
+def _section_totals_status(validation: dict, invoices: list, pdf_path, text, sections) -> dict:
+    """A total_not_found statement no other no-total step passed (2026-10-26, Blaise Alexander /
+    Matthews Auto: a scan printing several account statements, each with its own NEW BALANCE / PAY
+    THIS AMOUNT, and no grand total; src/validation/section_totals.py, SECTION_TOTALS_CHECK_ENABLED=false
+    switches it off): every row is in one extracted section, each section's rows equal its total to
+    the cent, charges - credits equals their sum, each section total is found as a labelled total on
+    the PDF itself (its text, or its positioned lines) and every labelled amount found is a section
+    total or their sum -> "matches", method "pdf_section_totals", printed = the SUM of the section
+    totals (detail["section_totals"] records where each was found; the statement's own
+    statement_total_as_printed stays empty). Not applicable -> unchanged; applicable but failing ->
+    stays total_not_found with the reason in detail["section_totals"]."""
+    if validation.get("printed") is not None or not section_totals.enabled():
+        return validation
+    rows = [inv for inv in invoices if not inv.get("informational")]
+    computed = validation.get("computed")
+    outcome = section_totals.check_section_totals(rows, sections, text, computed, pdf_path)
+    if not outcome.get("applicable"):
+        return validation
+    detail = {**(validation.get("detail") or {}), "section_totals": outcome}
+    if not outcome["passed"]:
+        print(f"  Section totals: {outcome['reason'][:160]} -- stays total_not_found")
+        return {**validation, "detail": detail}
+    printed = outcome["printed_total"]
+    print(f"  Section totals: {len(outcome['sections'])} account sections, each section's rows = its total, each "
+          f"total printed on the PDF; their sum {printed:,.2f} = charges - credits -- passes.")
+    return {**validation, "status": "matches", "method": PDF_SECTION_TOTALS_METHOD, "printed": printed,
+            "computed": computed, "difference": round(printed - computed, 2), "detail": detail}
+
+
 def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: str = None) -> dict:
     """Sets schema_result["validation"] (and the verified previous balance
     in statement_metadata) for a freshly extracted statement. Returns the
@@ -1741,6 +1775,11 @@ def _validate_extraction(schema_result: dict, pdf_text: str, pdf_path: str = Non
         # no-total rule and the account-blocks check, so it only adds a pass.
         if validation["status"] == "total_not_found":
             validation = _full_match_no_total_status(validation, schema_result.get("invoices") or [], pdf_path, text)
+        # Several account sections and no grand total, each section's total found as a labelled total
+        # on the PDF itself (2026-10-26): after every other no-total step, so it only adds a pass.
+        if validation["status"] == "total_not_found":
+            validation = _section_totals_status(validation, schema_result.get("invoices") or [], pdf_path, text,
+                                                stmt_meta.get("section_totals"))
         # Invoice-balance check (2026-10-19), on the finished result: an
         # extracted amount-due column that disagrees with the row amounts is
         # recorded in the detail; only for a vendor listed in config/
