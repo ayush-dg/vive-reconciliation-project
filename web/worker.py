@@ -234,6 +234,25 @@ def _last_step(output: str) -> str:
     return f"last step finished: {steps[-1]}" if steps else "no step had finished"
 
 
+_EXCEPTION_LINE_RE = re.compile(r"^([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt)):\s?(.*)$")
+
+
+def _failure_reason(output: str, returncode) -> str:
+    """The plain, specific last line for a failed pipeline run with no reason of its own (2026-10-26):
+    the dashboard shows only the last line of error_message (web/deps.py friendly_error()), which was
+    otherwise whatever the pipeline printed last."""
+    lines = [l.strip() for l in (output or "").splitlines() if l.strip()]
+    exceptions = [m for m in (_EXCEPTION_LINE_RE.match(l) for l in lines) if m]
+    if "PDF not found" in (output or ""):
+        return "PDF not found: the file was gone from the worker and could not be fetched again."
+    if "Traceback (most recent call last)" in (output or "") and exceptions:
+        return f"Pipeline error: {exceptions[-1].group(0)[:250]}"
+    if returncode == 0:
+        return "No statement: the pipeline finished without reporting a statement id."
+    tail = lines[-1][:150] if lines else "no output"
+    return f"Pipeline stopped (exit {returncode}): {tail}"
+
+
 def _record(job: dict, claim_token, blob_status: str, **fields) -> bool:
     """A final job write; with restart recovery it applies only while this attempt still holds the
     claim -- if a newer attempt owns the job, nothing is written, not even the blob outcome."""
@@ -347,6 +366,9 @@ def _run_job(job: dict) -> None:
                 # final line); stderr is appended after stdout, so it can't be
                 # relied on to already be last.
                 error_message = f"{output.strip()[-3500:]}\n\n{check_line[len(SILVER_CHECK_MARKER):].strip()}"
+            else:
+                # A specific reason LAST (2026-10-26) -- see _failure_reason().
+                error_message = f"{output.strip()[-3500:]}\n\n{_failure_reason(output, result.returncode)}".strip()
             _record(job, claim_token, "failed", status="FAILED", completed_at=completed_at,
                     error_message=error_message)
             return
@@ -381,7 +403,9 @@ def _run_job(job: dict) -> None:
             else:
                 error_message = (
                     f"Extraction completed but produced 0 rows for statement_id {statement_id} "
-                    f"-- see application logs for this job's real output.\n\n{output.strip()[-4000:]}"
+                    f"-- see application logs for this job's real output.\n\n{output.strip()[-3800:]}\n\n"
+                    # The reason LAST (2026-10-26): the dashboard shows the final line.
+                    f"No rows: the extraction stored no line items for statement_id {statement_id}."
                 )
             _record(job, claim_token, "failed", status="FAILED", completed_at=completed_at,
                     statement_id=statement_id, error_message=error_message)
