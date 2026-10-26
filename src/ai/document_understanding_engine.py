@@ -214,47 +214,82 @@ class DocumentUnderstandingEngine:
                 except OSError:
                     pass
 
+    def _call(self, client, send_path: str, source_file: str, statement_id: str):
+        """One AI call, audit-logged; raises what the client raises (after logging it)."""
+        started = time.monotonic()
+        try:
+            with timed_step("ai_call"):
+                response = client.generate_with_file(send_path, VISION_PROMPT)
+        except Exception as e:
+            _log_call_exception(client, e, time.monotonic() - started, source_file, statement_id)
+            raise
+        try:
+            log_ai_call(
+                response,
+                interaction_type="DOCUMENT_UNDERSTANDING",
+                prompt_version="vision_v1",
+                source_file=source_file,
+                statement_id=statement_id,
+                extraction_confidence=(
+                    response.parsed_json.get("extraction_confidence", {}).get("overall")
+                    if response.parsed_json else None
+                ),
+                validation_result="SUCCESS" if response.success else "FAILED",
+            )
+        except Exception as e:
+            print(f"  [Engine] ai_audit_log row not written ({type(e).__name__}: {e})")
+        return response
+
     def _understand(self, pdf_path: str, send_path: str, source_file: str, statement_id: str = None) -> dict:
         # --- PRIMARY PATH: active provider from provider_chain (universal, handles all PDF formats) ---
         primary_client = client_factory.get_ai_client()
         provider_label = primary_client.__class__.__name__
         print(f"  [Engine] Attempting {provider_label} (primary path — handles any PDF format)...")
+        answers = []
         try:
-            started = time.monotonic()
-            try:
-                with timed_step("ai_call"):
-                    response = primary_client.generate_with_file(send_path, VISION_PROMPT)
-            except Exception as e:
-                _log_call_exception(primary_client, e, time.monotonic() - started, source_file, statement_id)
-                raise
-
-            try:
-                log_ai_call(
-                    response,
-                    interaction_type="DOCUMENT_UNDERSTANDING",
-                    prompt_version="vision_v1",
-                    source_file=source_file,
-                    statement_id=statement_id,
-                    extraction_confidence=(
-                        response.parsed_json.get("extraction_confidence", {}).get("overall")
-                        if response.parsed_json else None
-                    ),
-                    validation_result="SUCCESS" if response.success else "FAILED",
-                )
-            except Exception as e:
-                print(f"  [Engine] ai_audit_log row not written ({type(e).__name__}: {e})")
-
-            if response.success and response.parsed_json:
+            response = self._call(primary_client, send_path, source_file, statement_id)
+            shortfall = _shortfall(response, pdf_path)
+            if shortfall:
+                # No rows, or far fewer than the PDF's text layer prints (2026-10-26, the Faulkner case):
+                # one automatic retry before any fallback.
+                print(f"  [Engine] {provider_label}: {shortfall} -- retrying the AI call once")
+                answers.append((response, shortfall))
+                response = self._call(primary_client, send_path, source_file, statement_id)
+                shortfall = _shortfall(response, pdf_path)
+            if response.success and response.parsed_json and not shortfall:
                 result = response.parsed_json
                 result["_provider_used"] = response.provider
                 result["_model_used"] = response.model
                 print(f"  [Engine] {provider_label} success — "
                       f"{len(result.get('invoices', []))} invoices extracted")
                 return result
+            if shortfall:
+                answers.append((response, shortfall))
             else:
                 print(f"  [Engine] {provider_label} failed: {response.error}")
         except Exception as e:
             print(f"  [Engine] {provider_label} error: {e}")
+
+        if answers:
+            # Both AI answers fell short: the deterministic reader for this layout first, if there is one.
+            best = max(answers, key=lambda a: len((a[0].parsed_json or {}).get("invoices") or []) if a[0].success else -1)
+            best_rows = len((best[0].parsed_json or {}).get("invoices") or []) if best[0].success else 0
+            reader = _deterministic_reader(pdf_path)
+            if reader is not None and len(reader.get("invoices") or []) > best_rows:
+                print(f"  [Engine] Using the deterministic reader for this layout "
+                      f"({reader.get('_deterministic_reader')}): {len(reader['invoices'])} rows")
+                reader.setdefault("warnings", []).append(
+                    f"AI answers fell short twice ({best[1]}); read by {reader.get('_deterministic_reader')}")
+                return reader
+            if best_rows:
+                result = best[0].parsed_json
+                result["_provider_used"] = best[0].provider
+                result["_model_used"] = best[0].model
+                result.setdefault("warnings", []).append(
+                    f"The AI returned {best_rows} rows twice; {best[1]}. Kept the AI rows; validation decides.")
+                print(f"  [Engine] Keeping the better AI answer ({best_rows} rows)")
+                return result
+            print(f"  [Engine] {provider_label}: no rows on both attempts and no deterministic reader for this layout")
 
         # --- FALLBACK PATH: deterministic pdfplumber (no AI, no cost) ---
         # extract_with_pdfplumber() handles scanned pages internally via
@@ -290,6 +325,74 @@ def _log_call_exception(client, error: Exception, seconds: float, source_file: s
         )
     except Exception as e:
         print(f"  [Engine] ai_audit_log row not written ({type(e).__name__}: {e})")
+
+
+# An AI answer that falls short (2026-10-26): no rows, or far fewer than the PDF's own text layer prints.
+NO_ROWS_ERROR = "appears truncated"           # ClaudeSonnetClient: column names but an empty rows list
+TEXT_ROW_SHORTFALL = 0.5                      # fewer than half the printed dated lines with an amount ...
+MIN_TEXT_ROWS = 5                             # ... on a text layer printing at least this many
+_DATE_RE = None
+_AMOUNT_RE = None
+
+
+def _text_layer_rows(pdf_path: str):
+    """How many text-layer lines print a date and an amount (a rough count of transaction lines), or
+    None for a scan / an unreadable file. Uses the text extract_pdf_text() already read when it can."""
+    import re
+    global _DATE_RE, _AMOUNT_RE
+    if _DATE_RE is None:
+        _DATE_RE = re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}[A-Z]{3}\d{2,4})\b")
+        _AMOUNT_RE = re.compile(r"(?<![\d.])-?\$?\d{1,3}(?:,\d{3})*\.\d{2}\b")
+    texts = page_texts(pdf_path)
+    if texts is None:
+        try:
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                texts = [page.extract_text() or "" for page in pdf.pages]
+        except Exception:
+            return None
+    lines = [line for text in texts for line in (text or "").splitlines()]
+    if sum(len(line) for line in lines) < 200:
+        return None
+    return sum(1 for line in lines if _DATE_RE.search(line) and _AMOUNT_RE.search(line))
+
+
+def _shortfall(response, pdf_path: str):
+    """Why an AI answer falls short, or None: column names but no rows (the client's "truncated"), a
+    statement answered with no rows, or far fewer rows than its text layer prints. A document the
+    model judged not a statement never falls short."""
+    if not response.success:
+        return "the AI returned column names but no rows" if NO_ROWS_ERROR in (response.error or "") else None
+    parsed = response.parsed_json or {}
+    if (parsed.get("document_metadata") or {}).get("document_type") == "NOT_A_STATEMENT":
+        return None
+    rows = len(parsed.get("invoices") or [])
+    if not rows:
+        return "the AI returned no rows"
+    printed = _text_layer_rows(pdf_path)
+    if printed is not None and printed >= MIN_TEXT_ROWS and rows < TEXT_ROW_SHORTFALL * printed:
+        return f"the AI returned {rows} rows; the text layer prints {printed} dated lines with an amount"
+    return None
+
+
+def _deterministic_reader(pdf_path: str):
+    """The python_library extractor for this PDF's layout (src/extraction/python_library, matched by its
+    vendor signature -- extract_ef320, extract_fenix, ...) as an engine result, or None when no
+    extractor matches, it has no field mapping, or it reads no rows. Never raises."""
+    try:
+        from src.extraction.python_library import adapter
+        module = adapter.extract_all.detect_vendor(pdf_path)
+        if module.__name__ not in adapter._FIELD_MAP:
+            return None
+        result = adapter.PythonLibraryExtractionEngine().understand("", pdf_path)
+    except Exception as e:
+        print(f"  [Engine] No deterministic reader for this layout ({type(e).__name__})")
+        return None
+    if not (result or {}).get("invoices"):
+        return None
+    result["_provider_used"] = "python_library"
+    result["_deterministic_reader"] = module.__name__
+    return result
 
 
 def extract_pdf_text(pdf_path: str):
