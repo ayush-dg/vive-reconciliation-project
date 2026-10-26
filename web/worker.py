@@ -202,6 +202,51 @@ class _LiveStatusLines(threading.Thread):
         self.join(timeout=10)
 
 
+class _Heartbeat(threading.Thread):
+    """Restart recovery (queries.job_recovery_enabled(), 2026-10-26): tells the jobs table every
+    queries.HEARTBEAT_SECONDS that this worker still runs the job, so a job whose container died is
+    retried after queries.HEARTBEAT_STALE_MINUTES instead of 40 minutes -- and one still running is
+    never handed to a second worker. Never raises."""
+
+    def __init__(self, job_id: str, claim_token: str):
+        super().__init__(name=f"heartbeat-{job_id}", daemon=True)
+        self.job_id, self.claim_token = job_id, claim_token
+        self._done = threading.Event()
+
+    def run(self) -> None:
+        from web import queries
+        while not self._done.wait(queries.HEARTBEAT_SECONDS):
+            try:
+                queries.heartbeat_job(self.job_id, self.claim_token)
+            except Exception as e:
+                print(f"[worker] Job {self.job_id}: heartbeat not written ({type(e).__name__}: {e})")
+
+    def finish(self) -> None:
+        self._done.set()
+        self.join(timeout=10)
+
+
+_STEP_TIMING_RE = re.compile(r"Step timing:\s*([A-Za-z0-9_]+)=")
+
+
+def _last_step(output: str) -> str:
+    steps = _STEP_TIMING_RE.findall(output or "")
+    return f"last step finished: {steps[-1]}" if steps else "no step had finished"
+
+
+def _record(job: dict, claim_token, blob_status: str, **fields) -> bool:
+    """A final job write; with restart recovery it applies only while this attempt still holds the
+    claim -- if a newer attempt owns the job, nothing is written, not even the blob outcome."""
+    from web import queries
+    if claim_token and queries.update_job_status(job["job_id"], claim_token=claim_token, **fields) is False:
+        print(f"[worker] Job {job['job_id']}: outcome not written -- a newer attempt owns this job")
+        return False
+    if not claim_token:
+        queries.update_job_status(job["job_id"], **fields)
+    _write_blob_outcome(job, blob_status, fields.get("error_message") if blob_status == "failed" else None)
+    return True
+
+
 def _read_text(path: str) -> str:
     try:
         with open(path, "rb") as f:
@@ -224,6 +269,11 @@ def _run_job(job: dict) -> None:
 
     print(f"[worker] Starting job {job_id} ({job['pdf_filename']})")
     _restore_missing_pdf(job)
+    # Restart recovery (queries.job_recovery_enabled()): beat while running, guard every final write.
+    claim_token = job.get("claim_token") if queries.job_recovery_enabled() else None
+    heartbeat = _Heartbeat(job_id, claim_token) if claim_token else None
+    if heartbeat:
+        heartbeat.start()
 
     relative_pdf_path = os.path.relpath(pdf_path, PROJECT_ROOT)
     # The pipeline's stdout goes to a file the live thread follows; stderr
@@ -247,6 +297,8 @@ def _run_job(job: dict) -> None:
         finally:
             out_file.close()
             live.finish()
+            if heartbeat:
+                heartbeat.finish()
         stdout = result.stdout if result.stdout is not None else _read_text(out_file.name)
         output = (stdout or "") + "\n" + (result.stderr or "")
         # Lines the live thread already printed are not printed again.
@@ -272,8 +324,8 @@ def _run_job(job: dict) -> None:
                 if silver_count > 0:
                     vendor_name = queries.get_vendor_name_for_statement(statement_id)
                     print(f"[worker] Job {job_id} COMPLETED (extraction only, no ERP data to match) — {statement_id} ({vendor_name})")
-                    queries.update_job_status(
-                        job_id,
+                    _record(
+                        job, claim_token, "completed",
                         status="COMPLETED",
                         completed_at=completed_at,
                         statement_id=statement_id,
@@ -284,7 +336,6 @@ def _run_job(job: dict) -> None:
                             f"loaded for this vendor yet, matching skipped. See scripts/load_voucher_data.py."
                         ),
                     )
-                    _write_blob_outcome(job, "completed")
                     return
 
             print(f"[worker] Job {job_id} FAILED (exit {result.returncode})")
@@ -296,13 +347,8 @@ def _run_job(job: dict) -> None:
                 # final line); stderr is appended after stdout, so it can't be
                 # relied on to already be last.
                 error_message = f"{output.strip()[-3500:]}\n\n{check_line[len(SILVER_CHECK_MARKER):].strip()}"
-            queries.update_job_status(
-                job_id,
-                status="FAILED",
-                completed_at=completed_at,
-                error_message=error_message,
-            )
-            _write_blob_outcome(job, "failed", error_message)
+            _record(job, claim_token, "failed", status="FAILED", completed_at=completed_at,
+                    error_message=error_message)
             return
 
         statement_id = match.group(1)
@@ -337,14 +383,8 @@ def _run_job(job: dict) -> None:
                     f"Extraction completed but produced 0 rows for statement_id {statement_id} "
                     f"-- see application logs for this job's real output.\n\n{output.strip()[-4000:]}"
                 )
-            queries.update_job_status(
-                job_id,
-                status="FAILED",
-                completed_at=completed_at,
-                statement_id=statement_id,
-                error_message=error_message,
-            )
-            _write_blob_outcome(job, "failed", error_message)
+            _record(job, claim_token, "failed", status="FAILED", completed_at=completed_at,
+                    statement_id=statement_id, error_message=error_message)
             return
 
         vendor_name = queries.get_vendor_name_for_statement(statement_id)
@@ -365,8 +405,8 @@ def _run_job(job: dict) -> None:
         print(f"[worker] Job {job_id} COMPLETED — {statement_id} ({vendor_name})"
               + (" [duplicate]" if DUPLICATE_MARKER in output else "")
               + (" [stopped at validation]" if validation_line else ""))
-        queries.update_job_status(
-            job_id,
+        _record(
+            job, claim_token, "completed",
             status="COMPLETED",
             completed_at=completed_at,
             statement_id=statement_id,
@@ -374,7 +414,6 @@ def _run_job(job: dict) -> None:
             document_hash=document_hash,
             **({"error_message": note} if note else {}),
         )
-        _write_blob_outcome(job, "completed")
     except subprocess.TimeoutExpired as e:
         # The pipeline was killed at the cap: keep the end of what it had
         # printed (which step it was in), explanation LAST -- the UI shows the
@@ -383,6 +422,20 @@ def _run_job(job: dict) -> None:
         error_message = f"Worker error: {e}"
         if partial.strip():
             error_message = f"{partial.strip()[-TIMEOUT_OUTPUT_CHARS:]}\n\n{error_message}"
+        if claim_token:
+            # Restart recovery: retried while attempts remain, else FAILED with every attempt's
+            # reason and a plain "Timed out: ..." last line (queries.retry_or_fail_job).
+            reason = f"hit the 30-minute cap ({_last_step(partial)})"
+            try:
+                outcome = queries.retry_or_fail_job(job_id, claim_token, reason,
+                                                    partial.strip()[-TIMEOUT_OUTPUT_CHARS:] or None)
+            except Exception as write_error:
+                outcome = f"not recorded ({write_error})"
+            print(f"[worker] Job {job_id}: {reason} -- {outcome}")
+            if outcome == "failed":
+                failed = queries.get_job_by_id(job_id) or {}
+                _write_blob_outcome(job, "failed", failed.get("error_message"))
+            return
         print(f"[worker] Job {job_id} FAILED with worker error: {e} "
               f"({len(partial.strip())} characters of output kept)")
         try:
@@ -398,15 +451,10 @@ def _run_job(job: dict) -> None:
     except Exception as e:
         print(f"[worker] Job {job_id} FAILED with worker error: {e}")
         try:
-            queries.update_job_status(
-                job_id,
-                status="FAILED",
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                error_message=f"Worker error: {e}",
-            )
+            _record(job, claim_token, "failed", status="FAILED",
+                    completed_at=datetime.now(timezone.utc).isoformat(), error_message=f"Worker error: {e}")
         except Exception:
             pass  # even the failure write must never take the worker loop down
-        _write_blob_outcome(job, "failed", f"Worker error: {e}")
     finally:
         try:
             os.remove(out_file.name)

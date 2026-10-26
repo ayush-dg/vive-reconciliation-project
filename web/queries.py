@@ -1709,6 +1709,102 @@ def create_job(job_id: str, pdf_filename: str, pdf_path: str, submitted_by: str,
 # worker kills the pipeline subprocess at 30 minutes (web/worker.py).
 STALE_PROCESSING_MINUTES = 40
 
+# Restart recovery (2026-10-26; design backups/fix_f1_20261025/restart_recovery_4d.md;
+# migrations/023_add_job_recovery_columns.sql). Off unless VIVE_JOB_RECOVERY_ENABLED=true -- turn it on
+# only after the four columns exist in the database (src/lakehouse/azure_sql_migrations.py for Azure
+# SQL). On dev, 2026-10-25: two Fred Beans jobs died with their host and waited for the 40-minute rule,
+# Berlin City / NYE 9-4-26 were killed at the 30-minute cap, and a late write from an old host could
+# overwrite a newer attempt. With it on, a claim records its owner, the worker beats every
+# HEARTBEAT_SECONDS, a job with no heartbeat for HEARTBEAT_STALE_MINUTES (or stopped at the 30-minute
+# cap) is retried until JOB_MAX_ATTEMPTS, every attempt's reason is kept in attempt_log, and every final
+# write from the worker must still hold the claim.
+JOB_RECOVERY_ENV = "VIVE_JOB_RECOVERY_ENABLED"
+JOB_MAX_ATTEMPTS = 2
+HEARTBEAT_SECONDS = 60
+HEARTBEAT_STALE_MINUTES = 5
+# This process: the App Service instance plus a per-boot id, so a restarted container is a new owner.
+WORKER_INSTANCE = f"{(os.environ.get('WEBSITE_INSTANCE_ID') or 'local')[:12]}-{uuid.uuid4().hex[:8]}"
+
+
+def job_recovery_enabled() -> bool:
+    return os.getenv(JOB_RECOVERY_ENV, "false").strip().lower() == "true"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _with_attempt(log, line: str) -> str:
+    return f"{log}\n{line}" if log else line
+
+
+def heartbeat_job(job_id: str, claim_token: str) -> bool:
+    """The worker still runs this job: True when its claim still holds."""
+    cursor = execute_sql(
+        "UPDATE jobs SET heartbeat_at = ? WHERE job_id = ? AND claim_token = ? AND status = 'PROCESSING'",
+        [_utcnow().isoformat(), job_id, claim_token],
+    )
+    return getattr(cursor, "rowcount", 0) == 1
+
+
+def _end_or_retry(row: dict, reason: str, final_line: str, error_message: str = None) -> str:
+    """One attempt of a PROCESSING job did not finish (reason): back to PENDING while attempts remain,
+    else FAILED with the attempt log and a plain final line (the UI shows the last line). Guarded on
+    the attempt's own claim. Returns "requeued", "failed", or "lost" (another attempt owns the job)."""
+    attempts = max(row.get("attempts") or 0, 1)
+    log = _with_attempt(row.get("attempt_log"), f"attempt {attempts}: {reason}")
+    guard, params = ("claim_token = ?", [row["claim_token"]]) if row.get("claim_token") else ("claim_token IS NULL", [])
+    if attempts < JOB_MAX_ATTEMPTS:
+        cursor = execute_sql(
+            "UPDATE jobs SET status = 'PENDING', claim_token = NULL, started_at = NULL, claimed_by = NULL, "
+            f"heartbeat_at = NULL, attempt_log = ? WHERE job_id = ? AND status = 'PROCESSING' AND {guard}",
+            [log, row["job_id"]] + params,
+        )
+        return "requeued" if getattr(cursor, "rowcount", 0) == 1 else "lost"
+    message = "\n\n".join(p for p in (error_message, log, final_line.format(attempts=attempts)) if p)
+    cursor = execute_sql(
+        "UPDATE jobs SET status = 'FAILED', completed_at = ?, attempt_log = ?, error_message = ? "
+        f"WHERE job_id = ? AND status = 'PROCESSING' AND {guard}",
+        [_utcnow().isoformat(), log, message, row["job_id"]] + params,
+    )
+    return "failed" if getattr(cursor, "rowcount", 0) == 1 else "lost"
+
+
+STALLED_FINAL_LINE = ("Stalled host: abandoned after {attempts} attempts -- the job stopped reporting every time "
+                      "(container restart or stuck host). Re-queue it once the cause is fixed.")
+TIMEOUT_FINAL_LINE = ("Timed out: stopped at the 30-minute cap on {attempts} attempts. Re-queue it once the slow "
+                      "step is fixed.")
+
+
+def retry_or_fail_job(job_id: str, claim_token: str, reason: str, error_message: str = None) -> str:
+    """The worker's own report of an attempt that did not finish (the 30-minute cap): see _end_or_retry."""
+    rows = execute_query("SELECT * FROM jobs WHERE job_id = ?", [job_id])
+    if not rows or rows[0].get("claim_token") != claim_token:
+        return "lost"
+    return _end_or_retry(rows[0], reason, TIMEOUT_FINAL_LINE, error_message)
+
+
+def _requeue_stalled_jobs(legacy_minutes: int) -> int:
+    now = _utcnow()
+    stalled_before = (now - timedelta(minutes=HEARTBEAT_STALE_MINUTES)).isoformat()
+    legacy_before = (now - timedelta(minutes=legacy_minutes)).isoformat()
+    stale = execute_query(
+        "SELECT * FROM jobs WHERE status = 'PROCESSING' AND ("
+        "(heartbeat_at IS NOT NULL AND heartbeat_at < ?) OR "
+        # Claimed before recovery was switched on: no heartbeat, so the old 40-minute rule.
+        "(heartbeat_at IS NULL AND started_at IS NOT NULL AND started_at < ?))",
+        [stalled_before, legacy_before],
+    )
+    acted = 0
+    for row in stale:
+        since = row.get("heartbeat_at") or row.get("started_at")
+        reason = f"stalled -- no heartbeat since {since} from {row.get('claimed_by') or 'an unrecorded worker'}"
+        outcome = _end_or_retry(row, reason, STALLED_FINAL_LINE)
+        if outcome != "lost":
+            print(f"[worker] Job {row['job_id']}: {reason} -- {outcome}")
+            acted += 1
+    return acted
+
 
 def requeue_stale_processing_jobs(max_age_minutes: int = STALE_PROCESSING_MINUTES) -> int:
     """Puts jobs left PROCESSING by a container that died (App Service
@@ -1717,7 +1813,14 @@ def requeue_stale_processing_jobs(max_age_minutes: int = STALE_PROCESSING_MINUTE
     Oct 13 restart). Only jobs started more than max_age_minutes ago, so a
     job the previous container is still finishing during a deploy swap is
     left alone. Their PDFs are fetched back from blob storage when the local
-    copy is gone (worker._restore_missing_pdf). Returns how many were reset."""
+    copy is gone (worker._restore_missing_pdf). Returns how many were reset.
+
+    With restart recovery on (job_recovery_enabled()): a job is stale when its heartbeat is older than
+    HEARTBEAT_STALE_MINUTES (or, claimed before the switch, by the rule above), and it is retried only
+    while attempts remain -- else FAILED with every attempt's reason (_requeue_stalled_jobs). Returns how
+    many jobs were requeued or ended."""
+    if job_recovery_enabled():
+        return _requeue_stalled_jobs(max_age_minutes)
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
     stale = execute_query(
         "SELECT job_id FROM jobs WHERE status = 'PROCESSING' AND started_at IS NOT NULL AND started_at < ?",
@@ -1732,7 +1835,7 @@ def requeue_stale_processing_jobs(max_age_minutes: int = STALE_PROCESSING_MINUTE
     return len(stale)
 
 
-def claim_next_pending_job():
+def claim_next_pending_job(worker_id: str = None):
     """Atomically claims the oldest PENDING job whose pdf_filename has no
     other job currently PROCESSING, flipping it straight to PROCESSING in
     one UPDATE, then looks it up by the claim_token that UPDATE just
@@ -1763,12 +1866,23 @@ def claim_next_pending_job():
     especially on Windows), which would make that WHERE clause match both
     rows and claim them together. id has no such tie. MIN(...) is used
     instead of LIMIT 1 inside the subquery so this stays valid T-SQL if
-    this ever runs against Azure SQL (see src/lakehouse/connection.py)."""
+    this ever runs against Azure SQL (see src/lakehouse/connection.py).
+
+    With restart recovery on, the same UPDATE also records the owner
+    (worker_id, default WORKER_INSTANCE), the first heartbeat and the
+    attempt number."""
     claim_token = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    if job_recovery_enabled():
+        now = _utcnow().isoformat()
+        sets = ("status = 'PROCESSING', started_at = ?, claim_token = ?, claimed_by = ?, heartbeat_at = ?, "
+                "attempts = COALESCE(attempts, 0) + 1")
+        params = [now, claim_token, worker_id or WORKER_INSTANCE, now]
+    else:
+        now = datetime.now(timezone.utc).isoformat()
+        sets, params = "status = 'PROCESSING', started_at = ?, claim_token = ?", [now, claim_token]
     execute_sql(
-        """
-        UPDATE jobs SET status = 'PROCESSING', started_at = ?, claim_token = ?
+        f"""
+        UPDATE jobs SET {sets}
         WHERE id = (
             SELECT MIN(p.id) FROM jobs p
             WHERE p.status = 'PENDING'
@@ -1780,7 +1894,7 @@ def claim_next_pending_job():
         )
         AND status = 'PENDING'
         """,
-        [now, claim_token],
+        params,
     )
     rows = execute_query("SELECT * FROM jobs WHERE claim_token = ?", [claim_token])
     return rows[0] if rows else None
@@ -1789,14 +1903,19 @@ def claim_next_pending_job():
 def update_job_status(job_id: str, status: str, started_at: str = None,
                        completed_at: str = None, statement_id: str = None,
                        vendor_name: str = None, error_message: str = None,
-                       document_hash: str = None) -> None:
+                       document_hash: str = None, claim_token: str = None) -> bool:
     """Builds the SET clause from whichever fields are relevant to this
     transition — PENDING->PROCESSING only sets started_at; COMPLETED/FAILED
     also set completed_at plus their own outcome fields.
 
     document_hash (2026-09-03) lets _resolve_bronze_statement_id() find a
     cache-hit job's real Bronze statement_id without re-reading the
-    original PDF from local disk -- see that function's docstring."""
+    original PDF from local disk -- see that function's docstring.
+
+    claim_token (restart recovery, 2026-10-26): with job_recovery_enabled(),
+    the write applies only while the job still holds that claim -- a late
+    write from an attempt that was requeued (or ended) never overwrites a
+    newer one. Returns False when nothing was written that way."""
     sets = ["status = ?"]
     params = [status]
     if started_at is not None:
@@ -1818,7 +1937,12 @@ def update_job_status(job_id: str, status: str, started_at: str = None,
         sets.append("document_hash = ?")
         params.append(document_hash)
     params.append(job_id)
-    execute_sql(f"UPDATE jobs SET {', '.join(sets)} WHERE job_id = ?", params)
+    where = "job_id = ?"
+    if claim_token is not None and job_recovery_enabled():
+        where += " AND claim_token = ?"
+        params.append(claim_token)
+    cursor = execute_sql(f"UPDATE jobs SET {', '.join(sets)} WHERE {where}", params)
+    return claim_token is None or not job_recovery_enabled() or getattr(cursor, "rowcount", 0) == 1
 
 
 def get_active_jobs() -> list:

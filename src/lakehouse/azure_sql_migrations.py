@@ -474,6 +474,13 @@ COLUMNS = {
         # even though the underlying extraction/matching had already
         # succeeded -- confirmed 2026-09-23 against the prod database.
         ("document_hash", "ALTER TABLE jobs ADD document_hash NVARCHAR(MAX)"),
+        # migrations/023_add_job_recovery_columns.sql (SQLite side) -- restart
+        # recovery (web/queries.py, VIVE_JOB_RECOVERY_ENABLED). Must be applied
+        # BEFORE that switch is turned on: with it off nothing reads them.
+        ("claimed_by", "ALTER TABLE jobs ADD claimed_by NVARCHAR(255)"),
+        ("heartbeat_at", "ALTER TABLE jobs ADD heartbeat_at NVARCHAR(64)"),
+        ("attempts", "ALTER TABLE jobs ADD attempts INT NOT NULL DEFAULT 0"),
+        ("attempt_log", "ALTER TABLE jobs ADD attempt_log NVARCHAR(MAX)"),
     ],
     "bronze_vendor_statement_raw": [
         # Python-library extraction path (see
