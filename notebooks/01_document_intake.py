@@ -72,14 +72,14 @@ from src.extraction.python_library.adapter import (
     PythonLibraryExtractionEngine, ROUTABLE_VENDOR_SIGNATURES,
 )
 from src.validation.arithmetic_gate import (
-    apply_invoice_balance_check, compute_arithmetic_validation, compute_statement_total_from_invoices,
-    compute_vendor_column_total, try_pdf_full_match, validate_with_fallbacks,
+    VALIDATION_METHOD_STATEMENT_EQUATION, apply_invoice_balance_check, compute_arithmetic_validation,
+    compute_statement_total_from_invoices, compute_vendor_column_total, try_pdf_full_match, validate_with_fallbacks,
 )
 from src.validation.last_payment import mark_last_payment_notes
 from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
-from src.validation import account_blocks, due_column, full_match_no_total, net_lines, text_columns
+from src.validation import account_blocks, due_column, full_match_no_total, net_lines, payment_column, text_columns
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
@@ -1435,6 +1435,11 @@ def apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: st
     is listed in detail["text_column_corrections"] with the extracted and the
     printed value; otherwise detail["text_column_check"]["row_check"] says why.
 
+    Last, a bare "Payment" column the client left unmapped may count as
+    credits -- only when previous balance + amounts - payments = the printed
+    total and the gate then passes by statement_equation (_try_payment_column,
+    2026-10-26, Blue Sun).
+
     A scan's OCR text is read at most once for all of this (see
     _ocr_validation_text).
     """
@@ -1447,8 +1452,9 @@ def _apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: s
     if validation.get("status") != "mismatch":
         return validation
     if not text_columns.enabled():
-        return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
-                                                                       pdf_path), pdf_text, pdf_path)
+        return _try_payment_column(schema_result, _try_net_line_drop(
+            schema_result, _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path), pdf_text,
+            pdf_path), pdf_text, pdf_path)
     printed = validation.get("printed")
     plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
     reason = plan["reason"]
@@ -1481,8 +1487,9 @@ def _apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: s
     validation["detail"] = {**(validation.get("detail") or {}),
                             "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
     schema_result["validation"] = validation
-    return _try_net_line_drop(schema_result, _try_due_column_corrections(schema_result, validation, pdf_text,
-                                                                       pdf_path), pdf_text, pdf_path)
+    return _try_payment_column(schema_result, _try_net_line_drop(
+        schema_result, _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path), pdf_text,
+        pdf_path), pdf_text, pdf_path)
 
 
 def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
@@ -1562,6 +1569,48 @@ def _try_net_line_drop(schema_result: dict, validation: dict, pdf_text: str, pdf
             reason = f"the rows without it still do not pass (status {trial_validation.get('status')})"
     if reason != net_lines.NOT_APPLICABLE:
         validation["detail"] = {**(validation.get("detail") or {}), "net_line_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
+    return validation
+
+
+def _try_payment_column(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """A bare "Payment" column the client left unmapped (src/validation/payment_column.py, 2026-10-26, Blue Sun
+    Quonset STMT-B0E5C001; PAYMENT_COLUMN_CORRECTION_ENABLED=false switches it off): on a statement that still
+    fails, its payments become credits ONLY if previous balance + amounts - payments = the printed total to the
+    cent and the whole gate then passes by statement_equation (tried on a copy first). The rows changed are
+    listed in detail["payment_column_corrections"]; otherwise nothing changes and detail["payment_column_check"]
+    says why."""
+    if validation.get("status") != "mismatch" or not payment_column.enabled():
+        return validation
+    printed = validation.get("printed")
+    previous = (schema_result.get("statement_metadata") or {}).get("previous_balance")
+    plan = payment_column.plan_payment_column(schema_result.get("invoices") or [], printed, previous)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        trial_plan = payment_column.plan_payment_column(trial.get("invoices") or [], printed, previous)
+        payment_column.apply_payment_column(trial_plan)
+        trial.setdefault("statement_metadata", {})["statement_total_computed"] = \
+            compute_statement_total_from_invoices(trial.get("invoices") or [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+        if (trial_validation.get("status"), trial_validation.get("method")) == ("matches", VALIDATION_METHOD_STATEMENT_EQUATION):
+            changed = payment_column.record(plan)
+            payment_column.apply_payment_column(plan)
+            schema_result.setdefault("statement_metadata", {})["statement_total_computed"] = \
+                compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+            for c in changed:
+                print(f"  Payment column: row {c['row_number']} {c['date']} {c['payment']:,.2f} under \"{c['column']}\" "
+                      f"counted as a credit")
+            print(f"  {plan['equation']} -- re-validating.")
+            validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+            validation["detail"] = {**(validation.get("detail") or {}), "payment_column_corrections": changed}
+            schema_result["validation"] = validation
+            return validation
+        reason = (f"with the payments the rows still do not pass by the statement equation "
+                  f"(status {trial_validation.get('status')}, method {trial_validation.get('method')})")
+    if reason != payment_column.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}), "payment_column_check": {"applied": False, "reason": reason}}
         schema_result["validation"] = validation
     return validation
 
