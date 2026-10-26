@@ -142,6 +142,18 @@ def _restore_missing_pdf(job: dict) -> None:
         print(f"[worker] Job {job['job_id']}: could not re-download {source_blob_path}: {e}")
 
 
+def _save_step_timings(job: dict, output: str, statement_id=None) -> None:
+    """Saves this job's per-step timings (the "Step timing:" lines the pipeline printed) to the
+    job_step_timing table, only while JOB_TIMING_LOG_ENABLED=true. Best-effort and never raises."""
+    try:
+        from src.pipeline_timing import parse_step_timings, save_job_timings, timing_log_enabled
+        if not timing_log_enabled():
+            return
+        save_job_timings(job["job_id"], job.get("pdf_filename"), statement_id, parse_step_timings(output))
+    except Exception as exc:  # pragma: no cover
+        print(f"[worker] could not save step timings: {exc}")
+
+
 def _run_job(job: dict) -> None:
     from web import queries
 
@@ -171,6 +183,7 @@ def _run_job(job: dict) -> None:
         hash_match = DOCUMENT_HASH_RE.search(output)
         document_hash = hash_match.group(1) if hash_match else None
         completed_at = datetime.now(timezone.utc).isoformat()
+        _save_step_timings(job, output, match.group(1) if match else None)
 
         if result.returncode != 0 or not match:
             # Matching's deliberate no-mock-ERP-data guard (src/matching/
