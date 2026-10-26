@@ -667,11 +667,15 @@ def _check_row(inv, line, allow_balance_only=False):
     """None if the row matches this line exactly, else a reason string.
     allow_balance_only (rows-only mode only): a row with no amount matches a
     line that prints no amount either, only a balance equal to the row's
-    extracted amount_due (Healey's 1401474: Amount blank, Balance -100.54)."""
+    extracted amount_due (Healey's 1401474: Amount blank, Balance -100.54).
+    The same rule holds in every mode for an interest / finance row whose PDF
+    line prints that word too (arithmetic_gate.is_interest_balance_row,
+    Sullivan Tire 2026-10-26: "Interest ... $0.00 $0.00 $17.60")."""
     if line.get("is_subtotal"):
         return "the PDF line is a printed invoice subtotal, not a transaction"
     want_date = parse_date(inv.get("invoice_date"))
-    if allow_balance_only and abs(sum(a for a, _ in _row_amounts(inv))) <= _CENT:
+    balance_only = allow_balance_only or _interest_line(inv, line)
+    if balance_only and abs(sum(a for a, _ in _row_amounts(inv))) <= _CENT:
         printed_amounts = [m for m in line["money"] if m["role"] in _AMOUNT_ROLES and abs(m["value"]) > _CENT]
         balance = _balance_value(line)
         due = inv.get("amount_due")
@@ -722,6 +726,38 @@ def _check_row(inv, line, allow_balance_only=False):
                " which the extracted row does not carry"
     line["_used_money"] = used
     return None
+
+
+def _interest_line(inv, line) -> bool:
+    from src.validation.arithmetic_gate import INTEREST_WORDS_RE, is_interest_balance_row
+    return is_interest_balance_row(inv) and bool(INTEREST_WORDS_RE.search(line["text"]))
+
+
+def interest_rows_on_pdf(rows, pdf_path, budget_seconds=None) -> list:
+    """For each interest / finance row (arithmetic_gate.is_interest_balance_row):
+    None when exactly one PDF line printing its reference verifies it -- the
+    interest word, its date, no non-zero amount under any charge / credit
+    column and exactly its balance (_check_row) -- else why not. Used by the
+    open-balance row guard (2026-10-26, Sullivan Tire)."""
+    try:
+        pages = read_pdf_lines(pdf_path, budget_seconds)
+    except NotVerified as e:
+        return [f"not verified: {e}"] * len(rows)
+    except Exception as e:
+        return [f"PDF unreadable ({type(e).__name__})"] * len(rows)
+    table = build_table(pages)
+    out = []
+    for inv in rows:
+        invoice_norm = norm_invoice(inv.get("invoice_number"))
+        lines = [l for l in table if l["in_region"] and invoice_norm and _invoice_on_line(invoice_norm, l)]
+        hits = [l for l in lines if _check_row(inv, l) is None]
+        if len(hits) == 1:
+            out.append(None)
+        elif hits:
+            out.append(f"{len(hits)} PDF lines print it")
+        else:
+            out.append(f"p{lines[0]['page']}: {_check_row(inv, lines[0])}" if lines else "no PDF line prints its reference")
+    return out
 
 
 def match_rows(invoices, table, allow_balance_only=False, reread=None):
