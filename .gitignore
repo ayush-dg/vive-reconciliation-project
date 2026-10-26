@@ -52,3 +52,6 @@ dbt/.compiled_silver/
 # NetSuite ODBC driver files (vendor binaries) -- see vendor/netsuite_odbc/README.md
 vendor/netsuite_odbc/*
 !vendor/netsuite_odbc/README.md
+remove_statement.py
+new-stmts/
+
