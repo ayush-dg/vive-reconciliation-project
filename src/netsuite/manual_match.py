@@ -28,8 +28,10 @@ import os
 from datetime import date
 
 from src.netsuite.fields import MATCHED_BILL_FIELD, STATEMENT_LINE_RECORD
+from src.netsuite.guard import KEY_FIELDS, key_field_changes
 from src.netsuite.writeback import (
-    _is_period_locked, _is_true, _sql_literal, _ties, fetch_sandbox_transactions, resolve_pdf_link,
+    KEY_FIELD_CHANGED, _is_period_locked, _is_true, _sql_literal, _ties, fetch_sandbox_transactions,
+    resolve_pdf_link,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,7 +63,8 @@ def _client():
 
 
 def _read_bill(ns, record_id) -> dict:
-    rows = ns.suiteql(f"SELECT {', '.join(_BILL_FIELDS)} FROM transaction WHERE id = {int(record_id)}")
+    # The key fields ride along so a write can be checked for side effects (guard.KEY_FIELDS).
+    rows = ns.suiteql(f"SELECT {', '.join(_BILL_FIELDS + KEY_FIELDS)} FROM transaction WHERE id = {int(record_id)}")
     return rows[0] if rows else {}
 
 
@@ -99,6 +102,10 @@ def _write(ns, writes: list, kind: str, record_type: str, record_id, body: dict,
     outcome to `writes`. Never raises."""
     entry = {"kind": kind, "record_type": record_type, "record_id": record_id, "sent": body,
              "before": before, "ok": False, "detail": ""}
+    if any(w["detail"].startswith(KEY_FIELD_CHANGED) for w in writes):
+        entry["detail"] = "not attempted: a protected field changed on an earlier write"
+        writes.append(entry)
+        return
     try:
         if record_id is None:
             entry["record_id"] = ns.create_record(record_type, body)
@@ -113,11 +120,14 @@ def _write(ns, writes: list, kind: str, record_type: str, record_id, body: dict,
     writes.append(entry)
 
 
-def _bill_check(ns, body):
+def _bill_check(ns, body, before=None):
     def check(record_id):
         row = _read_bill(ns, record_id)
         if not row:
             return "record not found on read-back"
+        changed = key_field_changes(before, row)
+        if changed:
+            return KEY_FIELD_CHANGED + ", ".join(changed)
         if "custbody_reconciled" in body and _is_true(row.get("custbody_reconciled")) != body["custbody_reconciled"]:
             return "read-back mismatch on reconciled"
         for key in ("custbody_statement_reference", MATCHED_BILL_FIELD):
@@ -171,8 +181,9 @@ def write_manual_match(statement_id: str, invoice_number: str, statement_amount,
                      MATCHED_BILL_FIELD: invoice_number}
         if link:
             bill_body["custbody_statement_link"] = link
-        _write(ns, writes, "bill", record_type, txn["id"], bill_body, _read_bill(ns, txn["id"]),
-               _bill_check(ns, bill_body))
+        before_bill = _read_bill(ns, txn["id"])
+        _write(ns, writes, "bill", record_type, txn["id"], bill_body, before_bill,
+               _bill_check(ns, bill_body, before_bill))
 
         # 2. A different bill the write-back flagged for this invoice: clear the flag only.
         flagged = [r for r in fetch_sandbox_transactions(ns, [e for e in (statement_entity_ids or []) if str(e).isdigit()],
@@ -181,8 +192,9 @@ def write_manual_match(statement_id: str, invoice_number: str, statement_amount,
                    and r.get("custbody_statement_reference") == statement_id]
         for old in flagged:
             body = {"custbody_reconciliation_exception": None}
+            before_old = _read_bill(ns, old["id"])
             _write(ns, writes, "flag cleared", _RECORD_TYPE[old["type"]], old["id"], body,
-                   _read_bill(ns, old["id"]), _bill_check(ns, body))
+                   before_old, _bill_check(ns, body, before_old))
 
         # 3. The Statement Line for the invoice: update it, or create it.
         sl_body = {"custrecord_sl_status": "Matched", "custrecord_sl_exception_type": None,
@@ -277,7 +289,7 @@ def undo_manual_match_writes(before_json: str, ns=None) -> dict:
             rid, rtype = entry["record_id"], entry["record_type"]
             try:
                 if entry.get("created"):
-                    ns.delete_record(rtype, rid)
+                    ns.delete_record(rtype, rid, statement_id=entry["sent"].get("custrecord_sl_statement_id"))
                     notes.append(f"{entry['kind']} {rid}: deleted")
                     continue
                 current = _read_statement_line(ns, rid) if rtype == STATEMENT_LINE_RECORD else _read_bill(ns, rid)

@@ -58,6 +58,7 @@ def main() -> int:
         print(f"REFUSING TO RUN: {exc}")
         return 2
 
+    print(f"Environment    : {client.environment.label}")
     print(f"Account domain : {client.domain_id}")
     print(f"OAuth1 realm   : {client.realm}")
     print(f"Base URL       : {client.base_url}")

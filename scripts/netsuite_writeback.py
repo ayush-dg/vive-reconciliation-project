@@ -149,14 +149,18 @@ def _run_revert(ns, title: str, actions: list, apply: bool, statement_id: str) -
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Preview, or with --apply write, the NetSuite sandbox write-back.")
+    parser = argparse.ArgumentParser(
+        description="Preview, or with --apply write, the NetSuite write-back (sandbox or production, "
+                    "decided by NETSUITE_ACCOUNT_ID).")
     parser.add_argument("--statement-id")
     parser.add_argument("--revert", dest="revert_log", help="Undo the writes recorded in this log file")
     parser.add_argument("--revert-statement", dest="revert_statement", metavar="STATEMENT_ID",
                         help="Undo everything written for this statement, found in NetSuite (no log needed)")
     parser.add_argument("--json", dest="json_path", help="Also write the full plan to this JSON file")
     parser.add_argument("--apply", action="store_true",
-                        help="Actually write to the SANDBOX. Without this flag nothing is written.")
+                        help="Actually write to NetSuite. Without this flag nothing is written.")
+    parser.add_argument("--confirm-account", dest="confirm_account", metavar="ACCOUNT_ID",
+                        help="Required with --apply when the account is PRODUCTION: type the account id again.")
     args = parser.parse_args()
 
     try:
@@ -165,8 +169,12 @@ def main() -> int:
         print(f"REFUSING TO RUN: {exc}")
         return 2
 
-    mode = "APPLY -- WRITING TO SANDBOX" if args.apply else "DRY RUN -- read-only"
-    print(f"NetSuite sandbox: {ns.domain_id}  ({mode})\n")
+    mode = f"APPLY -- WRITING TO {ns.environment.name.upper()}" if args.apply else "DRY RUN -- read-only"
+    print(f"NetSuite {ns.environment.label}  ({mode})\n")
+    if args.apply and ns.environment.is_production and args.confirm_account != ns.environment.account:
+        print(f"REFUSING TO RUN: this is PRODUCTION ({ns.environment.account}). Add --confirm-account "
+              f"{ns.environment.account} to write to it.")
+        return 2
     if args.revert_log:
         return _revert_from_log(ns, args.revert_log, args.apply)
     if args.revert_statement:

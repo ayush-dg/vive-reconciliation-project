@@ -35,6 +35,7 @@ from decimal import Decimal
 from src.lakehouse.fabric_sql import get_warehouse_connection
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.fields import BODY_FIELDS, STATEMENT_LINE_RECORD
+from src.netsuite.guard import KEY_FIELD_COLUMNS, WriteBlocked, key_field_changes, key_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,11 @@ CAT_HELD_BY_OTHER = "reconciled by another statement"
 # A planned write the run never reached because it stopped early (see _stops_the_run).
 CAT_NOT_ATTEMPTED = "not attempted (run stopped early)"
 CAT_LINK_ONLY_FAILED = "link-only write failed"
+# Guardrails (src/netsuite/guard.py). Both end the run: they point at a bug or at something
+# else in NetSuite reacting to our save, not at one unlucky record.
+CAT_WRITE_BLOCKED = "write blocked by the guardrails"
+CAT_KEY_FIELD_CHANGED = "a protected field changed"
+KEY_FIELD_CHANGED = "a protected field changed during the write: "
 
 EXCEPTION_AMOUNT_DIFFERS = "Amount differs"
 EXCEPTION_DUPLICATE = "Duplicate"
@@ -125,6 +131,8 @@ class Plan:
     note: str = ""
     previous: dict = field(default_factory=dict)
     category: str = ""
+    # The bill's key fields (guard.KEY_FIELDS) as read when planned; the read-back compares.
+    key_snapshot: dict = field(default_factory=dict)
 
 
 # ----------------------------------------------------------------------
@@ -228,7 +236,8 @@ def fetch_sandbox_transactions(ns, entity_ids: list, tranids: list) -> dict:
         rows = ns.suiteql(
             "SELECT t.id, t.tranid, t.entity, t.type, t.foreigntotal, tl.location, "
             "t.custbody_reconciled, t.custbody_statement_reference, t.custbody_statement_link, "
-            "t.custbody_reconciled_date, t.custbody_reconciliation_exception "
+            "t.custbody_reconciled_date, t.custbody_reconciliation_exception, "
+            "t.trandate, t.postingperiod, t.status, t.approvalstatus, t.currency "
             "FROM transaction t LEFT JOIN transactionline tl "
             "ON tl.transaction = t.id AND tl.mainline = 'T' "
             "WHERE t.type IN ('VendBill','VendCred') AND t.voided = 'F' "
@@ -241,7 +250,9 @@ def fetch_sandbox_transactions(ns, entity_ids: list, tranids: list) -> dict:
 def fetch_exception_list_ids(ns) -> dict:
     """{value name: internal id} for the Reconciliation Exception list, so
     the plan can show (and Phase 2 can send) the right list value."""
-    rows = ns.suiteql("SELECT id, name FROM customlist_exception")
+    # The list is a different table in each account (created by hand), named by the environment.
+    table = getattr(getattr(ns, "environment", None), "exception_list_table", None) or "customlist_exception"
+    rows = ns.suiteql(f"SELECT id, name FROM {table}")
     return {r["name"]: r["id"] for r in rows}
 
 
@@ -295,7 +306,7 @@ def _txn_plan_base(invoice, amount, txn, action, fields=None, note="") -> Plan:
         invoice_number=invoice, statement_amount=_amount(amount), action=action,
         record_type=_RECORD_TYPE_BY_NS_TYPE[txn["type"]], record_id=txn["id"],
         sandbox_tranid=txn["tranid"], sandbox_amount=_amount(txn["foreigntotal"]),
-        fields=fields or {}, note=note, previous=previous,
+        fields=fields or {}, note=note, previous=previous, key_snapshot=key_snapshot(txn),
     )
 
 
@@ -607,11 +618,14 @@ def _read_back_bill(ns, plan: Plan) -> str:
     actually sent are checked (a link-only plan sends just the link), and
     the link is compared exactly -- LINK_NOT_STORED when it differs."""
     rows = ns.suiteql(
-        "SELECT custbody_reconciled, custbody_statement_reference, custbody_reconciliation_exception, "
-        f"custbody_statement_link FROM transaction WHERE id = {int(plan.record_id)}")
+        "SELECT t.custbody_reconciled, t.custbody_statement_reference, t.custbody_reconciliation_exception, "
+        f"t.custbody_statement_link, {KEY_FIELD_COLUMNS} FROM transaction t WHERE t.id = {int(plan.record_id)}")
     if not rows:
         return "record not found on read-back"
     row = rows[0]
+    changed = key_field_changes(plan.key_snapshot, row)
+    if changed:
+        return KEY_FIELD_CHANGED + ", ".join(changed)
     sent = plan.fields
     checks = []
     if "custbody_reconciled" in sent:
@@ -717,11 +731,15 @@ def _apply_plan_untimed(ns, plan: Plan) -> ApplyResult:
             return ApplyResult(plan, False, f"{holder} saved this record first; left as it set it",
                                plan.record_id, category=CAT_HELD_BY_OTHER)
         problem = _read_back_bill(ns, plan)
+        if problem.startswith(KEY_FIELD_CHANGED):
+            return ApplyResult(plan, False, problem, plan.record_id, category=CAT_KEY_FIELD_CHANGED)
         if problem == LINK_NOT_STORED and not _is_link_only(plan):
             # The reconciliation result itself was stored: a link problem must
             # not mark it failed (or stop the run as a "first write" failure).
             return ApplyResult(plan, True, f"updated; {LINK_NOT_STORED}", plan.record_id, link_mismatch=True)
         return ApplyResult(plan, not problem, problem or "updated", plan.record_id)
+    except WriteBlocked as exc:  # the guardrails refused it; nothing was sent
+        return ApplyResult(plan, False, f"blocked: {exc}", category=CAT_WRITE_BLOCKED)
     except Exception as exc:  # report and move on -- one bad record must not stop the batch
         body = getattr(exc, "body", "") or ""
         return ApplyResult(
@@ -741,7 +759,10 @@ def _stops_the_run(result: ApplyResult, attempts_so_far: int) -> bool:
     early for failures that would repeat on every record: an authentication
     or permission error at any point, or any other failure on the very
     first write (a bad field or format). A link-only write never stops the
-    run (they come last; `attempts_so_far` counts result writes only)."""
+    run (they come last; `attempts_so_far` counts result writes only). A write the
+    guardrails blocked, or one after which a protected field had changed, always ends it."""
+    if result.category in (CAT_WRITE_BLOCKED, CAT_KEY_FIELD_CHANGED):
+        return True
     if result.category in (CAT_PERIOD_LOCKED, CAT_HELD_BY_OTHER) or result.plan.action == PATCH_LINK_ONLY:
         return False
     return result.status_code in _AUTH_STATUS_CODES or attempts_so_far == 1
@@ -807,7 +828,8 @@ def build_revert_actions(log: dict) -> list:
             continue
         if entry["action"] == CREATE_STATEMENT_LINE:
             actions.append({"op": "DELETE", "record_type": entry["record_type"],
-                            "record_id": entry["record_id"], "invoice_number": entry["invoice_number"]})
+                            "record_id": entry["record_id"], "invoice_number": entry["invoice_number"],
+                            "statement_id": log.get("statement_id")})
             continue
         previous = entry.get("previous") or {}
         body = {key: _restore_value(key, previous) for key in entry["fields_sent"]}
@@ -853,7 +875,8 @@ def find_revert_actions_for_statement(ns, statement_id: str) -> list:
             "SELECT id, custrecord_sl_invoice_number AS inv FROM customrecord_statement_line "
             f"WHERE custrecord_sl_statement_id = {literal}"):
         actions.append({"op": "DELETE", "record_type": STATEMENT_LINE_RECORD,
-                        "record_id": row["id"], "invoice_number": row.get("inv") or ""})
+                        "record_id": row["id"], "invoice_number": row.get("inv") or "",
+                        "statement_id": statement_id})
     return actions
 
 
@@ -863,7 +886,8 @@ def apply_revert(ns, actions: list) -> list:
     for action in actions:
         try:
             if action["op"] == "DELETE":
-                ns.delete_record(action["record_type"], action["record_id"])
+                ns.delete_record(action["record_type"], action["record_id"],
+                                 statement_id=action.get("statement_id"))
             else:
                 ns.patch_record(action["record_type"], action["record_id"], action["body"])
             results.append((action, True, "reverted"))
@@ -901,6 +925,12 @@ def write_error_log(statement_id: str, exc: Exception) -> str:
         return ""
 
 
+def _environment_label(ns) -> str:
+    """"SANDBOX 7321761-sb1" / "PRODUCTION 7321761" -- which account a log is about."""
+    environment = getattr(ns, "environment", None)
+    return environment.label if environment is not None else f"SANDBOX {getattr(ns, 'domain_id', '')}".strip()
+
+
 def write_apply_log(ns, statement_id: str, results: list, plans: list = None) -> str:
     """Saves exactly what was sent to NetSuite, record by record, so a
     write can be audited -- and undone (build_revert_actions) -- later.
@@ -930,7 +960,7 @@ def write_apply_log(ns, statement_id: str, results: list, plans: list = None) ->
         "reason": CAT_NOT_ATTEMPTED, "detail": "the run stopped before this write was attempted",
     } for p in unattempted_plans(plans or [], results)]
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
+        json.dump({"statement_id": statement_id, "sandbox": ns.domain_id, "environment": _environment_label(ns),
                    "applied_at": datetime.now().isoformat(timespec="seconds"),
                    "writes": entries, "failed_counts": failure_counts(results),
                    "not_written": not_written,
@@ -952,7 +982,7 @@ def write_revert_log(ns, statement_id: str, results: list) -> str:
             "invoice_number": a["invoice_number"], "body": a.get("body"), "ok": ok, "detail": detail,
         } for a, ok, detail in results]
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"statement_id": statement_id, "sandbox": ns.domain_id,
+            json.dump({"statement_id": statement_id, "sandbox": ns.domain_id, "environment": _environment_label(ns),
                        "reverted_at": datetime.now().isoformat(timespec="seconds"),
                        "reverted": sum(1 for r in reverts if r["ok"]),
                        "failed": sum(1 for r in reverts if not r["ok"]),

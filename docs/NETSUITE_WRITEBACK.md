@@ -1,8 +1,8 @@
 # NetSuite write-back
 
 After a statement is reconciled, its result is written back into NetSuite so AP
-sees it on the bill itself. **Sandbox only**: the client refuses any account that
-is not `<digits>-sb<digits>`. The write-back reads the matcher's saved results
+sees it on the bill itself. **Which account is decided by one setting,
+`NETSUITE_ACCOUNT_ID`** (see Configuration): `7321761-sb1` is the sandbox, `7321761` is production. The write-back reads the matcher's saved results
 (`silver.recon_matched_invoices`, `silver.recon_exceptions`), finds each invoice
 in NetSuite, and updates its status. It never re-matches anything.
 
@@ -26,8 +26,9 @@ matching succeeds. It is best-effort: it never fails a job. It is **off unless**
 
 | File | Role |
 |---|---|
-| `src/netsuite/client.py` | OAuth1 (TBA) REST + SuiteQL client; sandbox-only guard |
+| `src/netsuite/client.py` | OAuth1 (TBA) REST + SuiteQL client; picks sandbox or production from `NETSUITE_ACCOUNT_ID` |
 | `src/netsuite/writeback.py` | planning, applying (with read-back), revert, file logs |
+| `src/netsuite/guard.py` | write allowlist, and the "nothing else changed" key-field check |
 | `src/netsuite/log_store.py` | saves every run to the database |
 | `src/netsuite/pipeline_hook.py` | the pipeline entry point |
 | `src/netsuite/fields.py` | the custom fields the write-back depends on |
@@ -39,7 +40,10 @@ matching succeeds. It is best-effort: it never fails a job. It is **off unless**
 
 | Variable | Meaning |
 |---|---|
-| `SANDBOX_ACCOUNT_ID`, `SANDBOX_CONSUMER_KEY`, `SANDBOX_CONSUMER_SECRET`, `SANDBOX_TOKEN_ID`, `SANDBOX_TOKEN_SECRET` | TBA credentials for the sandbox |
+| `NETSUITE_ACCOUNT_ID` | **The switch.** `7321761-sb1` (or `_SB1`) = sandbox, using `SANDBOX_*`; `7321761` (digits only) = production, using `PROD_*`; anything else is refused. Unset, it falls back to `SANDBOX_ACCOUNT_ID` (so an unconfigured setup is always the sandbox) |
+| `SANDBOX_ACCOUNT_ID`, `_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_TOKEN_ID`, `_TOKEN_SECRET` | TBA credentials for the sandbox |
+| `PROD_ACCOUNT_ID`, `_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_TOKEN_ID`, `_TOKEN_SECRET` | TBA credentials for production. Each set's own `*_ACCOUNT_ID` must equal `NETSUITE_ACCOUNT_ID`, so sandbox keys can never be used on production (or the reverse) |
+| `NETSUITE_PROD_WRITES_ENABLED` | Production is **written to** only when this is `true` (reading never needs it). The sandbox is not affected |
 | `NETSUITE_WRITEBACK_ENABLED` | `true` turns the write-back on (default off) |
 | `NETSUITE_WRITEBACK_PDF_LINK` | `true` also writes the statement PDF link (default off) |
 | `SHAREPOINT_*` | the statement PDF is archived to SharePoint at intake; the link written is that file's SharePoint URL (see `.env.example`) |
@@ -72,6 +76,25 @@ Saving to the database is best-effort and never fails a job.
 statement card: green with a tick when written, amber when partly blocked, red on a failure, grey for
 *reverted* or *nothing to write*; none when the statement has no saved run. Hover for the statement-wide breakdown.
 
+## Guardrails: the code can only write our custom fields
+
+`src/netsuite/guard.py` is called inside the client's `patch_record`, `create_record` and `delete_record`,
+before anything is sent. A refused write raises `WriteBlocked`, sends nothing, and ends the run (recorded as
+"write blocked by the guardrails").
+
+* **Bills and credits**: PATCH only, and only `custbody_reconciled`, `_reconciled_date`, `_statement_reference`,
+  `_statement_link`, `_reconciliation_exception`, `_matched_bill`. Never created, never deleted.
+* **Statement Lines**: create / patch / delete, only the `custrecord_sl_*` fields and `name`. A delete first reads
+  the row and refuses unless it belongs to the statement being undone.
+* Any other record type or field (including nested keys), and any value of the wrong shape (a bad date, an `http://`
+  link, a list value without a numeric id), is refused.
+* **Nothing else changed**: a bill's key fields (number, vendor, total, date, period, status, approval status, currency)
+  are read when the write is planned and again in the read-back that already follows every write (no extra requests).
+  If any differs, the run stops and the record is reported as "a protected field changed".
+
+Adding a field to the write-back means adding it to `guard.py`; `tests/test_netsuite_guard.py` fails if a planner sends
+anything the guard does not allow.
+
 ## Operating it
 
 ```
@@ -90,7 +113,7 @@ because bills it already stamped are skipped.
 
 * If matching itself fails (or is skipped), no write-back is attempted and no run is recorded; the job's output line says why.
   A run is keyed by statement id (its `job_id` column is empty); join to `jobs.statement_id` to find the job.
-* Sandbox only. Production needs its own credentials, the same fields/record/permissions, and a deliberate change to the guard in `client.py`.
+* Production needs: the `PROD_*` credentials, the same custom fields and Statement Line record (same ids), a role with Edit (not Full) on bills and credits and Allow Non-G/L Changes, and `NETSUITE_PROD_WRITES_ENABLED=true`. The CLI also needs `--confirm-account <id>` with `--apply`. The skip reason "not in sandbox" means "not in the NetSuite account in use".
 * The sandbox lacks bills created in production after its last refresh, so matched lines can be skipped as "not in sandbox".
 * Invoices whose matcher-saved number is not NetSuite's exact tranid (some vendors use alternate spellings) are skipped as not found in the sandbox.
 * The stored link is the PDF's SharePoint URL, shown as the whole address in a Hyperlink field; searches and portlets cannot show
