@@ -1678,6 +1678,9 @@ def _try_text_row_corrections(schema_result: dict, pdf_text: str, pdf_path: str,
     validation = _validate_extraction(schema_result, pdf_text, pdf_path)
     corrections = [{k: v for k, v in c.items()} for c in plan["corrections"]]
     validation["detail"] = {**(validation.get("detail") or {}), "text_column_corrections": corrections}
+    if plan.get("identified_by_elimination"):
+        # Rows matched to their printed line by elimination (unchanged rows; see plan_text_row_corrections).
+        validation["detail"]["text_column_identified_by_elimination"] = plan["identified_by_elimination"]
     schema_result["validation"] = validation
     return validation, None
 
