@@ -140,7 +140,14 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
       matched pair (an outstanding-only row and a credit-only row of the
       exact same magnitude, for the same invoice_number) are dropped
       entirely -- an invoice_number that appears only once, or whose
-      rows don't match in magnitude, is left untouched."""
+      rows don't match in magnitude, is left untouched.
+
+    One more row shape (2026-10-26, Dent Wizard STMT-B0E5C006: Charge 152.00,
+    Payments -45.00, Balance 107.00): a row printing a charge, a payment of a
+    DIFFERENT size against it and the balance left, where its amount due is
+    exactly charge - payment. It nets to that balance -- counting only the
+    payment (-45.00) lost every charge. See _charge_payment_balance(); every
+    other row nets exactly as above."""
     if not invoices:
         return None
 
@@ -186,6 +193,10 @@ def compute_statement_total_from_invoices(invoices: list) -> Optional[float]:
             # Dual-value settlement row (Keystone) -- net together on this row.
             total += _settlement_net(balance_forward, payment_applied)
             continue
+        parts = _charge_payment_balance(inv)
+        if parts:
+            total += parts[0] - parts[1]
+            continue
         credit = abs(inv.get("credit") or 0)
         if credit:
             total -= credit
@@ -207,6 +218,30 @@ def _settlement_net(balance_forward: float, payment_applied: float) -> float:
     the first into -2X, so the payment's magnitude takes balance_forward's
     sign instead: 0 for (+,+), (-,-), (+,-) and (-,+) alike."""
     return balance_forward - math.copysign(abs(payment_applied), balance_forward)
+
+
+def _is_money(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _charge_payment_balance(inv: dict):
+    """(charge, payment) of a row that prints a charge, a payment against it and
+    the balance left (2026-10-26, Dent Wizard STMT-B0E5C006: Charge 152.00,
+    Payments -45.00, Balance 107.00): a positive charge, a payment of a
+    different size, and an amount due equal to charge - payment to the cent.
+    Such a row nets to that balance, and the PDF checks verify all three of its
+    amounts. None for every other row -- in particular the ABC-pattern credit
+    memo, whose charge repeats the credit's face value (charge == payment), a
+    row with no amount due, and a row whose amount due is anything else."""
+    charge, payment, due = inv.get("outstanding_amount"), inv.get("credit"), inv.get("amount_due")
+    if not (_is_money(charge) and _is_money(payment) and _is_money(due)):
+        return None
+    payment = abs(payment)
+    if charge <= 0.005 or payment <= 0.005 or abs(charge - payment) <= 0.005:
+        return None
+    if abs(round(charge - payment - due, 2)) > 0.005:
+        return None
+    return charge, payment
 
 
 def _load_total_columns() -> dict:
@@ -333,6 +368,9 @@ def _row_net(inv: dict) -> float:
     payment_applied = inv.get("payment_applied")
     if balance_forward and payment_applied:
         return _settlement_net(balance_forward, payment_applied)
+    parts = _charge_payment_balance(inv)
+    if parts:
+        return parts[0] - parts[1]
     credit = abs(inv.get("credit") or 0)
     if credit:
         return -credit

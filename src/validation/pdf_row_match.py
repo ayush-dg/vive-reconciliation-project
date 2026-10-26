@@ -623,11 +623,18 @@ def _mark_invoice_subtotals(table):
 # --------------------------------------------------------------------------
 
 def _row_amounts(inv):
-    """[(expected signed net, kind)] for one extracted row, as the gate counts it."""
-    from src.validation.arithmetic_gate import _row_net
+    """[(expected signed amount, kind)] for one extracted row, as the gate counts
+    it. A row with a charge, a payment against it and the balance left
+    (arithmetic_gate._charge_payment_balance, Dent Wizard 2026-10-26) gives
+    both its charge and its payment -- each must be printed in its own column;
+    _check_row then also checks its balance."""
+    from src.validation.arithmetic_gate import _charge_payment_balance, _row_net
     bf, pa = inv.get("balance_forward"), inv.get("payment_applied")
     if bf and pa:
         return [(round(bf, 2), "settlement_forward"), (round(-abs(pa), 2), "settlement_payment")]
+    parts = _charge_payment_balance(inv)
+    if parts:
+        return [(round(parts[0], 2), "charge"), (round(-parts[1], 2), "payment")]
     return [(round(_row_net(inv), 2), "net")]
 
 
@@ -680,7 +687,8 @@ def _check_row(inv, line, allow_balance_only=False):
     if want_date is None and line["dates"]:
         return "date missing from the extracted row"
     used = []
-    for amount, kind in _row_amounts(inv):
+    amounts = _row_amounts(inv)
+    for amount, kind in amounts:
         if abs(amount) <= _CENT:
             if kind == "net" and any(m["role"] in _AMOUNT_ROLES and abs(m["value"]) > _CENT for m in line["money"]):
                 return "extracted row has no amount; the PDF line prints one"
@@ -697,6 +705,13 @@ def _check_row(inv, line, allow_balance_only=False):
             printed = ", ".join(f"{m['value']:,.2f} ({m['role'] or '-'})" for m in line["money"]) or "none"
             return f"amount {amount:,.2f} not on the PDF line (printed: {printed})"
         used.append(id(hit))
+    if any(kind == "payment" for _, kind in amounts):
+        # A charge-and-payment row: its balance is a populated money column
+        # too, and it is what the row nets to -- the PDF must print it.
+        balance, due = _balance_value(line), inv.get("amount_due")
+        if balance is None or abs(round(balance - due, 2)) > _CENT:
+            printed = ", ".join(f"{m['value']:,.2f}" for m in line["money"] if m["role"] == "balance") or "none"
+            return f"balance {due:,.2f} not printed on the PDF line (printed balance: {printed})"
     # Another amount on the line is only acceptable when it repeats the
     # matched amount under a second charge column (Sub-Total = Total).
     matched_values = [m["value"] for m in line["money"] if id(m) in used]
