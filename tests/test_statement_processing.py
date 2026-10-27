@@ -97,6 +97,21 @@ class TestJobCard(unittest.TestCase):
             self.assertFalse(card["checked"])
 
 
+class TestFailedStages(unittest.TestCase):
+    """The list page's "Failed" dropdown filters on these (2026-10-27)."""
+
+    def test_each_card_names_the_stages_that_failed(self):
+        extraction = sp.job_card({"job_id": "J1", "status": "FAILED", "pdf_filename": "x.pdf"})
+        validation = sp.intake_card(_intake(status="mismatch", diff=45.0), job={"status": "COMPLETED"})
+        reconciliation = sp.intake_card(_intake(), job={"status": "FAILED", "error_message": "boom"})
+        clean = sp.intake_card(_intake(), recon={"exceptions": 0, "reasons": {}})
+        queued = sp.job_card({"job_id": "J2", "status": "PENDING", "pdf_filename": "y.pdf"})
+        self.assertEqual(extraction["failed_stages"], ["extraction"])
+        self.assertEqual(validation["failed_stages"], ["validation"])
+        self.assertEqual(reconciliation["failed_stages"], ["reconciliation"])
+        self.assertEqual((clean["failed_stages"], queued["failed_stages"]), ([], []))
+
+
 class TestBuildCards(unittest.TestCase):
 
     def test_adds_failed_and_running_jobs_but_not_duplicates_or_completed(self):

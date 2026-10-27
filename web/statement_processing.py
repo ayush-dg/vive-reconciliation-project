@@ -70,6 +70,9 @@ def _finish(card, extraction, validation, reconciliation, note, tone):
     else:
         card["status"] = "ok"
     card["failed"] = card["status"] == "failed"
+    # Which stages failed (2026-10-27): the list page's "Failed" dropdown
+    # filters on any stage or one of them.
+    card["failed_stages"] = [s["name"].lower() for s in card["stages"] if s["state"] == "fail"]
     card["has_exceptions"] = reconciliation["state"] == "warn"
     return card
 
