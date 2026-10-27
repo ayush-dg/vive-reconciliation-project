@@ -161,6 +161,27 @@ class AlreadyMatchedTests(unittest.TestCase):
         self.assertIn("disabled", html)
         self.assertIn("Matched by hand by admin@vive.com", html)
 
+    def test_already_matched_records_are_hidden_by_default_with_a_show_toggle(self):
+        matched = self._row(tranid="338630", already_matched={
+            "invoice_number": "338630", "statement_id": "STMT-FA1403E1", "status": "Matched",
+            "matched_by": "system", "matched_at": "2026-10-20"})
+        result = {"rows": [matched, self._row(tranid="111", internal_id="88")], "row_count": 2,
+                  "truncated": False, "error": False, "needs_filter": False, "message": None,
+                  "source": "connect", "matched_count": 1}
+        html = templates.get_template("_netsuite_search_results.html").render(result=result, last_sync=None)
+        self.assertIn('data-matched="1" hidden', html)
+        self.assertIn("1 already matched record hidden", html)
+        self.assertIn('class="ns-show-matched"', html)
+        self.assertIn("1 result<", html)
+
+    def test_when_everything_is_matched_the_panel_says_so(self):
+        matched = self._row(already_matched={"invoice_number": "1", "statement_id": "S", "status": "Matched",
+                                             "matched_by": "system", "matched_at": None})
+        result = {"rows": [matched], "row_count": 1, "truncated": False, "error": False,
+                  "needs_filter": False, "message": None, "source": "connect", "matched_count": 1}
+        html = templates.get_template("_netsuite_search_results.html").render(result=result, last_sync=None)
+        self.assertIn("Everything found is already matched", html)
+
     def test_an_unmatched_record_can_be_picked(self):
         html = self._render([self._row()])
         self.assertNotIn("Already matched", html)

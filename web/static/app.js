@@ -277,6 +277,7 @@ document.addEventListener("DOMContentLoaded", function () {
           nsResults.innerHTML = html;
           wireDetailsToggles();
           wirePicks();
+          wireMatchedToggle();
         })
         .catch(function () {
           nsResults.innerHTML =
@@ -312,6 +313,26 @@ document.addEventListener("DOMContentLoaded", function () {
       const diff = (isNaN(stmt) || isNaN(ns)) ? null : Math.round((stmt - ns) * 100) / 100;
       document.getElementById("nsPickDiff").textContent = diff === null ? "—" : money(diff);
       document.getElementById("nsPickDiffWrap").classList.toggle("ns-off", !!diff);
+    }
+
+    // Records already matched are hidden by default (2026-10-27); "Show"
+    // reveals them (still marked and unpickable), "Hide" puts them away --
+    // with their details rows, which only ever open through their own button.
+    function wireMatchedToggle() {
+      const btn = nsResults.querySelector(".ns-show-matched");
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        const show = btn.getAttribute("aria-expanded") !== "true";
+        btn.setAttribute("aria-expanded", String(show));
+        btn.textContent = show ? "Hide" : "Show";
+        nsResults.querySelectorAll('tr[data-matched="1"]').forEach(function (tr) {
+          tr.hidden = !show;
+          if (!show) {
+            const details = document.getElementById(tr.dataset.rowId + "-details");
+            if (details) { details.hidden = true; }
+          }
+        });
+      });
     }
 
     function wirePicks() {

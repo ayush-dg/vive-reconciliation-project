@@ -27,6 +27,10 @@
 </div>
 
 {% else %}
+{# Records already matched to a statement line (recon table) are hidden by
+   default (2026-10-27); "Show" reveals them, marked and unpickable. #}
+{% set hidden_n = result.matched_count or 0 %}
+{% set visible_n = result.row_count - hidden_n %}
 <div class="ns-modal-meta">
   {# Where the rows came from (2026-10-27): live NetSuite, or the nightly
      copy -- also when the live search failed and the copy answered. #}
@@ -37,8 +41,15 @@
   {% else %}
   <span>NetSuite data as of {{ last_sync | friendly_dt if last_sync else "unknown" }}</span>
   {% endif %}
-  <span>{{ result.row_count }} result{{ "s" if result.row_count != 1 }}</span>
+  <span>{{ visible_n }} result{{ "s" if visible_n != 1 }}</span>
 </div>
+{% if hidden_n %}
+<div class="ns-matched-note">
+  {% if not visible_n %}Everything found is already matched to a statement line. {% endif %}
+  <span>{{ hidden_n }} already matched {{ "record" if hidden_n == 1 else "records" }} hidden</span>
+  <button type="button" class="ns-show-matched" aria-expanded="false" data-count="{{ hidden_n }}">Show</button>
+</div>
+{% endif %}
 
 <table class="ns-modal-table">
   <thead>
@@ -54,7 +65,7 @@
   <tbody>
     {% for row in result.rows %}
     {% set rid = "nsrow-" ~ loop.index %}
-    <tr class="ns-modal-row" data-row-id="{{ rid }}">
+    <tr class="ns-modal-row{% if row.already_matched %} ns-row-matched{% endif %}" data-row-id="{{ rid }}"{% if row.already_matched %} data-matched="1" hidden{% endif %}>
       <td class="ns-col-pick">
         {% if row.internal_id and row.already_matched %}
         <input type="checkbox" class="ns-pick" disabled aria-label="{{ row.record_type }} {{ row.tranid }} is already matched"

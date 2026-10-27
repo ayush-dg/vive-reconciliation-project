@@ -596,5 +596,7 @@ def netsuite_search(request: Request, user: str = Depends(require_login),
         [(row.get("record_type"), row.get("internal_id")) for row in result.get("rows") or []])
     for row in result.get("rows") or []:
         row["already_matched"] = matched.get(((row.get("record_type") or "").lower(), str(row.get("internal_id"))))
+    # Hidden by default, with a "Show" toggle in the results (2026-10-27).
+    result["matched_count"] = sum(1 for row in result.get("rows") or [] if row.get("already_matched"))
     last_sync = None if result.get("source") == "connect" else queries.get_last_netsuite_sync()
     return render(request, "_netsuite_search_results.html", {"result": result, "last_sync": last_sync})
