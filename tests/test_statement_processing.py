@@ -330,6 +330,24 @@ class TestPages(unittest.TestCase):
         self.assertIn("Not in NetSuite", html)
         self.assertIn('href="/exceptions/Conicelli%20Toyota?statement_id=S1"', html)
 
+    def test_detail_offers_the_pdf_in_a_new_tab(self):
+        # Same link and fallbacks as the Exceptions page (2026-10-27).
+        intake = {**_intake(), "validation_attempts": [], "primary_computed": None, "previous_balance": None}
+        with mock.patch("web.queries.get_statement_pdf",
+                        lambda sid: {"mailbox_blob_path": "mailbox/x.pdf", "original_filename": "COLLund0926.pdf"}):
+            html = self._detail(intake, None)
+        bar = html.split('<div class="topbar-actions">')[1].split("</div>")[0]
+        self.assertIn('href="/statements/S1/COLLund0926.pdf" target="_blank" rel="noopener"', bar)
+        self.assertIn("View PDF", bar)
+
+    def test_detail_greys_the_pdf_out_when_there_is_no_copy(self):
+        intake = {**_intake(), "validation_attempts": [], "primary_computed": None, "previous_balance": None}
+        with mock.patch("web.queries.get_statement_pdf", lambda sid: None):
+            html = self._detail(intake, None)
+        bar = html.split('<div class="topbar-actions">')[1].split("</div>")[0]
+        self.assertIn('pdf-btn is-disabled', bar)
+        self.assertNotIn("/statements/", bar)
+
     def test_detail_for_a_validation_stop(self):
         intake = {**_intake(status="mismatch", diff=45.0), "validation_attempts": [], "primary_computed": None,
                   "previous_balance": None}
