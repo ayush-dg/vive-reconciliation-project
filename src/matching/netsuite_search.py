@@ -455,7 +455,7 @@ def _needs_narrowing(entity_ids, bounds, invoice_contains=None) -> bool:
 
 def _empty_result(**extra) -> dict:
     base = {"rows": [], "row_count": 0, "truncated": False, "error": False,
-            "needs_filter": False, "message": None}
+            "needs_filter": False, "message": None, "source": SOURCE_FABRIC}
     base.update(extra)
     return base
 
@@ -522,7 +522,8 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
         amount_tolerance = "any"
     if amount_tolerance not in TOLERANCES:
         return _empty_result(error=True, message=f"Unknown amount tolerance: {amount_tolerance}")
-    if not _fabric_configured():
+    source = search_source()
+    if source == SOURCE_FABRIC and not _fabric_configured():
         return _empty_result(error=True, message="NetSuite search is not configured.")
 
     parsed_from, parsed_to, date_error = _validate_dates(date_from, date_to)
@@ -540,9 +541,20 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
             ),
         )
 
+    args = (entity_ids, bounds, invoice_contains, statuses, sort_amount, parsed_from, parsed_to, limit, locations)
+    rows = None
+    if source == SOURCE_CONNECT:
+        try:
+            rows = _run_search_connect(*args)
+        except Exception:
+            # Live NetSuite failed: answer from the nightly copy and say so.
+            logger.warning("Live NetSuite search failed -- using the Fabric copy", exc_info=True)
+            source = SOURCE_FALLBACK
     try:
-        rows = _run_search(entity_ids, bounds, invoice_contains, statuses,
-                           sort_amount, parsed_from, parsed_to, limit, locations)
+        if rows is None:
+            if not _fabric_configured():
+                return _empty_result(error=True, message="NetSuite search is unavailable right now.", source=source)
+            rows = _run_search(*args)
     except Exception:
         logger.exception(
             "NetSuite open-AP search failed (entity_ids=%s amount=%s tolerance=%s "
@@ -550,7 +562,7 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
             entity_ids, amount, amount_tolerance, invoice_contains, statuses,
             sort_amount, parsed_from, parsed_to, locations,
         )
-        return _empty_result(error=True, message="NetSuite search is unavailable right now.")
+        return _empty_result(error=True, message="NetSuite search is unavailable right now.", source=source)
 
     ordered = _sort_rows(rows, sort_amount)
     truncated = len(ordered) > limit
@@ -558,6 +570,7 @@ def search_open_ap(entity_ids=None, amount=None, amount_tolerance="exact",
         rows=ordered[:limit],
         row_count=min(len(ordered), limit),
         truncated=truncated,
+        source=source,
     )
 
 
@@ -594,6 +607,14 @@ def fetch_record(record_type: str, internal_id: str):
     table = {"bill": BILL_TABLE, "credit": CREDIT_TABLE}.get((record_type or "").lower())
     if not table or not str(internal_id or "").isdigit():
         return None
+    if search_source() == SOURCE_CONNECT:
+        # The record as NetSuite has it now (2026-10-27); the Fabric copy
+        # only if the live read fails.
+        try:
+            return _fetch_record_connect(table, internal_id)
+        except Exception:
+            logger.warning("Live NetSuite read of %s %s failed -- using the Fabric copy",
+                           record_type, internal_id, exc_info=True)
     status_expr = "t.status" if table == BILL_TABLE else "NULL"
     unapplied_expr = "t.unapplied" if table == CREDIT_TABLE else "NULL"
     rows = execute_lakehouse_query(
@@ -610,4 +631,154 @@ def fetch_record(record_type: str, internal_id: str):
         """,
         [str(internal_id)],
     )
+    return _shape_row(rows[0]) if rows else None
+
+
+# --- Live NetSuite (SuiteAnalytics Connect), 2026-10-27 ----------------------
+#
+# NETSUITE_SEARCH_SOURCE=connect|fabric picks where this search reads from;
+# unset, it follows NETSUITE_SOURCE (the matching switch). Live rows come
+# from NetSuite2.com through src/netsuite/connect_client.py (read-only), in
+# the same row shape as the Fabric copy, so _shape_row() and everything
+# after it are unchanged. Confirmed live 2026-10-27 against production:
+#   - one `transaction` table, type 'VendBill' / 'VendCred'; amounts are
+#     ABS(foreigntotal); bill status codes A/B (+ a few C/E, as in Fabric),
+#     which a WHERE must spell 'VendBill:A' / 'VendBill:B';
+#   - the shop is on the main line (transactionline.mainline = 'T');
+#   - a credit's still-open amount is that main line's
+#     foreignpaymentamountunused (the Fabric copy's `unapplied`: 17.63 on
+#     MN847143 in both) -- every credit's own status is just 'Y';
+#   - TOP, ? parameters, LOWER(...) LIKE ... ESCAPE '\\' and
+#     TO_DATE(?, 'YYYY-MM-DD') all work; a bare date string does not.
+# A failed live search falls back to the Fabric copy and says so.
+
+SOURCE_FABRIC, SOURCE_CONNECT, SOURCE_FALLBACK = "fabric", "connect", "fabric_fallback"
+_TYPE_BY_TABLE = {BILL_TABLE: "VendBill", CREDIT_TABLE: "VendCred"}
+_CONNECT_LIKE_SPECIALS = ("%", "_")
+
+
+def search_source() -> str:
+    """'connect' or 'fabric' for this search (see the block comment above)."""
+    value = (os.getenv("NETSUITE_SEARCH_SOURCE") or "").strip().lower()
+    if value in (SOURCE_FABRIC, SOURCE_CONNECT):
+        return value
+    from src.netsuite.connect_source import netsuite_source
+    return netsuite_source()
+
+
+def _connect_escape_like(text: str) -> str:
+    """LIKE escaping for Connect: only % and _ are special there."""
+    escaped = text.replace(_LIKE_ESCAPE, _LIKE_ESCAPE + _LIKE_ESCAPE)
+    for special in _CONNECT_LIKE_SPECIALS:
+        escaped = escaped.replace(special, _LIKE_ESCAPE + special)
+    return escaped
+
+
+def _digits(values) -> list:
+    """Ids for Connect (numbers there): digits only, anything else dropped."""
+    return [int(str(v).strip()) for v in values or [] if str(v).strip().isdigit()]
+
+
+def build_connect_select(table: str, entity_ids=None, bounds=None, invoice_contains=None,
+                         statuses=None, date_from=None, date_to=None, locations=None,
+                         limit: int = DEFAULT_LIMIT, sort_amount=None) -> tuple:
+    """(sql, params) for one table on live NetSuite, the same filters as
+    build_conditions(). Every user value is a bound parameter except the
+    sort amount, which is formatted from a float here (Connect does not take
+    parameters in ORDER BY)."""
+    where = ["t.type = ?", "t.voided = 'F'", "t.tranid IS NOT NULL"]
+    params = [_TYPE_BY_TABLE[table]]
+    entities = _digits(entity_ids)
+    if entity_ids is not None and entity_ids and not entities:
+        where.append("1 = 0")  # ids given but none usable -> nothing, never everything
+    elif entities:
+        where.append(f"t.entity IN ({','.join('?' * len(entities))})")
+        params += entities
+    codes = _digits(locations)
+    if codes:
+        where.append(f"tl.location IN ({','.join('?' * len(codes))})")
+        params += codes
+    if bounds:
+        low, high = bounds
+        if high is None:
+            where.append("ABS(t.foreigntotal) >= ?")
+            params.append(low)
+        else:
+            where.append("ABS(t.foreigntotal) BETWEEN ? AND ?")
+            params += [low, high]
+    if invoice_contains and invoice_contains.strip():
+        where.append(f"LOWER(t.tranid) LIKE LOWER(?) ESCAPE '{_LIKE_ESCAPE}'")
+        params.append(f"%{_connect_escape_like(invoice_contains.strip())}%")
+    if date_from:
+        where.append("t.trandate >= TO_DATE(?, 'YYYY-MM-DD')")
+        params.append(date_from)
+    if date_to:
+        where.append("t.trandate <= TO_DATE(?, 'YYYY-MM-DD')")
+        params.append(date_to)
+    chosen = frozenset(s for s in (statuses or ()) if s in STATUSES)
+    if chosen != frozenset(STATUSES):
+        paid = chosen == {"paid"}
+        if table == BILL_TABLE:
+            # Filtered as "VendBill:A" / "VendBill:B"; a bare "A" matches
+            # nothing, though rows display as "A" (confirmed live 2026-10-27).
+            where.append("t.status = ?")
+            params.append("VendBill:B" if paid else "VendBill:A")
+        elif paid:
+            where.append("(tl.foreignpaymentamountunused IS NULL OR tl.foreignpaymentamountunused <= 0)")
+        else:
+            where.append("tl.foreignpaymentamountunused > 0")
+    if sort_amount is not None:
+        order = f"ABS(ABS(t.foreigntotal) - {abs(float(sort_amount)):.2f}) ASC"
+    else:
+        order = "t.trandate DESC"
+    status_expr = "t.status" if table == BILL_TABLE else "NULL"
+    unapplied_expr = "tl.foreignpaymentamountunused" if table == CREDIT_TABLE else "NULL"
+    sql = (
+        f"SELECT TOP {int(limit)} t.id, t.tranid, t.entity, ABS(t.foreigntotal) AS total, t.trandate, t.duedate, "
+        f"t.transactionnumber, t.custbody_cgh_ro, tl.location, {status_expr} AS status_code, "
+        f"{unapplied_expr} AS unapplied_amount, v.companyname, v.entityid "
+        "FROM transaction t "
+        "LEFT JOIN transactionline tl ON tl.transaction = t.id AND tl.mainline = 'T' "
+        "LEFT JOIN vendor v ON v.id = t.entity "
+        f"WHERE {' AND '.join(where)} ORDER BY {order}"
+    )
+    return sql, params
+
+
+def _connect_rows(sql: str, params: list, table: str) -> list:
+    from src.netsuite.connect_client import get_shared_client
+    rows = []
+    for raw in get_shared_client().query(sql, params):
+        row = dict(raw, source_table=table)
+        for key in ("trandate", "duedate"):
+            if hasattr(row.get(key), "strftime"):
+                row[key] = row[key].strftime("%Y-%m-%d")
+        rows.append(row)
+    return rows
+
+
+def _run_search_connect(entity_ids, bounds, invoice_contains, statuses,
+                        sort_amount, date_from, date_to, limit, locations=None) -> list:
+    """_run_search() on live NetSuite: one capped, ordered query per table."""
+    rows = []
+    for table in (BILL_TABLE, CREDIT_TABLE):
+        sql, params = build_connect_select(table, entity_ids, bounds, invoice_contains, statuses,
+                                           date_from, date_to, locations, limit, sort_amount)
+        rows.extend(_shape_row(raw) for raw in _connect_rows(sql, params, table))
+    return rows
+
+
+def _fetch_record_connect(table: str, internal_id: str):
+    sql = (
+        f"SELECT t.id, t.tranid, t.entity, ABS(t.foreigntotal) AS total, t.trandate, t.duedate, "
+        f"t.transactionnumber, t.custbody_cgh_ro, tl.location, "
+        f"{'t.status' if table == BILL_TABLE else 'NULL'} AS status_code, "
+        f"{'tl.foreignpaymentamountunused' if table == CREDIT_TABLE else 'NULL'} AS unapplied_amount, "
+        "v.companyname, v.entityid "
+        "FROM transaction t "
+        "LEFT JOIN transactionline tl ON tl.transaction = t.id AND tl.mainline = 'T' "
+        "LEFT JOIN vendor v ON v.id = t.entity "
+        "WHERE t.id = ? AND t.type = ? AND t.voided = 'F'"
+    )
+    rows = _connect_rows(sql, [int(internal_id), _TYPE_BY_TABLE[table]], table)
     return _shape_row(rows[0]) if rows else None

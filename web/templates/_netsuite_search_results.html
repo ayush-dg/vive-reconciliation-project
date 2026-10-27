@@ -28,7 +28,15 @@
 
 {% else %}
 <div class="ns-modal-meta">
+  {# Where the rows came from (2026-10-27): live NetSuite, or the nightly
+     copy -- also when the live search failed and the copy answered. #}
+  {% if result.source == "connect" %}
+  <span class="ns-source ns-source-live">Live NetSuite</span>
+  {% elif result.source == "fabric_fallback" %}
+  <span class="ns-source ns-source-fallback">Live NetSuite unavailable — nightly copy as of {{ last_sync | friendly_dt if last_sync else "unknown" }}</span>
+  {% else %}
   <span>NetSuite data as of {{ last_sync | friendly_dt if last_sync else "unknown" }}</span>
+  {% endif %}
   <span>{{ result.row_count }} result{{ "s" if result.row_count != 1 }}</span>
 </div>
 
@@ -48,7 +56,10 @@
     {% set rid = "nsrow-" ~ loop.index %}
     <tr class="ns-modal-row" data-row-id="{{ rid }}">
       <td class="ns-col-pick">
-        {% if row.internal_id %}
+        {% if row.internal_id and row.already_matched %}
+        <input type="checkbox" class="ns-pick" disabled aria-label="{{ row.record_type }} {{ row.tranid }} is already matched"
+               title="Already matched to {{ row.already_matched.invoice_number }} on {{ row.already_matched.statement_id }}">
+        {% elif row.internal_id %}
         <input type="checkbox" class="ns-pick" aria-label="Pick {{ row.record_type | lower }} {{ row.tranid }} for {{ row.total | money }}"
                data-record-type="{{ row.record_type | lower }}" data-internal-id="{{ row.internal_id }}"
                data-tranid="{{ row.tranid or '' }}" data-amount="{{ '%.2f' | format(row.total) if row.total is not none else '' }}"
@@ -59,6 +70,10 @@
       <td>
         <span class="ns-bill-no">{{ row.tranid or "—" }}</span>
         {% if row.is_credit %}<span class="ns-tag-credit">Credit</span>{% endif %}
+        {% if row.already_matched %}
+        {% set am = row.already_matched %}
+        <span class="ns-tag-matched" title="{{ 'Matched by hand' if am.status == 'Matched manually' else 'Matched automatically' }}{% if am.matched_by and am.matched_by != 'system' %} by {{ am.matched_by }}{% endif %}{% if am.matched_at %} · {{ am.matched_at | string | truncate(10, True, '') }}{% endif %}">✓ Already matched to {{ am.invoice_number }} · {{ am.statement_id }}</span>
+        {% endif %}
         {# NetSuite business dates -- reformatted for display only, never
            timezone-converted, and falling back to the raw string when
            unparseable. Credits almost never carry a duedate (0.03% of
