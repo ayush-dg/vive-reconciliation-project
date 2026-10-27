@@ -253,6 +253,27 @@ class TestReconView(unittest.TestCase):
         self.assertEqual((line["status"], line["label"]), ("resolved", "Accepted (was not in NetSuite)"))
         self.assertEqual((line["by"], line["at"]), ("admin@vivecollision.com", "2026-10-21"))
 
+    def test_set_aside_lines_say_why_in_plain_words(self):
+        rows = [self._row(1, "322756", "Not reconciled", -1272.32,
+                          note="payment/reversal of invoice 322756's charge -- set aside, not an exception"),
+                self._row(2, "9559776", "Not reconciled", 112.77,
+                          note="set aside: invoice 9559776's result is on line 181 -- this line is a reprint/payment of it"),
+                self._row(3, "X", "Not reconciled", 5.0, note="set aside by this vendor's line selection rule (reprint/duplicate)"),
+                self._row(4, "Y", "Matched", 5.0)]
+        reasons = [r["reason"] for r in sp.recon_view(rows)["rows"]]
+        self.assertEqual(reasons, ["Payment/reversal of invoice 322756's charge", "Reprint/payment of line 181",
+                                   "Reprint or duplicate (vendor rule)", None])
+
+    def test_every_stored_note_has_a_plain_reason(self):
+        self.assertEqual(sp.set_aside_reason("exact duplicate of another line on this statement -- counted once"),
+                         "Duplicate of another line, counted once")
+        self.assertEqual(sp.set_aside_reason("payment line closing a charge on the same invoice -- set aside before matching"),
+                         "Payment closing this invoice's charge")
+        self.assertEqual(sp.set_aside_reason("not checked against NetSuite on its own (backfilled from the stored results)"),
+                         "Not checked on its own")
+        self.assertEqual(sp.set_aside_reason("an unknown note"), "an unknown note")
+        self.assertIsNone(sp.set_aside_reason(None))
+
     def test_a_manual_match_is_a_resolved_exception(self):
         # As on the Exceptions page ("Reconciled · matches ..."): found, then resolved.
         out = sp.recon_view([self._row(1, "338630", "Matched manually", 144.96, exc="E1", source="manual",

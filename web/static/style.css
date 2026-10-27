@@ -944,3 +944,4 @@ select {
 .ns-modal-row:has(.ns-pick:disabled) { opacity: .7; }
 .ns-matched-note { display: flex; gap: 8px; align-items: center; padding: 6px 12px; font-size: 12px; color: var(--text-muted); }
 .ns-show-matched { background: none; border: none; padding: 0; color: var(--navy-2); font-weight: 600; cursor: pointer; text-decoration: underline; }
+.sp-reason { font-size: 12px; color: var(--text-secondary); margin-top: 3px; max-width: 320px; }
