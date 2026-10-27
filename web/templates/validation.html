@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}VIVE Collision — Statement Processing{% endblock %}
 
+{% block head_scripts %}<script>window.viveFilterStart = ViveFilters.init(["status", "vendor", "shop", "period", "sync", "day"], false);</script>{% endblock %}
+
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
@@ -122,6 +124,7 @@
     <option value="{{ pval }}">{{ pval | period_label }}</option>
     {% endfor %}
   </select>
+  <button type="button" class="filter-chip" onclick="ViveFilters.reset()" title="Back to this page's default filters">Reset filters</button>
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
@@ -231,17 +234,34 @@
     updateHero(heroCount, heroPassedCount);
   }
 
+  // Kept in the address and remembered for this tab (static/filters.js),
+  // so "← Statement Processing" from a statement brings them back.
+  function remember() {
+    ViveFilters.save({
+      status: currentStatus === "all" ? "" : currentStatus, vendor: vendorFilter.value, shop: shopFilter.value,
+      period: periodFilter.value, sync: syncFilter.value, day: dateInput.value,
+    });
+  }
+  function setIfOffered(select, value) {
+    if (value && Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+      select.value = value;
+    }
+  }
+  function setStatus(status) {
+    statusChips.forEach(function (c) { c.classList.toggle("active", c.dataset.filter === status); });
+    currentStatus = status;
+  }
+
   statusChips.forEach(function (chip) {
     chip.addEventListener("click", function () {
-      statusChips.forEach(function (c) { c.classList.remove("active"); });
-      chip.classList.add("active");
-      currentStatus = chip.dataset.filter;
+      setStatus(chip.dataset.filter);
       applyFilters();
+      remember();
     });
   });
-  vendorFilter.addEventListener("change", applyFilters);
-  shopFilter.addEventListener("change", applyFilters);
-  periodFilter.addEventListener("change", applyFilters);
+  vendorFilter.addEventListener("change", function () { applyFilters(); remember(); });
+  shopFilter.addEventListener("change", function () { applyFilters(); remember(); });
+  periodFilter.addEventListener("change", function () { applyFilters(); remember(); });
 
   // Time window -- see the #time-window comment above. The hidden
   // #sync-filter select (set by the picker, static/app.js) and the hidden
@@ -265,6 +285,7 @@
     // No sync and no day is the picker's "All" -- shown on its button.
     syncPickerBtn.classList.toggle("active", (!!sync && !!picked) || (!sync && !day));
     applyFilters();
+    remember();
   }
 
   todayChip.addEventListener("click", function () {
@@ -285,6 +306,13 @@
   // on load -- read from the controls, so a value the browser restored on
   // Back/reload is honoured too (a restored older sync can only have come
   // from the picker).
+  var start = window.viveFilterStart || {};
+  if (["pass", "fail", "exceptions"].indexOf(start.status) !== -1) { setStatus(start.status); }
+  setIfOffered(vendorFilter, start.vendor);
+  setIfOffered(shopFilter, start.shop);
+  setIfOffered(periodFilter, start.period);
+  setIfOffered(syncFilter, start.sync);
+  if (start.day) { dateInput.value = start.day; }
   setTimeWindow(syncFilter.value, dateInput.value, syncFilter.value !== newestSync);
 })();
 </script>

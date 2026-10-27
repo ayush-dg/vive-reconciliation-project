@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}VIVE Collision — Exceptions{% endblock %}
 
+{% block head_scripts %}<script>window.viveFilterStart = ViveFilters.init(["vendor", "shop", "location"], true);</script>{% endblock %}
+
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
@@ -92,6 +94,7 @@
     <option value="{{ lname }}">{{ lname }}</option>
     {% endfor %}
   </select>
+  <button type="button" class="filter-chip" onclick="ViveFilters.reset()" title="Back to this page's default filters">Reset filters</button>
 </div>
 
 <div class="vendor-grid" id="exception-run-grid">
@@ -187,12 +190,28 @@
     });
   }
 
-  vendorFilter.addEventListener("change", applyFilters);
-  shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); });
-  locationFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); });
+  // Kept in the address and remembered for this tab (static/filters.js),
+  // so coming back from a statement brings the same filters back.
+  function remember() {
+    ViveFilters.save({vendor: vendorFilter.value, shop: shopFilter.value, location: locationFilter.value});
+  }
+  function setIfOffered(select, value) {
+    if (value && Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+      select.value = value;
+    }
+  }
+  var start = window.viveFilterStart || {};
+  setIfOffered(vendorFilter, start.vendor);
+  setIfOffered(shopFilter, start.shop);
+  setIfOffered(locationFilter, start.location);
+
+  vendorFilter.addEventListener("change", function () { applyFilters(); remember(); });
+  shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); remember(); });
+  locationFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); remember(); });
   // A browser can restore a previous shop/location pick on Back/reload.
   updateVendorCounts();
   applyFilters();
+  remember();
 })();
 </script>
 
