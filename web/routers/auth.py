@@ -2,12 +2,18 @@
 auth.py
 
 Session-based login, backed by the users table (see
-migrations/004_add_users_table.sql) with bcrypt-verified passwords. The
-original hardcoded admin/Vive@2026 credentials are kept as a fallback
-deliberately — per the Phase 3 instructions, remove FALLBACK_EMAIL/
-FALLBACK_PASSWORD/FALLBACK_NAME and _authenticate()'s fallback branch only
-once database-backed users are confirmed working end to end.
+migrations/004_add_users_table.sql) with bcrypt-verified passwords.
+
+Fallback admin login (2026-10-28): the credentials are no longer in the
+code. ADMIN_LOGIN_EMAIL and ADMIN_LOGIN_PASSWORD come from the app settings;
+with either unset there is no fallback and only users-table logins work. It
+exists because an environment's users table can be empty (dev's was on
+2026-10-28): log in with it, add real users on the Users page, then remove
+the settings.
 """
+
+import hmac
+import os
 
 import bcrypt
 from fastapi import APIRouter, Form, Request
@@ -18,9 +24,18 @@ from web import queries
 
 router = APIRouter()
 
-FALLBACK_EMAIL = "admin@vive.com"
-FALLBACK_PASSWORD = "Vive@2026"
 FALLBACK_NAME = "Admin"
+
+
+def _fallback_login(email: str, password: str) -> bool:
+    """True when the app settings define the fallback admin login and these
+    credentials are it."""
+    admin_email = (os.getenv("ADMIN_LOGIN_EMAIL") or "").strip().lower()
+    admin_password = os.getenv("ADMIN_LOGIN_PASSWORD") or ""
+    if not admin_email or not admin_password or (email or "").strip().lower() != admin_email:
+        return False
+    # Constant-time comparison, so response time says nothing about the password.
+    return hmac.compare_digest((password or "").encode("utf-8"), admin_password.encode("utf-8"))
 
 
 def _authenticate(email: str, password: str):
@@ -34,7 +49,7 @@ def _authenticate(email: str, password: str):
     except Exception:
         pass  # DB lookup failed (e.g. migration not yet run) — fall through
 
-    if email == FALLBACK_EMAIL and password == FALLBACK_PASSWORD:
+    if _fallback_login(email, password):
         return FALLBACK_NAME
 
     return None

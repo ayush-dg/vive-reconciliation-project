@@ -4,9 +4,9 @@
 -- plaintext. created_by records which user's session created the row
 -- (NULL for the seed admin user, since nobody created it through the app).
 --
--- The hardcoded admin/Vive@2026 fallback in web/routers/auth.py is kept
--- deliberately until database-backed users are confirmed working — see
--- that file's docstring.
+-- web/routers/auth.py also accepts a fallback admin login defined in the
+-- app settings (ADMIN_LOGIN_EMAIL / ADMIN_LOGIN_PASSWORD) -- see that
+-- file's docstring.
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
