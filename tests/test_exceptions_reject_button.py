@@ -58,33 +58,19 @@ def _visible_text(html):
     return re.sub(r"<[^>]+>", " ", html)
 
 
-class TestRejectButton(unittest.TestCase):
+class TestButtonsRemoved(unittest.TestCase):
+    """Accept / Reject and "Approve N at 99%+ confidence" were removed from the
+    page on 2026-10-28 (Accept as match is how an exception is resolved);
+    the POST route behind them is still tested below."""
 
-    def _button(self, html):
-        return re.search(r'<button[^>]*value="DISPUTED"[^>]*>.*?</button>', html, re.S).group(0)
-
-    def test_label_is_reject_and_value_stays_disputed(self):
+    def test_no_accept_reject_form_or_bulk_approve(self):
         for reason in ("Not Found in NetSuite", "Amount Mismatch", "Invoice Missing", "EXTRACTION_INCOMPLETE"):
             with self.subTest(reason=reason):
-                button = self._button(_render(reason))
-                self.assertIn('name="action" value="DISPUTED"', button)
-                self.assertEqual(_visible_text(button).strip(), "Reject")
-
-    def test_styling_and_icon_are_unchanged(self):
-        button = self._button(_render())
-        self.assertIn('class="btn btn-dispute"', button)
-        self.assertIn('type="submit"', button)
-        self.assertIn('<use href="#i-x-circle"/>', button)
-
-    def test_no_visible_dispute_wording_left_on_the_page(self):
-        text = _visible_text(_render()).lower()
-        self.assertNotIn("disput", text)
-        self.assertIn("reject", text)
-
-    def test_accept_button_is_unchanged(self):
-        html = _render()
-        accept = re.search(r'<button[^>]*value="ACCEPTED"[^>]*>.*?</button>', html, re.S).group(0)
-        self.assertEqual(_visible_text(accept).strip(), "Accept")
+                html = _render(reason)
+                self.assertNotIn('id="action-form"', html)
+                self.assertNotIn('name="action"', html)
+                self.assertNotIn("bulk-approve", html)
+                self.assertNotIn("disput", _visible_text(html).lower())
 
 
 class TestRejectStillStoresDisputed(unittest.TestCase):

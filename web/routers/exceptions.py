@@ -356,8 +356,6 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "filter": filter,
         "sort": sort or "",
         "reason_badge": REASON_BADGE,
-        "high_confidence_count": queries.get_high_confidence_exception_count(vendor_name, BULK_APPROVE_THRESHOLD),
-        "bulk_approve_threshold": BULK_APPROVE_THRESHOLD,
         "netsuite_record": netsuite_record,
         "writeback": None if exceptions_only else _writeback_status(statement_id),
         # "View PDF" in the top bar (2026-10-20): opens the statement's PDF

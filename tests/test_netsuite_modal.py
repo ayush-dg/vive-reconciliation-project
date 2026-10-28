@@ -142,16 +142,15 @@ class TestModalIsLookOnly(unittest.TestCase):
         )
         self.assertNotIn('type="checkbox"', rendered)
 
-    def test_modal_is_outside_the_action_form(self):
-        """The panel must not sit inside any form -- in the Accept/Reject
-        form, Enter in its search box would submit Accept. Since 2026-10-16
-        the panel comes first and the action form opens after it."""
+    def test_modal_is_outside_any_form(self):
+        """The panel must not sit inside any form -- Enter in its search box
+        would submit it. (The Accept/Reject form after it was removed on
+        2026-10-28.)"""
         html = _render("Not Found in NetSuite")
-        self.assertIn('id="action-form"', html)
+        self.assertNotIn('id="action-form"', html)
         panel = html.index('<section class="ns-inline"')
         before = html[:panel]
         self.assertEqual(before.count("<form"), before.count("</form>"))
-        self.assertLess(html.index("</section>", panel), html.index('id="action-form"'))
 
 
 class TestModalMarkup(unittest.TestCase):

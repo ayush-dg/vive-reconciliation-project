@@ -60,15 +60,6 @@
       <div class="resolve-count">{{ resolved }} / {{ total }} resolved</div>
     </div>
 
-    {% if high_confidence_count %}
-    <div style="padding:12px 18px;border-bottom:1px solid var(--border)">
-      <button type="button" id="bulk-approve-btn" class="btn-primary" style="width:100%"
-              data-vendor-url="{{ vendor_url_name }}" data-count="{{ high_confidence_count }}">
-        Approve {{ high_confidence_count }} at 99%+ confidence
-      </button>
-    </div>
-    {% endif %}
-
     <div class="list-scroll">
       {% for exc in exceptions %}
       <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ sort_qs }}&selected={{ exc.exception_id }}"
@@ -385,30 +376,9 @@
     </dialog>
     {% endif %}
 
-    <form method="post" action="/exceptions/{{ vendor_url_name }}" id="action-form">
-    <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
-    <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
-    <input type="hidden" name="invoice_number" value="{{ selected.invoice_number }}">
-    <input type="hidden" name="reason_code" value="{{ selected.exception_reason }}">
-    <input type="hidden" name="filter" value="{{ filter }}">
-    <input type="hidden" name="sort" value="{{ sort }}">
-
-    <div class="note-field">
-      <label>Add a note <span class="field-hint">(optional)</span></label>
-      <textarea rows="4" name="note" placeholder="e.g. 'Shop confirmed they'll post this by Friday' or 'Vendor confirmed it's a duplicate'"></textarea>
-    </div>
-
-    {# "Reject" (2026-10-06, was "Dispute with vendor") is the visible label
-       only: the submitted value stays DISPUTED, the value
-       exception_dispositions.disposition_status stores and its CHECK
-       constraint allows, so existing rows and every query are unchanged. #}
-    <div class="detail-actions">
-      <div class="action-cluster">
-        <button class="btn btn-accept" type="submit" name="action" value="ACCEPTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-check-circle"/></svg> Accept</button>
-        <button class="btn btn-dispute" type="submit" name="action" value="DISPUTED"><svg class="icon" style="width:14px;height:14px"><use href="#i-x-circle"/></svg> Reject</button>
-      </div>
-    </div>
-    </form>
+    {# Accept / Reject (and "Approve N at 99%+ confidence") were removed from
+       this page on 2026-10-28: an exception is resolved here only through
+       Accept as match above. The POST routes behind them still exist. #}
     {% else %}
     {% if total and resolved == total %}
     <div class="empty-state">🎉 All exceptions resolved for {{ vendor_display_name }}.</div>
@@ -421,20 +391,6 @@
 </div>
 
 
-<script>
-(function () {
-  var btn = document.getElementById("bulk-approve-btn");
-  if (!btn) return;
-  btn.addEventListener("click", function () {
-    var count = btn.dataset.count;
-    if (!confirm("Approve " + count + " exceptions at 99%+ confidence? This cannot be undone.")) {
-      return;
-    }
-    fetch("/exceptions/" + btn.dataset.vendorUrl + "/bulk-approve", { method: "POST" })
-      .then(function () { window.location.reload(); });
-  });
-})();
-</script>
 {% endif %}
 </div>
 {% include "_pdf_pane.html" %}

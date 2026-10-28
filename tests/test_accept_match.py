@@ -301,7 +301,6 @@ class TestMarkup(unittest.TestCase):
         panel_end = html.index("</section>", html.index('<section class="ns-inline"'))
         self.assertGreater(html.index('id="nsAccept"'), panel_end)
         self.assertGreater(html.index('id="nsAcceptDialog"'), panel_end)
-        self.assertLess(html.index('id="nsAcceptDialog"'), html.index('id="action-form"'))
         self.assertIn('action="/exceptions/Conicelli%20Toyota/accept-match"', html)
         self.assertIn('data-statement-amount="50.51"', html)
 
