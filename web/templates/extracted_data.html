@@ -11,11 +11,19 @@
   {# The statement's PDF in a new tab, as on the Exceptions page (2026-10-28) -- greyed out when no copy exists. #}
   <div class="topbar-actions">
     {% if pdf_url %}
-    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" title="Open the statement PDF in a new tab"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" id="pdf-pane-btn" aria-controls="pdf-pane" aria-expanded="false" title="Show the statement PDF beside this page"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
     {% else %}
     <span class="pdf-btn is-disabled" aria-disabled="true" title="PDF not available"><svg class="icon"><use href="#i-file"/></svg>View PDF</span>
     {% endif %}
   </div>
+</div>
+{% endblock %}
+
+{# The page and the statement PDF side by side (2026-10-28, _pdf_pane.html). #}
+{% block body %}
+<div class="pdf-split">
+  <div class="content">{{ self.content() }}</div>
+  {% include "_pdf_pane.html" %}
 </div>
 {% endblock %}
 

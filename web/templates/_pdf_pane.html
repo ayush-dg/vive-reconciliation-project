@@ -1,0 +1,51 @@
+{# _pdf_pane.html (2026-10-28): the statement PDF beside the page -- the
+   right-hand column of a .pdf-split, hidden until the topbar's View PDF
+   (#pdf-pane-btn, an ordinary new-tab link underneath) opens it. Used by
+   Statement Processing's detail page, Exceptions review and Extracted Data;
+   needs pdf_url. #}
+{% if pdf_url %}
+<aside class="pdf-pane" id="pdf-pane" aria-label="Statement PDF" hidden>
+  <div class="pdf-pane-head">
+    <span class="pdf-pane-title">Statement PDF</span>
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-pane-link">Open in new tab</a>
+    <button type="button" class="pdf-pane-close" id="pdf-pane-close" aria-label="Close the PDF">&times;</button>
+  </div>
+  <iframe class="pdf-pane-frame" id="pdf-pane-frame" title="Statement PDF" data-src="{{ pdf_url }}"></iframe>
+</aside>
+<script>
+(function () {
+  // A narrow window keeps the plain new-tab link; the panel needs room.
+  var MIN_WIDTH = 1100, KEY = "vive-pdf-pane-open";
+  var btn = document.getElementById("pdf-pane-btn");
+  var pane = document.getElementById("pdf-pane");
+  var frame = document.getElementById("pdf-pane-frame");
+  var topbar = document.querySelector(".topbar");
+  function remember(open) { try { sessionStorage.setItem(KEY, open ? "1" : ""); } catch (e) {} }
+  function show(open) {
+    if (open && !frame.src) { frame.src = frame.dataset.src; }  // loaded on first open only
+    // The panel sits just under the sticky topbar and fills the rest of the window.
+    pane.style.top = pane.style.height = "";
+    if (open && topbar) {
+      pane.style.top = topbar.offsetHeight + "px";
+      pane.style.height = "calc(100vh - " + topbar.offsetHeight + "px)";
+    }
+    pane.hidden = !open;
+    pane.parentElement.classList.toggle("pdf-open", open);  // lets a page make room (style.css)
+    btn.setAttribute("aria-expanded", String(open));
+    btn.classList.toggle("is-open", open);
+    btn.title = open ? "Hide the statement PDF" : "Show the statement PDF beside this page";
+    remember(open);
+  }
+  btn.addEventListener("click", function (ev) {
+    if (window.innerWidth < MIN_WIDTH) { return; }  // the link's own new tab
+    ev.preventDefault();
+    show(pane.hidden);
+  });
+  document.getElementById("pdf-pane-close").addEventListener("click", function () { show(false); });
+  // Kept open from one statement to the next in this tab.
+  var wasOpen = false;
+  try { wasOpen = sessionStorage.getItem(KEY) === "1"; } catch (e) {}
+  if (wasOpen && window.innerWidth >= MIN_WIDTH) { show(true); }
+})();
+</script>
+{% endif %}

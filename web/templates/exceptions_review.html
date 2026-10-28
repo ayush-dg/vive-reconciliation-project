@@ -11,7 +11,7 @@
   <div class="topbar-actions">
     {# The statement's PDF in a new tab -- greyed out when no archived copy exists. #}
     {% if pdf_url %}
-    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" title="Open the statement PDF in a new tab"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" id="pdf-pane-btn" aria-controls="pdf-pane" aria-expanded="false" title="Show the statement PDF beside this page"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
     {% else %}
     <span class="pdf-btn is-disabled" aria-disabled="true" title="PDF not available"><svg class="icon"><use href="#i-file"/></svg>View PDF</span>
     {% endif %}
@@ -25,6 +25,9 @@
 {% endblock %}
 
 {% block body %}
+{# The page and the statement PDF side by side (2026-10-28, _pdf_pane.html). #}
+<div class="pdf-split">
+<div class="pdf-split-main">
 {% if not_found %}
 <div class="content">
   <div class="empty-state">No reconciliation run found for "{{ vendor_display_name }}".</div>
@@ -433,4 +436,7 @@
 })();
 </script>
 {% endif %}
+</div>
+{% include "_pdf_pane.html" %}
+</div>
 {% endblock %}

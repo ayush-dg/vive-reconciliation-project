@@ -105,26 +105,55 @@
      (2026-10-16). #}
   <button type="button" class="filter-chip active" data-filter="all">All</button>
   <button type="button" class="filter-chip" data-filter="pass">Passed</button>
-  <select id="failed-filter" class="filter-chip" style="cursor:pointer" aria-label="Failed statements">
-    <option value="">Failed…</option>
-    <option value="fail">Failed · any stage</option>
+  {# "Failed" (2026-10-28): the same picker as vendor/shop below, with a fixed
+     label and a dot before each entry; the hidden placeholder option is the
+     "no failed filter" value and is left out of the list. #}
+  <select id="failed-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
+    <option value="" hidden>Failed</option>
+    <option value="fail">All failed runs</option>
     <option value="fail-extraction">Extraction failed</option>
     <option value="fail-validation">Validation failed</option>
     <option value="fail-reconciliation">Reconciliation failed</option>
   </select>
+  <div class="ns-chip-wrap picker-dots" data-sync-picker="failed-filter">
+    <button type="button" class="filter-chip sync-picker-btn" id="failed-filter-btn"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="failed-filter-list">
+      Failed<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+    </button>
+    <ul class="ns-popover sync-picker-list" id="failed-filter-list" role="listbox" aria-labelledby="failed-filter-btn" hidden></ul>
+  </div>
   <button type="button" class="filter-chip" data-filter="exceptions">Exceptions</button>
-  <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
+  {# Vendor and shop (2026-10-28): the same button + listbox picker as "Past
+     syncs" (static/app.js), over the hidden real <select> -- a browser
+     dropdown of hundreds of long names opened wherever the browser chose;
+     this list always opens centered below its chip. data-picker-label: the
+     button shows the picked option. #}
+  <select id="vendor-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
     <option value="">All vendors</option>
     {% for vname in vendor_options %}
     <option value="{{ vname }}">{{ vname }}</option>
     {% endfor %}
   </select>
-  <select id="shop-filter" class="filter-chip" style="cursor:pointer">
+  <div class="ns-chip-wrap picker-select" data-sync-picker="vendor-filter" data-picker-label>
+    <button type="button" class="filter-chip sync-picker-btn" id="vendor-filter-btn"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="vendor-filter-list">
+      <span class="picker-label">All vendors</span><svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+    </button>
+    <ul class="ns-popover sync-picker-list" id="vendor-filter-list" role="listbox" aria-labelledby="vendor-filter-btn" hidden></ul>
+  </div>
+  <select id="shop-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
     <option value="">All shops</option>
     {% for sname in shop_options %}
     <option value="{{ sname }}">{{ sname }}</option>
     {% endfor %}
   </select>
+  <div class="ns-chip-wrap picker-select" data-sync-picker="shop-filter" data-picker-label>
+    <button type="button" class="filter-chip sync-picker-btn" id="shop-filter-btn"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="shop-filter-list">
+      <span class="picker-label">All shops</span><svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+    </button>
+    <ul class="ns-popover sync-picker-list" id="shop-filter-list" role="listbox" aria-labelledby="shop-filter-btn" hidden></ul>
+  </div>
   <select id="period-filter" class="filter-chip" style="cursor:pointer">
     <option value="">All periods</option>
     {% for pval in period_options %}
@@ -262,7 +291,7 @@
     statusChips.forEach(function (c) { c.classList.toggle("active", c.dataset.filter === status); });
     var failed = FAILED.indexOf(status) !== -1;
     failedFilter.value = failed ? status : "";
-    failedFilter.classList.toggle("active", failed);
+    document.getElementById("failed-filter-btn").classList.toggle("active", failed);
     currentStatus = status;
   }
 

@@ -583,6 +583,18 @@ document.addEventListener("DOMContentLoaded", function () {
     const button = wrap.querySelector(".sync-picker-btn");
     const list = wrap.querySelector(".sync-picker-list");
     if (!select || !button || !list) return;
+    // data-picker-label (2026-10-28, Statement Processing's vendor/shop
+    // filters): the button shows the picked option and is highlighted while
+    // one is picked. Without it the label stays fixed ("Past syncs").
+    const label = wrap.hasAttribute("data-picker-label") ? button.querySelector(".picker-label") : null;
+
+    function showSelection() {
+      if (!label) return;
+      const opt = select.options[select.selectedIndex];
+      label.textContent = opt ? opt.text : "";
+      button.title = opt ? opt.text : "";
+      button.classList.toggle("active", !!select.value);
+    }
 
     function enabledOptions() {
       return Array.from(list.children).filter(function (li) {
@@ -593,6 +605,8 @@ document.addEventListener("DOMContentLoaded", function () {
     function build() {
       list.textContent = "";
       Array.from(select.options).forEach(function (opt, i) {
+        // A hidden option is the select's "nothing picked" value, not a list entry.
+        if (opt.hidden) return;
         const li = document.createElement("li");
         li.id = list.id + "-" + i;
         li.className = "ns-pop-opt";
@@ -623,14 +637,35 @@ document.addEventListener("DOMContentLoaded", function () {
     function pick(li) {
       close(true);
       select.value = li.dataset.value;
+      showSelection();
       select.dispatchEvent(new Event("change", { bubbles: true }));
     }
+    // The page restores saved filters into the select before this runs.
+    showSelection();
 
     button.addEventListener("click", function () {
       if (list.hidden) { open(); } else { close(false); }
     });
+    // Type to jump (2026-10-28), as a native <select> does: letters typed
+    // within a second of each other build up a prefix, and the first entry
+    // starting with it (case-insensitive) gets focus -- which scrolls it into
+    // view. A space continues the prefix ("Gates G"); on its own it picks.
+    let typed = "", typedAt = 0;
+    function isTypeAhead(ev) {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.key.length !== 1) return false;
+      return ev.key !== " " || (typed && Date.now() - typedAt < 1000);
+    }
+    function jumpTo(ch) {
+      const now = Date.now();
+      typed = (now - typedAt < 1000 ? typed : "") + ch.toLowerCase();
+      typedAt = now;
+      const hit = enabledOptions().find(function (li) { return li.textContent.trim().toLowerCase().startsWith(typed); });
+      if (hit) { hit.focus(); }
+    }
+
     button.addEventListener("keydown", function (ev) {
       if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); open(); }
+      else if (isTypeAhead(ev) && ev.key !== " ") { ev.preventDefault(); open(); jumpTo(ev.key); }
     });
     list.addEventListener("click", function (ev) {
       const li = ev.target.closest('[role="option"]');
@@ -639,6 +674,7 @@ document.addEventListener("DOMContentLoaded", function () {
     list.addEventListener("keydown", function (ev) {
       const opts = enabledOptions();
       const i = opts.indexOf(document.activeElement);
+      if (isTypeAhead(ev)) { ev.preventDefault(); jumpTo(ev.key); return; }
       if (ev.key === "ArrowDown") { ev.preventDefault(); opts[Math.min(i + 1, opts.length - 1)].focus(); }
       else if (ev.key === "ArrowUp") { ev.preventDefault(); opts[Math.max(i - 1, 0)].focus(); }
       else if (ev.key === "Home") { ev.preventDefault(); opts[0].focus(); }

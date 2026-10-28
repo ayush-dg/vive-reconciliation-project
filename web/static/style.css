@@ -260,7 +260,25 @@ svg { display: block; }
 .pdf-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--navy-2); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .pdf-btn .icon { width: 13px; height: 13px; }
 .pdf-btn:hover { background: var(--steel-tint); }
+.pdf-btn.is-open { background: var(--navy); border-color: var(--navy); color: #fff; }
 .pdf-btn.is-disabled { color: var(--text-muted); opacity: .6; cursor: not-allowed; }
+/* Statement Processing detail, Exceptions review, Extracted Data (2026-10-28,
+   _pdf_pane.html): the page and the statement PDF
+   side by side -- the PDF column stays put under the sticky topbar while the
+   page scrolls (top/height set by the page from the topbar's height). */
+.pdf-split { display: flex; align-items: flex-start; flex: 1; min-width: 0; }
+.pdf-split > .content, .pdf-split-main { flex: 1; min-width: 0; }
+.pdf-pane { position: sticky; top: 0; height: 100vh; flex: 0 0 45%; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border); }
+.pdf-pane[hidden] { display: none; }
+.pdf-pane-head { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.pdf-pane-title { font-size: 13px; font-weight: 600; color: var(--text); margin-right: auto; }
+.pdf-pane-link { font-size: 12.5px; font-weight: 600; color: var(--navy-2); text-decoration: none; }
+.pdf-pane-link:hover { text-decoration: underline; }
+.pdf-pane-close { border: none; background: transparent; font-size: 20px; line-height: 1; color: var(--text-muted); cursor: pointer; padding: 0 4px; }
+.pdf-pane-close:hover { color: var(--text); }
+.pdf-pane-frame { flex: 1; width: 100%; border: 0; }
+/* Exceptions review with the PDF open: a narrower exception list, so the detail keeps its room. */
+.pdf-split.pdf-open .detail-layout { grid-template-columns: 260px 1fr; }
 .pdf-btn.is-disabled:hover { background: var(--surface); }
 .intake-tabs {
   display: flex; flex-wrap: nowrap; gap: 28px; padding: 0 32px;
@@ -655,8 +673,28 @@ select {
 .report-hero-stat-label { font-size: 12px; color: rgba(255,255,255,0.65); margin-top: 4px; }
 .report-hero-divider { width: 1px; height: 38px; background: rgba(255,255,255,0.16); }
 
-.filter-chips { display: flex; gap: 8px; margin-bottom: 18px; }
-.filter-chip { font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; }
+/* One row. A <select> is as wide as its longest option, and some vendor/shop
+   names are very long, so a dropdown chip is 200px wide (down to 120px on a
+   narrow screen) with an ellipsis -- the full name still shows in the open
+   list. Buttons keep their natural width. */
+.filter-chips { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.filter-chip { font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis; }
+/* Statement Processing's "Failed" picker: a dot before each entry instead of
+   the check mark, filled navy on the one picked. */
+.picker-dots .sync-picker-list { min-width: 200px; }
+.picker-dots .sync-picker-list .ns-pop-opt { display: flex; align-items: center; gap: 10px; }
+.picker-dots .sync-picker-list .ns-pop-opt::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+.picker-dots .sync-picker-list .ns-pop-opt[aria-selected="true"]::before { content: ""; background: var(--navy-2); }
+/* Vendor/shop pickers (static/app.js data-picker-label): the same 200px chip,
+   the picked name cut with an ellipsis, and the list centered below it --
+   scrolling inside itself, wrapping a long name rather than widening. */
+.ns-chip-wrap.picker-select { flex: 0 1 200px; min-width: 120px; }
+.picker-select .sync-picker-btn { width: 100%; justify-content: space-between; }
+.picker-select .picker-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-select .sync-picker-chevron { flex-shrink: 0; }
+.picker-select .sync-picker-list { left: 50%; transform: translateX(-50%); width: max-content; min-width: 100%; max-width: 360px; }
+.picker-select .sync-picker-list .ns-pop-opt { white-space: normal; }
 .filter-chip:hover { background: var(--steel-tint); }
 .filter-chip.active { background: var(--navy); border-color: var(--navy); color: #fff; }
 

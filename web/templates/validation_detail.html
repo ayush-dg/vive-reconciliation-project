@@ -8,14 +8,26 @@
     <span>/</span>
     <span style="color:var(--text);font-weight:500">{{ (card.vendor_display_name if card else none) or (intake.vendor_name if intake else statement_id) }}{% if intake and intake.statement_period %} — {{ intake.statement_period | period_label }}{% endif %}</span>
   </div>
-  {# The statement's PDF in a new tab, as on the Exceptions page (2026-10-27) -- greyed out when no copy exists. #}
+  {# The statement's PDF (2026-10-27) -- greyed out when no copy exists. Since
+     2026-10-28 it opens beside the page (#pdf-pane below) on a wide enough
+     screen; the link itself still opens a new tab without JavaScript or on a
+     narrow window. #}
   <div class="topbar-actions">
     {% if pdf_url %}
-    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" title="Open the statement PDF in a new tab"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" id="pdf-pane-btn" aria-controls="pdf-pane" aria-expanded="false" title="Show the statement PDF beside this page"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
     {% else %}
     <span class="pdf-btn is-disabled" aria-disabled="true" title="PDF not available"><svg class="icon"><use href="#i-file"/></svg>View PDF</span>
     {% endif %}
   </div>
+</div>
+{% endblock %}
+
+{# The page and the statement PDF side by side (2026-10-28): the PDF panel
+   is the right-hand column, hidden until View PDF opens it. #}
+{% block body %}
+<div class="pdf-split">
+  <div class="content">{{ self.content() }}</div>
+  {% include "_pdf_pane.html" %}
 </div>
 {% endblock %}
 
