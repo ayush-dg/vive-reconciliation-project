@@ -1,17 +1,19 @@
 """NetSuite REST client (record/v1 + SuiteQL), OAuth 1.0a TBA -- sandbox or production.
 
-WHICH ACCOUNT is decided by ONE setting, NETSUITE_ACCOUNT_ID:
+WHICH ACCOUNT is decided by ONE setting, NETSUITE_WRITEBACK_ACCOUNT_ID:
   7321761-sb1  (or 7321761_SB1)   -> the sandbox,   credentials from SANDBOX_*
-  7321761                          -> production,    credentials from PROD_*
+  7321761                          -> production,    credentials from NETSUITE_CONNECT_*
+                                      (the production keys already in the app settings)
   anything else                    -> refused
-Each credential set is SANDBOX_/PROD_ + ACCOUNT_ID, CONSUMER_KEY, CONSUMER_SECRET,
+Each credential set is SANDBOX_/NETSUITE_CONNECT_ + ACCOUNT_ID, CONSUMER_KEY, CONSUMER_SECRET,
 TOKEN_ID, TOKEN_SECRET -- never from code. The chosen set's own *_ACCOUNT_ID must
-equal NETSUITE_ACCOUNT_ID, so sandbox keys can never be sent to production (or the
-reverse). With NETSUITE_ACCOUNT_ID unset the client falls back to SANDBOX_ACCOUNT_ID:
+equal NETSUITE_WRITEBACK_ACCOUNT_ID, so sandbox keys can never be sent to production (or the
+reverse). With NETSUITE_WRITEBACK_ACCOUNT_ID unset the client falls back to SANDBOX_ACCOUNT_ID:
 an unconfigured setup can only ever mean the sandbox.
 
 READING works in either account. WRITING to production additionally needs
-NETSUITE_PROD_WRITES_ENABLED=true, and every write -- either account -- is checked by
+NETSUITE_WRITEBACK_ENABLED=true (the same switch that turns the
+write-back on), and every write -- either account -- is checked by
 src/netsuite/guard.py (our custom fields only).
 
 NetSuite writes the same account id two different ways, and mixing them
@@ -48,7 +50,7 @@ SANDBOX = "sandbox"
 PRODUCTION = "production"
 _EXCEPTION_LIST_TABLE = {SANDBOX: "customlist_exception", PRODUCTION: "customlist673"}
 
-PROD_WRITES_FLAG = "NETSUITE_PROD_WRITES_ENABLED"
+WRITEBACK_FLAG = "NETSUITE_WRITEBACK_ENABLED"
 
 # SuiteQL returns at most 1000 rows per page.
 SUITEQL_PAGE_SIZE = 1000
@@ -73,7 +75,7 @@ class Environment:
     name: str            # SANDBOX or PRODUCTION
     account: str         # the id as written in the REST domain, e.g. 7321761-sb1 or 7321761
     realm: str           # the OAuth1 realm, e.g. 7321761_SB1 or 7321761
-    prefix: str          # "SANDBOX" or "PROD": which credential set
+    prefix: str          # "SANDBOX" or "NETSUITE_CONNECT": which credential set
     exception_list_table: str
 
     @property
@@ -111,9 +113,9 @@ def _classify(raw_account_id: str) -> Environment:
         domain, realm = derive_account_forms(cleaned)
         return Environment(SANDBOX, domain, realm, "SANDBOX", _EXCEPTION_LIST_TABLE[SANDBOX])
     if _PRODUCTION_ID.match(cleaned):
-        return Environment(PRODUCTION, cleaned, cleaned, "PROD", _EXCEPTION_LIST_TABLE[PRODUCTION])
+        return Environment(PRODUCTION, cleaned, cleaned, "NETSUITE_CONNECT", _EXCEPTION_LIST_TABLE[PRODUCTION])
     raise NetSuiteConfigError(
-        f"NETSUITE_ACCOUNT_ID={cleaned!r} is neither a sandbox id (e.g. 7321761-sb1) nor a production id "
+        f"NETSUITE_WRITEBACK_ACCOUNT_ID={cleaned!r} is neither a sandbox id (e.g. 7321761-sb1) nor a production id "
         "(digits only, e.g. 7321761). Refusing to run."
     )
 
@@ -121,9 +123,9 @@ def _classify(raw_account_id: str) -> Environment:
 def resolve_environment(env=None):
     """(Environment, credentials) from the process environment (or `env`)."""
     env = os.environ if env is None else env
-    selected = _clean(env.get("NETSUITE_ACCOUNT_ID")) or _clean(env.get("SANDBOX_ACCOUNT_ID"))
+    selected = _clean(env.get("NETSUITE_WRITEBACK_ACCOUNT_ID")) or _clean(env.get("SANDBOX_ACCOUNT_ID"))
     if not selected:
-        raise NetSuiteConfigError("NETSUITE_ACCOUNT_ID is not set (use the sandbox id, or the production id).")
+        raise NetSuiteConfigError("NETSUITE_WRITEBACK_ACCOUNT_ID is not set (use the sandbox id, or the production id).")
     environment = _classify(selected)
     wanted = {name: f"{environment.prefix}_{name}" for name in _CREDENTIAL_NAMES}
     missing = [var for var in wanted.values() if not _clean(env.get(var))]
@@ -132,13 +134,13 @@ def resolve_environment(env=None):
     own = _classify(env.get(wanted["ACCOUNT_ID"]))
     if (own.name, own.account.lower()) != (environment.name, environment.account.lower()):
         raise NetSuiteConfigError(
-            f"NETSUITE_ACCOUNT_ID is {environment.label} but {wanted['ACCOUNT_ID']} is {own.label}. "
+            f"NETSUITE_WRITEBACK_ACCOUNT_ID is {environment.label} but {wanted['ACCOUNT_ID']} is {own.label}. "
             "The credential set must belong to the account it is used for. Refusing to run.")
     return environment, {name: _clean(env.get(var)) for name, var in wanted.items()}
 
 
-def production_writes_enabled() -> bool:
-    return os.getenv(PROD_WRITES_FLAG, "").strip().lower() == "true"
+def writeback_enabled() -> bool:
+    return os.getenv(WRITEBACK_FLAG, "").strip().lower() == "true"
 
 
 class NetSuiteClient:
@@ -159,9 +161,9 @@ class NetSuiteClient:
 
     def _require_writes_allowed(self):
         """Production is written to only when explicitly armed; the sandbox always may."""
-        if self.environment.is_production and not production_writes_enabled():
+        if self.environment.is_production and not writeback_enabled():
             raise guard.WriteBlocked(
-                f"production writes are off: {PROD_WRITES_FLAG} is not true ({self.environment.label})")
+                f"production writes are off: {WRITEBACK_FLAG} is not true ({self.environment.label})")
 
     def _request(self, method, url, **kwargs):
         """One HTTP call with a small retry on throttling/transient 5xx.
