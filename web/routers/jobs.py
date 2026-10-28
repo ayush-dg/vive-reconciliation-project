@@ -14,6 +14,7 @@ from fastapi.responses import RedirectResponse
 
 from web.deps import render, require_login, sidebar_context
 from web import queries
+from web.routers.exceptions import _statement_pdf_url
 
 router = APIRouter()
 
@@ -59,6 +60,9 @@ def job_extracted_data(job_id: str, request: Request, user: str = Depends(requir
         "active_page": "upload",
         "job": job,
         "rows": queries.get_extracted_rows_for_job(job_id),
+        # "View PDF" (2026-10-28): the same link and fallbacks as the
+        # Exceptions and Statement Processing pages.
+        "pdf_url": _statement_pdf_url(job.get("statement_id")),
         **sidebar_context(request),
     }
     return render(request, "extracted_data.html", ctx)

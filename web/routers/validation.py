@@ -18,6 +18,7 @@ from web.deps import render, require_login, sidebar_context, smart_title
 from web import queries
 from web import statement_processing as sp
 from web import time_window as tw
+from web.routers.exceptions import _statement_pdf_url
 from src.vendor_identity import display_name as vendor_display_name
 
 router = APIRouter()
@@ -108,13 +109,16 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
     # result). Opens on the stage that needs attention (sp.default_tab()).
     # get_statement_report() is mostly Fabric (summary, matched,
     # exceptions); the other three are mostly Azure SQL.
-    report, (data, job, extracted, set_aside, recon_rows) = _alongside(
+    report, (data, job, extracted, set_aside, recon_rows, pdf_url) = _alongside(
         lambda: queries.get_statement_report(statement_id),
         lambda: queries.get_extraction_validation_detail(statement_id),
         lambda: queries.get_latest_job_for_statement(statement_id),
         lambda: queries.get_extracted_rows_for_statement(statement_id),
         lambda: queries.get_set_aside_lines(statement_id),
-        lambda: queries.get_recon_rows(statement_id))
+        lambda: queries.get_recon_rows(statement_id),
+        # "View PDF" (2026-10-27): the same link and fallbacks as the
+        # Exceptions page -- None greys the button out.
+        lambda: _statement_pdf_url(statement_id))
     intake = data.get("intake")
     summary, matched, exceptions = report.get("summary"), report.get("matched") or [], report.get("exceptions") or []
 
@@ -151,6 +155,7 @@ def validation_detail(statement_id: str, request: Request, user: str = Depends(r
         "summary": summary,
         "extracted": extracted if card else [],
         "recon": lines_view,
+        "pdf_url": pdf_url,
         "active_tab": tab if tab in tabs else (sp.default_tab(card) if card else "validation"),
         **sidebar_context(request),
     }

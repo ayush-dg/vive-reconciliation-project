@@ -2778,6 +2778,30 @@ _OPEN_RECON_REASON = {"Amount mismatch": "Amount Mismatch", "Not found in NetSui
                       "Vendor not resolved": "Vendor Not Resolved in NetSuite"}
 
 
+def get_matched_netsuite_records(records) -> dict:
+    """{("bill"|"credit", internal_id): {statement_id, invoice_number, status,
+    matched_by, matched_at}} for the NetSuite records in `records` (pairs of
+    record type and internal id) that a statement line is already matched to
+    -- automatically or by hand -- per the recon table. The Find in NetSuite
+    results mark those "Already matched" (2026-10-27). {} when nothing is
+    given or the table can't be read."""
+    ids = sorted({str(i) for _, i in records or [] if str(i or "").isdigit()})
+    if not ids:
+        return {}
+    try:
+        rows = execute_query(
+            f"SELECT netsuite_record_type, netsuite_internal_id, statement_id, invoice_number, status, "
+            f"matched_by, matched_at FROM recon WHERE is_active = 1 AND status IN (?, ?) "
+            f"AND netsuite_internal_id IN ({','.join('?' * len(ids))})",
+            ["Matched", "Matched manually", *ids])
+    except Exception:
+        return {}
+    out = {}
+    for r in rows:
+        out.setdefault(((r["netsuite_record_type"] or "").lower(), str(r["netsuite_internal_id"])), r)
+    return out
+
+
 def get_recon_card_status() -> dict:
     """{statement_id: {"exceptions": open, "reasons": {reason: open n},
     "resolved": n, "matched": lines}} from the recon table, for every statement
