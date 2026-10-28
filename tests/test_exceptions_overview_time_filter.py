@@ -325,7 +325,7 @@ class TestExceptionsOverviewRoute(unittest.TestCase):
         self.assertIn('<option value="Fenix" data-name="Fenix">Fenix (2)</option>', options)
         self.assertIn('data-name="Orphan CO">Orphan CO (1)</option>', options)
         self.assertIn("function updateVendorCounts()", html)
-        self.assertIn('shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); });', html)
+        self.assertIn('shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); remember(); });', html)
 
     def test_vendor_shop_location_options_rebuilt_from_the_window(self):
         html = self._get("/exceptions")

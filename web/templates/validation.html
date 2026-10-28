@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}VIVE Collision — Statement Processing{% endblock %}
 
+{% block head_scripts %}<script>window.viveFilterStart = ViveFilters.init(["status", "vendor", "shop", "period", "sync", "day"], false);</script>{% endblock %}
+
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
@@ -98,11 +100,18 @@
 
 <div class="filter-chips">
   {# Passed = passed validation; Failed = extraction, validation or
-     reconciliation failed; Exceptions = reconciled with at least one
-     exception (2026-10-16). #}
+     reconciliation failed -- a dropdown since 2026-10-27, for any stage or
+     one of them; Exceptions = reconciled with at least one exception
+     (2026-10-16). #}
   <button type="button" class="filter-chip active" data-filter="all">All</button>
   <button type="button" class="filter-chip" data-filter="pass">Passed</button>
-  <button type="button" class="filter-chip" data-filter="fail">Failed</button>
+  <select id="failed-filter" class="filter-chip" style="cursor:pointer" aria-label="Failed statements">
+    <option value="">Failed…</option>
+    <option value="fail">Failed · any stage</option>
+    <option value="fail-extraction">Extraction failed</option>
+    <option value="fail-validation">Validation failed</option>
+    <option value="fail-reconciliation">Reconciliation failed</option>
+  </select>
   <button type="button" class="filter-chip" data-filter="exceptions">Exceptions</button>
   <select id="vendor-filter" class="filter-chip" style="cursor:pointer">
     <option value="">All vendors</option>
@@ -122,6 +131,7 @@
     <option value="{{ pval }}">{{ pval | period_label }}</option>
     {% endfor %}
   </select>
+  <button type="button" class="filter-chip" onclick="ViveFilters.reset()" title="Back to this page's default filters">Reset filters</button>
 </div>
 
 <div class="report-card-grid" id="validation-card-grid">
@@ -135,7 +145,7 @@
   {% for run in runs %}
   <div class="report-card sp-card" data-state="{{ run.status }}"
        data-validation="{{ 'pass' if run.validation_passed else 'fail' }}"
-       data-failed="{{ '1' if run.failed else '' }}" data-exceptions="{{ '1' if run.has_exceptions else '' }}"
+       data-failed="{{ '1' if run.failed else '' }}" data-failed-stages="{{ run.failed_stages | join(' ') }}" data-exceptions="{{ '1' if run.has_exceptions else '' }}"
        data-checked="{{ '1' if run.checked else '' }}"
        data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
        data-period="{{ run.statement_period or '' }}"
@@ -177,6 +187,8 @@
 <script>
 (function () {
   var statusChips = document.querySelectorAll(".filter-chip[data-filter]");
+  var failedFilter = document.getElementById("failed-filter");
+  var FAILED = ["fail", "fail-extraction", "fail-validation", "fail-reconciliation"];
   var vendorFilter = document.getElementById("vendor-filter");
   var shopFilter = document.getElementById("shop-filter");
   var periodFilter = document.getElementById("period-filter");
@@ -215,6 +227,8 @@
       var matchesStatus = currentStatus === "all"
         || (currentStatus === "pass" && card.dataset.validation === "pass")
         || (currentStatus === "fail" && card.dataset.failed === "1")
+        || (currentStatus.indexOf("fail-") === 0
+            && (" " + card.dataset.failedStages + " ").indexOf(" " + currentStatus.slice(5) + " ") !== -1)
         || (currentStatus === "exceptions" && card.dataset.exceptions === "1");
       var inWindow = (!vendor || card.dataset.vendor === vendor)
         && (!shop || card.dataset.shop === shop)
@@ -231,17 +245,42 @@
     updateHero(heroCount, heroPassedCount);
   }
 
+  // Kept in the address and remembered for this tab (static/filters.js),
+  // so "← Statement Processing" from a statement brings them back.
+  function remember() {
+    ViveFilters.save({
+      status: currentStatus === "all" ? "" : currentStatus, vendor: vendorFilter.value, shop: shopFilter.value,
+      period: periodFilter.value, sync: syncFilter.value, day: dateInput.value,
+    });
+  }
+  function setIfOffered(select, value) {
+    if (value && Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+      select.value = value;
+    }
+  }
+  function setStatus(status) {
+    statusChips.forEach(function (c) { c.classList.toggle("active", c.dataset.filter === status); });
+    var failed = FAILED.indexOf(status) !== -1;
+    failedFilter.value = failed ? status : "";
+    failedFilter.classList.toggle("active", failed);
+    currentStatus = status;
+  }
+
   statusChips.forEach(function (chip) {
     chip.addEventListener("click", function () {
-      statusChips.forEach(function (c) { c.classList.remove("active"); });
-      chip.classList.add("active");
-      currentStatus = chip.dataset.filter;
+      setStatus(chip.dataset.filter);
       applyFilters();
+      remember();
     });
   });
-  vendorFilter.addEventListener("change", applyFilters);
-  shopFilter.addEventListener("change", applyFilters);
-  periodFilter.addEventListener("change", applyFilters);
+  failedFilter.addEventListener("change", function () {
+    setStatus(failedFilter.value || "all");
+    applyFilters();
+    remember();
+  });
+  vendorFilter.addEventListener("change", function () { applyFilters(); remember(); });
+  shopFilter.addEventListener("change", function () { applyFilters(); remember(); });
+  periodFilter.addEventListener("change", function () { applyFilters(); remember(); });
 
   // Time window -- see the #time-window comment above. The hidden
   // #sync-filter select (set by the picker, static/app.js) and the hidden
@@ -265,6 +304,7 @@
     // No sync and no day is the picker's "All" -- shown on its button.
     syncPickerBtn.classList.toggle("active", (!!sync && !!picked) || (!sync && !day));
     applyFilters();
+    remember();
   }
 
   todayChip.addEventListener("click", function () {
@@ -285,6 +325,13 @@
   // on load -- read from the controls, so a value the browser restored on
   // Back/reload is honoured too (a restored older sync can only have come
   // from the picker).
+  var start = window.viveFilterStart || {};
+  if (["pass", "exceptions"].concat(FAILED).indexOf(start.status) !== -1) { setStatus(start.status); }
+  setIfOffered(vendorFilter, start.vendor);
+  setIfOffered(shopFilter, start.shop);
+  setIfOffered(periodFilter, start.period);
+  setIfOffered(syncFilter, start.sync);
+  if (start.day) { dateInput.value = start.day; }
   setTimeWindow(syncFilter.value, dateInput.value, syncFilter.value !== newestSync);
 })();
 </script>

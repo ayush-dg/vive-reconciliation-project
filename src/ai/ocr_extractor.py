@@ -22,12 +22,28 @@ import platform
 import shutil
 
 
+TESSERACT_THREADS_ENV = "VIVE_TESSERACT_THREADS"
+
+
+def apply_tesseract_thread_limit() -> None:
+    """VIVE_TESSERACT_THREADS=<n> caps every Tesseract run of this process
+    at n threads (2026-10-25): Tesseract reads OMP_THREAD_LIMIT, and
+    pytesseract starts it with this process's environment. Unset, blank or
+    not a positive whole number: nothing is changed (Tesseract's own
+    default, as before)."""
+    raw = (os.environ.get(TESSERACT_THREADS_ENV) or "").strip()
+    if raw.isdigit() and int(raw) > 0:
+        os.environ["OMP_THREAD_LIMIT"] = str(int(raw))
+
+
 def _configure_tesseract_path(pytesseract) -> None:
-    """Point pytesseract at the Tesseract binary on Windows.
+    """Point pytesseract at the Tesseract binary on Windows, and apply
+    VIVE_TESSERACT_THREADS (apply_tesseract_thread_limit) on every platform.
 
     pytesseract defaults to just "tesseract", which fails if the install
     directory isn't on PATH at the time Python starts.
     """
+    apply_tesseract_thread_limit()
     if platform.system() != "Windows":
         return
     tess_path = shutil.which("tesseract")

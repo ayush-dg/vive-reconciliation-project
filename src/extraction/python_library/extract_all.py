@@ -51,6 +51,7 @@ import extract_allstar     # All Star Auto Lights, Inc.
 import extract_grappone    # Grappone (CDK AR statement)
 import extract_mastria     # Mastria (CDK AR statement)
 import extract_partsauthority  # Parts Authority (letterhead is an image; signature is the returned-check notice)
+import extract_ef320       # CDK eF320 AR statement (Faulkner, Morong Falmouth, Fette Ford)
 import extract_autoly      # Autoly statements (Bow, Chuck's, Ding's, Goyette's, ...)
 
 EXTRACTORS = [
@@ -72,6 +73,7 @@ EXTRACTORS = [
     extract_grappone,
     extract_mastria,
     extract_partsauthority,
+    extract_ef320,
     # Last: its signature is the Autoly ledger header, which Fenix NE's
     # statements print too -- extract_fenix (above) must match them first.
     extract_autoly,

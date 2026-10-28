@@ -8,6 +8,14 @@
     <span>/</span>
     <span style="color:var(--text);font-weight:500">{{ (card.vendor_display_name if card else none) or (intake.vendor_name if intake else statement_id) }}{% if intake and intake.statement_period %} — {{ intake.statement_period | period_label }}{% endif %}</span>
   </div>
+  {# The statement's PDF in a new tab, as on the Exceptions page (2026-10-27) -- greyed out when no copy exists. #}
+  <div class="topbar-actions">
+    {% if pdf_url %}
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" title="Open the statement PDF in a new tab"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
+    {% else %}
+    <span class="pdf-btn is-disabled" aria-disabled="true" title="PDF not available"><svg class="icon"><use href="#i-file"/></svg>View PDF</span>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}
 
@@ -360,7 +368,7 @@
         <td class="num">{{ r.amount | money if r.amount is not none else "—" }}</td>
         <td class="num">{{ r.netsuite_amount | money if r.netsuite_amount is not none else "—" }}</td>
         <td class="num{{ ' sp-bad' if r.difference }}">{{ r.difference | money_signed if r.difference is not none else "—" }}</td>
-        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger', 'resolved': 'info'}.get(r.status, 'neutral') }}"{% if r.note %} title="{{ r.note }}"{% endif %}>{{ ('✓ ' if r.status in ('matched', 'resolved')) ~ r.label }}</span>{% if r.by %}<div class="sp-shared">{{ r.by }}{% if r.at %} · {{ r.at }}{% endif %}</div>{% endif %}</td>
+        <td><span class="badge {{ {'matched': 'success', 'mismatch': 'warning', 'missing': 'danger', 'resolved': 'info'}.get(r.status, 'neutral') }}"{% if r.note %} title="{{ r.note }}"{% endif %}>{{ ('✓ ' if r.status in ('matched', 'resolved')) ~ r.label }}</span>{% if r.reason %}<div class="sp-reason">{{ r.reason }}</div>{% endif %}{% if r.by %}<div class="sp-shared">{{ r.by }}{% if r.at %} · {{ r.at }}{% endif %}</div>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

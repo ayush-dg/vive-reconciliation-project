@@ -477,26 +477,50 @@ def plan_text_row_corrections(invoices: list, pdf_path: Optional[str], printed: 
     # Identity: reference + date must pick exactly one printed line; where several lines share them
     # (RH Long's payment batch 220830, an NYE invoice and its credit memo on one day), the row's printed
     # words (reference, PO#/MEMO, source...) must be exactly the words the line prints left of its amounts.
-    claimed, pairs = {}, []
+    # A row whose words match none of those lines is decided last, by elimination (2026-10-26, NYE
+    # SYNTH_9_QZXW row 43: XYZ900001C-1 08-14 52.17 carries its credit memo's reference): it takes the ONE
+    # line with its reference and date that no other row claims, and only if it already carries exactly
+    # that line's amount -- nothing is ever corrected on an identity found this way.
+    claimed, pairs, deferred = {}, [], []
     for index, inv in enumerate(rows):
         number = inv.get("row_number") or index + 1
         label = f"row {number} ({inv.get('invoice_number')})"
         ref, date = _norm_token(inv.get("invoice_number")), str(inv.get("invoice_date") or "").strip()
+
+        def refuse_here(reason):
+            # The first refusal in row order, exactly as before elimination existed.
+            if deferred:
+                return refuse(deferred[0][3], pdf_total=pdf_total)
+            return refuse(reason, pdf_total=pdf_total)
         if not ref or not date:
-            return refuse(f"{label} has no reference or date", pdf_total=pdf_total)
+            return refuse_here(f"{label} has no reference or date")
         candidates = [i for i, l in enumerate(lines) if l["date"] == date and ref in l["tokens"]]
+        shared = candidates
         if len(candidates) > 1:
             words = sorted(_c2_row_tokens(inv, raw_keys))
             candidates = [i for i in candidates if sorted(lines[i]["tokens"]) == words]
-        if len(candidates) != 1:
-            return refuse(f"{label} {date}: matches {len(candidates)} printed lines, not exactly one", pdf_total=pdf_total)
-        if candidates[0] in claimed:
-            return refuse(f"{label} and row {claimed[candidates[0]]} claim the same printed line", pdf_total=pdf_total)
-        claimed[candidates[0]] = number
         kind, value = _c2_row_amount(inv, layout)
+        if not candidates and len(shared) > 1 and kind != "both":
+            deferred.append((inv, number, shared, f"{label} {date}: matches 0 printed lines, not exactly one",
+                             kind, value))
+            continue
+        if len(candidates) != 1:
+            return refuse_here(f"{label} {date}: matches {len(candidates)} printed lines, not exactly one")
+        if candidates[0] in claimed:
+            return refuse_here(f"{label} and row {claimed[candidates[0]]} claim the same printed line")
+        claimed[candidates[0]] = number
         if kind == "both":
-            return refuse(f"{label} has both a charge and a credit", pdf_total=pdf_total)
+            return refuse_here(f"{label} has both a charge and a credit")
         pairs.append((inv, kind, value, lines[candidates[0]]))
+    eliminated = []
+    for inv, number, shared, reason, kind, value in deferred:
+        left = [i for i in shared if i not in claimed]
+        if len(left) != 1 or (kind, value) != (lines[left[0]]["kind"], lines[left[0]]["value"]):
+            return refuse(reason, pdf_total=pdf_total)
+        claimed[left[0]] = number
+        pairs.append((inv, kind, value, lines[left[0]]))
+        eliminated.append({"row_number": inv.get("row_number"), "invoice_number": inv.get("invoice_number"),
+                           "date": lines[left[0]]["date"], "printed_line": lines[left[0]]["text"]})
     left = len(lines) - len(claimed)
     if left:
         return refuse(f"{left} printed line(s) match no extracted row", pdf_total=pdf_total)
@@ -521,8 +545,11 @@ def plan_text_row_corrections(invoices: list, pdf_path: Optional[str], printed: 
         changes.append((inv, line["kind"], line["value"]))
     if not corrections:
         return refuse("the extraction already agrees with the PDF line by line", pdf_total=pdf_total)
-    return {"applicable": True, "reason": "", "corrections": corrections, "pdf_total": pdf_total,
+    plan = {"applicable": True, "reason": "", "corrections": corrections, "pdf_total": pdf_total,
             "layout": layout, "raw_keys": raw_keys, "_changes": changes}
+    if eliminated:
+        plan["identified_by_elimination"] = eliminated
+    return plan
 
 
 def apply_text_row_corrections(plan: dict) -> int:

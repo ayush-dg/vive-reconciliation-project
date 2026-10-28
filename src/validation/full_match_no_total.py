@@ -8,8 +8,8 @@ status is still "total_not_found" after the no-total rule (pdf_rows_no_total) an
 check (pdf_account_blocks) may pass too, as long as nothing the PDF prints contradicts the rows.
 
 It passes only if ALL of this holds:
-  - the statement has rows (informational rows left out) and a PDF; the same 12-page cap and OCR time
-    budget as pdf_full_match; over the cap / budget, unreadable, or a page from which no printed
+  - the statement has rows (informational rows left out) and a PDF; the same page cap and OCR time
+    budget as pdf_full_match (pdf_row_match.max_pages(), ocr_time_budget_seconds()); over the cap / budget, unreadable, or a page from which no printed
     transaction line could be read = not verified, never a pass;
   - check_pdf_full_match passes: every row matches exactly one printed line and every printed
     transaction line exactly one row; every printed column is in the extraction; every cell (amounts
@@ -115,7 +115,7 @@ def total_like_amounts(pages: list, text: Optional[str], pdf_path: Optional[str]
                     continue
                 if page["source"] != "ocr" or page.get("rotation") or not pdf_path:
                     continue
-                rereader = rereader or prm._Rereader(pdf_path, time.monotonic() + prm.OCR_TIME_BUDGET_SECONDS)
+                rereader = rereader or prm._Rereader(pdf_path, time.monotonic() + prm.ocr_time_budget_seconds())
                 width = x1 - x0
                 got = rereader._ocr(page["page"], (x0 - width, bottom + 1, x1 + 1.75 * width, bottom + 2.6 * box_height),
                                     "0123456789.,$-", 7) or []

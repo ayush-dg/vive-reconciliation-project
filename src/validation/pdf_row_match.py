@@ -75,6 +75,13 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 12
 OCR_TIME_BUDGET_SECONDS = 30.0
+# Deployment settings for the two limits above (2026-10-26): dev reads PDFs
+# 10-32x slower than a laptop, and five Oct 25 statements whose rows are
+# right (Chuck's, LV Honda, LV Hyundai, MB LV, LV Acura) stopped there at
+# "OCR time budget exhausted". Unset, blank, not a number or not positive =
+# the default above. Read on every call (max_pages(), ocr_time_budget_seconds()).
+MAX_PAGES_ENV = "VIVE_PDF_CHECK_MAX_PAGES"
+OCR_TIME_BUDGET_ENV = "VIVE_PDF_CHECK_OCR_BUDGET_SECONDS"
 OCR_MAX_WORKERS = 4
 OCR_DPI = 300
 OCR_CONFIG = "--psm 6"
@@ -103,6 +110,32 @@ _ROW_NUMBER_RE = re.compile(r"^\D{0,2}?(\d{1,4})[.,]?$")
 class NotVerified(Exception):
     """The PDF could not be read completely (page cap, OCR budget, unreadable
     page) -- the check reports "not verified", never a pass."""
+
+
+def _setting(name, default, cast):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = cast(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number -- using %s", name, raw, default)
+        return default
+    if not value > 0 or value == float("inf"):
+        logger.warning("%s=%r is not positive -- using %s", name, raw, default)
+        return default
+    return value
+
+
+def max_pages() -> int:
+    """The page cap of the PDF checks: VIVE_PDF_CHECK_MAX_PAGES, else MAX_PAGES."""
+    return _setting(MAX_PAGES_ENV, MAX_PAGES, int)
+
+
+def ocr_time_budget_seconds() -> float:
+    """The OCR time budget of the PDF checks: VIVE_PDF_CHECK_OCR_BUDGET_SECONDS,
+    else OCR_TIME_BUDGET_SECONDS."""
+    return _setting(OCR_TIME_BUDGET_ENV, OCR_TIME_BUDGET_SECONDS, float)
 
 
 # --------------------------------------------------------------------------
@@ -276,14 +309,18 @@ def _group_lines(words):
 _PAGES_CACHE: "OrderedDict" = OrderedDict()
 
 
-def read_pdf_lines(pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, max_workers=OCR_MAX_WORKERS):
+def read_pdf_lines(pdf_path, budget_seconds=None, max_workers=OCR_MAX_WORKERS):
     """[{"page", "source", "rotation", "lines"}] or raises NotVerified.
-    Cached per file (the intake can run the gate twice for one statement);
-    the cache keeps the last _PAGES_CACHE_SIZE files only."""
-    key = (os.path.abspath(pdf_path), os.path.getmtime(pdf_path), budget_seconds, max_workers)
+    budget_seconds None = ocr_time_budget_seconds(). Cached per file (the
+    intake can run the gate twice for one statement) and limits; the cache
+    keeps the last _PAGES_CACHE_SIZE reads only."""
+    if budget_seconds is None:
+        budget_seconds = ocr_time_budget_seconds()
+    cap = max_pages()
+    key = (os.path.abspath(pdf_path), os.path.getmtime(pdf_path), budget_seconds, max_workers, cap)
     if key not in _PAGES_CACHE:
         try:
-            _PAGES_CACHE[key] = _read_pdf_lines(pdf_path, budget_seconds, max_workers)
+            _PAGES_CACHE[key] = _read_pdf_lines(pdf_path, budget_seconds, max_workers, cap)
         except NotVerified as e:
             _PAGES_CACHE[key] = e
         while len(_PAGES_CACHE) > _PAGES_CACHE_SIZE:
@@ -294,17 +331,18 @@ def read_pdf_lines(pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, max_workers
     return cached
 
 
-def _read_pdf_lines(pdf_path, budget_seconds, max_workers):
+def _read_pdf_lines(pdf_path, budget_seconds, max_workers, cap=None):
     """Text-layer pages are read directly; scanned pages are OCR'd in
     parallel, one Tesseract process per page driven from a thread (the GIL
     is released while Tesseract runs), at most min(cpu count, max_workers)
-    at a time, all within one shared time budget."""
+    at a time, all within one shared time budget. cap None = max_pages()."""
     import pdfplumber
 
+    cap = max_pages() if cap is None else cap
     deadline = time.monotonic() + budget_seconds
     with pdfplumber.open(pdf_path) as pdf:
-        if len(pdf.pages) > MAX_PAGES:
-            raise NotVerified(f"{len(pdf.pages)} pages (cap {MAX_PAGES})")
+        if len(pdf.pages) > cap:
+            raise NotVerified(f"{len(pdf.pages)} pages (cap {cap})")
         text_words = [_text_layer_words(page) for page in pdf.pages]
     scans = [i for i, words in enumerate(text_words) if len(words) < MIN_TEXT_WORDS]
     ocr = {}
@@ -585,11 +623,18 @@ def _mark_invoice_subtotals(table):
 # --------------------------------------------------------------------------
 
 def _row_amounts(inv):
-    """[(expected signed net, kind)] for one extracted row, as the gate counts it."""
-    from src.validation.arithmetic_gate import _row_net
+    """[(expected signed amount, kind)] for one extracted row, as the gate counts
+    it. A row with a charge, a payment against it and the balance left
+    (arithmetic_gate._charge_payment_balance, Dent Wizard 2026-10-26) gives
+    both its charge and its payment -- each must be printed in its own column;
+    _check_row then also checks its balance."""
+    from src.validation.arithmetic_gate import _charge_payment_balance, _row_net
     bf, pa = inv.get("balance_forward"), inv.get("payment_applied")
     if bf and pa:
         return [(round(bf, 2), "settlement_forward"), (round(-abs(pa), 2), "settlement_payment")]
+    parts = _charge_payment_balance(inv)
+    if parts:
+        return [(round(parts[0], 2), "charge"), (round(-parts[1], 2), "payment")]
     return [(round(_row_net(inv), 2), "net")]
 
 
@@ -622,11 +667,15 @@ def _check_row(inv, line, allow_balance_only=False):
     """None if the row matches this line exactly, else a reason string.
     allow_balance_only (rows-only mode only): a row with no amount matches a
     line that prints no amount either, only a balance equal to the row's
-    extracted amount_due (Healey's 1401474: Amount blank, Balance -100.54)."""
+    extracted amount_due (Healey's 1401474: Amount blank, Balance -100.54).
+    The same rule holds in every mode for an interest / finance row whose PDF
+    line prints that word too (arithmetic_gate.is_interest_balance_row,
+    Sullivan Tire 2026-10-26: "Interest ... $0.00 $0.00 $17.60")."""
     if line.get("is_subtotal"):
         return "the PDF line is a printed invoice subtotal, not a transaction"
     want_date = parse_date(inv.get("invoice_date"))
-    if allow_balance_only and abs(sum(a for a, _ in _row_amounts(inv))) <= _CENT:
+    balance_only = allow_balance_only or _interest_line(inv, line)
+    if balance_only and abs(sum(a for a, _ in _row_amounts(inv))) <= _CENT:
         printed_amounts = [m for m in line["money"] if m["role"] in _AMOUNT_ROLES and abs(m["value"]) > _CENT]
         balance = _balance_value(line)
         due = inv.get("amount_due")
@@ -642,7 +691,8 @@ def _check_row(inv, line, allow_balance_only=False):
     if want_date is None and line["dates"]:
         return "date missing from the extracted row"
     used = []
-    for amount, kind in _row_amounts(inv):
+    amounts = _row_amounts(inv)
+    for amount, kind in amounts:
         if abs(amount) <= _CENT:
             if kind == "net" and any(m["role"] in _AMOUNT_ROLES and abs(m["value"]) > _CENT for m in line["money"]):
                 return "extracted row has no amount; the PDF line prints one"
@@ -659,6 +709,13 @@ def _check_row(inv, line, allow_balance_only=False):
             printed = ", ".join(f"{m['value']:,.2f} ({m['role'] or '-'})" for m in line["money"]) or "none"
             return f"amount {amount:,.2f} not on the PDF line (printed: {printed})"
         used.append(id(hit))
+    if any(kind == "payment" for _, kind in amounts):
+        # A charge-and-payment row: its balance is a populated money column
+        # too, and it is what the row nets to -- the PDF must print it.
+        balance, due = _balance_value(line), inv.get("amount_due")
+        if balance is None or abs(round(balance - due, 2)) > _CENT:
+            printed = ", ".join(f"{m['value']:,.2f}" for m in line["money"] if m["role"] == "balance") or "none"
+            return f"balance {due:,.2f} not printed on the PDF line (printed balance: {printed})"
     # Another amount on the line is only acceptable when it repeats the
     # matched amount under a second charge column (Sub-Total = Total).
     matched_values = [m["value"] for m in line["money"] if id(m) in used]
@@ -669,6 +726,38 @@ def _check_row(inv, line, allow_balance_only=False):
                " which the extracted row does not carry"
     line["_used_money"] = used
     return None
+
+
+def _interest_line(inv, line) -> bool:
+    from src.validation.arithmetic_gate import INTEREST_WORDS_RE, is_interest_balance_row
+    return is_interest_balance_row(inv) and bool(INTEREST_WORDS_RE.search(line["text"]))
+
+
+def interest_rows_on_pdf(rows, pdf_path, budget_seconds=None) -> list:
+    """For each interest / finance row (arithmetic_gate.is_interest_balance_row):
+    None when exactly one PDF line printing its reference verifies it -- the
+    interest word, its date, no non-zero amount under any charge / credit
+    column and exactly its balance (_check_row) -- else why not. Used by the
+    open-balance row guard (2026-10-26, Sullivan Tire)."""
+    try:
+        pages = read_pdf_lines(pdf_path, budget_seconds)
+    except NotVerified as e:
+        return [f"not verified: {e}"] * len(rows)
+    except Exception as e:
+        return [f"PDF unreadable ({type(e).__name__})"] * len(rows)
+    table = build_table(pages)
+    out = []
+    for inv in rows:
+        invoice_norm = norm_invoice(inv.get("invoice_number"))
+        lines = [l for l in table if l["in_region"] and invoice_norm and _invoice_on_line(invoice_norm, l)]
+        hits = [l for l in lines if _check_row(inv, l) is None]
+        if len(hits) == 1:
+            out.append(None)
+        elif hits:
+            out.append(f"{len(hits)} PDF lines print it")
+        else:
+            out.append(f"p{lines[0]['page']}: {_check_row(inv, lines[0])}" if lines else "no PDF line prints its reference")
+    return out
 
 
 def match_rows(invoices, table, allow_balance_only=False, reread=None):
@@ -1006,7 +1095,10 @@ def equations(table, matches, printed, tolerance):
 # --------------------------------------------------------------------------
 
 def _analyse(rows, pdf_path, budget_seconds, allow_balance_only=False):
-    """(pages, table, matches, failures, rereads) or raises NotVerified."""
+    """(pages, table, matches, failures, rereads) or raises NotVerified.
+    budget_seconds None = ocr_time_budget_seconds()."""
+    if budget_seconds is None:
+        budget_seconds = ocr_time_budget_seconds()
     started = time.monotonic()
     try:
         pages = read_pdf_lines(pdf_path, budget_seconds)
@@ -1080,7 +1172,7 @@ def _opening_balance_line(table, matches, failures):
     return line
 
 
-def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
+def check_pdf_row_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=None, **_):
     """Gate method "pdf_row_match" (see the module docstring)."""
     started = time.monotonic()
     if not pdf_path:
@@ -1194,7 +1286,7 @@ def _vendor_section(table, matches, failures, vendor_name):
             "lines_ignored": ignored}, None
 
 
-def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS,
+def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=None,
                              vendor_name=None, **_):
     """Gate method "pdf_store_sections" (see the module docstring). A store
     is complete only when its rows sum to its printed Amount Due exactly to
@@ -1297,13 +1389,14 @@ def check_pdf_store_sections(printed, rows, *, tolerance=0.01, pdf_path=None, bu
 _PRINTED_TOTAL_LABELS = ("total", "balance due", "amount due", "new balance", "pay this amount", "please pay")
 
 
-def check_rows_only(rows, pdf_path, budget_seconds=OCR_TIME_BUDGET_SECONDS, printed=None):
+def check_rows_only(rows, pdf_path, budget_seconds=None, printed=None):
     """For a statement with NO printed total: every extracted row against its
     PDF line and every PDF transaction line against a row, with no equation
     (2026-10-12, user decision: this is the statement's pass/fail).
     Returns {"status": "rows_verified" | "rows_do_not_match" | "not_verified"
-    | "has_printed_total", ...}; only "rows_verified" is a pass. Same 30 s
-    OCR budget and 12-page cap as the other PDF checks."""
+    | "has_printed_total", ...}; only "rows_verified" is a pass. Same OCR
+    budget and page cap as the other PDF checks (ocr_time_budget_seconds(),
+    max_pages())."""
     started = time.monotonic()
     if printed is not None:
         return {"status": "has_printed_total", "reason": f"the extraction has a printed total ({printed})"}
@@ -1437,9 +1530,11 @@ def _find_value_words(words, value, free):
     return None
 
 
-def check_pdf_full_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=OCR_TIME_BUDGET_SECONDS, **_):
+def check_pdf_full_match(printed, rows, *, tolerance=0.01, pdf_path=None, budget_seconds=None, **_):
     """Gate method "pdf_full_match" (see the module docstring). Runs only
     after every other method has failed and can only add a pass."""
+    if budget_seconds is None:
+        budget_seconds = ocr_time_budget_seconds()
     started = time.monotonic()
     if not pdf_path:
         return _not_applicable("no PDF available")

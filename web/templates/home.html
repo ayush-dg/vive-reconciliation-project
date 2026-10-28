@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}VIVE Collision — Home{% endblock %}
 
+{% block head_scripts %}<script>ViveFilters.init([], true);</script>{% endblock %}
+
 {% block topbar %}
 <div class="topbar">
   <div class="topbar-title">
@@ -269,6 +271,7 @@
       <option value="{{ p }}" {{ 'selected' if p == run_period }}>{{ p | period_label }}</option>
       {% endfor %}
     </select>
+    <button type="button" class="filter-chip" onclick="ViveFilters.reset()" title="Back to this page's default filters">Reset filters</button>
   </form>
 
   {% if runs %}

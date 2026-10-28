@@ -97,6 +97,21 @@ class TestJobCard(unittest.TestCase):
             self.assertFalse(card["checked"])
 
 
+class TestFailedStages(unittest.TestCase):
+    """The list page's "Failed" dropdown filters on these (2026-10-27)."""
+
+    def test_each_card_names_the_stages_that_failed(self):
+        extraction = sp.job_card({"job_id": "J1", "status": "FAILED", "pdf_filename": "x.pdf"})
+        validation = sp.intake_card(_intake(status="mismatch", diff=45.0), job={"status": "COMPLETED"})
+        reconciliation = sp.intake_card(_intake(), job={"status": "FAILED", "error_message": "boom"})
+        clean = sp.intake_card(_intake(), recon={"exceptions": 0, "reasons": {}})
+        queued = sp.job_card({"job_id": "J2", "status": "PENDING", "pdf_filename": "y.pdf"})
+        self.assertEqual(extraction["failed_stages"], ["extraction"])
+        self.assertEqual(validation["failed_stages"], ["validation"])
+        self.assertEqual(reconciliation["failed_stages"], ["reconciliation"])
+        self.assertEqual((clean["failed_stages"], queued["failed_stages"]), ([], []))
+
+
 class TestBuildCards(unittest.TestCase):
 
     def test_adds_failed_and_running_jobs_but_not_duplicates_or_completed(self):
@@ -253,6 +268,27 @@ class TestReconView(unittest.TestCase):
         self.assertEqual((line["status"], line["label"]), ("resolved", "Accepted (was not in NetSuite)"))
         self.assertEqual((line["by"], line["at"]), ("admin@vivecollision.com", "2026-10-21"))
 
+    def test_set_aside_lines_say_why_in_plain_words(self):
+        rows = [self._row(1, "322756", "Not reconciled", -1272.32,
+                          note="payment/reversal of invoice 322756's charge -- set aside, not an exception"),
+                self._row(2, "9559776", "Not reconciled", 112.77,
+                          note="set aside: invoice 9559776's result is on line 181 -- this line is a reprint/payment of it"),
+                self._row(3, "X", "Not reconciled", 5.0, note="set aside by this vendor's line selection rule (reprint/duplicate)"),
+                self._row(4, "Y", "Matched", 5.0)]
+        reasons = [r["reason"] for r in sp.recon_view(rows)["rows"]]
+        self.assertEqual(reasons, ["Payment/reversal of invoice 322756's charge", "Reprint/payment of line 181",
+                                   "Reprint or duplicate (vendor rule)", None])
+
+    def test_every_stored_note_has_a_plain_reason(self):
+        self.assertEqual(sp.set_aside_reason("exact duplicate of another line on this statement -- counted once"),
+                         "Duplicate of another line, counted once")
+        self.assertEqual(sp.set_aside_reason("payment line closing a charge on the same invoice -- set aside before matching"),
+                         "Payment closing this invoice's charge")
+        self.assertEqual(sp.set_aside_reason("not checked against NetSuite on its own (backfilled from the stored results)"),
+                         "Not checked on its own")
+        self.assertEqual(sp.set_aside_reason("an unknown note"), "an unknown note")
+        self.assertIsNone(sp.set_aside_reason(None))
+
     def test_a_manual_match_is_a_resolved_exception(self):
         # As on the Exceptions page ("Reconciled · matches ..."): found, then resolved.
         out = sp.recon_view([self._row(1, "338630", "Matched manually", 144.96, exc="E1", source="manual",
@@ -329,6 +365,24 @@ class TestPages(unittest.TestCase):
         self.assertIn("Line-by-line against NetSuite", html)
         self.assertIn("Not in NetSuite", html)
         self.assertIn('href="/exceptions/Conicelli%20Toyota?statement_id=S1"', html)
+
+    def test_detail_offers_the_pdf_in_a_new_tab(self):
+        # Same link and fallbacks as the Exceptions page (2026-10-27).
+        intake = {**_intake(), "validation_attempts": [], "primary_computed": None, "previous_balance": None}
+        with mock.patch("web.queries.get_statement_pdf",
+                        lambda sid: {"mailbox_blob_path": "mailbox/x.pdf", "original_filename": "COLLund0926.pdf"}):
+            html = self._detail(intake, None)
+        bar = html.split('<div class="topbar-actions">')[1].split("</div>")[0]
+        self.assertIn('href="/statements/S1/COLLund0926.pdf" target="_blank" rel="noopener"', bar)
+        self.assertIn("View PDF", bar)
+
+    def test_detail_greys_the_pdf_out_when_there_is_no_copy(self):
+        intake = {**_intake(), "validation_attempts": [], "primary_computed": None, "previous_balance": None}
+        with mock.patch("web.queries.get_statement_pdf", lambda sid: None):
+            html = self._detail(intake, None)
+        bar = html.split('<div class="topbar-actions">')[1].split("</div>")[0]
+        self.assertIn('pdf-btn is-disabled', bar)
+        self.assertNotIn("/statements/", bar)
 
     def test_detail_for_a_validation_stop(self):
         intake = {**_intake(status="mismatch", diff=45.0), "validation_attempts": [], "primary_computed": None,

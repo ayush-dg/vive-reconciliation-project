@@ -71,11 +71,11 @@ class ClientConstructionTests(unittest.TestCase):
 
 
 _PROD_ENV = {
-    "PROD_ACCOUNT_ID": "7321761",
-    "PROD_CONSUMER_KEY": "pck",
-    "PROD_CONSUMER_SECRET": "pcs",
-    "PROD_TOKEN_ID": "pti",
-    "PROD_TOKEN_SECRET": "pts",
+    "NETSUITE_CONNECT_ACCOUNT_ID": "7321761",
+    "NETSUITE_CONNECT_CONSUMER_KEY": "pck",
+    "NETSUITE_CONNECT_CONSUMER_SECRET": "pcs",
+    "NETSUITE_CONNECT_TOKEN_ID": "pti",
+    "NETSUITE_CONNECT_TOKEN_SECRET": "pts",
 }
 _BOTH = dict(_FULL_ENV, **_PROD_ENV)
 
@@ -86,10 +86,10 @@ def _client(env, session=None):
 
 
 class EnvironmentSwitchTests(unittest.TestCase):
-    """NETSUITE_ACCOUNT_ID alone decides sandbox or production."""
+    """NETSUITE_WRITEBACK_ACCOUNT_ID alone decides sandbox or production."""
 
     def test_a_sandbox_id_selects_the_sandbox_and_its_credentials(self):
-        client = _client(dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761-sb1"))
+        client = _client(dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761-sb1"))
         self.assertEqual(client.environment.name, "sandbox")
         self.assertFalse(client.environment.is_production)
         self.assertEqual(client.base_url, "https://7321761-sb1.suitetalk.api.netsuite.com/services/rest")
@@ -98,7 +98,7 @@ class EnvironmentSwitchTests(unittest.TestCase):
         self.assertEqual(client.environment.exception_list_table, "customlist_exception")
 
     def test_a_plain_id_selects_production_and_its_credentials(self):
-        client = _client(dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761"))
+        client = _client(dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761"))
         self.assertTrue(client.environment.is_production)
         self.assertEqual(client.base_url, "https://7321761.suitetalk.api.netsuite.com/services/rest")
         self.assertEqual(client.realm, "7321761")
@@ -110,11 +110,11 @@ class EnvironmentSwitchTests(unittest.TestCase):
     def test_either_sandbox_spelling_works(self):
         for raw in ("7321761-sb1", "7321761_SB1", ' "7321761-SB1" '):
             with self.subTest(raw=raw):
-                env = dict(_BOTH, NETSUITE_ACCOUNT_ID=raw, SANDBOX_ACCOUNT_ID="7321761_SB1")
+                env = dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID=raw, SANDBOX_ACCOUNT_ID="7321761_SB1")
                 self.assertEqual(_client(env).domain_id, "7321761-sb1")
 
     def test_with_nothing_selected_it_is_the_sandbox(self):
-        client = _client(_BOTH)          # NETSUITE_ACCOUNT_ID not set
+        client = _client(_BOTH)          # NETSUITE_WRITEBACK_ACCOUNT_ID not set
         self.assertEqual(client.environment.name, "sandbox")
         self.assertEqual(client._auth.client.client_key, "ck")
 
@@ -125,22 +125,22 @@ class EnvironmentSwitchTests(unittest.TestCase):
     def test_ambiguous_account_ids_are_refused(self):
         for bad in ("sb1", "7321761-sb", "7321761-rp1", "7321761-sb1-extra", "acme", "7321761 1", "7321761-"):
             with self.subTest(bad=bad), self.assertRaises(NetSuiteConfigError):
-                _client(dict(_BOTH, NETSUITE_ACCOUNT_ID=bad))
+                _client(dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID=bad))
 
     def test_production_without_its_own_credentials_is_refused(self):
         with self.assertRaises(NetSuiteConfigError) as ctx:
-            _client(dict(_FULL_ENV, NETSUITE_ACCOUNT_ID="7321761"))   # only the sandbox keys exist
-        self.assertIn("PROD_", str(ctx.exception))
+            _client(dict(_FULL_ENV, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761"))   # only the sandbox keys exist
+        self.assertIn("NETSUITE_CONNECT_", str(ctx.exception))
 
     def test_a_credential_set_must_belong_to_the_account_selected(self):
         cases = [
-            dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761", PROD_ACCOUNT_ID="7321761-sb1"),   # sandbox id in the prod slot
-            dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761", PROD_ACCOUNT_ID="9999999"),       # another account
-            dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761-sb1", SANDBOX_ACCOUNT_ID="7321761"),  # prod id in the sandbox slot
-            dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761-sb1", SANDBOX_ACCOUNT_ID="7321761-sb2"),
+            dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761", NETSUITE_CONNECT_ACCOUNT_ID="7321761-sb1"),   # sandbox id in the prod slot
+            dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761", NETSUITE_CONNECT_ACCOUNT_ID="9999999"),       # another account
+            dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761-sb1", SANDBOX_ACCOUNT_ID="7321761"),  # prod id in the sandbox slot
+            dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761-sb1", SANDBOX_ACCOUNT_ID="7321761-sb2"),
         ]
         for env in cases:
-            with self.subTest(env=(env["NETSUITE_ACCOUNT_ID"], env["PROD_ACCOUNT_ID"], env["SANDBOX_ACCOUNT_ID"])):
+            with self.subTest(env=(env["NETSUITE_WRITEBACK_ACCOUNT_ID"], env["NETSUITE_CONNECT_ACCOUNT_ID"], env["SANDBOX_ACCOUNT_ID"])):
                 with self.assertRaises(NetSuiteConfigError):
                     _client(env)
 
@@ -155,15 +155,15 @@ class ProductionWritesNeedArmingTests(unittest.TestCase):
 
     def test_production_reads_work_without_the_flag(self):
         session = self._session()
-        client = _client(dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761"), session)
+        client = _client(dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761"), session)
         self.assertEqual(client.suiteql("SELECT 1"), [])
         session.request.assert_called_once()
 
     def test_production_writes_are_blocked_without_the_flag_and_nothing_is_sent(self):
         from src.netsuite.guard import WriteBlocked
         session = self._session()
-        client = _client(dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761"), session)
-        with mock.patch.dict(os.environ, dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761"), clear=True):
+        client = _client(dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761"), session)
+        with mock.patch.dict(os.environ, dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761"), clear=True):
             with self.assertRaises(WriteBlocked):
                 client.patch_record("vendorbill", "500", {"custbody_reconciled": True})
             with self.assertRaises(WriteBlocked):
@@ -178,7 +178,7 @@ class ProductionWritesNeedArmingTests(unittest.TestCase):
         for value in ("", "false", "1", "yes", "TRUEISH"):
             with self.subTest(value=value):
                 session = self._session()
-                env = dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761", NETSUITE_PROD_WRITES_ENABLED=value)
+                env = dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761", NETSUITE_WRITEBACK_ENABLED=value)
                 client = _client(env, session)
                 with mock.patch.dict(os.environ, env, clear=True), self.assertRaises(WriteBlocked):
                     client.patch_record("vendorbill", "500", {"custbody_reconciled": True})
@@ -187,7 +187,7 @@ class ProductionWritesNeedArmingTests(unittest.TestCase):
     def test_the_flag_arms_production_but_the_allowlist_still_applies(self):
         from src.netsuite.guard import WriteBlocked
         session = self._session()
-        env = dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761", NETSUITE_PROD_WRITES_ENABLED="true")
+        env = dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761", NETSUITE_WRITEBACK_ENABLED="true")
         client = _client(env, session)
         with mock.patch.dict(os.environ, env, clear=True):
             client.patch_record("vendorbill", "500", {"custbody_reconciled": True})
@@ -198,7 +198,7 @@ class ProductionWritesNeedArmingTests(unittest.TestCase):
 
     def test_the_sandbox_never_needs_the_flag(self):
         session = self._session()
-        env = dict(_BOTH, NETSUITE_ACCOUNT_ID="7321761-sb1")
+        env = dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID="7321761-sb1")
         client = _client(env, session)
         with mock.patch.dict(os.environ, env, clear=True):
             client.patch_record("vendorbill", "500", {"custbody_reconciled": True})
@@ -217,7 +217,7 @@ class ProductionWritesNeedArmingTests(unittest.TestCase):
 
         for account, table in (("7321761-sb1", "customlist_exception"), ("7321761", "customlist673")):
             with self.subTest(account=account):
-                ns = Ns(_client(dict(_BOTH, NETSUITE_ACCOUNT_ID=account)).environment)
+                ns = Ns(_client(dict(_BOTH, NETSUITE_WRITEBACK_ACCOUNT_ID=account)).environment)
                 self.assertEqual(wb.fetch_exception_list_ids(ns), {"Amount differs": "1"})
                 self.assertIn(f"FROM {table}", ns.queries[0])
 

@@ -70,6 +70,9 @@ def _finish(card, extraction, validation, reconciliation, note, tone):
     else:
         card["status"] = "ok"
     card["failed"] = card["status"] == "failed"
+    # Which stages failed (2026-10-27): the list page's "Failed" dropdown
+    # filters on any stage or one of them.
+    card["failed_stages"] = [s["name"].lower() for s in card["stages"] if s["state"] == "fail"]
     card["has_exceptions"] = reconciliation["state"] == "warn"
     return card
 
@@ -220,6 +223,29 @@ def _same_invoice(line_inv, result_inv, exact_only=False) -> bool:
     return a == b or (not exact_only and b.startswith(a + "-"))
 
 
+_SET_ASIDE_REASONS = (
+    # (pattern in the stored note, plain reason shown on the line) -- 2026-10-27.
+    (re.compile(r"payment/reversal of invoice (.+?)'s charge"), "Payment/reversal of invoice {0}'s charge"),
+    (re.compile(r"payment line closing a charge"), "Payment closing this invoice's charge"),
+    (re.compile(r"line selection rule"), "Reprint or duplicate (vendor rule)"),
+    (re.compile(r"exact duplicate of another line"), "Duplicate of another line, counted once"),
+    (re.compile(r"result is on line (\d+)"), "Reprint/payment of line {0}"),
+    (re.compile(r"not checked against NetSuite on its own"), "Not checked on its own"),
+)
+
+
+def set_aside_reason(note):
+    """A set-aside line's stored note (the matcher's or the backfill's) in
+    short plain words for the line list; an unrecognised note as written."""
+    if not note:
+        return None
+    for pattern, text in _SET_ASIDE_REASONS:
+        found = pattern.search(note)
+        if found:
+            return text.format(*found.groups())
+    return note
+
+
 # recon table status -> (filter group, label) for the Reconciliation tab.
 _RECON_GROUPS = {
     "Matched": ("matched", "Matched"),
@@ -262,6 +288,7 @@ def recon_view(recon_rows: list) -> dict:
             "amount": _num(r.get("line_amount")), "netsuite_amount": _num(r.get("netsuite_amount")),
             "difference": _num(r.get("difference")), "status": group, "label": label,
             "note": r.get("note") if group in ("set_aside", "resolved") or r.get("source") == "manual" else None,
+            "reason": set_aside_reason(r.get("note")) if group == "set_aside" else None,
             "by": who, "at": str(r.get("matched_at") or "")[:10] if who else None,
             "shared": False, "invoice_lines": 1,
         })
@@ -355,6 +382,7 @@ def line_results(lines: list, matched: list, exceptions: list, set_aside: dict =
             "line_number": line.get("line_number"), "invoice_number": inv, "amount": amount,
             "netsuite_amount": ns, "difference": round(stmt - ns, 2) if stmt is not None and ns is not None else None,
             "status": status, "label": label, "note": set_aside.get(line.get("line_number")),
+            "reason": set_aside_reason(set_aside.get(line.get("line_number"))) if status == "set_aside" else None,
             "shared": shared and bool(inv) and per_invoice.get(inv, 0) > 1, "invoice_lines": per_invoice.get(inv, 0),
         })
 

@@ -20,11 +20,19 @@ text layer are left alone (orientation only matters to the vision read of a
 scan), and any failure -- no tesseract binary, no OSD data, an unreadable page,
 a low-confidence guess -- leaves the PDF exactly as it was: this step can only
 help, never block an extraction.
+
+A PDF of more than LONG_PDF_PAGES pages is checked within a time budget
+(2026-10-25): the 13- and 16-page scans Berlin City and NYE 9-4-26 took 25-33
+s here before the AI call (an estimated 4-18 min on dev, where both hit the
+30-minute worker cap). Pages the budget does not reach are left as they are,
+like any page whose detection fails. Up to LONG_PDF_PAGES pages nothing
+changes.
 """
 
 import os
 import re
 import tempfile
+import time
 
 # Below this OSD orientation confidence the guess is ignored -- a sparse or
 # noisy page can produce a spurious rotation, and leaving a correctly
@@ -33,18 +41,25 @@ MIN_ORIENTATION_CONFIDENCE = 2.0
 # A page with at least this much extractable text has a real text layer.
 TEXT_LAYER_MIN_CHARS = 40
 MAX_PAGES_CHECKED = 20
+# The default page cap of the PDF checks (src/validation/pdf_row_match.MAX_PAGES);
+# a raised VIVE_PDF_CHECK_MAX_PAGES does not change it.
+LONG_PDF_PAGES = 12
+LONG_PDF_BUDGET_SECONDS = 30.0
 
 
-def _osd_rotation(page) -> int:
+def _osd_rotation(page, timeout: float = 0) -> int:
     """Clockwise degrees (0/90/180/270) this rendered page needs to be
-    upright, or 0 when unknown or below MIN_ORIENTATION_CONFIDENCE."""
+    upright, or 0 when unknown or below MIN_ORIENTATION_CONFIDENCE.
+    timeout (seconds, 0 = none) is passed to Tesseract."""
     import pytesseract
     from PIL import Image
     import pymupdf
+    from src.ai.ocr_extractor import apply_tesseract_thread_limit
 
+    apply_tesseract_thread_limit()
     pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2), colorspace=pymupdf.csGRAY)
     image = Image.frombytes("L", (pix.width, pix.height), pix.samples)
-    osd = pytesseract.image_to_osd(image, config="--psm 0")
+    osd = pytesseract.image_to_osd(image, config="--psm 0", timeout=timeout)
     rotate = re.search(r"Rotate:\s*(\d+)", osd)
     confidence = re.search(r"Orientation confidence:\s*([\d.]+)", osd)
     if not rotate or not confidence or float(confidence.group(1)) < MIN_ORIENTATION_CONFIDENCE:
@@ -66,13 +81,21 @@ def upright_copy(pdf_path: str):
 
     rotations = {}
     try:
+        deadline = time.monotonic() + LONG_PDF_BUDGET_SECONDS if doc.page_count > LONG_PDF_PAGES else None
         for index, page in enumerate(doc):
             if index >= MAX_PAGES_CHECKED:
                 break
             if len(page.get_text().strip()) >= TEXT_LAYER_MIN_CHARS:
                 continue
+            if deadline is not None and time.monotonic() >= deadline:
+                print(f"  [Orientation] {LONG_PDF_BUDGET_SECONDS:.0f} s budget for a {doc.page_count}-page PDF "
+                      f"used up at page {index + 1} -- the rest left as they are")
+                break
             try:
-                needed = _osd_rotation(page)
+                if deadline is None:
+                    needed = _osd_rotation(page)
+                else:
+                    needed = _osd_rotation(page, timeout=max(1.0, deadline - time.monotonic()))
             except Exception as e:
                 print(f"  [Orientation] page {index + 1}: detection unavailable ({type(e).__name__}) -- left as is")
                 continue

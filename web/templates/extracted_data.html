@@ -8,6 +8,14 @@
     <span>/</span>
     <span style="color:var(--text);font-weight:500">{{ job.pdf_filename }}</span>
   </div>
+  {# The statement's PDF in a new tab, as on the Exceptions page (2026-10-28) -- greyed out when no copy exists. #}
+  <div class="topbar-actions">
+    {% if pdf_url %}
+    <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-btn" title="Open the statement PDF in a new tab"><svg class="icon"><use href="#i-file"/></svg>View PDF</a>
+    {% else %}
+    <span class="pdf-btn is-disabled" aria-disabled="true" title="PDF not available"><svg class="icon"><use href="#i-file"/></svg>View PDF</span>
+    {% endif %}
+  </div>
 </div>
 {% endblock %}
 

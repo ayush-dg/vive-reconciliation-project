@@ -13,7 +13,7 @@ a page printing "Page k of N" (k > 1) continues the block of page k-1 and
 must repeat the same Total Amount Due if it prints one. Any other page
 (Lithia's terms pages) belongs to no block. It passes only if ALL hold:
   - every page has a text layer (a scan is not applicable), at most
-    MAX_PAGES pages, and two or more blocks;
+    the PDF checks' page cap (pdf_row_match.max_pages()), and two or more blocks;
   - every block prints its Total Amount Due, read from the PDF's own words:
     the one amount printed directly under the label, or after it on the
     same line;
@@ -208,8 +208,8 @@ def check_pdf_account_blocks(rows, pdf_path, computed):
     try:
         import pdfplumber
         with pdfplumber.open(pdf_path) as pdf:
-            if len(pdf.pages) > prm.MAX_PAGES:
-                return prm._not_applicable(f"{len(pdf.pages)} pages (cap {prm.MAX_PAGES})")
+            if len(pdf.pages) > prm.max_pages():
+                return prm._not_applicable(f"{len(pdf.pages)} pages (cap {prm.max_pages()})")
             scans = [i + 1 for i, page in enumerate(pdf.pages)
                      if len(prm._text_layer_words(page)) < prm.MIN_TEXT_WORDS]
     except Exception as e:
