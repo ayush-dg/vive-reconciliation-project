@@ -163,14 +163,15 @@ class TestAgingDisplay(unittest.TestCase):
 
         _insert_gold_summary(self.execute_sql, statement_id="STMT-2", vendor_name="Vendor Two")
 
-    def test_shows_open_for_days_and_escalate_button_when_not_escalated(self):
+    def test_shows_open_for_days_and_no_escalate_button(self):
+        # The Escalate button was removed from the page on 2026-10-28.
         _insert_gold_exception(self.execute_sql, statement_id="STMT-2", exception_id="EXC-1",
                                 invoice_number="INV-1", date_raised=_raised_days_ago(3))
 
         resp = self.client.get("/exceptions/Vendor%20Two")
 
         self.assertIn("Open for 3 days", resp.text)
-        self.assertIn("Escalate", resp.text)
+        self.assertNotIn("/escalate", resp.text)
         self.assertNotIn("Escalated", resp.text)
 
     def test_shows_escalated_message_instead_of_button_once_escalated(self):

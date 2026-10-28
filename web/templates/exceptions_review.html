@@ -128,16 +128,10 @@
         <span class="badge {{ 'badge-aged' if selected.days_open >= 30 else 'badge-neutral' }}" style="margin-left:8px">Open for {{ selected.days_open }} day{{ "s" if selected.days_open != 1 }}</span>
         {% endif %}
       </span>
+      {# The Escalate button was removed on 2026-10-28; an exception escalated
+         before then still says so. #}
       {% if selected.escalation_status == 'ESCALATED' %}
       <span class="badge badge-danger"><svg class="icon" style="width:12px;height:12px"><use href="#i-flag"/></svg>Escalated {{ selected.days_since_escalated }} day{{ "s" if selected.days_since_escalated != 1 }} ago</span>
-      {% else %}
-      <form method="post" action="/exceptions/{{ vendor_url_name }}/escalate" style="margin:0">
-        <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
-        <input type="hidden" name="filter" value="{{ filter }}">
-        <input type="hidden" name="sort" value="{{ sort }}">
-        <input type="hidden" name="statement_id" value="{{ statement.statement_id if statement else '' }}">
-        <button type="submit" class="btn-ghost"><svg class="icon" style="width:13px;height:13px"><use href="#i-flag"/></svg> Escalate</button>
-      </form>
       {% endif %}
     </div>
     <div class="sec-label" style="margin-top:6px">Invoice details</div>
@@ -221,10 +215,11 @@
        the page opens, pre-filled for this exception, under the "NetSuite
        record" preview and independent of it: the preview only ever appears
        for Amount Mismatch, while this covers every reason that means "did
-       not tie out". It sits OUTSIDE the action form below, so Enter in its
-       boxes can never submit Accept; nothing in it posts or resolves
-       anything -- Accept/Reject/Escalate remain the only way to close an
-       exception. Wired up by static/app.js. #}
+       not tie out". It is not inside any form, so Enter in its boxes never
+       submits anything; nothing in it posts or resolves anything -- Accept
+       as match, below it, is the only way to close an exception from this
+       page (Accept/Reject/Escalate were removed 2026-10-28). Wired up by
+       static/app.js. #}
     {% if selected.exception_reason in searchable_reasons %}
     <section class="ns-inline" id="nsPanel" aria-labelledby="nsPanelTitle"
              data-vendor-id="{{ selected.vendor_id or '' }}"
