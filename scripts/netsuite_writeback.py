@@ -151,7 +151,7 @@ def _run_revert(ns, title: str, actions: list, apply: bool, statement_id: str) -
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Preview, or with --apply write, the NetSuite write-back (sandbox or production, "
-                    "decided by NETSUITE_ACCOUNT_ID).")
+                    "decided by NETSUITE_WRITEBACK_ACCOUNT_ID).")
     parser.add_argument("--statement-id")
     parser.add_argument("--revert", dest="revert_log", help="Undo the writes recorded in this log file")
     parser.add_argument("--revert-statement", dest="revert_statement", metavar="STATEMENT_ID",

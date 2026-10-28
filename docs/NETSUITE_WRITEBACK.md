@@ -2,7 +2,7 @@
 
 After a statement is reconciled, its result is written back into NetSuite so AP
 sees it on the bill itself. **Which account is decided by one setting,
-`NETSUITE_ACCOUNT_ID`** (see Configuration): `7321761-sb1` is the sandbox, `7321761` is production. The write-back reads the matcher's saved results
+`NETSUITE_WRITEBACK_ACCOUNT_ID`** (see Configuration): `7321761-sb1` is the sandbox, `7321761` is production. The write-back reads the matcher's saved results
 (`silver.recon_matched_invoices`, `silver.recon_exceptions`), finds each invoice
 in NetSuite, and updates its status. It never re-matches anything.
 
@@ -26,7 +26,7 @@ matching succeeds. It is best-effort: it never fails a job. It is **off unless**
 
 | File | Role |
 |---|---|
-| `src/netsuite/client.py` | OAuth1 (TBA) REST + SuiteQL client; picks sandbox or production from `NETSUITE_ACCOUNT_ID` |
+| `src/netsuite/client.py` | OAuth1 (TBA) REST + SuiteQL client; picks sandbox or production from `NETSUITE_WRITEBACK_ACCOUNT_ID` |
 | `src/netsuite/writeback.py` | planning, applying (with read-back), revert, file logs |
 | `src/netsuite/guard.py` | write allowlist, and the "nothing else changed" key-field check |
 | `src/netsuite/log_store.py` | saves every run to the database |
@@ -40,11 +40,10 @@ matching succeeds. It is best-effort: it never fails a job. It is **off unless**
 
 | Variable | Meaning |
 |---|---|
-| `NETSUITE_ACCOUNT_ID` | **The switch.** `7321761-sb1` (or `_SB1`) = sandbox, using `SANDBOX_*`; `7321761` (digits only) = production, using `PROD_*`; anything else is refused. Unset, it falls back to `SANDBOX_ACCOUNT_ID` (so an unconfigured setup is always the sandbox) |
+| `NETSUITE_WRITEBACK_ACCOUNT_ID` | **The switch.** `7321761-sb1` (or `_SB1`) = sandbox, using `SANDBOX_*`; `7321761` (digits only) = production, using `NETSUITE_CONNECT_*` (the production keys already in the app settings); anything else is refused. Unset, it falls back to `SANDBOX_ACCOUNT_ID` (so an unconfigured setup is always the sandbox) |
 | `SANDBOX_ACCOUNT_ID`, `_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_TOKEN_ID`, `_TOKEN_SECRET` | TBA credentials for the sandbox |
-| `PROD_ACCOUNT_ID`, `_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_TOKEN_ID`, `_TOKEN_SECRET` | TBA credentials for production. Each set's own `*_ACCOUNT_ID` must equal `NETSUITE_ACCOUNT_ID`, so sandbox keys can never be used on production (or the reverse) |
-| `NETSUITE_PROD_WRITES_ENABLED` | Production is **written to** only when this is `true` (reading never needs it). The sandbox is not affected |
-| `NETSUITE_WRITEBACK_ENABLED` | `true` turns the write-back on (default off) |
+| `NETSUITE_CONNECT_ACCOUNT_ID`, `_CONSUMER_KEY`, `_CONSUMER_SECRET`, `_TOKEN_ID`, `_TOKEN_SECRET` | TBA credentials for production. Each set's own `*_ACCOUNT_ID` must equal `NETSUITE_WRITEBACK_ACCOUNT_ID`, so sandbox keys can never be used on production (or the reverse) |
+| `NETSUITE_WRITEBACK_ENABLED` | `true` turns the write-back on (default off). It is the only on/off switch, and production is written to only when it is `true`; reading never needs it |
 | `NETSUITE_WRITEBACK_PDF_LINK` | `true` also writes the statement PDF link (default off) |
 | `SHAREPOINT_*` | the statement PDF is archived to SharePoint at intake; the link written is that file's SharePoint URL (see `.env.example`) |
 
@@ -113,7 +112,7 @@ because bills it already stamped are skipped.
 
 * If matching itself fails (or is skipped), no write-back is attempted and no run is recorded; the job's output line says why.
   A run is keyed by statement id (its `job_id` column is empty); join to `jobs.statement_id` to find the job.
-* Production needs: the `PROD_*` credentials, the same custom fields and Statement Line record (same ids), a role with Edit (not Full) on bills and credits and Allow Non-G/L Changes, and `NETSUITE_PROD_WRITES_ENABLED=true`. The CLI also needs `--confirm-account <id>` with `--apply`. The skip reason "not in sandbox" means "not in the NetSuite account in use".
+* Production needs: the `NETSUITE_CONNECT_*` credentials (the token's role must be able to write), the same custom fields and Statement Line record (same ids), a role with Edit (not Full) on bills and credits and Allow Non-G/L Changes, and `NETSUITE_WRITEBACK_ENABLED=true`. The CLI also needs `--confirm-account <id>` with `--apply`. The skip reason "not in sandbox" means "not in the NetSuite account in use".
 * The sandbox lacks bills created in production after its last refresh, so matched lines can be skipped as "not in sandbox".
 * Invoices whose matcher-saved number is not NetSuite's exact tranid (some vendors use alternate spellings) are skipped as not found in the sandbox.
 * The stored link is the PDF's SharePoint URL, shown as the whole address in a Hyperlink field; searches and portlets cannot show
