@@ -277,6 +277,23 @@ svg { display: block; }
 .pdf-pane-close { border: none; background: transparent; font-size: 20px; line-height: 1; color: var(--text-muted); cursor: pointer; padding: 0 4px; }
 .pdf-pane-close:hover { color: var(--text); }
 .pdf-pane-frame { flex: 1; width: 100%; border: 0; }
+/* Statement Processing detail with the PDF open (_pdf_pane.html,
+   data-collapse-sidebar): the left navigation shrinks to its icons, labels
+   moving to tooltips; closing the PDF brings it back. */
+.sidebar { transition: width .2s ease, padding .2s ease; }
+.app-shell.sidebar-collapsed .sidebar { width: 64px; padding: 22px 8px 18px; }
+.app-shell.sidebar-collapsed .sidebar-brand { justify-content: center; padding: 4px 0 24px; }
+.app-shell.sidebar-collapsed .sidebar-brand-icon { width: 40px; height: 40px; }
+.app-shell.sidebar-collapsed .sidebar-brand-text,
+.app-shell.sidebar-collapsed .nav-group-label { display: none; }
+.app-shell.sidebar-collapsed .nav-item { font-size: 0; justify-content: center; gap: 0; padding: 10px 0; }
+.app-shell.sidebar-collapsed .nav-item.active::before { left: -8px; }
+.app-shell.sidebar-collapsed .nav-dot { position: absolute; top: 6px; right: 10px; margin-left: 0; }
+.app-shell.sidebar-collapsed .sidebar-footer { padding: 14px 0 4px; }
+.app-shell.sidebar-collapsed .profile-toggle { padding: 10px 0; }
+.app-shell.sidebar-collapsed .profile-toggle > div { justify-content: center; }
+.app-shell.sidebar-collapsed .profile-toggle > div > div:last-child { display: none; }
+.app-shell.sidebar-collapsed .profile-dropdown { right: auto; min-width: 160px; }
 /* Exceptions review with the PDF open: a narrower exception list, so the detail keeps its room. */
 .pdf-split.pdf-open .detail-layout { grid-template-columns: 260px 1fr; }
 .pdf-btn.is-disabled:hover { background: var(--surface); }
@@ -545,6 +562,16 @@ select {
 .bulk-bar .bulk-total { font-weight: 700; font-family: var(--font-mono); }
 
 .list-scroll { max-height: 620px; overflow-y: auto; flex: 1; }
+/* Exceptions review (2026-10-28): the exception list stays in view under the
+   sticky topbar while the details scroll -- it used to scroll away with the
+   page, leaving its grey column empty beside a long NetSuite search. It is as
+   tall as the window and scrolls inside itself; the grid clips (rather than
+   hides) its overflow, because overflow:hidden would stop the list sticking.
+   --topbar-h is set by static/app.js. */
+.detail-layout { overflow: clip; align-items: start; background: var(--surface-sunk); }
+.detail-layout > .detail-list { position: sticky; top: var(--topbar-h, 84px); max-height: calc(100vh - var(--topbar-h, 84px)); border-right: none; }
+.detail-layout > .detail-list .list-scroll { max-height: none; min-height: 0; }
+.detail-layout > .detail-view-panel { align-self: stretch; background: var(--surface); border-left: 1px solid var(--border-strong); }
 .exception-row { display: block; padding: 14px 18px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .exception-row:hover { background: var(--steel-tint); }
 .exception-row.active, .exception-row.sel { background: var(--navy-tint); border-left: 3px solid var(--navy-2); }
@@ -717,6 +744,9 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
   .stat-grid, .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .upload-grid, .vendor-grid, .reports-layout { grid-template-columns: 1fr; }
   .detail-layout, .body-split { grid-template-columns: 1fr; display: block; }
+  /* Stacked: the exception list sits above the details, so it doesn't stick. */
+  .detail-layout > .detail-list { position: static; max-height: none; }
+  .detail-layout > .detail-list .list-scroll { max-height: 620px; }
   .field-grid { grid-template-columns: repeat(2, 1fr); }
 }
 

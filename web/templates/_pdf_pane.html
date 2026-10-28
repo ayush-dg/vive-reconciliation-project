@@ -31,6 +31,16 @@
     }
     pane.hidden = !open;
     pane.parentElement.classList.toggle("pdf-open", open);  // lets a page make room (style.css)
+    // A page that asks for it (data-collapse-sidebar on its .pdf-split):
+    // the left navigation shrinks to its icons while the PDF is open.
+    if (pane.parentElement.hasAttribute("data-collapse-sidebar")) {
+      var shell = document.querySelector(".app-shell");
+      if (shell) { shell.classList.toggle("sidebar-collapsed", open); }
+      document.querySelectorAll(".sidebar .nav-item").forEach(function (item) {
+        // The label is hidden, so it moves to the tooltip.
+        if (open) { item.title = item.textContent.trim(); } else { item.removeAttribute("title"); }
+      });
+    }
     btn.setAttribute("aria-expanded", String(open));
     btn.classList.toggle("is-open", open);
     btn.title = open ? "Hide the statement PDF" : "Show the statement PDF beside this page";

@@ -25,7 +25,8 @@
 {# The page and the statement PDF side by side (2026-10-28): the PDF panel
    is the right-hand column, hidden until View PDF opens it. #}
 {% block body %}
-<div class="pdf-split">
+{# data-collapse-sidebar: on this page the left navigation shrinks to its icons while the PDF is open. #}
+<div class="pdf-split" data-collapse-sidebar>
   <div class="content">{{ self.content() }}</div>
   {% include "_pdf_pane.html" %}
 </div>

@@ -1,3 +1,14 @@
+// The sticky topbar's height as --topbar-h (2026-10-28), for whatever sits
+// just under it -- Exceptions review's exception list (style.css).
+(function () {
+  function setTopbarHeight() {
+    const topbar = document.querySelector(".topbar");
+    if (topbar) { document.documentElement.style.setProperty("--topbar-h", topbar.offsetHeight + "px"); }
+  }
+  document.addEventListener("DOMContentLoaded", setTopbarHeight);
+  window.addEventListener("resize", setTopbarHeight);
+})();
+
 // Upload page: list every picked file in the file-card (multiple files are
 // supported), and show a brief "Queuing..." overlay while the upload
 // request is in flight — it returns as soon as files are saved and queued,
