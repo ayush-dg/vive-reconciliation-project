@@ -9,6 +9,8 @@ context (open exceptions count, shown as the nav-dot on "Exceptions").
 import hashlib
 import os
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -32,11 +34,37 @@ def require_login(request: Request) -> str:
     return user
 
 
-def sidebar_context(request: Request) -> dict:
+# The sidebar's two counts (the Exceptions and Review queue dots), kept for
+# SIDEBAR_COUNTS_TTL_SECONDS (default 30 min, 2026-10-29) instead of
+# recounted on every page: the open-exceptions count opens a new Fabric
+# connection each time (~0.5 s), on pages that have nothing to do with
+# exceptions too. A dot can lag a resolution by up to that long.
+_SIDEBAR_COUNTS = {"at": None, "values": None}
+_SIDEBAR_COUNTS_LOCK = threading.Lock()
+
+
+def _sidebar_counts_ttl() -> float:
+    try:
+        return float(os.getenv("SIDEBAR_COUNTS_TTL_SECONDS") or 1800)
+    except ValueError:
+        return 1800.0
+
+
+def _sidebar_counts() -> dict:
     from web.queries import get_open_recon_exceptions_count, get_pending_review_count
+    with _SIDEBAR_COUNTS_LOCK:
+        at, values = _SIDEBAR_COUNTS["at"], _SIDEBAR_COUNTS["values"]
+        if values is not None and time.monotonic() - at < _sidebar_counts_ttl():
+            return values
+        values = {"open_exceptions_count": get_open_recon_exceptions_count(),
+                  "pending_review_count": get_pending_review_count()}
+        _SIDEBAR_COUNTS.update(at=time.monotonic(), values=values)
+        return values
+
+
+def sidebar_context(request: Request) -> dict:
     return {
-        "open_exceptions_count": get_open_recon_exceptions_count(),
-        "pending_review_count": get_pending_review_count(),
+        **_sidebar_counts(),
         "user_email": request.session.get("user"),
         "user_name": request.session.get("user_name") or request.session.get("user") or "",
     }

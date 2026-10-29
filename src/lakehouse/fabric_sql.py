@@ -5,8 +5,13 @@ get_fabric_connection() in connection.py (out-of-band SQL_COPT_SS_ACCESS_TOKEN),
 just targeting the new service-principal-based Fabric workspace instead of
 the existing SQL-database-in-Fabric cut-over.
 """
+import logging
 import os
 import struct
+import threading
+import time
+
+logger = logging.getLogger(__name__)
 
 SQL_COPT_SS_ACCESS_TOKEN = 1256
 
@@ -69,16 +74,81 @@ def get_warehouse_connection():
     return _connect(os.environ["FABRIC_WAREHOUSE_NAME"])
 
 
+# Reused read connections (2026-10-29). Every page's queries used to open a
+# fresh Fabric connection per query (~0.3-1 s each, more after a quiet
+# spell); now execute_lakehouse_query()/execute_warehouse_query() take an
+# idle one from a small per-database pool and give it back after the query.
+# A connection idle for over _POOL_IDLE_SECONDS (under Azure's ~4 min
+# idle-drop of outbound connections) or older than _POOL_MAX_AGE_SECONDS is
+# closed rather than reused, and a query that fails on a reused connection is
+# retried once on a fresh one. Callers that hold their own connection
+# (get_*_connection(): matching, dbt, the vendor resolver) are unchanged, and
+# so is execute_warehouse_sql() (writes keep a connection of their own).
+_POOL_IDLE_SECONDS = 180
+_POOL_MAX_AGE_SECONDS = 1800
+_POOL_MAX_IDLE = 4
+_pools = {}  # database -> [(conn, opened_at, last_used), ...]
+_pool_lock = threading.Lock()
+
+
+def _close_quietly(conn) -> None:
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _take(database: str):
+    """(conn, opened_at, reused) -- an idle pooled connection still fit to
+    use, else a new one."""
+    now = time.monotonic()
+    stale = []
+    taken = None
+    with _pool_lock:
+        pool = _pools.setdefault(database, [])
+        while pool:
+            conn, opened_at, last_used = pool.pop()
+            if now - last_used < _POOL_IDLE_SECONDS and now - opened_at < _POOL_MAX_AGE_SECONDS:
+                taken = (conn, opened_at, True)
+                break
+            stale.append(conn)
+    for conn in stale:
+        _close_quietly(conn)
+    return taken or (_connect(database), time.monotonic(), False)
+
+
+def _give_back(database: str, conn, opened_at) -> None:
+    with _pool_lock:
+        pool = _pools.setdefault(database, [])
+        if len(pool) < _POOL_MAX_IDLE:
+            pool.append((conn, opened_at, time.monotonic()))
+            return
+    _close_quietly(conn)
+
+
+def _pooled_query(database: str, sql, params) -> list:
+    for attempt in (1, 2):
+        conn, opened_at, reused = _take(database)
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params or [])
+            cols = [c[0] for c in cur.description]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            _close_quietly(conn)
+            if not reused or attempt == 2:
+                raise
+            logger.warning("Fabric query failed on a reused connection -- retrying on a new one", exc_info=True)
+            continue
+        _give_back(database, conn, opened_at)
+        return rows
+
+
 def execute_lakehouse_query(sql, params=None) -> list:
     """Fabric-Lakehouse-backed equivalent of execute_warehouse_query() --
-    same signature, same return shape (list of dicts). A fresh connection
-    per call (no pooling) -- these are low-frequency admin/UI reads, not a
-    hot path."""
-    conn = get_lakehouse_connection()
-    cur = conn.cursor()
-    cur.execute(sql, params or [])
-    cols = [c[0] for c in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
+    same signature, same return shape (list of dicts), on a reused
+    connection (see _pooled_query())."""
+    return _pooled_query(os.environ["FABRIC_LAKEHOUSE_NAME"], sql, params)
 
 
 def execute_warehouse_query(sql, params=None) -> list:
@@ -86,13 +156,8 @@ def execute_warehouse_query(sql, params=None) -> list:
     src.lakehouse.connection.execute_query() -- same signature, same
     return shape (list of dicts) -- so callers written against the local
     Azure SQL/SQLite backend can switch to this with a one-line import
-    change. A fresh connection per call (no pooling) -- these are
-    low-frequency admin/UI reads, not a hot path."""
-    conn = get_warehouse_connection()
-    cur = conn.cursor()
-    cur.execute(sql, params or [])
-    cols = [c[0] for c in cur.description]
-    return [dict(zip(cols, row)) for row in cur.fetchall()]
+    change. On a reused connection (see _pooled_query())."""
+    return _pooled_query(os.environ["FABRIC_WAREHOUSE_NAME"], sql, params)
 
 
 def execute_warehouse_sql(sql, params=None) -> None:

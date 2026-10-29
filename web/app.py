@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.deps import LoginRequired
@@ -42,8 +43,41 @@ app.add_middleware(
     secret_key=os.getenv("WEB_SESSION_SECRET", "vive-dev-secret-change-me"),
 )
 
+class _GZipExceptStatementPdfs:
+    """Pages and their data compressed (2026-10-29: Statement Processing was
+    353 KB, Exceptions 288 KB, sent as-is), except the statement PDF routes
+    (/statements/...) -- PDFs are already compressed, and the side PDF
+    viewer streams them as they are."""
+
+    def __init__(self, app):
+        self.app = app
+        self.gzip = GZipMiddleware(app, minimum_size=1000)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith("/statements/"):
+            await self.app(scope, receive, send)
+        else:
+            await self.gzip(scope, receive, send)
+
+
+app.add_middleware(_GZipExceptStatementPdfs)
+
+
+class _VersionedStaticFiles(StaticFiles):
+    """A versioned static file (static_url()'s ?v=<content hash>, web/deps.py)
+    is cached by the browser for a year (2026-10-29): its URL changes
+    whenever its content does, so it never needs re-checking. Unversioned
+    URLs keep the default (re-checked)."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if b"v=" in (scope.get("query_string") or b"") and response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", _VersionedStaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.exception_handler(LoginRequired)
