@@ -19,7 +19,6 @@ See RULES.md RULE-13 — Phase 3 switch to Azure SQL as the production backend.
 import sqlite3
 import os
 import re
-import threading
 import time
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "lakehouse", "reconciliation.db")
@@ -272,96 +271,18 @@ def execute_sql(sql, params=None):
     return _run_with_retry(_run)
 
 
-# Reused Azure SQL read connections (2026-10-29). execute_query() used to
-# open and close a connection per call -- measured locally ~0.24 s to open
-# and ~0.47 s to close, on top of the query; the Exceptions list made 13 such
-# calls. Reads now take an idle connection from a small pool (autocommit, so
-# nothing is left open between uses) and give it back. One idle for over
-# _READ_POOL_IDLE_SECONDS (under Azure's ~4 min idle-drop) or older than
-# _READ_POOL_MAX_AGE_SECONDS is closed instead; a query that fails on a reused
-# connection is retried once on a fresh one. execute_sql() (writes) and the
-# SQLite path are unchanged.
-_READ_POOL_IDLE_SECONDS = 180
-_READ_POOL_MAX_AGE_SECONDS = 1800
-_READ_POOL_MAX_IDLE = 4
-_read_pool = []  # [(conn, opened_at, last_used), ...]
-_read_pool_lock = threading.Lock()
-
-
-def _close_quietly(conn) -> None:
-    try:
-        conn.close()
-    except Exception:
-        pass
-
-
-def _take_read_connection():
-    """(conn, opened_at, reused): an idle pooled Azure SQL connection still
-    fit to use, else a new autocommit one."""
-    now = time.monotonic()
-    stale, taken = [], None
-    with _read_pool_lock:
-        while _read_pool:
-            conn, opened_at, last_used = _read_pool.pop()
-            if now - last_used < _READ_POOL_IDLE_SECONDS and now - opened_at < _READ_POOL_MAX_AGE_SECONDS:
-                taken = (conn, opened_at, True)
-                break
-            stale.append(conn)
-    for conn in stale:
-        _close_quietly(conn)
-    if taken:
-        return taken
-    conn = get_connection()
-    conn.autocommit = True
-    return conn, time.monotonic(), False
-
-
-def _give_back_read_connection(conn, opened_at) -> None:
-    with _read_pool_lock:
-        if len(_read_pool) < _READ_POOL_MAX_IDLE:
-            _read_pool.append((conn, opened_at, time.monotonic()))
-            return
-    _close_quietly(conn)
-
-
-def _rows_as_dicts(cursor, rows) -> list:
-    columns = [col[0] for col in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]
-
-
 def execute_query(sql, params=None):
-    """Execute a SELECT and return all rows as list of dicts. On Azure SQL,
-    on a reused connection (see above); a failure on a reused one retries
-    once on a fresh connection, and that one retries a dropped connection
-    as before (_run_with_retry)."""
-    if not _using_azure_sql():
-        def _run_sqlite(conn):
-            cursor = conn.execute(sql, params or [])
-            return [dict(row) for row in cursor.fetchall()]
-        return _run_with_retry(_run_sqlite)
-
-    stmt = _translate_for_azure(sql)
-    conn, opened_at, reused = _take_read_connection()
-    try:
+    """Execute a SELECT and return all rows as list of dicts. Retries on a
+    dropped Azure SQL connection — see _run_with_retry."""
+    def _run(conn):
+        stmt = _translate_for_azure(sql) if _using_azure_sql() else sql
         cursor = conn.execute(stmt, params or [])
-        rows = _rows_as_dicts(cursor, cursor.fetchall())
-    except Exception as exc:
-        _close_quietly(conn)
-        dropped = _is_dropped_connection_error(exc)
-        if not reused and not dropped:
-            raise
-        if dropped:  # as before: wait, then a fresh connection
-            print("  Azure SQL connection dropped — retrying...")
-            time.sleep(CONNECTION_RETRY_WAIT_SECONDS)
-        else:
-            print("  Azure SQL read failed on a reused connection — retrying on a new one...")
-
-        def _run(fresh):
-            cursor = fresh.execute(stmt, params or [])
-            return _rows_as_dicts(cursor, cursor.fetchall())
-        return _run_with_retry(_run)
-    _give_back_read_connection(conn, opened_at)
-    return rows
+        rows = cursor.fetchall()
+        if _using_azure_sql():
+            columns = [col[0] for col in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        return [dict(row) for row in rows]
+    return _run_with_retry(_run)
 
 
 def execute_sql_fabric(sql, params=None):

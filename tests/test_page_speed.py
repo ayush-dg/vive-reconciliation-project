@@ -56,6 +56,8 @@ class SidebarCountsTests(unittest.TestCase):
 class _Cur:
     def __init__(self, conn):
         self.conn, self.description = conn, [("c",)]
+        conn.cursors.append(self)
+        self.closed = False
 
     def execute(self, sql, params):
         if self.conn.fail:
@@ -64,10 +66,13 @@ class _Cur:
     def fetchall(self):
         return [(1,)]
 
+    def close(self):
+        self.closed = True
+
 
 class _Conn:
     def __init__(self, fail=False):
-        self.fail, self.closed = fail, False
+        self.fail, self.closed, self.cursors = fail, False, []
 
     def cursor(self):
         return _Cur(self)
@@ -101,6 +106,8 @@ class FabricPoolTests(unittest.TestCase):
             self.assertEqual(fabric_sql.execute_warehouse_query("SELECT 1"), [{"c": 1}])
             self.now[0] += 10
         self.assertEqual(len(self.made), 1)
+        # Every cursor is closed before its connection goes back for another thread.
+        self.assertTrue(all(cur.closed for cur in self.made[0].cursors))
 
     def test_idle_connection_is_not_reused(self):
         fabric_sql.execute_warehouse_query("SELECT 1")
@@ -132,76 +139,6 @@ class FabricPoolTests(unittest.TestCase):
         fabric_sql.execute_lakehouse_query("SELECT 1")
         self.assertEqual(len(self.made), 2)
         self.assertEqual(sorted(fabric_sql._pools), ["lh", "wh"])
-
-
-class _SqlCursor:
-    description = [("c",)]
-
-    def fetchall(self):
-        return [(1,)]
-
-
-class _SqlConn:
-    def __init__(self):
-        self.closed, self.autocommit, self.fail = False, False, False
-
-    def execute(self, sql, params):
-        if self.fail:
-            raise RuntimeError("connection dropped")
-        return _SqlCursor()
-
-    def close(self):
-        self.closed = True
-
-
-class AzureSqlReadPoolTests(unittest.TestCase):
-    """execute_query() on Azure SQL reuses read connections (2026-10-29)."""
-
-    def setUp(self):
-        from src.lakehouse import connection
-        self.c = connection
-        connection._read_pool.clear()
-        self.addCleanup(connection._read_pool.clear)
-        self.made, self.now = [], [500.0]
-
-        def connect():
-            conn = _SqlConn()
-            self.made.append(conn)
-            return conn
-
-        for p in (mock.patch.object(connection, "_using_azure_sql", return_value=True),
-                  mock.patch.object(connection, "get_connection", side_effect=connect),
-                  mock.patch.object(connection.time, "monotonic", side_effect=lambda: self.now[0])):
-            p.start()
-            self.addCleanup(p.stop)
-
-    def test_reads_reuse_one_autocommit_connection(self):
-        for _ in range(5):
-            self.assertEqual(self.c.execute_query("SELECT 1"), [{"c": 1}])
-            self.now[0] += 10
-        self.assertEqual(len(self.made), 1)
-        self.assertTrue(self.made[0].autocommit)
-
-    def test_idle_connection_is_replaced(self):
-        self.c.execute_query("SELECT 1")
-        self.now[0] += self.c._READ_POOL_IDLE_SECONDS
-        self.c.execute_query("SELECT 1")
-        self.assertEqual(len(self.made), 2)
-        self.assertTrue(self.made[0].closed)
-
-    def test_failure_on_a_reused_connection_retries_on_a_new_one(self):
-        self.c.execute_query("SELECT 1")
-        self.made[0].fail = True
-        self.assertEqual(self.c.execute_query("SELECT 1"), [{"c": 1}])
-        self.assertEqual(len(self.made), 2)
-        self.assertTrue(self.made[0].closed)
-
-    def test_writes_still_use_their_own_connection(self):
-        self.c.execute_query("SELECT 1")
-        with mock.patch.object(_SqlConn, "commit", create=True):
-            self.c.execute_sql("UPDATE t SET x = 1")
-        self.assertEqual(len(self.made), 2)  # the write did not take the pooled read connection
-        self.assertTrue(self.made[1].closed)
 
 
 class OpenExceptionsGroupedTests(unittest.TestCase):

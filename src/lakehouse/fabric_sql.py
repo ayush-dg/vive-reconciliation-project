@@ -131,9 +131,14 @@ def _pooled_query(database: str, sql, params) -> list:
         conn, opened_at, reused = _take(database)
         try:
             cur = conn.cursor()
-            cur.execute(sql, params or [])
-            cols = [c[0] for c in cur.description]
-            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+            try:
+                cur.execute(sql, params or [])
+                cols = [c[0] for c in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+            finally:
+                # Closed here, on the thread that used it, before the
+                # connection can be handed to another thread (2026-10-29).
+                cur.close()
         except Exception:
             _close_quietly(conn)
             if not reused or attempt == 2:
