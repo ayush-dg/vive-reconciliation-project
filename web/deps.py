@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from web.netsuite_status import without_sandbox
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -315,6 +316,7 @@ templates.env.filters["eastern_day"] = eastern_day
 templates.env.filters["friendly_date"] = friendly_date
 templates.env.filters["friendly_error"] = friendly_error
 templates.env.filters["urlname"] = urlname
+templates.env.filters["without_sandbox"] = without_sandbox
 templates.env.filters["smart_title"] = smart_title
 
 

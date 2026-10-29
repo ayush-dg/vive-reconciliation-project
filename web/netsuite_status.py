@@ -14,6 +14,7 @@ for it, or it predates the log tables, and "not written" would be wrong.
 """
 
 import json
+import re
 
 # Badge classes already defined by the app's stylesheet.
 SUCCESS, WARNING, DANGER, NEUTRAL = "badge-success", "badge-warning", "badge-danger", "badge-neutral"
@@ -26,6 +27,12 @@ NAME = "NetSuite write-back"
 # Must equal src.netsuite.writeback.CAT_NOT_ATTEMPTED (a test checks); repeated
 # here so this module stays free of the write-back's heavy imports.
 NOT_ATTEMPTED = "not attempted (run stopped early)"
+
+
+def without_sandbox(text) -> str:
+    """Saved write-back reasons name "the sandbox" (written before production
+    write-back); shown to users as "NetSuite" so prod doesn't read as sandbox."""
+    return re.sub(r"\b(?:the )?sandbox\b", "NetSuite", text or "", flags=re.IGNORECASE)
 
 
 def _counts(run) -> dict:
@@ -43,7 +50,7 @@ def _tooltip(run, not_written: dict) -> str:
             parts.append(text.format(run[key]))
     if not_written:
         parts.append("not written: " + ", ".join(f"{n} {reason}" for reason, n in not_written.items()))
-    return "Whole statement: " + ("; ".join(parts) or "nothing to write")
+    return without_sandbox("Whole statement: " + ("; ".join(parts) or "nothing to write"))
 
 
 def _verdict(run) -> tuple:
@@ -72,7 +79,7 @@ def writeback_pill(run):
         detail = (run.get("error_message") or "").strip().splitlines()
         return {"css": DANGER, "color": COLOR[DANGER], "label": f"{NAME} · failed", "short": "Write-back · failed",
                 "ok": False,
-                "tooltip": detail[0][:160] if detail else "the write-back could not run",
+                "tooltip": without_sandbox(detail[0][:160]) if detail else "the write-back could not run",
                 "finished_at": run.get("finished_at")}
     if run.get("outcome") == "reverted":
         # The statement's NetSuite records were cleared after the write-back, so

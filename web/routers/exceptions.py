@@ -21,7 +21,7 @@ from urllib.parse import quote, unquote, urlencode
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
-from web.netsuite_status import writeback_pill
+from web.netsuite_status import without_sandbox, writeback_pill
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
 from web import time_window as tw
@@ -461,7 +461,7 @@ def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depe
         return _message(f"Not matched: {exc}")
     return _message(f"Invoice {exception['invoice_number']} matched to NetSuite "
                     f"{record['record_type'].lower()} {record.get('tranid')}. "
-                    f"NetSuite sandbox: {netsuite.get('status') or 'not written'}.")
+                    f"NetSuite: {without_sandbox(netsuite.get('status') or 'not written')}.")
 
 
 @router.post("/exceptions/{vendor_name}/undo-match")

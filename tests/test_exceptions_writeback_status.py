@@ -52,7 +52,7 @@ class PillRulesTests(unittest.TestCase):
     def test_lines_skipped_by_design_do_not_turn_a_clean_run_amber(self):
         pill = netsuite_status.writeback_pill(_run(not_written=9, not_written_counts='{"not in sandbox": 9}'))
         self.assertEqual(pill["css"], "badge-success")
-        self.assertIn("not written: 9 not in sandbox", pill["tooltip"])
+        self.assertIn("not written: 9 not in NetSuite", pill["tooltip"])
         self.assertTrue(pill["tooltip"].startswith("Whole statement: "))
 
     def test_a_locked_period_makes_it_amber(self):

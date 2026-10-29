@@ -810,5 +810,9 @@
   "ASBURY_AUTOMOTIVE_GROUP": {
     "entity_ids": ["203119"],
     "note": "Jaguar Land Rover Sudbury (203119). Added 2026-10-19 from HEBWorc0926.pdf (Asbury Automotive Group, Tekion layout, billed to Vive of Worcester): the statement groups its invoices by franchise ('Land Rover Sudbury') and NetSuite holds each franchise as its own vendor, so no vendor carries 'Asbury' in its name and name matching finds nothing. This covers ONLY the Land Rover Sudbury franchise: a statement listing another Asbury franchise needs that franchise's entity added here. The NetSuite tranid equals the printed invoice number as is (71-100428-2, $674.87 ties exactly)."
+  },
+  "BANKS_CHEVROLET-CADILLAC_BUICK-GMC": {
+    "entity_ids": ["239562"],
+    "note": "Banks Chevrolet Cadillac Buick GMC (239562) -- added 2026-10-29 from prod STMT-0CA7F62C: its bills tie out under 239562 once the CVW prefix is stripped (CVW994295 -> 994295 $42.92, CVW993160-x -> 993160-x) and its credits as CM + number (CMCVW991606 -> CM991606). NetSuite's name uses spaces where the statement uses hyphens, so it is pinned here instead of relying on name lookup."
   }
 }
