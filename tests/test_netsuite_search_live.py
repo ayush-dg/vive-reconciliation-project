@@ -120,6 +120,28 @@ class SourceSwitchTests(unittest.TestCase):
             self.assertIsNone(ns.fetch_record("credit", "4739106"))
         copy.assert_called_once()
 
+    def test_live_search_has_one_time_limit_for_both_tables(self):
+        # 2026-10-29: each query gets what is left of one search_timeout().
+        client = mock.Mock()
+        client.query.return_value = []
+        with mock.patch.dict(os.environ, {"NETSUITE_SEARCH_TIMEOUT_SECONDS": "20"}), \
+                mock.patch("src.netsuite.connect_client.get_shared_client", return_value=client):
+            ns._run_search_connect(["81232"], None, None, {"open"}, None, None, None, 100)
+        timeouts = [call.kwargs["timeout"] for call in client.query.call_args_list]
+        self.assertEqual(len(timeouts), 2)
+        self.assertTrue(0 < timeouts[1] <= timeouts[0] <= 20)
+
+    def test_a_timed_out_live_search_falls_back_to_the_copy(self):
+        from src.netsuite.connect_client import QueryTimeout
+        row = {"record_type": "Bill", "tranid": "3", "total": 5.0, "trandate": "2026-10-01"}
+        result = self._search(QueryTimeout("took over 25s"), lambda *a: [row])
+        self.assertEqual((result["source"], result["row_count"], result["error"]), ("fabric_fallback", 1, False))
+
+    def test_search_timeout_setting(self):
+        for value, expected in (("", 25), ("40", 40), ("soon", 25), ("0", 25)):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"NETSUITE_SEARCH_TIMEOUT_SECONDS": value}):
+                self.assertEqual(ns.search_timeout(), expected)
+
     def test_live_dates_are_turned_into_iso_text(self):
         from datetime import datetime
         client = mock.Mock()

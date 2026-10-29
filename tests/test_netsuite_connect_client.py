@@ -2,9 +2,9 @@
 tests/test_netsuite_connect_client.py
 
 Offline tests for src/netsuite/connect_client.py: settings, the one-time TBA
-password, the connection string, the read-only guard, and connection reuse /
-refresh / reconnect. No ODBC driver or NetSuite call is used -- connections
-are fakes.
+password, the connection string, the read-only guard, connection reuse /
+refresh / reconnect, the idle reconnect and the query timeout (2026-10-29).
+No ODBC driver or NetSuite call is used -- connections are fakes.
 """
 
 import base64
@@ -12,6 +12,8 @@ import hashlib
 import hmac
 import os
 import sys
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -19,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.netsuite.connect_client import (
     ConnectClient,
     ConnectConfigError,
+    QueryTimeout,
     ReadOnlyError,
     account_forms,
     build_password,
@@ -61,7 +64,13 @@ class SettingsTests(unittest.TestCase):
         cfg = load_config(_ENV)
         self.assertEqual(cfg["host"], "7321761.connect.api.netsuite.com")
         self.assertEqual(cfg["max_age_seconds"], 1800)
+        self.assertEqual(cfg["idle_seconds"], 60)
         self.assertEqual(cfg["account"], "7321761")
+
+    def test_idle_seconds_can_be_set(self):
+        self.assertEqual(load_config({**_ENV, "NETSUITE_CONNECT_IDLE_SECONDS": "30"})["idle_seconds"], 30)
+        with self.assertRaises(ConnectConfigError):
+            load_config({**_ENV, "NETSUITE_CONNECT_IDLE_SECONDS": "soon"})
 
     def test_host_driver_and_truststore_can_be_overridden(self):
         cfg = load_config({**_ENV, "NETSUITE_CONNECT_HOST": "h.example", "NETSUITE_CONNECT_DRIVER": "D",
@@ -112,6 +121,8 @@ class _Cursor:
 
     def execute(self, sql, params):
         self.conn.executed.append(sql)
+        if self.conn.hang is not None:
+            self.conn.hang.wait(5)  # a dead socket: waits until released (or 5s)
         if self.conn.fail_next:
             self.conn.fail_next -= 1
             raise RuntimeError("connection dropped")
@@ -121,8 +132,8 @@ class _Cursor:
 
 
 class _Conn:
-    def __init__(self, fail_next=0):
-        self.executed, self.closed, self.fail_next = [], False, fail_next
+    def __init__(self, fail_next=0, hang=None):
+        self.executed, self.closed, self.fail_next, self.hang = [], False, fail_next, hang
 
     def cursor(self):
         return _Cursor(self)
@@ -156,16 +167,18 @@ class ClientTests(unittest.TestCase):
     def test_rows_come_back_as_lowercase_dicts(self):
         self.assertEqual(self.client.query("SELECT id, tranid FROM transaction"), [{"id": 1, "tranid": "A1"}])
 
-    def test_connection_is_reused_within_max_age(self):
+    def test_connection_is_reused_while_in_use(self):
+        # 30s apart: never idle for the 60s that forces a new connection.
         for _ in range(5):
             self.client.query("SELECT 1 FROM vendor")
-            self.clock.now += 60
+            self.clock.now += 30
         self.assertEqual(len(self.made), 1)
         self.assertEqual(self.client.logins, 1)
 
     def test_connection_is_refreshed_after_max_age(self):
-        self.client.query("SELECT 1 FROM vendor")
-        self.clock.now += 1800
+        for _ in range(60):  # in use every 30s, so only the age forces it
+            self.client.query("SELECT 1 FROM vendor")
+            self.clock.now += 30
         self.client.query("SELECT 1 FROM vendor")
         self.assertEqual(len(self.made), 2)
         self.assertTrue(self.made[0].closed)
@@ -191,10 +204,64 @@ class ClientTests(unittest.TestCase):
             self.client.query("DELETE FROM vendor")
         self.assertEqual(self.made, [])
 
+    def test_an_idle_connection_is_replaced_before_the_next_query(self):
+        # Prod 2026-10-28: a connection idle a few minutes was silently dropped
+        # and the next query hung on it -- now it is never reused after 60s idle.
+        self.client.query("SELECT 1 FROM vendor")
+        self.clock.now += 59
+        self.client.query("SELECT 1 FROM vendor")
+        self.assertEqual(len(self.made), 1)
+        self.clock.now += 60
+        self.client.query("SELECT 1 FROM vendor")
+        self.assertEqual(len(self.made), 2)
+        self.assertTrue(self.made[0].closed)
+
     def test_close_closes_the_connection(self):
         self.client.query("SELECT 1 FROM vendor")
         self.client.close()
         self.assertTrue(self.made[0].closed)
+
+
+class TimeoutTests(unittest.TestCase):
+    """query(timeout=...): a hung query or a busy connection gives up in time
+    (QueryTimeout), and the hung connection is not reused."""
+
+    def setUp(self):
+        self.made, self.release = [], threading.Event()
+        self.hang_first = True
+
+        def connect(conn_str, timeout):
+            conn = _Conn(hang=self.release if (self.hang_first and not self.made) else None)
+            self.made.append(conn)
+            return conn
+
+        self.client = ConnectClient(load_config(_ENV), connect_fn=connect)
+        self.addCleanup(self.release.set)
+
+    def test_a_hung_query_times_out_and_its_connection_is_dropped(self):
+        started = time.monotonic()
+        with self.assertRaises(QueryTimeout):
+            self.client.query("SELECT 1 FROM vendor", timeout=0.3)
+        self.assertLess(time.monotonic() - started, 2)
+        # The next query gets a fresh connection, not the hung one.
+        self.assertEqual(self.client.query("SELECT 1 FROM vendor", timeout=2), [{"id": 1, "tranid": "A1"}])
+        self.assertEqual(len(self.made), 2)
+
+    def test_a_query_waiting_behind_a_hung_one_gives_up_too(self):
+        worker = threading.Thread(target=lambda: self.client.query("SELECT 1 FROM vendor"), daemon=True)
+        worker.start()  # no timeout: holds the connection until released
+        time.sleep(0.1)
+        started = time.monotonic()
+        with self.assertRaises(QueryTimeout):
+            self.client.query("SELECT 2 FROM vendor", timeout=0.3)
+        self.assertLess(time.monotonic() - started, 2)
+        self.release.set()
+        worker.join(2)
+
+    def test_no_timeout_still_waits_for_slow_queries(self):
+        # Matching passes no timeout: a slow (not dead) query still answers.
+        threading.Timer(0.4, self.release.set).start()
+        self.assertEqual(self.client.query("SELECT 1 FROM vendor"), [{"id": 1, "tranid": "A1"}])
 
 
 if __name__ == "__main__":

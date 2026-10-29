@@ -15,6 +15,19 @@ connection and reuses it for up to NETSUITE_CONNECT_MAX_AGE_SECONDS (default
 30 min), then opens a fresh one. A query that fails on a dropped connection
 is retried once on a new connection.
 
+Idle connections (2026-10-29): one idle for NETSUITE_CONNECT_IDLE_SECONDS
+(default 60) is replaced before the next query rather than reused. Prod's
+log, 2026-10-28 17:12-17:19 UTC: the web app's connection sat idle ~3.5 min,
+was silently dropped in between (Azure drops idle outbound connections;
+NetSuite can close idle sessions), and the next search waited ~6.5 min on
+the dead socket for "TCP/IP error, connection timed out (2308)" -- holding
+the lock, so every other search queued behind it and got a 504.
+
+query(..., timeout=N) (2026-10-29, the NetSuite search): the whole call --
+waiting for the connection and running -- gets N seconds; past that it raises
+QueryTimeout, and a query still running is abandoned with its connection
+(the next query opens a fresh one). No timeout (matching) waits as before.
+
 Read-only twice over: SuiteAnalytics Connect itself only reads, and query()
 refuses anything that isn't a single SELECT/WITH statement.
 
@@ -27,6 +40,7 @@ Settings (environment):
                                (Linux) / the Windows installer's name
   NETSUITE_CONNECT_TRUSTSTORE  default: the driver's ca4.cer (Linux) / system
   NETSUITE_CONNECT_MAX_AGE_SECONDS  default 1800
+  NETSUITE_CONNECT_IDLE_SECONDS     default 60
 """
 import base64
 import hashlib
@@ -45,6 +59,7 @@ LINUX_DRIVER = "NetSuite ODBC Drivers 9.0"      # registered in the Dockerfile
 WINDOWS_DRIVER = "NetSuite Drivers 64bit"        # what the Windows installer registers
 LINUX_TRUSTSTORE = "/opt/netsuite/odbcclient/cert/ca4.cer"
 DEFAULT_MAX_AGE_SECONDS = 1800
+DEFAULT_IDLE_SECONDS = 60
 LOGIN_TIMEOUT_SECONDS = 60
 
 _REQUIRED = ("ACCOUNT_ID", "CONSUMER_KEY", "CONSUMER_SECRET", "TOKEN_ID", "TOKEN_SECRET", "ROLE_ID")
@@ -57,6 +72,10 @@ class ConnectConfigError(Exception):
 
 class ReadOnlyError(Exception):
     """query() was given something other than a single SELECT statement."""
+
+
+class QueryTimeout(Exception):
+    """query(timeout=...) ran out of time -- waiting for the connection or running."""
 
 
 def account_forms(raw_account_id: str) -> tuple:
@@ -84,6 +103,10 @@ def load_config(env=None) -> dict:
         max_age = int(env.get(_PREFIX + "MAX_AGE_SECONDS") or DEFAULT_MAX_AGE_SECONDS)
     except ValueError:
         raise ConnectConfigError(f"{_PREFIX}MAX_AGE_SECONDS must be a whole number of seconds")
+    try:
+        idle = int(env.get(_PREFIX + "IDLE_SECONDS") or DEFAULT_IDLE_SECONDS)
+    except ValueError:
+        raise ConnectConfigError(f"{_PREFIX}IDLE_SECONDS must be a whole number of seconds")
     return {
         "account": realm_form,
         "host": (env.get(_PREFIX + "HOST") or "").strip() or f"{host_form}.connect.api.netsuite.com",
@@ -95,6 +118,7 @@ def load_config(env=None) -> dict:
         "driver": (env.get(_PREFIX + "DRIVER") or "").strip() or (WINDOWS_DRIVER if windows else LINUX_DRIVER),
         "truststore": (env.get(_PREFIX + "TRUSTSTORE") or "").strip() or ("system" if windows else LINUX_TRUSTSTORE),
         "max_age_seconds": max_age,
+        "idle_seconds": idle,
     }
 
 
@@ -139,6 +163,7 @@ class ConnectClient:
         self._lock = threading.Lock()
         self._conn = None
         self._opened_at = None
+        self._last_used = None
         self.logins = 0
         self.last_login_seconds = None
 
@@ -154,6 +179,7 @@ class ConnectClient:
         self.logins += 1
         logger.info("NetSuite Connect login #%d took %.1fs", self.logins, self.last_login_seconds)
         self._conn, self._opened_at = conn, self._clock()
+        self._last_used = self._opened_at
 
     def _close_quietly(self):
         if self._conn is not None:
@@ -161,38 +187,97 @@ class ConnectClient:
                 self._conn.close()
             except Exception:
                 logger.warning("closing a NetSuite Connect connection failed (ignored)")
-        self._conn, self._opened_at = None, None
+        self._conn, self._opened_at, self._last_used = None, None, None
+
+    def _abandon(self):
+        """Drops the connection without waiting on it: a query is still stuck
+        on it, so it is closed on a background thread (closing a dead socket
+        can block too) and the next query opens a fresh one."""
+        conn, self._conn, self._opened_at, self._last_used = self._conn, None, None, None
+        if conn is not None:
+            threading.Thread(target=_close_ignoring_errors, args=(conn,), daemon=True).start()
 
     def _connection(self):
-        too_old = self._opened_at is not None and self._clock() - self._opened_at >= self.config["max_age_seconds"]
-        if self._conn is None or too_old:
+        now = self._clock()
+        too_old = self._opened_at is not None and now - self._opened_at >= self.config["max_age_seconds"]
+        too_idle = self._last_used is not None and now - self._last_used >= self.config["idle_seconds"]
+        if self._conn is None or too_old or too_idle:
             self._close_quietly()
             self._open()
         return self._conn
 
+    def _run(self, sql, params, conn=None) -> list:
+        conn = conn or self._connection()
+        cur = conn.cursor()
+        cur.execute(sql, list(params or []))
+        cols = [d[0].lower() for d in cur.description]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        if conn is self._conn:  # not a connection abandoned meanwhile
+            self._last_used = self._clock()
+        return rows
+
     # -- queries ------------------------------------------------------------
-    def query(self, sql: str, params=None) -> list:
+    def query(self, sql: str, params=None, timeout: float = None) -> list:
         """Rows as dicts with lowercase column names. Retries once on a fresh
-        connection if the first attempt fails (e.g. a dropped connection)."""
+        connection if the first attempt fails (e.g. a dropped connection).
+        With `timeout` (seconds), the whole call -- waiting for the connection
+        and running -- raises QueryTimeout past it (see the module docstring)."""
         check_read_only(sql)
-        with self._lock:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        if deadline is None:
+            self._lock.acquire()
+        elif not self._lock.acquire(timeout=max(0.0, timeout)):
+            raise QueryTimeout(f"NetSuite Connect stayed busy for {timeout:g}s (another query is still running)")
+        try:
             for attempt in (1, 2):
                 try:
-                    cur = self._connection().cursor()
-                    cur.execute(sql, list(params or []))
-                    cols = [d[0].lower() for d in cur.description]
-                    return [dict(zip(cols, row)) for row in cur.fetchall()]
-                except ReadOnlyError:
+                    if deadline is None:
+                        return self._run(sql, params)
+                    return self._run_by(deadline, sql, params, timeout)
+                except (ReadOnlyError, QueryTimeout):
                     raise
                 except Exception:
                     self._close_quietly()
-                    if attempt == 2:
+                    if attempt == 2 or (deadline is not None and time.monotonic() >= deadline):
                         raise
                     logger.warning("NetSuite Connect query failed; retrying once on a new connection", exc_info=True)
+        finally:
+            self._lock.release()
+
+    def _run_by(self, deadline, sql, params, timeout) -> list:
+        """_run() on a worker thread, waited on until `deadline`. The connection
+        (and any login) is taken here, under the lock, so an abandoned worker
+        can never swap in a connection another query is using."""
+        conn = self._connection()
+        result = {}
+
+        def work():
+            try:
+                result["rows"] = self._run(sql, params, conn)
+            except BaseException as exc:  # handed back to the caller below
+                result["error"] = exc
+
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+        worker.join(max(0.0, deadline - time.monotonic()))
+        if worker.is_alive():
+            self._abandon()
+            logger.warning("NetSuite Connect query took over %gs -- abandoned with its connection", timeout)
+            raise QueryTimeout(f"NetSuite Connect query took over {timeout:g}s")
+        if "error" in result:
+            raise result["error"]
+        return result["rows"]
 
     def close(self) -> None:
         with self._lock:
             self._close_quietly()
+
+
+def _close_ignoring_errors(conn) -> None:
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 _shared = None

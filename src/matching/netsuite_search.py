@@ -53,6 +53,7 @@ Facts this module relies on, all confirmed live against Fabric
 """
 import logging
 import os
+import time
 
 from src.lakehouse.fabric_sql import execute_lakehouse_query
 from src.netsuite.locations import location_names
@@ -653,6 +654,11 @@ def fetch_record(record_type: str, internal_id: str):
 # A failed live search falls back to the Fabric copy and says so.
 
 SOURCE_FABRIC, SOURCE_CONNECT, SOURCE_FALLBACK = "fabric", "connect", "fabric_fallback"
+# A live search gets this many seconds in all (both tables, and any wait for
+# the shared connection) before it falls back to the Fabric copy (2026-10-29)
+# -- it used to wait as long as NetSuite did, past Azure's ~4 min request
+# limit (504). NETSUITE_SEARCH_TIMEOUT_SECONDS overrides it.
+DEFAULT_SEARCH_TIMEOUT_SECONDS = 25
 _TYPE_BY_TABLE = {BILL_TABLE: "VendBill", CREDIT_TABLE: "VendCred"}
 _CONNECT_LIKE_SPECIALS = ("%", "_")
 
@@ -664,6 +670,14 @@ def search_source() -> str:
         return value
     from src.netsuite.connect_source import netsuite_source
     return netsuite_source()
+
+
+def search_timeout() -> float:
+    try:
+        value = float(os.getenv("NETSUITE_SEARCH_TIMEOUT_SECONDS") or DEFAULT_SEARCH_TIMEOUT_SECONDS)
+    except ValueError:
+        return DEFAULT_SEARCH_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_SEARCH_TIMEOUT_SECONDS
 
 
 def _connect_escape_like(text: str) -> str:
@@ -745,10 +759,17 @@ def build_connect_select(table: str, entity_ids=None, bounds=None, invoice_conta
     return sql, params
 
 
-def _connect_rows(sql: str, params: list, table: str) -> list:
-    from src.netsuite.connect_client import get_shared_client
+def _connect_rows(sql: str, params: list, table: str, deadline: float = None) -> list:
+    """Rows from live NetSuite, given until `deadline` (time.monotonic()) --
+    QueryTimeout past it, which the callers turn into the Fabric fallback."""
+    from src.netsuite.connect_client import QueryTimeout, get_shared_client
+    if deadline is None:
+        deadline = time.monotonic() + search_timeout()
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise QueryTimeout("NetSuite search ran out of time")
     rows = []
-    for raw in get_shared_client().query(sql, params):
+    for raw in get_shared_client().query(sql, params, timeout=remaining):
         row = dict(raw, source_table=table)
         for key in ("trandate", "duedate"):
             if hasattr(row.get(key), "strftime"):
@@ -759,12 +780,14 @@ def _connect_rows(sql: str, params: list, table: str) -> list:
 
 def _run_search_connect(entity_ids, bounds, invoice_contains, statuses,
                         sort_amount, date_from, date_to, limit, locations=None) -> list:
-    """_run_search() on live NetSuite: one capped, ordered query per table."""
+    """_run_search() on live NetSuite: one capped, ordered query per table,
+    both within one search_timeout()."""
+    deadline = time.monotonic() + search_timeout()
     rows = []
     for table in (BILL_TABLE, CREDIT_TABLE):
         sql, params = build_connect_select(table, entity_ids, bounds, invoice_contains, statuses,
                                            date_from, date_to, locations, limit, sort_amount)
-        rows.extend(_shape_row(raw) for raw in _connect_rows(sql, params, table))
+        rows.extend(_shape_row(raw) for raw in _connect_rows(sql, params, table, deadline))
     return rows
 
 
