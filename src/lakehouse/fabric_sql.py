@@ -139,6 +139,11 @@ def _pooled_query(database: str, sql, params) -> list:
                 # Closed here, on the thread that used it, before the
                 # connection can be handed to another thread (2026-10-29).
                 cur.close()
+            # Ends the read transaction pyodbc opened (autocommit is off).
+            # Fabric reads are snapshot-isolated: left open, every later
+            # query on this reused connection kept seeing the data as of its
+            # first one -- new matching results stayed hidden (2026-10-29).
+            conn.rollback()
         except Exception:
             _close_quietly(conn)
             if not reused or attempt == 2:

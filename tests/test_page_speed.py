@@ -72,10 +72,13 @@ class _Cur:
 
 class _Conn:
     def __init__(self, fail=False):
-        self.fail, self.closed, self.cursors = fail, False, []
+        self.fail, self.closed, self.cursors, self.rollbacks = fail, False, [], 0
 
     def cursor(self):
         return _Cur(self)
+
+    def rollback(self):
+        self.rollbacks += 1
 
     def close(self):
         self.closed = True
@@ -108,6 +111,8 @@ class FabricPoolTests(unittest.TestCase):
         self.assertEqual(len(self.made), 1)
         # Every cursor is closed before its connection goes back for another thread.
         self.assertTrue(all(cur.closed for cur in self.made[0].cursors))
+        # And every read transaction is ended, so the next query sees new data.
+        self.assertEqual(self.made[0].rollbacks, 5)
 
     def test_idle_connection_is_not_reused(self):
         fabric_sql.execute_warehouse_query("SELECT 1")
