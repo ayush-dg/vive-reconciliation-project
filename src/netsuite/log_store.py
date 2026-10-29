@@ -222,6 +222,20 @@ def get_latest_runs(statement_ids) -> dict:
     are simply absent."""
     ids = [s for s in dict.fromkeys(statement_ids) if s]
     latest = {}
+    if len(ids) > 200:
+        # One query for every statement's latest run, kept here for these ids
+        # (2026-10-29): the Exceptions list asked for 2,050 ids in 11 batches
+        # of 200 -- 11 queries (13 s measured locally) against a table that
+        # had 5 rows.
+        wanted = set(ids)
+        rows = execute_query(
+            "SELECT * FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY statement_id "
+            "ORDER BY started_at DESC, id DESC) AS newest FROM netsuite_writeback_run r) x WHERE newest = 1")
+        for row in rows:
+            row.pop("newest", None)
+            if row["statement_id"] in wanted:
+                latest[row["statement_id"]] = row
+        return latest
     for start in range(0, len(ids), 200):
         chunk = ids[start:start + 200]
         rows = execute_query(

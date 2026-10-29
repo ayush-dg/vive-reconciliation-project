@@ -134,6 +134,108 @@ class FabricPoolTests(unittest.TestCase):
         self.assertEqual(sorted(fabric_sql._pools), ["lh", "wh"])
 
 
+class _SqlCursor:
+    description = [("c",)]
+
+    def fetchall(self):
+        return [(1,)]
+
+
+class _SqlConn:
+    def __init__(self):
+        self.closed, self.autocommit, self.fail = False, False, False
+
+    def execute(self, sql, params):
+        if self.fail:
+            raise RuntimeError("connection dropped")
+        return _SqlCursor()
+
+    def close(self):
+        self.closed = True
+
+
+class AzureSqlReadPoolTests(unittest.TestCase):
+    """execute_query() on Azure SQL reuses read connections (2026-10-29)."""
+
+    def setUp(self):
+        from src.lakehouse import connection
+        self.c = connection
+        connection._read_pool.clear()
+        self.addCleanup(connection._read_pool.clear)
+        self.made, self.now = [], [500.0]
+
+        def connect():
+            conn = _SqlConn()
+            self.made.append(conn)
+            return conn
+
+        for p in (mock.patch.object(connection, "_using_azure_sql", return_value=True),
+                  mock.patch.object(connection, "get_connection", side_effect=connect),
+                  mock.patch.object(connection.time, "monotonic", side_effect=lambda: self.now[0])):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_reads_reuse_one_autocommit_connection(self):
+        for _ in range(5):
+            self.assertEqual(self.c.execute_query("SELECT 1"), [{"c": 1}])
+            self.now[0] += 10
+        self.assertEqual(len(self.made), 1)
+        self.assertTrue(self.made[0].autocommit)
+
+    def test_idle_connection_is_replaced(self):
+        self.c.execute_query("SELECT 1")
+        self.now[0] += self.c._READ_POOL_IDLE_SECONDS
+        self.c.execute_query("SELECT 1")
+        self.assertEqual(len(self.made), 2)
+        self.assertTrue(self.made[0].closed)
+
+    def test_failure_on_a_reused_connection_retries_on_a_new_one(self):
+        self.c.execute_query("SELECT 1")
+        self.made[0].fail = True
+        self.assertEqual(self.c.execute_query("SELECT 1"), [{"c": 1}])
+        self.assertEqual(len(self.made), 2)
+        self.assertTrue(self.made[0].closed)
+
+    def test_writes_still_use_their_own_connection(self):
+        self.c.execute_query("SELECT 1")
+        with mock.patch.object(_SqlConn, "commit", create=True):
+            self.c.execute_sql("UPDATE t SET x = 1")
+        self.assertEqual(len(self.made), 2)  # the write did not take the pooled read connection
+        self.assertTrue(self.made[1].closed)
+
+
+class OpenExceptionsGroupedTests(unittest.TestCase):
+    """Long statement-id lists are not sent to Fabric as IN (?, ?, ...) -- the
+    open exceptions are grouped once and filtered here (same rows)."""
+
+    ROWS = [{"statement_id": "S1", "c": 2}, {"statement_id": "S2", "c": 1}, {"statement_id": "OTHER", "c": 9}]
+
+    def _run(self, ids):
+        from web import queries
+        with mock.patch.object(queries, "recon_query", return_value=self.ROWS) as q:
+            rows = queries._open_exceptions_grouped("statement_id, COUNT(*) AS c", "statement_id", ids)
+        return rows, q.call_args
+
+    def test_a_short_list_is_sent_as_parameters(self):
+        rows, call = self._run(["S1", "S2"])
+        self.assertIn("IN (?, ?)", call.args[0])
+        self.assertEqual(call.args[1], ["S1", "S2"])
+
+    def test_a_long_list_is_filtered_here_instead(self):
+        from web import queries
+        ids = ["S1", "S2"] + [f"X{i}" for i in range(queries._IN_LIST_LIMIT)]
+        rows, call = self._run(ids)
+        self.assertNotIn(" IN (", call.args[0])
+        self.assertEqual(len(call.args), 1)  # no parameters at all
+        self.assertEqual([r["statement_id"] for r in rows], ["S1", "S2"])
+
+    def test_no_ids_means_no_query(self):
+        from web import queries
+        with mock.patch.object(queries, "recon_query") as q:
+            self.assertEqual(queries._open_exceptions_grouped("statement_id", "statement_id", []), [])
+        q.assert_not_called()
+
+
 class CompressionAndCachingTests(unittest.TestCase):
     def _client(self):
         from web.app import _GZipExceptStatementPdfs, _VersionedStaticFiles, STATIC_DIR

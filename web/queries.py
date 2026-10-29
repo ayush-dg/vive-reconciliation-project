@@ -375,12 +375,21 @@ def _attach_intake_period_and_shop(rows: list, statement_ids: list = None) -> No
 
 
 def _attach_job_ids_and_display_names(rows: list) -> None:
-    for row in rows:
+    """Each row's newest job_id (one query for all rows, 2026-10-29 -- it was
+    one query per row: 10 on Home, ~4.9 s of its ~9 s measured locally) and
+    vendor display name."""
+    ids = list(dict.fromkeys(r["statement_id"] for r in rows if r.get("statement_id")))
+    newest = {}
+    if ids:
         job_rows = execute_query(
-            "SELECT job_id FROM jobs WHERE statement_id = ? ORDER BY submitted_at DESC LIMIT 1",
-            [row["statement_id"]],
+            f"SELECT statement_id, job_id FROM jobs WHERE statement_id IN ({', '.join('?' for _ in ids)}) "
+            "ORDER BY submitted_at DESC",
+            ids,
         )
-        row["job_id"] = job_rows[0]["job_id"] if job_rows else None
+        for job in job_rows:
+            newest.setdefault(job["statement_id"], job["job_id"])
+    for row in rows:
+        row["job_id"] = newest.get(row.get("statement_id"))
         row["vendor_display_name"] = vendor_display_name(row["vendor_name"])
 
 
@@ -734,16 +743,9 @@ def get_exception_runs(window: TimeWindow = None) -> list:
 
     if runs:
         statement_ids = [r["statement_id"] for r in runs]
-        placeholders = ", ".join("?" for _ in statement_ids)
-        reason_rows = recon_query(
-            f"""
-            SELECT statement_id, exception_reason, COUNT(*) AS c
-            FROM silver.recon_exceptions
-            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
-            GROUP BY statement_id, exception_reason
-            """,
-            statement_ids,
-        )
+        placeholders = ", ".join("?" for _ in statement_ids)  # the Azure SQL lookup below
+        reason_rows = _open_exceptions_grouped(
+            "statement_id, exception_reason, COUNT(*) AS c", "statement_id, exception_reason", statement_ids)
         reasons_by_statement = {}
         for r in reason_rows:
             reasons_by_statement.setdefault(r["statement_id"], []).append(r)
@@ -808,6 +810,34 @@ def _pdf_name(intake_row) -> str:
     return os.path.basename(str(name).replace("\\", "/")) if name else None
 
 
+# Above this many statement ids, _open_exceptions_grouped() groups every OPEN
+# exception and keeps the wanted statements in Python instead of sending an
+# IN (?, ?, ...) list: Fabric is slow with long parameter lists -- measured
+# 2026-10-29 on dev, 2,050 ids: 3.0-5.1 s with the list, 0.55 s without, the
+# same rows. Short lists (a "Today" window) keep the IN list.
+_IN_LIST_LIMIT = 100
+
+
+def _open_exceptions_grouped(select_cols: str, group_by: str, statement_ids: list) -> list:
+    """SELECT <select_cols> FROM silver.recon_exceptions, OPEN only, for
+    `statement_ids`, GROUP BY <group_by> (which must include statement_id).
+    select_cols/group_by are fixed SQL from the callers, never user input."""
+    if not statement_ids:
+        return []
+    if len(statement_ids) <= _IN_LIST_LIMIT:
+        placeholders = ", ".join("?" for _ in statement_ids)
+        return recon_query(
+            f"SELECT {select_cols} FROM silver.recon_exceptions "
+            f"WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN' GROUP BY {group_by}",
+            statement_ids,
+        )
+    wanted = set(statement_ids)
+    rows = recon_query(
+        f"SELECT {select_cols} FROM silver.recon_exceptions WHERE exception_status = 'OPEN' GROUP BY {group_by}"
+    )
+    return [r for r in rows if r.get("statement_id") in wanted]
+
+
 def _attach_aging_summaries(vendors: list) -> None:
     """Batched equivalent of calling get_exception_aging_summary(vendor_name)
     once per vendor (mutates each vendor dict in place, adding "aging") --
@@ -825,16 +855,8 @@ def _attach_aging_summaries(vendors: list) -> None:
     with_statement = [v for v in vendors if v.get("statement_id")]
     if with_statement:
         statement_ids = [v["statement_id"] for v in with_statement]
-        placeholders = ", ".join("?" for _ in statement_ids)
-        aging_rows = recon_query(
-            f"""
-            SELECT statement_id, MIN(date_raised) AS oldest_date_raised
-            FROM silver.recon_exceptions
-            WHERE statement_id IN ({placeholders}) AND exception_status = 'OPEN'
-            GROUP BY statement_id
-            """,
-            statement_ids,
-        )
+        aging_rows = _open_exceptions_grouped(
+            "statement_id, MIN(date_raised) AS oldest_date_raised", "statement_id", statement_ids)
         oldest_by_statement = {r["statement_id"]: r["oldest_date_raised"] for r in aging_rows}
         for vendor in with_statement:
             oldest = oldest_by_statement.get(vendor["statement_id"])

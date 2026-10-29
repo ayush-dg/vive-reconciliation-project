@@ -372,6 +372,13 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(sorted(latest), ["STMT-X", "STMT-Y"])
         self.assertEqual(latest["STMT-X"]["period_locked"], 1)            # the 11:00 run, not the 09:00 one
         self.assertEqual(log_store.get_latest_runs([]), {})
+        # Over 200 ids (2026-10-29): one query for every statement's newest run, the same answer.
+        many = ["STMT-X", "STMT-Y"] + [f"STMT-PAD{i}" for i in range(250)]
+        big = log_store.get_latest_runs(many)
+        self.assertEqual(sorted(big), ["STMT-X", "STMT-Y"])
+        self.assertEqual(big["STMT-X"]["period_locked"], 1)
+        self.assertNotIn("newest", big["STMT-X"])
+        self.assertEqual({k: dict(v) for k, v in big.items()}, {k: dict(v) for k, v in latest.items()})
 
     def test_a_revert_after_a_write_flips_the_page_status_to_reverted(self):
         ok = wb.ApplyResult(self._plan("A"), True, "updated", "1")
