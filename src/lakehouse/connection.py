@@ -58,10 +58,6 @@ def _using_azure_sql():
     return bool(os.getenv("AZURE_SQL_SERVER"))
 
 
-def _using_fabric_warehouse():
-    return bool(os.getenv("FABRIC_WORKSPACE_ID"))
-
-
 def _using_fabric_sqldb():
     return bool(os.getenv("FABRIC_SQLDB_ENDPOINT"))
 

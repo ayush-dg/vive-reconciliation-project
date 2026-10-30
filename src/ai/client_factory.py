@@ -54,9 +54,3 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
     else:
         raise ValueError(f"Unknown provider: '{provider_name}'. Add it to client_factory.py.")
 
-
-def get_provider_chain() -> list:
-    """Returns the full ordered provider chain from config."""
-    active_config_path = "config/ai/active_provider.json"
-    active_config = _load_json(active_config_path)
-    return active_config.get("provider_chain", ["claude_sonnet", "pdfplumber"])

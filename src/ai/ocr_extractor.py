@@ -89,36 +89,3 @@ def ocr_page(pdf_path: str, page_num: int, dpi: int = 200) -> str:
         return ""
     return pytesseract.image_to_string(images[0], config="--psm 6")
 
-
-def extract_text_with_ocr(pdf_path: str, dpi: int = 200):
-    """
-    Convert each PDF page to an image and run OCR on it.
-    Returns (text, page_count) — same shape as extract_pdf_text().
-
-    dpi=200 is a good balance between speed and accuracy for
-    typical vendor statement PDFs. Increase to 300 for small text.
-    """
-    try:
-        import pytesseract
-        from pdf2image import convert_from_path
-    except ImportError as e:
-        raise RuntimeError(
-            f"OCR dependencies not installed: {e}\n"
-            f"Run: pip install pytesseract pdf2image\n"
-            f"And install Tesseract: https://github.com/UB-Mannheim/tesseract/wiki"
-        )
-    _configure_tesseract_path(pytesseract)
-
-    print(f"  [OCR] Converting PDF pages to images (dpi={dpi})...")
-    images = convert_from_path(pdf_path, dpi=dpi)
-    page_count = len(images)
-    pages_text = []
-
-    for i, image in enumerate(images, start=1):
-        print(f"  [OCR] Running OCR on page {i}/{page_count}...")
-        text = pytesseract.image_to_string(image, config="--psm 6")
-        pages_text.append(f"--- PAGE {i} ---\n{text}")
-
-    full_text = "\n\n".join(pages_text)
-    print(f"  [OCR] Extracted {len(full_text)} characters from {page_count} pages")
-    return full_text, page_count

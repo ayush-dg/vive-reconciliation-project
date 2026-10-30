@@ -54,12 +54,10 @@ shared one -- this write has nothing to race against those for. Best-
 effort: never raises into the caller. Missing Fabric config is a silent
 no-op, matching every other write in this pipeline.
 """
-import json
 import logging
 import os
 
 from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
-from src.lakehouse.bronze_raw import read_raw_statement
 
 logger = logging.getLogger(__name__)
 
@@ -270,23 +268,3 @@ def wait_for_visibility(statement_id: str, expected_lines: int, expected_fields:
             return False
         time.sleep(poll_interval)
 
-
-def write_unnested_from_storage(statement_id: str) -> tuple:
-    """Rebuild utility, NOT used by the automatic pipeline path -- reads
-    bronze.raw_statement back out (direct Delta read, see
-    read_raw_statement()'s docstring) and explodes it the same way. Useful
-    for backfilling or rebuilding a statement without re-running
-    extraction. Returns (0, 0) if the statement can't be read."""
-    raw_statement = read_raw_statement(statement_id)
-    if not raw_statement:
-        logger.warning("No bronze.raw_statement row found for statement_id=%s", statement_id)
-        return (0, 0)
-
-    try:
-        wrapped_lines = json.loads(raw_statement.get("raw_payload") or "[]")
-    except (TypeError, ValueError):
-        logger.exception("raw_payload for statement_id=%s is not valid JSON", statement_id)
-        return (0, 0)
-
-    line_rows, field_rows = _explode(wrapped_lines, statement_id)
-    return _write_lines_and_fields(line_rows, field_rows)

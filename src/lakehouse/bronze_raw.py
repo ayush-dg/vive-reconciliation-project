@@ -335,36 +335,3 @@ def promote_staged_raw_statement(statement_id: str) -> bool:
               f"{type(e).__name__}: {str(e)[:250]}")
         return False
 
-
-def read_raw_statement(statement_id: str) -> dict:
-    """Reads one row of bronze.raw_statement DIRECTLY from the
-    Delta Lake files (via the deltalake package), NOT through the Fabric
-    SQL analytics endpoint -- confirmed 2026-09-17 that the SQL endpoint
-    silently truncates this table's raw_payload column at 8000 characters
-    (LEN() via T-SQL returned 8000 for a row whose real value, read this
-    same way, was 17847 chars). Any statement with more than a modest
-    number of invoice lines exceeds that, so anything needing raw_payload
-    -- currently src/lakehouse/bronze_unnest.py's rebuild-from-storage
-    path -- reads it only through this function, never via OPENJSON/T-SQL.
-
-    Returns None if Fabric isn't configured, the table can't be read, or
-    no row matches statement_id (never raises -- same "additive, never
-    blocks the pipeline" philosophy as write_raw_statement())."""
-    if not _fabric_configured():
-        return None
-    try:
-        from deltalake import DeltaTable
-
-        dt = DeltaTable(_table_uri(), storage_options=_storage_options())
-        df = dt.to_pandas()
-        matches = df[df["statement_id"] == statement_id]
-        if matches.empty:
-            return None
-        # "Latest wins" must be by ingestion_timestamp, not row position --
-        # confirmed 2026-09-17 that to_pandas() does NOT return rows in
-        # write order (a re-run's freshly-appended row came back BEFORE the
-        # original one), so a bare .iloc[-1] silently picked the stale row.
-        return matches.sort_values("ingestion_timestamp").iloc[-1].to_dict()
-    except Exception:
-        logger.exception("Reading raw_statement for statement_id=%s failed (non-fatal)", statement_id)
-        return None
