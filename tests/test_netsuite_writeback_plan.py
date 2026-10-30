@@ -990,7 +990,7 @@ def _recon(invoice, record_id=None, amount=None, source="auto", status="Matched"
 
 class MatchedRecordFromReconTests(unittest.TestCase):
     """2026-10-30: matched lines are written to the record the matcher picked
-    (recon.netsuite_internal_id), and invoices matched by hand are left alone."""
+    (recon.netsuite_internal_id)."""
 
     def _plans(self, matched=(), exceptions=(), recon=(), sandbox=None, by_id=None):
         results = {"header": {"vendor_id": "V", "vendor_name_raw": "Vendor", "shop_name_raw": None},
@@ -1058,42 +1058,22 @@ class MatchedRecordFromReconTests(unittest.TestCase):
                             sandbox={"inv1": [dict(_txn("-100"), id="500")]})
         self.assertEqual(plans[0].record_id, "500")
 
-    def test_manual_match_on_an_exception_is_not_overwritten(self):
-        done_by_hand = dict(_txn("-90"), custbody_reconciled="T", custbody_statement_reference=STMT)
-        (plan,) = self._plans(exceptions=[_row("100.00", wb.REASON_AMOUNT_MISMATCH)],
-                              recon=[_recon("INV1", "500", 90.0, source="manual", status="Matched manually")],
-                              sandbox={"inv1": [done_by_hand]})
-        self.assertNotIn(plan.action, wb.WRITE_ACTIONS)
-        self.assertEqual(wb.skip_category(plan), wb.CAT_MATCHED_MANUALLY)
+    def test_manual_rows_are_not_used_to_pick_the_record(self):
+        # Only the matcher's own (auto) rows decide WHERE a matched line is written.
+        (plan,) = self._plans(matched=[_row()], recon=[_recon("INV1", "777", 100.0, source="manual",
+                                                               status="Matched manually")],
+                              sandbox={"inv1": [dict(_txn("-100"), id="500")]})
+        self.assertEqual(plan.record_id, "500")
+        self.assertEqual(self.asked_ids, [])
 
-    def test_manual_match_on_a_not_found_line_creates_no_statement_line(self):
-        (plan,) = self._plans(exceptions=[_row("5", wb.REASON_NOT_FOUND)],
-                              recon=[_recon("INV1", "500", 5.0, source="manual", status="Matched manually")])
-        self.assertNotEqual(plan.action, wb.CREATE_STATEMENT_LINE)
-        self.assertEqual(wb.skip_category(plan), wb.CAT_MATCHED_MANUALLY)
-
-    def test_manual_match_on_another_record_leaves_the_printed_numbers_bill_alone(self):
-        bill = dict(_txn("-67.52"), id="4420349", tranid="81122710")
-        (plan,) = self._plans(exceptions=[_row("50.00", wb.REASON_AMOUNT_MISMATCH, invoice="81122710")],
-                              recon=[_recon("81122710", "4536787", 50.0, source="manual", status="Matched manually")],
-                              sandbox={"81122710": [bill]})
-        self.assertEqual(wb.skip_category(plan), wb.CAT_MATCHED_MANUALLY)
-
-    def test_after_undo_the_line_is_written_normally(self):
-        # Undo leaves the manual row inactive, so load_recon_rows() doesn't return it.
-        (plan,) = self._plans(exceptions=[_row("100.00", wb.REASON_AMOUNT_MISMATCH)], recon=[],
-                              sandbox={"inv1": [_txn("-90")]})
-        self.assertEqual(plan.action, wb.PATCH_EXCEPTION)
-
-    def test_unreadable_recon_skips_exceptions_but_writes_matches(self):
+    def test_unreadable_recon_falls_back_to_the_printed_number(self):
         plans = self._plans(matched=[_row(invoice="M1")],
                             exceptions=[_row("100.00", wb.REASON_AMOUNT_MISMATCH), _row("5", wb.REASON_NOT_FOUND, "NF1")],
                             recon=None, sandbox={"m1": [dict(_txn("-100"), id="501", tranid="M1")],
                                                  "inv1": [_txn("-90")]})
-        self.assertEqual([p.action for p in plans], [wb.PATCH_MATCHED, wb.SKIP_REVIEW, wb.SKIP_REVIEW])
-        self.assertEqual({wb.skip_category(p) for p in plans[1:]}, {wb.CAT_MANUAL_UNCHECKED})
+        self.assertEqual([p.action for p in plans], [wb.PATCH_MATCHED, wb.PATCH_EXCEPTION, wb.CREATE_STATEMENT_LINE])
 
-    def test_statement_without_manual_matches_is_unchanged(self):
+    def test_exceptions_are_written_as_before(self):
         plans = self._plans(matched=[_row(invoice="M1")], exceptions=[_row("100.00", wb.REASON_AMOUNT_MISMATCH)],
                             recon=[_recon("M1", "501", 100.0)],
                             sandbox={"m1": [dict(_txn("-100"), id="501", tranid="M1")], "inv1": [_txn("-90")]},

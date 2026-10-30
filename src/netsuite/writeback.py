@@ -20,9 +20,7 @@ recorded in the recon table (Azure SQL), so a match found under another
 number (CM prefix, alternate number, DT# reference, credit number
 containing the invoice -- e.g. 81122710 -> CM81122710-1) is written to
 that record. A line with no usable recon row falls back to the record
-whose tranid IS the printed invoice number. Invoices a user matched by
-hand (recon source 'manual') are never written here: the manual match
-already wrote its own record, and a re-run must not overwrite it.
+whose tranid IS the printed invoice number.
 
 Facts confirmed live against the sandbox 2026-10-07:
 - transaction.foreigntotal is NEGATIVE for vendor bills and POSITIVE for
@@ -42,7 +40,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from src.lakehouse.fabric_sql import get_warehouse_connection
-from src.lakehouse.recon_table import SOURCE_AUTO, SOURCE_MANUAL, STATUS_MATCHED
+from src.lakehouse.recon_table import SOURCE_AUTO, STATUS_MATCHED
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.fields import BODY_FIELDS, STATEMENT_LINE_RECORD
 from src.netsuite.guard import KEY_FIELD_COLUMNS, WriteBlocked, key_field_changes, key_snapshot
@@ -81,8 +79,6 @@ CAT_VENDOR_UNRESOLVED = "vendor not resolved"
 CAT_UP_TO_DATE = "already up to date"
 CAT_RECONCILED_EARLIER = "reconciled by an earlier statement"
 CAT_NEEDS_REVIEW = "needs review"
-CAT_MATCHED_MANUALLY = "matched manually (left as the user wrote it)"
-CAT_MANUAL_UNCHECKED = "manual matches could not be checked"
 
 # Why a WRITE that was attempted did not succeed.
 CAT_PERIOD_LOCKED = "period locked"
@@ -188,8 +184,8 @@ def load_statement_results(statement_id: str) -> dict:
 
 def load_recon_rows(statement_id: str):
     """The statement's active recon rows (Azure SQL, src/lakehouse/recon_table.py):
-    the NetSuite record the matcher picked for each line, and the invoices a
-    user matched by hand. None when the table can't be read."""
+    the NetSuite record the matcher picked for each line. None when the
+    table can't be read (matched lines then use the tranid lookup)."""
     try:
         from src.lakehouse.connection import execute_query
         return execute_query(
@@ -219,12 +215,6 @@ def _matched_record_id(row, picked: dict):
     ids = {rid for rid, total in picked.get(row["invoice_number"].lower(), ())
            if _ties(total, row["statement_amount"])}
     return ids.pop() if len(ids) == 1 else None
-
-
-def _manual_invoices(recon_rows) -> set:
-    """Lowercased invoice numbers with an active manual match."""
-    return {r["invoice_number"].lower() for r in recon_rows or []
-            if r.get("source") == SOURCE_MANUAL and r.get("invoice_number")}
 
 
 # custbody_statement_link is a Hyperlink field; its real maximum length is
@@ -643,9 +633,7 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
                      category=CAT_VENDOR_UNRESOLVED)
                      for r in results["matched"] + results["exceptions"]]
 
-    recon_rows = load_recon_rows(statement_id)
-    manual = _manual_invoices(recon_rows)
-    picked = _matched_records(recon_rows)
+    picked = _matched_records(load_recon_rows(statement_id))
     record_ids = {id(r): _matched_record_id(r, picked) for r in results["matched"]}
 
     tranids = [r["invoice_number"] for r in results["matched"] + results["exceptions"]]
@@ -662,26 +650,9 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
     ctx.primary_entity = _primary_entity(matched)
     ctx.primary_location = _statement_location({**sandbox, **{f"id:{k}": [t] for k, t in by_id.items()}})
 
-    def by_hand(row):
-        return row["invoice_number"].lower() in manual
-
-    plans = []
-    for r, found in matched:
-        if by_hand(r):
-            plans.append(_skip(r["invoice_number"], r["statement_amount"], "matched by hand -- the manual "
-                               "match wrote its own record", category=CAT_MATCHED_MANUALLY))
-        else:
-            plans.append(plan_matched(r, found, ctx))
+    plans = [plan_matched(r, found, ctx) for r, found in matched]
     for r in results["exceptions"]:
-        if recon_rows is None:
-            plans.append(_skip(r["invoice_number"], r["statement_amount"], "recon table could not be read, "
-                               "so a manual match can't be ruled out -- not written this run",
-                               category=CAT_MANUAL_UNCHECKED))
-        elif by_hand(r):
-            plans.append(_skip(r["invoice_number"], r["statement_amount"], "matched by hand -- the manual "
-                               "match wrote its own record", category=CAT_MATCHED_MANUALLY))
-        else:
-            plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
+        plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
     # Link-only writes go last (stable sort): every reconciliation result is
     # written first, whatever happens to a link.
     plans.sort(key=lambda p: p.action == PATCH_LINK_ONLY)
