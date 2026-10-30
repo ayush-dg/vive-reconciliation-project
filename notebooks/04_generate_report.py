@@ -60,7 +60,7 @@ def generate_report(statement_id: str, run_explanations: bool = False,
 
     if not summary_rows:
         print(f"\nNo reconciliation summary found for statement_id: {statement_id}")
-        print("Run notebooks/03_run_matching.py first.")
+        print("Run the statement through matching first (scripts/run_full_pipeline.py).")
         return
 
     s = summary_rows[0]
@@ -222,10 +222,8 @@ def generate_report(statement_id: str, run_explanations: bool = False,
     else:
         print(f"  1. Review the {s['exception_count']} exceptions above")
         print(f"  2. Contact vendor or internal team to resolve each exception")
-        print(f"  3. Once resolved, update config/mock_erp/scenario_config.json")
-        print(f"  4. Re-run: python notebooks/02_generate_mock_erp.py --statement-id {statement_id}")
-        print(f"  5. Re-run: python notebooks/03_run_matching.py --statement-id {statement_id}")
-        print(f"  6. Re-run: python notebooks/04_generate_report.py --statement-id {statement_id}")
+        print(f"  3. Once resolved, re-run matching for the statement (scripts/run_full_pipeline.py)")
+        print(f"  4. Re-run: python notebooks/04_generate_report.py --statement-id {statement_id}")
 
     print(f"\n{'='*65}\n")
 

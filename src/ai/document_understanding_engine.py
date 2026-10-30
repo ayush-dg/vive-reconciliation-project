@@ -301,8 +301,7 @@ class DocumentUnderstandingEngine:
 
 
 # The provider name each client puts on its own AIResponse.
-_PROVIDER_NAMES = {"ClaudeSonnetClient": "claude_sonnet", "ClaudeClient": "claude", "GeminiClient": "gemini",
-                   "MistralClient": "mistral", "AzureOpenAIClient": "azure_openai"}
+_PROVIDER_NAMES = {"ClaudeSonnetClient": "claude_sonnet", "ClaudeClient": "claude"}
 
 
 def _log_call_exception(client, error: Exception, seconds: float, source_file: str, statement_id: str) -> None:
