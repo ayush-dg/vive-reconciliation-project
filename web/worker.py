@@ -365,7 +365,7 @@ def _run_job(job: dict) -> None:
                         document_hash=document_hash,
                         error_message=(
                             f"Extraction successful ({silver_count} rows) -- no ERP reference data "
-                            f"loaded for this vendor yet, matching skipped. See scripts/load_voucher_data.py."
+                            f"loaded for this vendor yet, matching skipped."
                         ),
                     )
                     return

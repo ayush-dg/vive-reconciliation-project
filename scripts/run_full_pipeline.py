@@ -11,7 +11,7 @@ Usage:
 What it runs:
     1. Document Intake (AI extraction → Bronze → Silver)
     2. Matching Engine (Silver both sides → Gold tables) -- against real
-       voucher-sourced ERP data only (scripts/load_voucher_data.py); no
+       voucher-sourced ERP data only; no
        mock ERP is generated or written by this pipeline anymore.
     3. Report (with optional AI exception explanations)
 """

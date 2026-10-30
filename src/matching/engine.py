@@ -256,7 +256,7 @@ def run_matching(statement_id: str,
         [statement_id]
     )
 
-    # Real voucher-sourced ERP data (scripts/load_voucher_data.py) lives
+    # Real voucher-sourced ERP data lives
     # under a synthetic, vendor-scoped statement_id ("VOUCHER-<vendor_id>")
     # independent of any single upload -- unlike mock-generated ERP rows,
     # which are scoped to exactly this statement_id and regenerated per
@@ -290,7 +290,7 @@ def run_matching(statement_id: str,
         raise ValueError(f"No real voucher-sourced INTERNAL_ERP rows for vendor_id='{vendor_id}' "
                          f"(statement_id='{statement_id}'). Matching no longer falls back to "
                          f"mock-generated ERP data -- load real voucher data for this vendor "
-                         f"first (see scripts/load_voucher_data.py).")
+                         f"first.")
 
     print(f"  [Matching] Statement invoices: {len(stmt_rows)}")
     print(f"  [Matching] ERP invoices: {len(erp_rows)}")

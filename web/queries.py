@@ -59,9 +59,8 @@ REASON_LABELS = {
 
 # gold_reconciliation_summary is an append-only per-run snapshot -- it keeps
 # a row for every vendor that has EVER completed a run, including ones whose
-# jobs-table row has since been deleted (job cleanup scripts, e.g.
-# scripts/cleanup_job_history_for_demo.py, only ever touch `jobs` and
-# deliberately leave Gold alone). So it's scoped here to only the
+# jobs-table row has since been deleted (job cleanup scripts only ever touch
+# `jobs` and deliberately leave Gold alone). So it's scoped here to only the
 # statement_ids that still have a live row in `jobs`. The subquery is
 # DISTINCT so this join can't fan out and double-count if a statement_id
 # were ever referenced by more than one jobs row.

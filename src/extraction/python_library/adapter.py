@@ -672,7 +672,7 @@ class PythonLibraryExtractionEngine:
         # Parts and asTech only; resolve_vendor_id() returns None for any
         # other miss and callers fall back to a default vendor_id
         # transform, by design -- see that module's own docstring). A
-        # vendor's real voucher-sourced ERP data (scripts/load_voucher_data.py)
+        # vendor's real voucher-sourced ERP data
         # must exist under "VOUCHER-<vendor_id>" for matching to find
         # anything to reconcile against; that's a separate prerequisite
         # from extraction working, unaffected by this change either way.
