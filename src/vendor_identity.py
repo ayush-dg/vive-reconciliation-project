@@ -30,6 +30,7 @@ CONFIG_PATH = os.path.join(
 )
 
 _lookup_cache = None
+_aliases_cache = None
 
 
 def _normalize(name: str) -> str:
@@ -58,15 +59,22 @@ def _normalize_split(name: str) -> str:
     return _normalize(re.sub(r"[-/]", " ", name))
 
 
+def _load_aliases() -> dict:
+    global _aliases_cache
+    if _aliases_cache is None:
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                _aliases_cache = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            _aliases_cache = {}
+    return _aliases_cache
+
+
 def _load_lookup() -> dict:
     global _lookup_cache
     if _lookup_cache is not None:
         return _lookup_cache
-    try:
-        with open(CONFIG_PATH, "r") as f:
-            raw = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        raw = {}
+    raw = _load_aliases()
     lookup = {}
     for vendor_id, aliases in raw.items():
         for alias in aliases:
@@ -90,6 +98,33 @@ def resolve_vendor_id(vendor_name) -> str:
         if key in lookup:
             return lookup[key]
     return None
+
+
+def _words(name: str) -> list:
+    """Uppercase words, any punctuation read as a word break ("Mr.Tire" -> MR TIRE)."""
+    return re.sub(r"[^A-Za-z0-9]+", " ", name).upper().split()
+
+
+def resolve_vendor_id_from_filename(vendor_name) -> str:
+    """resolve_vendor_id() for a vendor_name derived from the PDF's file name
+    (the statement printed no vendor name), plus one fallback: the name
+    STARTS WITH a known alias, in word order -- the longest such alias wins.
+    File names read "<vendor> <location> <MMYY>" (2026-10-30: prod's
+    "Mr.Tire_CherryHill_0926.pdf" got vendor_id MR.TIRE_CHERRYHILL_0926, a
+    new id every month and so never mapped). Only for file-name-derived
+    names: short aliases (CAP, VIP, NCS) must not swallow a printed vendor
+    name that merely starts with them."""
+    found = resolve_vendor_id(vendor_name)
+    if found or not vendor_name:
+        return found
+    words = _words(str(vendor_name))
+    best = None
+    for vendor_id, aliases in _load_aliases().items():
+        for alias in aliases:
+            alias_words = _words(alias)
+            if alias_words and words[:len(alias_words)] == alias_words                     and (best is None or len(alias_words) > best[0]):
+                best = (len(alias_words), vendor_id)
+    return best[1] if best else None
 
 
 # Company-type words dropped by the fallback forms below (whole words only).

@@ -1165,3 +1165,7 @@ BANKS_CHEVROLET-CADILLAC_BUICK-GMC,REFERENCE,original_invoice_number,string,v1,1
 BANKS_CHEVROLET-CADILLAC_BUICK-GMC,CHARGES,charge_amount,decimal,v1,1
 BANKS_CHEVROLET-CADILLAC_BUICK-GMC,CREDITS,payment_amount,decimal,v1,1
 BANKS_CHEVROLET-CADILLAC_BUICK-GMC,BALANCE,amount_remaining,decimal,v1,1
+MR_TIRE,Invoice No,original_invoice_number,string,v1,1
+MR_TIRE,Invoice Dt.,line_date,date,v1,1
+MR_TIRE,Origianl Amt,charge_amount,decimal,v1,1
+MR_TIRE,Open $,amount_remaining,decimal,v1,1

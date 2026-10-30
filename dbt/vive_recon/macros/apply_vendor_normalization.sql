@@ -63,6 +63,12 @@
     out this way against 24 for plain token_after): same as token_after,
     but spaces after vnr.pattern are removed first, so the token runs on
     through them. NULL when vnr.pattern is absent, as for token_after.
+    second_segment (added 2026-10-30: Mr. Tire prints Invoice No as
+    <store>-<invoice>-<ticket> or <store>_<invoice> -- 10681-174199-16884,
+    10681_173901; NetSuite's tranid is the middle part, 174199 / 173901,
+    confirmed under entity 588142): keeps the run of letters / digits after
+    the first character that is neither (any separator), up to the next one.
+    vnr.pattern is unused. A value with no separator passes through unchanged.
 #}
 {% macro apply_vendor_normalization(invoice_col, line_type_col) %}
     case
@@ -102,6 +108,12 @@
                                         then rtrim(left({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) - 1))
                                     else {{ invoice_col }}
                                  end
+                        when vnr.rule_type = 'second_segment'
+                            then case
+                                    when patindex('%[^0-9A-Za-z]%', {{ invoice_col }}) > 0
+                                        then left(substring({{ invoice_col }}, patindex('%[^0-9A-Za-z]%', {{ invoice_col }}) + 1, 4000), patindex('%[^0-9A-Za-z]%', substring({{ invoice_col }}, patindex('%[^0-9A-Za-z]%', {{ invoice_col }}) + 1, 4000) + '|') - 1)
+                                    else {{ invoice_col }}
+                                 end
                         else {{ invoice_col }}
                     end
                 )
@@ -134,6 +146,12 @@
             then case
                     when charindex(vnr.pattern, {{ invoice_col }}) > 1
                         then rtrim(left({{ invoice_col }}, charindex(vnr.pattern, {{ invoice_col }}) - 1))
+                    else {{ invoice_col }}
+                 end
+        when vnr.rule_type = 'second_segment'
+            then case
+                    when patindex('%[^0-9A-Za-z]%', {{ invoice_col }}) > 0
+                        then left(substring({{ invoice_col }}, patindex('%[^0-9A-Za-z]%', {{ invoice_col }}) + 1, 4000), patindex('%[^0-9A-Za-z]%', substring({{ invoice_col }}, patindex('%[^0-9A-Za-z]%', {{ invoice_col }}) + 1, 4000) + '|') - 1)
                     else {{ invoice_col }}
                  end
         else {{ invoice_col }}

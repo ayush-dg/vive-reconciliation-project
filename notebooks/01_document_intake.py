@@ -92,7 +92,7 @@ from src.matching.engine import score_exception_confidence
 from src.pipeline_timing import record_step, timed_step
 from src.normalization import normalize_invoice_number
 from src.shop_owners import get_shop_owner
-from src.vendor_identity import resolve_vendor_id, display_name
+from src.vendor_identity import resolve_vendor_id, resolve_vendor_id_from_filename, display_name
 from src.storage.blob_client import BlobStorageClient
 from src.storage.sharepoint_client import (
     SharePointArchiveClient, SharePointUploadResult, read_settings, sharepoint_enabled,
@@ -2105,11 +2105,13 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # everything silver/gold inherits from bronze downstream.
     vendor_meta = schema_result.setdefault("vendor_metadata", {})
     vendor_name = vendor_meta.get("vendor_name")
+    resolve = resolve_vendor_id
     if not vendor_name or not str(vendor_name).strip():
         vendor_name = derive_vendor_name_from_filename(pdf_path)
         vendor_meta["vendor_name"] = vendor_name
+        resolve = resolve_vendor_id_from_filename
         print(f"  No vendor name extracted — using filename-derived vendor: {vendor_name}")
-    vendor_id = resolve_vendor_id(vendor_name) or vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
+    vendor_id = resolve(vendor_name) or vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
 
     # Update statement_period from AI-detected dates if available
     stmt_meta = schema_result.get("statement_metadata", {})

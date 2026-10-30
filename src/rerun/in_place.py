@@ -335,9 +335,13 @@ def new_from_schema(io, intake, state: dict, pdf_path: str, pdf_text: str, schem
     if route.get("new_vendor_warning"):
         schema_result.setdefault("warnings", []).append(
             {"code": "NEW_VENDOR_TEXT_EMBEDDED", "message": route["new_vendor_warning"], "severity": "MEDIUM"})
-    vendor_name = vendor_meta.get("vendor_name") or intake.derive_vendor_name_from_filename(pdf_path)
+    vendor_name = vendor_meta.get("vendor_name")
+    resolve = intake.resolve_vendor_id
+    if not vendor_name:
+        vendor_name = intake.derive_vendor_name_from_filename(pdf_path)
+        resolve = intake.resolve_vendor_id_from_filename
     vendor_meta["vendor_name"] = vendor_name
-    vendor_id = intake.resolve_vendor_id(vendor_name) or vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
+    vendor_id = resolve(vendor_name) or vendor_name.upper().replace(" ", "_").replace(",", "")[:50]
     end = (schema_result.get("statement_metadata") or {}).get("statement_period_end") or ""
     statement_period = end[:7] if len(end) >= 7 else row.get("statement_period")
     with open(os.path.join(PROJECT_ROOT, "config", "validation", "extraction_rules.json")) as f:
