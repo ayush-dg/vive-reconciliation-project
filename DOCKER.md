@@ -22,14 +22,15 @@ container start via `env_file`.
 
 ## One-time setup
 
-1. Copy `.env.example` to `.env` and fill in your Azure OpenAI credentials:
+1. Copy `.env.example` to `.env` and fill in at least the Claude settings:
    ```
    cp .env.example .env
    ```
    ```
-   AZURE_OPENAI_ENDPOINT=...
-   AZURE_OPENAI_API_KEY=...
-   AZURE_OPENAI_DEPLOYMENT_GPT5_MINI=...
+   AZURE_CLAUDE_ENDPOINT=...
+   AZURE_CLAUDE_API_KEY=...
+   AZURE_CLAUDE_SONNET_DEPLOYMENT=...
+   AZURE_CLAUDE_DEPLOYMENT=...
    ```
    This file stays on your host and is never copied into the image — Docker
    reads it at container start (`docker-compose.yml`'s `env_file: .env`).
@@ -62,60 +63,22 @@ If this is the first time the lakehouse has been set up, create the schema:
 docker compose exec app python notebooks/00_setup_lakehouse_schema.py
 ```
 
-## Running the pipeline stages
+## Running the pipeline
 
-Either drop into an interactive shell:
-```
-docker compose exec app bash
-python notebooks/01_document_intake.py --pdf sample_data/YOUR_FILE.pdf
-python notebooks/02_generate_mock_erp.py --statement-id STMT-...
-python notebooks/03_run_matching.py --statement-id STMT-...
-python notebooks/04_generate_report.py --statement-id STMT-...
-```
-
-Or run one-off commands with `docker compose exec` directly:
-```
-docker compose exec app python notebooks/01_document_intake.py --pdf sample_data/YOUR_FILE.pdf --statement-id STMT-MY-001
-docker compose exec app python notebooks/02_generate_mock_erp.py --statement-id STMT-MY-001
-docker compose exec app python notebooks/03_run_matching.py --statement-id STMT-MY-001
-docker compose exec app python notebooks/04_generate_report.py --statement-id STMT-MY-001
-```
-
-Or use the existing single-command entry point, which runs all four stages:
+Run the whole pipeline (intake, matching, report) for one PDF:
 ```
 docker compose exec app python scripts/run_full_pipeline.py --pdf sample_data/YOUR_FILE.pdf
 ```
 
-## Mock ERP CLI / re-reconciliation workflow
-
-This remains CLI-only, exactly as it works outside Docker — there's no
-dashboard in this codebase and this task didn't add one.
-
+Or start the web app inside the container:
 ```
-docker compose exec app python notebooks/02_generate_mock_erp.py --statement-id STMT-MY-001
-docker compose exec app python notebooks/03_run_matching.py --statement-id STMT-MY-001
+docker compose exec app python -m uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
-
-**Caveat:** `config/mock_erp/scenario_config.json` is baked into the image at
-build time (only `lakehouse/` and `sample_data/` are volume-mounted, per the
-task's requirements). So to edit it while working in the container, either:
-
-- `docker compose exec app bash`, then edit the file in place with `vi`/`nano`
-  inside the container (edits are lost when the container is removed/rebuilt
-  — copy them back to the host if you want to keep them), or
-- Edit `config/mock_erp/scenario_config.json` on the host, then
-  `docker compose build && docker compose up -d` to rebuild with the new config.
-
-If you'll be iterating on `scenario_config.json` often, consider adding
-`./config/mock_erp:/app/config/mock_erp` as a third volume mount — this
-wasn't in scope for this change, so it's left as a decision for you.
 
 ## Verifying the container
 
-Run the existing test suite (see "Assumptions" — `pytest` isn't currently in
-`requirements.txt`, so it's not in the image by default):
+Run the test suite:
 ```
-docker compose exec app pip install pytest
 docker compose exec app python -m pytest tests/ -v
 ```
 
@@ -135,18 +98,16 @@ they're bind mounts, not container-internal storage.
 
 ## Assumptions made
 
-- **Python version**: no `pyproject.toml`, `setup.py`, `runtime.txt`, or
-  `.python-version` pins a version anywhere in this repo. The image uses
-  `python:3.12-slim`, matching `venv/pyvenv.cfg` (`version = 3.12.0`) from the
-  existing local dev environment. Confirm this is right for production.
+- **Python version**: nothing in the repo pins one. The image uses
+  `python:3.12-slim`, matching the local dev venv.
 - **`poppler-utils`**: not explicitly requested, but added alongside
   `tesseract-ocr` because `pdf2image` (used by the OCR fallback) calls
   Poppler's `pdftoppm` binary directly — without it, OCR extraction would
   fail at runtime inside the container even with Tesseract installed and
   `is_ocr_available()` reporting `True` (see "Flags" below).
 - **`config/` is baked into the image, not volume-mounted** — only
-  `lakehouse/` and `sample_data/` are mounted, per the task's explicit
-  requirements. Documented above as a caveat for the mock ERP workflow.
+  `lakehouse/` and `sample_data/` are mounted, so a config change needs
+  `docker compose build`.
 - **Default container command** is `tail -f /dev/null` (keeps the container
   running so `docker compose exec` works, same idea as a persistent dev
   shell) — the container does not auto-run the pipeline on start.

@@ -114,7 +114,7 @@ because bills it already stamped are skipped.
   A run is keyed by statement id (its `job_id` column is empty); join to `jobs.statement_id` to find the job.
 * Production needs: the `NETSUITE_CONNECT_*` credentials (the token's role must be able to write), the same custom fields and Statement Line record (same ids), a role with Edit (not Full) on bills and credits and Allow Non-G/L Changes, and `NETSUITE_WRITEBACK_ENABLED=true`. The CLI also needs `--confirm-account <id>` with `--apply`. The skip reason "not in sandbox" means "not in the NetSuite account in use".
 * The sandbox lacks bills created in production after its last refresh, so matched lines can be skipped as "not in sandbox".
-* Invoices whose matcher-saved number is not NetSuite's exact tranid (some vendors use alternate spellings) are skipped as not found in the sandbox.
+* A matched line is written to the record the matcher picked (by the internal id saved in the recon table), even when that record's number differs from the statement's (CM prefix, alternate number). Only a line with no usable recon row falls back to looking up the printed number, and is skipped as not found if NetSuite has no exact tranid for it.
 * The stored link is the PDF's SharePoint URL, shown as the whole address in a Hyperlink field; searches and portlets cannot show
   just the file name (their formula columns show the HTML as text). A bill already reconciled by this statement but lacking the link
   gets a link-only write; those are counted separately and a failed one is "not written", not a failure of the run.
