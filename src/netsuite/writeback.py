@@ -8,12 +8,21 @@ by tranid, and produces a list of Plan objects describing exactly what
 WOULD be written. build_plans() never mutates anything.
 
 Why the sandbox is looked up again instead of trusting the matcher: the
-matcher (src/matching/fabric_matching.py) compares against the Lakehouse
-copy of NetSuite and keeps no internal record id, so the write-back has to
-find the real bill/credit itself. The matcher's outcome (matched /
-mismatch / not found) stays the source of truth for WHAT to write; the
-sandbox lookup only decides WHERE, and flags any line where the sandbox
-disagrees with the matcher (data drift) instead of writing blindly.
+matcher (src/matching/fabric_matching.py) compares against a copy of
+NetSuite, so the write-back re-reads the real bill/credit before writing.
+The matcher's outcome (matched / mismatch / not found) stays the source of
+truth for WHAT to write; the sandbox lookup only decides WHERE, and flags
+any line where the sandbox disagrees with the matcher (data drift) instead
+of writing blindly.
+
+WHERE (2026-10-30): a matched line is read by the internal id the matcher
+recorded in the recon table (Azure SQL), so a match found under another
+number (CM prefix, alternate number, DT# reference, credit number
+containing the invoice -- e.g. 81122710 -> CM81122710-1) is written to
+that record. A line with no usable recon row falls back to the record
+whose tranid IS the printed invoice number. Invoices a user matched by
+hand (recon source 'manual') are never written here: the manual match
+already wrote its own record, and a re-run must not overwrite it.
 
 Facts confirmed live against the sandbox 2026-10-07:
 - transaction.foreigntotal is NEGATIVE for vendor bills and POSITIVE for
@@ -33,6 +42,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from src.lakehouse.fabric_sql import get_warehouse_connection
+from src.lakehouse.recon_table import SOURCE_AUTO, SOURCE_MANUAL, STATUS_MATCHED
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.fields import BODY_FIELDS, STATEMENT_LINE_RECORD
 from src.netsuite.guard import KEY_FIELD_COLUMNS, WriteBlocked, key_field_changes, key_snapshot
@@ -71,6 +81,8 @@ CAT_VENDOR_UNRESOLVED = "vendor not resolved"
 CAT_UP_TO_DATE = "already up to date"
 CAT_RECONCILED_EARLIER = "reconciled by an earlier statement"
 CAT_NEEDS_REVIEW = "needs review"
+CAT_MATCHED_MANUALLY = "matched manually (left as the user wrote it)"
+CAT_MANUAL_UNCHECKED = "manual matches could not be checked"
 
 # Why a WRITE that was attempted did not succeed.
 CAT_PERIOD_LOCKED = "period locked"
@@ -174,6 +186,47 @@ def load_statement_results(statement_id: str) -> dict:
             "exceptions": exceptions, "lines": lines}
 
 
+def load_recon_rows(statement_id: str):
+    """The statement's active recon rows (Azure SQL, src/lakehouse/recon_table.py):
+    the NetSuite record the matcher picked for each line, and the invoices a
+    user matched by hand. None when the table can't be read."""
+    try:
+        from src.lakehouse.connection import execute_query
+        return execute_query(
+            "SELECT invoice_number, source, status, netsuite_internal_id, netsuite_amount "
+            "FROM recon WHERE statement_id = ? AND is_active = 1", [statement_id])
+    except Exception as exc:  # the write-back falls back; see build_plans()
+        logger.warning("recon read failed for %s (%s)", statement_id, type(exc).__name__)
+        return None
+
+
+def _matched_records(recon_rows) -> dict:
+    """{lowercased invoice: {(internal id, NetSuite amount), ...}} for the
+    statement's automatic matches."""
+    picked = {}
+    for r in recon_rows or []:
+        if (r.get("source") == SOURCE_AUTO and r.get("status") == STATUS_MATCHED
+                and r.get("netsuite_internal_id") and r.get("invoice_number")):
+            picked.setdefault(r["invoice_number"].lower(), set()).add(
+                (str(r["netsuite_internal_id"]), r.get("netsuite_amount")))
+    return picked
+
+
+def _matched_record_id(row, picked: dict):
+    """The one record the matcher picked for this matched line whose amount
+    ties it, or None (the line then falls back to the tranid lookup). An
+    invoice printed twice with different amounts pairs by amount."""
+    ids = {rid for rid, total in picked.get(row["invoice_number"].lower(), ())
+           if _ties(total, row["statement_amount"])}
+    return ids.pop() if len(ids) == 1 else None
+
+
+def _manual_invoices(recon_rows) -> set:
+    """Lowercased invoice numbers with an active manual match."""
+    return {r["invoice_number"].lower() for r in recon_rows or []
+            if r.get("source") == SOURCE_MANUAL and r.get("invoice_number")}
+
+
 # custbody_statement_link is a Hyperlink field; its real maximum length is
 # not confirmed yet, so a longer URL is not written at all rather than
 # risking a rejected or truncated link.
@@ -219,6 +272,17 @@ def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+_TXN_SELECT = (
+    "SELECT t.id, t.tranid, t.entity, t.type, t.foreigntotal, tl.location, "
+    "t.custbody_reconciled, t.custbody_statement_reference, t.custbody_statement_link, "
+    "t.custbody_reconciled_date, t.custbody_reconciliation_exception, "
+    "t.trandate, t.postingperiod, t.status, t.approvalstatus, t.currency "
+    "FROM transaction t LEFT JOIN transactionline tl "
+    "ON tl.transaction = t.id AND tl.mainline = 'T' "
+    "WHERE t.type IN ('VendBill','VendCred') AND t.voided = 'F' "
+)
+
+
 def fetch_sandbox_transactions(ns, entity_ids: list, tranids: list) -> dict:
     """{lowercased tranid: [txn rows]} for non-voided vendor bills and
     credits of these entities. Entity ids are validated as digits-only
@@ -233,18 +297,27 @@ def fetch_sandbox_transactions(ns, entity_ids: list, tranids: list) -> dict:
     unique = sorted({t.lower() for t in tranids if t})
     for start in range(0, len(unique), _TRANID_CHUNK):
         chunk = ",".join(_sql_literal(t) for t in unique[start:start + _TRANID_CHUNK])
-        rows = ns.suiteql(
-            "SELECT t.id, t.tranid, t.entity, t.type, t.foreigntotal, tl.location, "
-            "t.custbody_reconciled, t.custbody_statement_reference, t.custbody_statement_link, "
-            "t.custbody_reconciled_date, t.custbody_reconciliation_exception, "
-            "t.trandate, t.postingperiod, t.status, t.approvalstatus, t.currency "
-            "FROM transaction t LEFT JOIN transactionline tl "
-            "ON tl.transaction = t.id AND tl.mainline = 'T' "
-            "WHERE t.type IN ('VendBill','VendCred') AND t.voided = 'F' "
-            f"AND t.entity IN ({entity_list}) AND LOWER(t.tranid) IN ({chunk})")
+        rows = ns.suiteql(_TXN_SELECT + f"AND t.entity IN ({entity_list}) AND LOWER(t.tranid) IN ({chunk})")
         for row in rows:
             by_tranid.setdefault(row["tranid"].lower(), []).append(row)
     return by_tranid
+
+
+def fetch_transactions_by_id(ns, entity_ids: list, record_ids) -> dict:
+    """{internal id: txn row} for the records the matcher picked -- the same
+    columns and filters as fetch_sandbox_transactions(), so a record that is
+    voided now or filed under another vendor comes back missing."""
+    safe_entities = [e for e in entity_ids if str(e).isdigit()]
+    unique = sorted({str(r) for r in record_ids if str(r).isdigit()})
+    if not safe_entities or not unique:
+        return {}
+    entity_list = ",".join(safe_entities)
+    by_id = {}
+    for start in range(0, len(unique), _TRANID_CHUNK):
+        chunk = ",".join(unique[start:start + _TRANID_CHUNK])
+        for row in ns.suiteql(_TXN_SELECT + f"AND t.entity IN ({entity_list}) AND t.id IN ({chunk})"):
+            by_id[str(row["id"])] = row
+    return by_id
 
 
 def fetch_exception_list_ids(ns) -> dict:
@@ -526,12 +599,13 @@ def plan_exception_row(row, candidates, ctx, existing_lines: set) -> list:
                   category=CAT_NO_BILL_TO_WRITE)]
 
 
-def _primary_entity(matched_rows, sandbox) -> str:
+def _primary_entity(matched) -> str:
     """The NetSuite entity most of this statement's matched bills belong
-    to -- the vendor that Statement Lines are filed under."""
+    to -- the vendor that Statement Lines are filed under. `matched` is
+    [(matched row, its candidate records), ...]."""
     counts = Counter()
-    for row in matched_rows:
-        for txn in sandbox.get(row["invoice_number"].lower(), []):
+    for row, candidates in matched:
+        for txn in candidates:
             if _ties(txn["foreigntotal"], row["statement_amount"]):
                 counts[str(txn["entity"])] += 1
     return counts.most_common(1)[0][0] if counts else None
@@ -569,15 +643,45 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
                      category=CAT_VENDOR_UNRESOLVED)
                      for r in results["matched"] + results["exceptions"]]
 
+    recon_rows = load_recon_rows(statement_id)
+    manual = _manual_invoices(recon_rows)
+    picked = _matched_records(recon_rows)
+    record_ids = {id(r): _matched_record_id(r, picked) for r in results["matched"]}
+
     tranids = [r["invoice_number"] for r in results["matched"] + results["exceptions"]]
     sandbox = fetch_sandbox_transactions(ns, ctx.entity_ids, tranids)
+    by_id = fetch_transactions_by_id(ns, ctx.entity_ids, [i for i in record_ids.values() if i])
     existing_lines = fetch_existing_statement_lines(ns, statement_id)
-    ctx.primary_entity = _primary_entity(results["matched"], sandbox)
-    ctx.primary_location = _statement_location(sandbox)
 
-    plans = [plan_matched(r, sandbox.get(r["invoice_number"].lower(), []), ctx) for r in results["matched"]]
+    def candidates(row):
+        # The record the matcher picked; the printed number's record if it's gone or unknown.
+        txn = by_id.get(record_ids.get(id(row)) or "")
+        return [txn] if txn else sandbox.get(row["invoice_number"].lower(), [])
+
+    matched = [(r, candidates(r)) for r in results["matched"]]
+    ctx.primary_entity = _primary_entity(matched)
+    ctx.primary_location = _statement_location({**sandbox, **{f"id:{k}": [t] for k, t in by_id.items()}})
+
+    def by_hand(row):
+        return row["invoice_number"].lower() in manual
+
+    plans = []
+    for r, found in matched:
+        if by_hand(r):
+            plans.append(_skip(r["invoice_number"], r["statement_amount"], "matched by hand -- the manual "
+                               "match wrote its own record", category=CAT_MATCHED_MANUALLY))
+        else:
+            plans.append(plan_matched(r, found, ctx))
     for r in results["exceptions"]:
-        plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
+        if recon_rows is None:
+            plans.append(_skip(r["invoice_number"], r["statement_amount"], "recon table could not be read, "
+                               "so a manual match can't be ruled out -- not written this run",
+                               category=CAT_MANUAL_UNCHECKED))
+        elif by_hand(r):
+            plans.append(_skip(r["invoice_number"], r["statement_amount"], "matched by hand -- the manual "
+                               "match wrote its own record", category=CAT_MATCHED_MANUALLY))
+        else:
+            plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
     # Link-only writes go last (stable sort): every reconciliation result is
     # written first, whatever happens to a link.
     plans.sort(key=lambda p: p.action == PATCH_LINK_ONLY)
