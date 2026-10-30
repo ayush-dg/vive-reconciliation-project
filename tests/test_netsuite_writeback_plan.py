@@ -483,6 +483,8 @@ class LinkOnlyPlanTests(unittest.TestCase):
              mock.patch.object(wb, "resolve_pdf_link", return_value=(SP_URL, "")), \
              mock.patch.object(wb, "fetch_exception_list_ids", return_value={}), \
              mock.patch.object(wb, "fetch_sandbox_transactions", return_value=sandbox), \
+             mock.patch.object(wb, "load_recon_rows", return_value=[]), \
+             mock.patch.object(wb, "fetch_transactions_by_id", return_value={}), \
              mock.patch.object(wb, "fetch_existing_statement_lines", return_value=set()), \
              mock.patch.object(wb, "_primary_entity", return_value="111"), \
              mock.patch.object(wb, "_statement_location", return_value=None):
@@ -979,6 +981,134 @@ class PlanUnwrittenReasonsTests(unittest.TestCase):
             with self.subTest(reason=reason):
                 (plan,) = wb.plan_exception_row(_row("5", reason), [], _ctx(), set())
                 self.assertEqual(plan.action, wb.SKIP_REVIEW)
+
+
+def _recon(invoice, record_id=None, amount=None, source="auto", status="Matched"):
+    return {"invoice_number": invoice, "source": source, "status": status,
+            "netsuite_internal_id": record_id, "netsuite_amount": amount}
+
+
+class MatchedRecordFromReconTests(unittest.TestCase):
+    """2026-10-30: matched lines are written to the record the matcher picked
+    (recon.netsuite_internal_id)."""
+
+    def _plans(self, matched=(), exceptions=(), recon=(), sandbox=None, by_id=None):
+        results = {"header": {"vendor_id": "V", "vendor_name_raw": "Vendor", "shop_name_raw": None},
+                   "matched": list(matched), "exceptions": list(exceptions), "lines": []}
+        self.asked_ids = []
+
+        def fetch_by_id(ns, entity_ids, record_ids):
+            self.asked_ids = sorted(record_ids)
+            return {k: v for k, v in (by_id or {}).items() if k in record_ids}
+
+        with mock.patch.object(wb, "load_statement_results", return_value=results), \
+             mock.patch.object(wb, "resolve_entity_ids", return_value=["111"]), \
+             mock.patch.object(wb, "resolve_pdf_link", return_value=(None, "")), \
+             mock.patch.object(wb, "fetch_exception_list_ids", return_value={"Amount differs": "7"}), \
+             mock.patch.object(wb, "fetch_sandbox_transactions", return_value=sandbox or {}), \
+             mock.patch.object(wb, "load_recon_rows", return_value=None if recon is None else list(recon)), \
+             mock.patch.object(wb, "fetch_transactions_by_id", side_effect=fetch_by_id), \
+             mock.patch.object(wb, "fetch_existing_statement_lines", return_value=set()):
+            return wb.build_plans(STMT, mock.Mock())[1]
+
+    def test_credit_found_under_another_number_is_written_to_the_matchers_record(self):
+        # Parts By Cochran, STMT-8D0C0DCB: line 81122710 $50 matched credit CM81122710-1;
+        # the printed number is a $67.52 bill.
+        bill = dict(_txn("-67.52"), id="4420349", tranid="81122710")
+        credit = dict(_txn("50", ns_type="VendCred"), id="4536787", tranid="CM81122710-1")
+        (plan,) = self._plans(matched=[_row("50.00", invoice="81122710")],
+                              recon=[_recon("81122710", "4536787", 50.0)],
+                              sandbox={"81122710": [bill]}, by_id={"4536787": credit})
+        self.assertEqual((plan.action, plan.record_type, plan.record_id), (wb.PATCH_MATCHED, "vendorcredit", "4536787"))
+        self.assertEqual(plan.invoice_number, "81122710")
+
+    def test_exact_number_match_writes_the_same_record_as_before(self):
+        txn = dict(_txn("-100"), id="500")
+        (plan,) = self._plans(matched=[_row()], recon=[_recon("INV1", "500", 100.0)],
+                              sandbox={"inv1": [txn]}, by_id={"500": txn})
+        self.assertEqual((plan.action, plan.record_id), (wb.PATCH_MATCHED, "500"))
+
+    def test_no_recon_row_falls_back_to_the_printed_number(self):
+        (plan,) = self._plans(matched=[_row()], recon=[], sandbox={"inv1": [dict(_txn("-100"), id="500")]})
+        self.assertEqual((plan.action, plan.record_id), (wb.PATCH_MATCHED, "500"))
+        self.assertEqual(self.asked_ids, [])
+
+    def test_record_gone_from_netsuite_falls_back_to_the_printed_number(self):
+        # Voided since, or filed under another vendor: the by-id read returns nothing.
+        (plan,) = self._plans(matched=[_row()], recon=[_recon("INV1", "999", 100.0)],
+                              sandbox={"inv1": [dict(_txn("-100"), id="500")]}, by_id={})
+        self.assertEqual(plan.record_id, "500")
+
+    def test_record_whose_amount_no_longer_ties_is_skipped(self):
+        credit = dict(_txn("40", ns_type="VendCred"), id="4536787", tranid="CM81122710-1")
+        (plan,) = self._plans(matched=[_row("50.00", invoice="81122710")],
+                              recon=[_recon("81122710", "4536787", 50.0)], by_id={"4536787": credit})
+        self.assertEqual(wb.skip_category(plan), wb.CAT_AMOUNT_NOT_TIED)
+
+    def test_invoice_printed_twice_pairs_each_line_by_amount(self):
+        a = dict(_txn("-100"), id="601", tranid="INV1")
+        b = dict(_txn("30", ns_type="VendCred"), id="602", tranid="CMINV1")
+        plans = self._plans(matched=[_row("100.00"), _row("30.00")],
+                            recon=[_recon("INV1", "601", 100.0), _recon("INV1", "602", 30.0)],
+                            by_id={"601": a, "602": b})
+        self.assertEqual([p.record_id for p in plans], ["601", "602"])
+
+    def test_two_picked_records_at_the_same_amount_fall_back(self):
+        plans = self._plans(matched=[_row()], recon=[_recon("INV1", "601", 100.0), _recon("INV1", "602", 100.0)],
+                            sandbox={"inv1": [dict(_txn("-100"), id="500")]})
+        self.assertEqual(plans[0].record_id, "500")
+
+    def test_manual_rows_are_not_used_to_pick_the_record(self):
+        # Only the matcher's own (auto) rows decide WHERE a matched line is written.
+        (plan,) = self._plans(matched=[_row()], recon=[_recon("INV1", "777", 100.0, source="manual",
+                                                               status="Matched manually")],
+                              sandbox={"inv1": [dict(_txn("-100"), id="500")]})
+        self.assertEqual(plan.record_id, "500")
+        self.assertEqual(self.asked_ids, [])
+
+    def test_unreadable_recon_falls_back_to_the_printed_number(self):
+        plans = self._plans(matched=[_row(invoice="M1")],
+                            exceptions=[_row("100.00", wb.REASON_AMOUNT_MISMATCH), _row("5", wb.REASON_NOT_FOUND, "NF1")],
+                            recon=None, sandbox={"m1": [dict(_txn("-100"), id="501", tranid="M1")],
+                                                 "inv1": [_txn("-90")]})
+        self.assertEqual([p.action for p in plans], [wb.PATCH_MATCHED, wb.PATCH_EXCEPTION, wb.CREATE_STATEMENT_LINE])
+
+    def test_exceptions_are_written_as_before(self):
+        plans = self._plans(matched=[_row(invoice="M1")], exceptions=[_row("100.00", wb.REASON_AMOUNT_MISMATCH)],
+                            recon=[_recon("M1", "501", 100.0)],
+                            sandbox={"m1": [dict(_txn("-100"), id="501", tranid="M1")], "inv1": [_txn("-90")]},
+                            by_id={"501": dict(_txn("-100"), id="501", tranid="M1")})
+        self.assertEqual([p.action for p in plans], [wb.PATCH_MATCHED, wb.PATCH_EXCEPTION])
+
+
+class LoadReconRowsTests(unittest.TestCase):
+    def test_reads_only_this_statements_active_rows(self):
+        with mock.patch("src.lakehouse.connection.execute_query", return_value=[]) as query:
+            self.assertEqual(wb.load_recon_rows(STMT), [])
+        sql, params = query.call_args[0]
+        self.assertIn("is_active = 1", sql)
+        self.assertEqual(params, [STMT])
+
+    def test_read_failure_returns_none(self):
+        with mock.patch("src.lakehouse.connection.execute_query", side_effect=RuntimeError("db down")):
+            self.assertIsNone(wb.load_recon_rows(STMT))
+
+
+class FetchTransactionsByIdTests(unittest.TestCase):
+    def test_reads_by_id_for_the_vendors_entities_only(self):
+        ns = mock.Mock()
+        ns.suiteql.return_value = [dict(_txn("50", ns_type="VendCred"), id=4536787)]
+        found = wb.fetch_transactions_by_id(ns, ["410838", "x;drop"], ["4536787", "bad'id"])
+        self.assertEqual(list(found), ["4536787"])
+        query = ns.suiteql.call_args[0][0]
+        self.assertIn("t.id IN (4536787)", query)
+        self.assertIn("t.entity IN (410838)", query)
+        self.assertIn("t.voided = 'F'", query)
+
+    def test_nothing_to_read(self):
+        ns = mock.Mock()
+        self.assertEqual(wb.fetch_transactions_by_id(ns, ["1"], []), {})
+        ns.suiteql.assert_not_called()
 
 
 if __name__ == "__main__":
