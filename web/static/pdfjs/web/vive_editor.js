@@ -1,4 +1,4 @@
-/* vive_editor.js -- the app's additions to the stock PDF.js 4.10.38 viewer
+/* vive_editor.js -- the app's additions to the stock PDF.js 5.7.284 viewer
    (web/static/pdfjs, otherwise unmodified apart from two tags in viewer.html).
 
    Opened by GET /statements/<id>/<name>.pdf?edit=1 (web/routers/statements.py)
@@ -6,8 +6,13 @@
 
    - Viewer options: no preferences from localStorage, no PDF scripting, no
      sample file.
-   - Tools: highlight, text and draw (the stamp/image tool is hidden in
-     vive_editor.css).
+   - Tools: highlight, text and draw, and comments: select text and a floating
+     "Comment" / "Highlight" button appears; a comment is a highlight with a
+     hidden note (a standard PDF popup, so Acrobat/Edge/SharePoint show it
+     too), listed in the comments sidebar. The stamp/image tool is hidden in
+     vive_editor.css. Opening the comments sidebar puts existing comments in
+     edit mode, which PDF.js counts as a change (Save lights up; saving
+     rewrites the same comments).
    - "Save to SharePoint": PDF.js writes the annotations into the file
      (saveDocument) and it is POSTed to /statements/<id>/pdf with If-Match:
      <eTag>. The server replaces the SharePoint file only if nobody saved
@@ -27,6 +32,8 @@
     options.set("disablePreferences", true);
     options.set("enableScripting", false);
     options.set("defaultUrl", "");
+    options.set("enableComment", true);
+    options.set("enableHighlightFloatingButton", true);
   }
   var target = document;
   try { target = window.parent.document; } catch (e) { target = document; }
@@ -96,7 +103,7 @@
     button.type = "button";
     button.className = "vive-save";
     button.textContent = "Save to SharePoint";
-    button.title = "Save your highlights, text and drawings into the statement's SharePoint file";
+    button.title = "Save your comments, highlights, text and drawings into the statement's SharePoint file";
     button.disabled = true;
     button.addEventListener("click", save);
     status = document.createElement("span");
