@@ -1169,3 +1169,7 @@ MR_TIRE,Invoice No,original_invoice_number,string,v1,1
 MR_TIRE,Invoice Dt.,line_date,date,v1,1
 MR_TIRE,Origianl Amt,charge_amount,decimal,v1,1
 MR_TIRE,Open $,amount_remaining,decimal,v1,1
+MERCEDES-BENZ_OF_BURLINGTON,DATE,line_date,date,v1,1
+MERCEDES-BENZ_OF_BURLINGTON,DOCUMENT,original_invoice_number,string,v1,1
+MERCEDES-BENZ_OF_BURLINGTON,DESCRIPTION,description_raw,string,v1,1
+MERCEDES-BENZ_OF_BURLINGTON,AMOUNT,charge_amount,decimal,v1,1

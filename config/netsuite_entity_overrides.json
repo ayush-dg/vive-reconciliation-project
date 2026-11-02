@@ -815,5 +815,6 @@
     "entity_ids": ["239562"],
     "note": "Banks Chevrolet Cadillac Buick GMC (239562) -- added 2026-10-29 from prod STMT-0CA7F62C: its bills tie out under 239562 once the CVW prefix is stripped (CVW994295 -> 994295 $42.92, CVW993160-x -> 993160-x) and its credits as CM + number (CMCVW991606 -> CM991606). NetSuite's name uses spaces where the statement uses hyphens, so it is pinned here instead of relying on name lookup."
   },
-  "MR_TIRE": {"entity_ids": ["588142"], "note": "MR. TIRE AUTO CENTERS (588142) -- added 2026-10-30 from prod STMT-1D59DFC6 (Mr.Tire_CherryHill_0926.pdf, no vendor name printed): 77 of its 80 lines are bills under 588142 at the exact amount, keyed by the middle part of Invoice No (second_segment rule)."}
+  "MR_TIRE": {"entity_ids": ["588142"], "note": "MR. TIRE AUTO CENTERS (588142) -- added 2026-10-30 from prod STMT-1D59DFC6 (Mr.Tire_CherryHill_0926.pdf, no vendor name printed): 77 of its 80 lines are bills under 588142 at the exact amount, keyed by the middle part of Invoice No (second_segment rule)."},
+  "MERCEDES-BENZ_OF_BURLINGTON": {"entity_ids": ["266702"], "note": "Mercedes-Benz of Burlington (266702) -- added 2026-11-02 from prod STMT-8414BAA7 (MB of Burlington Ben's 10-26.pdf): all 8 DOCUMENT numbers tie out exactly under 266702 (7 bills, and the -150.00 line is credit 8569175)."}
 }
