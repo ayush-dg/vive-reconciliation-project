@@ -225,9 +225,15 @@ class ViewTests(unittest.TestCase):
         resp, _ = self._get("/statements/STMT-60A970B4/BMW.pdf?edit=1")
         self.assertEqual(resp.status_code, 303)
         location = resp.headers["location"]
-        self.assertTrue(location.startswith(statements.VIEWER_PATH + "?file="))
+        # The file URL carries no query string: PDF.js 5.x would keep it in the path and 404.
+        self.assertTrue(location.startswith(statements.VIEWER_PATH + "?file=%2Fstatements%2FSTMT-60A970B4%2FBMW.pdf&"))
         self.assertIn("vive_sid=STMT-60A970B4", location)
         self.assertIn("vive_etag=%22%7BABC%7D%2C1%22", location)
+
+    def test_the_viewer_gets_the_plain_file_path(self):
+        # PDF.js 5.x encodes it itself: a space must reach it as "%20" once, never "%2520".
+        resp, _ = self._get("/statements/STMT-60A970B4/BMW%200926.pdf?edit=1")
+        self.assertIn("?file=%2Fstatements%2FSTMT-60A970B4%2FBMW%200926.pdf&", resp.headers["location"])
 
     def test_edit_without_a_sharepoint_copy_opens_the_plain_pdf(self):
         resp, _ = self._get("/statements/STMT-60A970B4/BMW.pdf?edit=1", sharepoint=None)

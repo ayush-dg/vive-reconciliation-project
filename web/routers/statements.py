@@ -138,7 +138,11 @@ def _editor_redirect(statement_id: str, filename: str):
     found = client.get_file(sharepoint["sharepoint_drive_id"], sharepoint["sharepoint_item_id"]) if client else None
     if not found:
         return RedirectResponse(plain, status_code=303)
-    source = f"{plain}?v={quote(found.etag, safe='')}"   # a new eTag is a new URL: no stale cache
+    # PDF.js 5.x URL-encodes the file it is given, so it gets the plain path (a
+    # pre-encoded "%20" would become "%2520") and no query string (it kept
+    # "?v=..." as part of the path: 404, 0 pages). The PDF is served with
+    # Cache-Control: no-store, so the latest version loads anyway.
+    source = f"/statements/{statement_id}/{_inline_filename(filename)}"
     return RedirectResponse(
         f"{VIEWER_PATH}?file={quote(source, safe='')}&vive_sid={quote(statement_id)}"
         f"&vive_etag={quote(found.etag, safe='')}", status_code=303)
