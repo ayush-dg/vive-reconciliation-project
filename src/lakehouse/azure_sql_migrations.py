@@ -432,6 +432,24 @@ TABLES = {
             logged_at NVARCHAR(40) NOT NULL
         )
     """,
+    # migrations/025_add_statement_pdf_edits.sql -- one row per save from the in-app PDF
+    # editor (who really edited; SharePoint shows the app's account), and the saved file's
+    # hash so intake treats a re-sent edited copy as a duplicate of its statement.
+    "statement_pdf_edits": """
+        CREATE TABLE statement_pdf_edits (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            statement_id NVARCHAR(100) NOT NULL,
+            edited_by NVARCHAR(255) NOT NULL,
+            edited_at NVARCHAR(40) NOT NULL,
+            sharepoint_drive_id NVARCHAR(200) NOT NULL,
+            sharepoint_item_id NVARCHAR(100) NOT NULL,
+            old_etag NVARCHAR(200),
+            new_etag NVARCHAR(200),
+            old_size BIGINT,
+            new_size BIGINT,
+            new_document_hash NVARCHAR(64) NOT NULL
+        )
+    """,
 }
 
 INDEXES = {
@@ -467,6 +485,14 @@ INDEXES = {
     "idx_job_step_timing_job": (
         "job_step_timing",
         "CREATE INDEX idx_job_step_timing_job ON job_step_timing(job_id)",
+    ),
+    "idx_statement_pdf_edits_statement": (
+        "statement_pdf_edits",
+        "CREATE INDEX idx_statement_pdf_edits_statement ON statement_pdf_edits(statement_id)",
+    ),
+    "idx_statement_pdf_edits_hash": (
+        "statement_pdf_edits",
+        "CREATE INDEX idx_statement_pdf_edits_hash ON statement_pdf_edits(new_document_hash)",
     ),
 }
 

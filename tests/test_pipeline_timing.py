@@ -115,9 +115,12 @@ class SchemaParityTests(unittest.TestCase):
         azure_cols = re.findall(r"^\s+(\w+)\s+(?:INT|NVARCHAR|FLOAT)", azure.TABLES["job_step_timing"], re.M)
         self.assertEqual(azure_cols, sqlite_cols)
 
-    def test_it_comes_last_so_it_cannot_block_an_older_table(self):
-        self.assertEqual(list(azure.TABLES)[-1], "job_step_timing")
-        self.assertEqual(list(azure.INDEXES)[-1], "idx_job_step_timing_job")
+    def test_it_comes_after_the_older_tables_so_it_cannot_block_one(self):
+        # Only tables added after it (statement_pdf_edits, 2026-11-02) may follow it.
+        tables, indexes = list(azure.TABLES), list(azure.INDEXES)
+        self.assertEqual(tables[tables.index("job_step_timing") + 1:], ["statement_pdf_edits"])
+        self.assertEqual(indexes[indexes.index("idx_job_step_timing_job") + 1:],
+                         ["idx_statement_pdf_edits_statement", "idx_statement_pdf_edits_hash"])
 
 
 if __name__ == "__main__":

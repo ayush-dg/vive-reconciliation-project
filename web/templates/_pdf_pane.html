@@ -2,11 +2,16 @@
    right-hand column of a .pdf-split, hidden until the topbar's View PDF
    (#pdf-pane-btn, an ordinary new-tab link underneath) opens it. Used by
    Statement Processing's detail page, Exceptions review and Extracted Data;
-   needs pdf_url. #}
+   needs pdf_url. When pdf_url opens the editor (?edit=1, PDF editing on --
+   web/routers/statements.py), "View original" opens the untouched copy. #}
 {% if pdf_url %}
 <aside class="pdf-pane" id="pdf-pane" aria-label="Statement PDF" hidden>
   <div class="pdf-pane-head">
     <span class="pdf-pane-title">Statement PDF</span>
+    {% if "edit=1" in pdf_url %}
+    <a href="{{ pdf_url.split('?')[0] }}?original=1" target="_blank" rel="noopener" class="pdf-pane-link"
+       title="The statement as it arrived, without any edits">View original</a>
+    {% endif %}
     <a href="{{ pdf_url }}" target="_blank" rel="noopener" class="pdf-pane-link">Open in new tab</a>
     <button type="button" class="pdf-pane-close" id="pdf-pane-close" aria-label="Close the PDF">&times;</button>
   </div>

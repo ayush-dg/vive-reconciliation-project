@@ -11,10 +11,18 @@ Path: {SHAREPOINT_BASE_FOLDER}/{vendor_slug}/{yyyy}/{mm}/{original_stem}__{hash1
 exact bytes are already archived", so the existing file is reused, never
 replaced.
 
+It also reads an archived file back by its item id (View PDF shows the
+SharePoint copy, so edits made there are seen) and, for the in-app PDF
+editor only, replaces that file's contents in place (replace_file): same
+item, same link, SharePoint keeps the old version.
+
 Rules:
-  - Never raises: every problem becomes SharePointUploadResult(status="failed").
-  - Never deletes or overwrites a file (conflictBehavior=fail). The only
-    DELETE ever sent cancels this module's own unfinished upload session.
+  - Never raises: every problem becomes SharePointUploadResult(status="failed")
+    (or a failed SharePointReplaceResult / None from the read helpers).
+  - Never deletes a file. Archiving never overwrites one (conflictBehavior=fail);
+    the only overwrite is replace_file(), which needs the eTag the editor
+    opened, so a save over someone else's newer save is refused (HTTP 412).
+    The only DELETE ever sent cancels this module's own unfinished upload session.
   - Never creates the base folder: a missing base folder fails the upload.
     Graph creates the vendor/year/month folders below it on upload.
   - Settings are SHAREPOINT_* only, read at call time; the credential is an
@@ -66,6 +74,24 @@ class SharePointUploadResult:
     item_id: str = None
     drive_id: str = None
     path: str = None
+    error: str = None
+
+
+@dataclass
+class SharePointFile:
+    """An archived file as it is now: its eTag (the version an edit must be
+    based on), size and link, plus the bytes when they were downloaded."""
+    etag: str
+    size: int
+    web_url: str = None
+    content: bytes = None
+
+
+@dataclass
+class SharePointReplaceResult:
+    status: str                 # "saved" | "conflict" | "failed"
+    etag: str = None
+    size: int = None
     error: str = None
 
 
@@ -207,7 +233,97 @@ class SharePointArchiveClient:
             # transport error's text can carry the pre-authenticated upload URL
             return self._failed(f"unexpected {type(exc).__name__}", drive_id, path)
 
+    def get_file(self, drive_id: str, item_id: str, with_content: bool = False):
+        """The archived file's current eTag/size/link, and its bytes when
+        with_content -- or None if it can't be read (gone, no access, SharePoint
+        down). The caller falls back to the Azure copy."""
+        try:
+            self._deadline = self._clock() + UPLOAD_BUDGET_SECONDS
+            self._token = self._get_token()
+            info = self._item_info(drive_id, item_id)
+            content = None
+            if with_content:
+                # Graph answers with a redirect to a pre-authenticated download URL;
+                # requests drops the bearer token when it follows it to another host.
+                r = self._send("GET", f"{GRAPH}/drives/{self._q(drive_id)}/items/{self._q(item_id)}/content",
+                               headers=self._auth(), timeout=CHUNK_TIMEOUT)
+                if r.status_code != 200:
+                    return None
+                content = r.content
+            return SharePointFile(etag=info["eTag"], size=info.get("size"), web_url=info.get("webUrl"),
+                                  content=content)
+        except Exception:
+            return None
+
+    def replace_file(self, drive_id: str, item_id: str, data: bytes, if_match: str) -> SharePointReplaceResult:
+        """Replaces the file's contents, only if it is still at eTag if_match.
+        The item, its name and its link stay the same; SharePoint keeps the
+        previous contents as an earlier version."""
+        try:
+            if not if_match:
+                raise SharePointUploadError("no eTag to save against")
+            if not data:
+                raise SharePointUploadError("empty file")
+            self._deadline = self._clock() + UPLOAD_BUDGET_SECONDS
+            self._token = self._get_token()
+            item_url = f"{GRAPH}/drives/{self._q(drive_id)}/items/{self._q(item_id)}"
+            guard = {"If-Match": if_match}
+            if len(data) <= SIMPLE_UPLOAD_MAX_BYTES:
+                r = self._send("PUT", f"{item_url}/content", data=data, timeout=CHUNK_TIMEOUT,
+                               headers={**self._auth(), **guard, "Content-Type": "application/pdf"})
+            else:
+                r = self._send("POST", f"{item_url}/createUploadSession", headers={**self._auth(), **guard},
+                               json={"item": {"@microsoft.graph.conflictBehavior": "replace"}})
+                if r.status_code == 200:
+                    r = self._upload_chunks((r.json() or {}).get("uploadUrl"), data)
+            if r.status_code == 412:
+                return SharePointReplaceResult("conflict", error="someone else saved this file since it was opened")
+            if r.status_code not in (200, 201):
+                raise self._error("replace", r)
+            item = r.json() or {}
+            return SharePointReplaceResult("saved", etag=item.get("eTag"), size=item.get("size"))
+        except _BudgetExceeded:
+            return SharePointReplaceResult("failed", error="timeout (save took longer than the time budget)")
+        except (SharePointConfigError, SharePointAuthError, SharePointUploadError) as exc:
+            return SharePointReplaceResult("failed", error=self._redact(str(exc)))
+        except Exception as exc:  # the type only, as in upload_statement_pdf
+            return SharePointReplaceResult("failed", error=f"unexpected {type(exc).__name__}")
+
     # ----------------------------------------------------------------- helpers
+    def _item_info(self, drive_id: str, item_id: str) -> dict:
+        r = self._send("GET", f"{GRAPH}/drives/{self._q(drive_id)}/items/{self._q(item_id)}"
+                              "?$select=id,eTag,size,webUrl", headers=self._auth())
+        if r.status_code != 200:
+            raise self._error("file lookup", r)
+        info = r.json() or {}
+        if not info.get("eTag"):
+            raise SharePointUploadError("file lookup returned no eTag")
+        return info
+
+    def _upload_chunks(self, upload_url: str, data: bytes):
+        """Sends data through an upload session; returns the final response."""
+        if not upload_url:
+            raise SharePointUploadError("upload session had no uploadUrl")
+        size = len(data)
+        try:
+            start = 0
+            while start < size:
+                chunk = data[start:start + CHUNK_BYTES]
+                end = start + len(chunk) - 1
+                # The uploadUrl is pre-authenticated: no bearer token is sent to it.
+                r = self._send("PUT", upload_url, data=chunk, timeout=CHUNK_TIMEOUT, headers={
+                    "Content-Length": str(len(chunk)), "Content-Range": f"bytes {start}-{end}/{size}"})
+                if r.status_code == 202:
+                    start = end + 1
+                    continue
+                if r.status_code not in (200, 201):
+                    self._cancel(upload_url)
+                return r
+            raise SharePointUploadError("upload session ended without a file")
+        except Exception:
+            self._cancel(upload_url)
+            raise
+
     def _redact(self, text: str) -> str:
         text = str(text)
         for secret in (self.settings.get("client_secret"), self._token):

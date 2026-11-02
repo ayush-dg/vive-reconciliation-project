@@ -1682,6 +1682,54 @@ def get_statement_pdf_for_document_hash(document_hash: str):
     return get_archived_pdf_for_document_hash(document_hash) or get_mailbox_pdf_for_document_hash(document_hash)
 
 
+_SHAREPOINT_PDF_SQL = """
+    SELECT statement_id, sharepoint_drive_id, sharepoint_item_id, sharepoint_web_url, original_filename
+    FROM document_intake_log
+    WHERE {where} AND sharepoint_status IN ('uploaded', 'existing')
+      AND sharepoint_drive_id IS NOT NULL AND sharepoint_item_id IS NOT NULL
+    ORDER BY sharepoint_uploaded_at DESC
+"""
+
+
+def get_sharepoint_pdf_for_statement(statement_id: str):
+    """The statement's archived SharePoint file ({"statement_id",
+    "sharepoint_drive_id", "sharepoint_item_id", "sharepoint_web_url",
+    "original_filename"}) -- or None when intake never archived it there
+    (dev, statements from before ~2026-10-17, or a failed upload). View PDF
+    shows this copy first, and the PDF editor saves into it."""
+    rows = execute_query(_SHAREPOINT_PDF_SQL.format(where="statement_id = ?"), [statement_id])
+    return rows[0] if rows else None
+
+
+def get_sharepoint_pdf_for_document_hash(document_hash: str):
+    """As get_sharepoint_pdf_for_statement, by the file's SHA-256 (the
+    original /statements/<hash>/pdf link)."""
+    rows = execute_query(_SHAREPOINT_PDF_SQL.format(where="document_hash = ?"), [document_hash])
+    return rows[0] if rows else None
+
+
+def record_pdf_edit(statement_id: str, edited_by: str, drive_id: str, item_id: str, old_etag: str,
+                    new_etag: str, old_size, new_size, new_document_hash: str) -> None:
+    """One save from the PDF editor -- see migrations/025_add_statement_pdf_edits.sql."""
+    execute_sql(
+        """
+        INSERT INTO statement_pdf_edits (statement_id, edited_by, edited_at, sharepoint_drive_id,
+            sharepoint_item_id, old_etag, new_etag, old_size, new_size, new_document_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [statement_id, edited_by, datetime.now(timezone.utc).isoformat(), drive_id, item_id,
+         old_etag, new_etag, old_size, new_size, new_document_hash],
+    )
+
+
+def get_pdf_edits(statement_id: str) -> list:
+    """The statement's PDF edits, newest first."""
+    return execute_query(
+        "SELECT edited_by, edited_at, new_size FROM statement_pdf_edits WHERE statement_id = ? ORDER BY edited_at DESC",
+        [statement_id],
+    )
+
+
 def list_users() -> list:
     return execute_query(
         "SELECT id, name, email, is_active, created_at, created_by FROM users ORDER BY created_at"
