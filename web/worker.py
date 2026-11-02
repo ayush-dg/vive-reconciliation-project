@@ -80,7 +80,8 @@ LIVE_POLL_SECONDS = 0.5
 # compare against" specifically, as opposed to any other non-zero exit.
 NO_VOUCHER_DATA_MARKER = "No real voucher-sourced INTERNAL_ERP rows"
 from src.pipeline_markers import (  # noqa: E402
-    DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER, SILVER_CHECK_MARKER, VALIDATION_GATE_MARKER,
+    DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER, RECON_DONE_MARKER, RECON_FAILED_MARKER,
+    SILVER_CHECK_MARKER, VALIDATION_GATE_MARKER,
 )
 
 # Dropzone auto-intake, polling variant -- see _dropzone_watcher_loop()'s
@@ -265,6 +266,23 @@ def _failure_reason(output: str, returncode) -> str:
     return f"Pipeline stopped (exit {returncode}): {tail}"
 
 
+def _reconciliation_note(output: str, silver_count: int) -> str:
+    """The note for a job whose extraction succeeded and whose legacy Phase 2
+    then stopped on no voucher data (every statement past the validation gate
+    -- prod has none). It used to say "no ERP reference data ... matching
+    skipped" for all of them, reconciled or not (2026-11-02); this says what
+    NetSuite matching actually did, from run_full_pipeline.py's markers."""
+    lines = (output or "").splitlines()
+    failed = next((l for l in lines if l.startswith(RECON_FAILED_MARKER)), None)
+    if failed:
+        return (f"Extracted {silver_count} rows, but reconciliation failed: "
+                f"{failed[len(RECON_FAILED_MARKER):].strip()}")
+    done = next((l for l in lines if l.startswith(RECON_DONE_MARKER)), None)
+    if done:
+        return f"Extracted {silver_count} rows and reconciled: {done[len(RECON_DONE_MARKER):].strip()}."
+    return f"Extracted {silver_count} rows -- not reconciled (the Silver build did not finish; see the job log)."
+
+
 def _record(job: dict, claim_token, blob_status: str, **fields) -> bool:
     """A final job write; with restart recovery it applies only while this attempt still holds the
     claim -- if a newer attempt owns the job, nothing is written, not even the blob outcome."""
@@ -355,7 +373,7 @@ def _run_job(job: dict) -> None:
                 silver_count = queries.get_silver_row_count(statement_id)
                 if silver_count > 0:
                     vendor_name = queries.get_vendor_name_for_statement(statement_id)
-                    print(f"[worker] Job {job_id} COMPLETED (extraction only, no ERP data to match) — {statement_id} ({vendor_name})")
+                    print(f"[worker] Job {job_id} COMPLETED — {statement_id} ({vendor_name})")
                     _record(
                         job, claim_token, "completed",
                         status="COMPLETED",
@@ -363,10 +381,7 @@ def _run_job(job: dict) -> None:
                         statement_id=statement_id,
                         vendor_name=vendor_name,
                         document_hash=document_hash,
-                        error_message=(
-                            f"Extraction successful ({silver_count} rows) -- no ERP reference data "
-                            f"loaded for this vendor yet, matching skipped."
-                        ),
+                        error_message=_reconciliation_note(output, silver_count),
                     )
                     return
 

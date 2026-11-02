@@ -22,6 +22,15 @@ NOT_A_STATEMENT_MARKER = "NOT_A_STATEMENT:"
 # the problem description; the job fails instead of showing 0 / 0.
 SILVER_CHECK_MARKER = "SILVER_CHECK_FAILED:"
 
+# NetSuite matching ran but failed (src/matching/fabric_matching.py's
+# run_fabric_matching() returned an error), so the statement has Silver but
+# no reconciliation. Followed by the short error.
+RECON_FAILED_MARKER = "RECON_FAILED:"
+
+# NetSuite matching wrote its results. Followed by "<matched> matched,
+# <exceptions> exceptions".
+RECON_DONE_MARKER = "RECON_DONE:"
+
 # The statement did not pass the Arithmetic Validation Gate 100% (printed
 # total == extracted lines), so it was stopped before Silver/reconciliation
 # -- see src/validation/gate.py. Followed by the reason.

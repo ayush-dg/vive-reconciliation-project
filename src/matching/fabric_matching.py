@@ -1114,14 +1114,14 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
             "netsuite_source": connect_source.used_summary(),
         }
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Fabric NetSuite matching failed for statement_id=%s (non-fatal)", statement_id)
         if wh_conn is not None:
             try:
                 wh_conn.rollback()
             except Exception:
                 pass
-        return {"error": "matching_failed"}
+        return {"error": "matching_failed", "reason": _short_error(exc)}
 
 
 def fetch_netsuite_record_for_invoice(vendor_id: str, vendor_name: str, invoice_number: str) -> dict:
@@ -1267,10 +1267,32 @@ def _has_prior_results(cur, statement_id) -> bool:
     return False
 
 
+# recon_matched_invoices / recon_exceptions hold invoice_number and
+# original_invoice_number as VARCHAR(100). Some vendors' raw invoice text is
+# longer (Wheels On Site prints "Invoice #00630634: Due ... Work Order: ...;
+# Vin ...; RO# ...; PO# ..." -- up to 114 chars, 2026-11-02), and one
+# over-long value failed the whole statement's INSERT. Only the stored copy
+# is cut; matching already ran on the full text, and the recon table
+# (NVARCHAR(MAX)) keeps it whole.
+INVOICE_TEXT_MAX = 100
+
+
+def _clip(value):
+    return value[:INVOICE_TEXT_MAX] if isinstance(value, str) else value
+
+
+def _short_error(exc) -> str:
+    """One line for the job's status message: the exception type and the
+    driver's text (pyodbc's ends in '(8152) (SQLExecDirectW)' noise)."""
+    text = " ".join(str(exc).split())
+    match = re.search(r"\](?!.*\])\s*(.*?)\s*\(\d+\)", text)
+    return f"{type(exc).__name__}: {(match.group(1) if match else text)[:200]}"
+
+
 def _write_match(writes, statement_id, vendor_id, shop, invoice_number, ro_number,
                   stmt_amount, erp_amount, now, original_invoice_number=None):
     writes.add("silver.recon_matched_invoices", [
-        str(uuid.uuid4()), vendor_id, shop, invoice_number, original_invoice_number, ro_number,
+        str(uuid.uuid4()), vendor_id, shop, _clip(invoice_number), _clip(original_invoice_number), ro_number,
         stmt_amount, erp_amount, 1, "MATCHED", statement_id, now,
     ])
 
@@ -1280,7 +1302,7 @@ def _write_exception(writes, statement_id, vendor_id, shop, shop_owner, invoice_
     """Returns the new exception_id (the recon table links each line to it)."""
     exception_id = str(uuid.uuid4())
     writes.add("silver.recon_exceptions", [
-        exception_id, vendor_id, shop, invoice_number, original_invoice_number, ro_number,
+        exception_id, vendor_id, shop, _clip(invoice_number), _clip(original_invoice_number), ro_number,
         stmt_amount, erp_amount, "EXCEPTION", reason, "OPEN", statement_id, now, shop_owner,
     ])
     return exception_id

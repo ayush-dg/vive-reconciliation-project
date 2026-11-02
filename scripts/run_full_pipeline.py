@@ -75,14 +75,18 @@ def _run_matching(statement_id):
         print(f"{SILVER_CHECK_MARKER} {problem} (statement_id {statement_id})")
         sys.exit(3)
     from src.matching.fabric_matching import run_fabric_matching
+    from src.pipeline_markers import RECON_DONE_MARKER, RECON_FAILED_MARKER
     with timed_step("matching"):
         match_result = run_fabric_matching(statement_id)
     if "error" in match_result or match_result.get("skipped"):
         print(f"    NetSuite matching: skipped/failed ({match_result}, see logs)")
+        reason = match_result.get("reason") or match_result.get("error") or "skipped"
+        print(f"{RECON_FAILED_MARKER} {reason}")
     else:
         print(f"    NetSuite matching: {match_result['matched']} matched, "
               f"{match_result['exceptions']} exceptions "
               f"(NetSuite data: {match_result.get('netsuite_source', 'fabric')})")
+        print(f"{RECON_DONE_MARKER} {match_result['matched']} matched, {match_result['exceptions']} exceptions")
         _run_netsuite_writeback(statement_id)
 
 
