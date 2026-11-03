@@ -1217,3 +1217,9 @@ GLASS_ROUTES,AMOUNT,charge_amount,decimal,v1,1
 BENNETT_AUTO_CENTER,Date,line_date,date,v1,1
 BENNETT_AUTO_CENTER,Transaction,original_invoice_number,string,v1,1
 BENNETT_AUTO_CENTER,Amount,charge_amount,decimal,v1,1
+LKQ_BUFFALO,reference_date,line_date,date,v1,1
+LKQ_BUFFALO,reference_number,original_invoice_number,string,v1,1
+LKQ_BUFFALO,purchase_order_number,po_number,string,v1,1
+LKQ_BUFFALO,period_activity,charge_amount,decimal,v1,1
+LKQ_BUFFALO,credit_applied,charge_amount,decimal,v1,1
+LKQ_BUFFALO,balance_due,amount_remaining,decimal,v1,1
