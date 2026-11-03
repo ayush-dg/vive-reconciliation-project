@@ -742,7 +742,6 @@ def get_exception_runs(window: TimeWindow = None) -> list:
 
     if runs:
         statement_ids = [r["statement_id"] for r in runs]
-        placeholders = ", ".join("?" for _ in statement_ids)  # the Azure SQL lookup below
         reason_rows = _open_exceptions_grouped(
             "statement_id, exception_reason, COUNT(*) AS c", "statement_id, exception_reason", statement_ids)
         reasons_by_statement = {}
@@ -758,15 +757,21 @@ def get_exception_runs(window: TimeWindow = None) -> list:
         # has no per-line "shop" field on most vendor PDFs). document_intake_log's
         # shop_or_entity IS reliably populated at intake time -- same JSON-list
         # column, same parse pattern get_statement_report() already uses.
-        intake_rows = execute_query(
-            f"""
-            SELECT statement_id, billing_location, statement_period, shop_or_entity,
-                   original_filename, source_file
-            FROM document_intake_log
-            WHERE statement_id IN ({placeholders})
-            """,
-            statement_ids,
-        )
+        # Chunked (2026-11-03): dev passed 2100 runs and the single IN list
+        # hit SQL Server's 2100-parameter cap -- the page 500'd on "All".
+        intake_rows = []
+        for i in range(0, len(statement_ids), _INTAKE_LOOKUP_CHUNK):
+            chunk = statement_ids[i:i + _INTAKE_LOOKUP_CHUNK]
+            placeholders = ", ".join("?" for _ in chunk)
+            intake_rows += execute_query(
+                f"""
+                SELECT statement_id, billing_location, statement_period, shop_or_entity,
+                       original_filename, source_file
+                FROM document_intake_log
+                WHERE statement_id IN ({placeholders})
+                """,
+                chunk,
+            )
         intake_by_statement = {r["statement_id"]: r for r in intake_rows}
 
         for run in runs:
@@ -2500,11 +2505,14 @@ def _backfill_statement_periods(rows: list) -> list:
     missing_ids = [r["statement_id"] for r in rows if not r.get("statement_period")]
     if not missing_ids:
         return rows
-    placeholders = ", ".join("?" for _ in missing_ids)
-    intake_rows = execute_query(
-        f"SELECT statement_id, statement_period FROM document_intake_log WHERE statement_id IN ({placeholders})",
-        missing_ids,
-    )
+    intake_rows = []
+    for i in range(0, len(missing_ids), _INTAKE_LOOKUP_CHUNK):
+        chunk = missing_ids[i:i + _INTAKE_LOOKUP_CHUNK]
+        placeholders = ", ".join("?" for _ in chunk)
+        intake_rows += execute_query(
+            f"SELECT statement_id, statement_period FROM document_intake_log WHERE statement_id IN ({placeholders})",
+            chunk,
+        )
     period_by_statement = {
         r["statement_id"]: r["statement_period"] for r in intake_rows if r["statement_period"]
     }
