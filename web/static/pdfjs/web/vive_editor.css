@@ -47,6 +47,24 @@
   cursor: default;
 }
 
+.vive-reset {
+  margin: 0 6px 0 0;
+  padding: 3px 10px;
+  border: 1px solid var(--field-border-color, #aaa);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--main-color, #333);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vive-reset:hover {
+  border-color: #c0392b;
+  color: #c0392b;
+}
+
 .vive-status {
   max-width: 340px;
   margin-right: 6px;

@@ -24,7 +24,9 @@ PDF.js editor (web/static/pdfjs/), whose Save posts the edited file to
 POST /statements/<statement id>/pdf: it replaces the SharePoint file in place
 (same item and link, so NetSuite's link opens the edited version), only if
 nobody saved since it was opened, and records who saved it in
-statement_pdf_edits. With the flag off nothing here changes.
+statement_pdf_edits. The editor's Reset (POST /statements/<id>/pdf/reset)
+puts the file back to the PDF as it arrived, the same way. With the flag off
+nothing here changes.
 """
 
 import hashlib
@@ -219,6 +221,63 @@ def _save_edited_pdf(statement_id: str, data: bytes, if_match: str, user: str):
     except Exception:
         pass  # the save itself succeeded; a missing log row must not report it as failed
     return JSONResponse({"saved": True, "etag": result.etag})
+
+
+def _reset_pdf(statement_id: str, if_match: str, user: str):
+    """The blocking part of a reset: put the SharePoint file back to the PDF as
+    it arrived -- its oldest SharePoint version, else the Azure archive or
+    mailbox copy -- only if it is still the version the editor opened."""
+    sharepoint = _sharepoint_for(queries.get_sharepoint_pdf_for_statement, statement_id)
+    if not sharepoint:
+        return _save_error(404, "This statement has no SharePoint copy to reset.")
+    client = _sharepoint_client()
+    if client is None:
+        return _save_error(503, "SharePoint is not configured.")
+    drive_id, item_id = sharepoint["sharepoint_drive_id"], sharepoint["sharepoint_item_id"]
+    current = client.get_file(drive_id, item_id, with_content=True)
+    if current is None:
+        return _save_error(502, "SharePoint could not be reached. Nothing was reset; try again.")
+    if current.etag != if_match:
+        return _save_error(409, "Someone else saved this PDF after you opened it. Nothing was reset -- "
+                                "reload to see their changes.")
+    original = client.get_first_version(drive_id, item_id)
+    if original is None:
+        try:
+            archived = queries.get_statement_pdf(statement_id)
+        except Exception:
+            archived = None
+        if archived:
+            original = _fetch_pdf_bytes(archived.get("blob_storage_path"), archived.get("mailbox_blob_path"))
+    if original is None:
+        return _save_error(404, "The original PDF could not be found. Nothing was reset.")
+    if original == current.content:
+        return JSONResponse({"reset": True, "unchanged": True, "etag": current.etag})
+    result = client.replace_file(drive_id, item_id, original, if_match)
+    if result.status == "conflict":
+        return _save_error(409, "Someone else saved this PDF after you opened it. Nothing was reset -- "
+                                "reload to see their changes.")
+    if result.status != "saved":
+        return _save_error(502, f"SharePoint did not accept the reset ({result.error}). Nothing was reset.")
+    try:
+        queries.record_pdf_edit(statement_id, user, drive_id, item_id, current.etag, result.etag,
+                                current.size, result.size or len(original), hashlib.sha256(original).hexdigest())
+    except Exception:
+        pass
+    return JSONResponse({"reset": True, "etag": result.etag})
+
+
+@router.post("/statements/{statement_id}/pdf/reset")
+async def reset_statement_pdf(statement_id: str, request: Request, user: str = Depends(require_login)):
+    """Reset from the PDF editor: removes every edit by putting the statement's
+    SharePoint file back to the PDF as it arrived (a new version, so the edited
+    one stays in SharePoint's version history). If-Match: the eTag the editor
+    opened. Answers {"reset": true, "etag"} or {"reset"/"saved": false, "error"}."""
+    if not pdf_editing_enabled() or not _STATEMENT_ID.match(statement_id):
+        raise HTTPException(status_code=404, detail="Statement not found")
+    if_match = request.headers.get("if-match", "")
+    if not if_match:
+        return _save_error(428, "The editor did not say which version it opened. Reload and try again.")
+    return await run_in_threadpool(_reset_pdf, statement_id, if_match, user)
 
 
 @router.post("/statements/{statement_id}/pdf")
