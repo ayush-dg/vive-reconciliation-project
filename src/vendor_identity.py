@@ -28,9 +28,13 @@ import re
 CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "vendor_aliases.json"
 )
+# Vendor families known by their first word(s) whatever the location after it
+# ("LKQ Buffalo", "LKQ Slippery Rock" -> LKQ) -- see the file's _comment.
+PREFIXES_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "vendor_name_prefixes.json")
 
 _lookup_cache = None
 _aliases_cache = None
+_prefixes_cache = None
 
 
 def _normalize(name: str) -> str:
@@ -87,17 +91,45 @@ def _load_lookup() -> dict:
     return _lookup_cache
 
 
+def _load_prefixes() -> dict:
+    """{vendor_id: [prefix, ...]} from config/vendor_name_prefixes.json."""
+    global _prefixes_cache
+    if _prefixes_cache is None:
+        try:
+            with open(PREFIXES_PATH, "r") as f:
+                raw = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            raw = {}
+        _prefixes_cache = {k: v for k, v in raw.items() if not k.startswith("_") and isinstance(v, list)}
+    return _prefixes_cache
+
+
+def _family_by_prefix(vendor_name: str):
+    """The vendor whose listed prefix the name starts with, in whole words
+    (the longest prefix wins), else None."""
+    words = _words(vendor_name)
+    best = None
+    for vendor_id, prefixes in _load_prefixes().items():
+        for prefix in prefixes:
+            prefix_words = _words(prefix)
+            if prefix_words and words[:len(prefix_words)] == prefix_words \
+                    and (best is None or len(prefix_words) > best[0]):
+                best = (len(prefix_words), vendor_id)
+    return best[1] if best else None
+
+
 def resolve_vendor_id(vendor_name) -> str:
     """Returns the canonical vendor_id for vendor_name per
-    config/vendor_aliases.json, or None if vendor_name is falsy or has no
-    known alias entry."""
+    config/vendor_aliases.json -- or, failing an exact alias, per a family
+    prefix in config/vendor_name_prefixes.json ("LKQ Buffalo" -> LKQ) --
+    or None if vendor_name is falsy or matches neither."""
     if not vendor_name or not str(vendor_name).strip():
         return None
     lookup = _load_lookup()
     for key in _candidate_keys(str(vendor_name)):
         if key in lookup:
             return lookup[key]
-    return None
+    return _family_by_prefix(str(vendor_name))
 
 
 def _words(name: str) -> list:

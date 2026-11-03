@@ -1,0 +1,4 @@
+{
+  "_comment": "Vendor families whose printed name always STARTS with the same word(s), whatever the location after it (src/vendor_identity.py resolve_vendor_id, used when no exact alias in vendor_aliases.json matches). Whole words only: 'LKQ Buffalo' -> LKQ, but not 'LKQX Parts' or 'Royal Used LKQ Parts'. Added 2026-11-03: every new LKQ location (Slippery Rock, Buffalo, ...) became its own unmapped vendor id and failed 'No lines read' although all LKQ statements share one layout and one set of NetSuite vendors.",
+  "LKQ": ["LKQ"]
+}
