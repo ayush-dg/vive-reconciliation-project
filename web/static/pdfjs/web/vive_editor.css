@@ -8,6 +8,24 @@
   display: none !important;
 }
 
+/* The marker next to a commented highlight: smaller and faint until hovered
+   (PDF.js draws a 24px bordered button with a shadow). Its position is
+   computed from its measured size, so it stays next to the highlight. */
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton {
+  --comment-button-dim: 14px;
+  padding: 2px;
+  border-color: transparent;
+  box-shadow: none;
+  background-color: transparent;
+  opacity: 0.55;
+}
+
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton:hover,
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton:focus-visible,
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton.selected {
+  opacity: 1;
+}
+
 .vive-save {
   margin: 0 6px;
   padding: 3px 10px;

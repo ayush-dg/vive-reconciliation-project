@@ -40,6 +40,31 @@
   target.addEventListener("webviewerloaded", onViewerLoaded);
   if (target !== document) { document.addEventListener("webviewerloaded", onViewerLoaded); }
 
+  // The floating "Comment" / "Highlight" buttons (shown on a text selection)
+  // switch the viewer into highlight mode to create the highlight and leave it
+  // there -- the mouse stays a highlighter pen. When it was in no tool before,
+  // go back to no tool once the highlight (and its comment) is done. Choosing
+  // the Highlight tool from the toolbar is not affected.
+  function noTool() {
+    var app = window.PDFViewerApplication;
+    if (app && app.pdfViewer && app.pdfViewer.annotationEditorMode !== 0) {
+      app.eventBus.dispatch("switchannotationeditormode", { source: window, mode: 0 });
+    }
+  }
+  document.addEventListener("click", function (event) {
+    var button = event.target && event.target.closest &&
+      event.target.closest('.editToolbar button[data-l10n-id^="pdfjs-comment-floating-button"],' +
+                           '.editToolbar button[data-l10n-id^="pdfjs-highlight-floating-button"]');
+    var app = window.PDFViewerApplication;
+    if (!button || !app || !app.pdfViewer || app.pdfViewer.annotationEditorMode !== 0) { return; }
+    var dialog = document.getElementById("commentManagerDialog");
+    if (/comment/.test(button.getAttribute("data-l10n-id")) && dialog) {
+      dialog.addEventListener("close", function () { window.setTimeout(noTool, 50); }, { once: true });
+    } else {
+      window.setTimeout(noTool, 400);   // after PDF.js has switched modes and added the highlight
+    }
+  }, true);
+
   if (!statementId || !etag) { return; }   // a plain view: no Save button
 
   var button, status, saving = false;
