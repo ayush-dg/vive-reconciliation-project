@@ -20,6 +20,7 @@ old versions of changed records as duplicate rows.
 import atexit
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,25 @@ def _client():
     return get_shared_client()
 
 
-def _close_shared_client():
+EXIT_CLOSE_WAIT_SECONDS = 5
+
+
+def _close_shared_client(wait_seconds: float = EXIT_CLOSE_WAIT_SECONDS):
+    """At exit, closes the shared Connect connection -- waiting at most
+    wait_seconds. Prod 2026-11-03: statement-1391685.pdf (Keystone, 426 lines)
+    matched and wrote back 423 records, then the pipeline process never
+    exited -- closing a connection that had gone dead during the 16-minute
+    write-back blocks forever (so can waiting for the client's lock) -- and the
+    worker killed the job at its 30-minute limit and marked it Failed. The close
+    now runs on a daemon thread the exit does not wait for past the limit."""
     try:
         from src.netsuite import connect_client
-        if connect_client._shared is not None:
-            connect_client._shared.close()
+        client = connect_client._shared
+        if client is None:
+            return
+        closer = threading.Thread(target=client.close, daemon=True)
+        closer.start()
+        closer.join(wait_seconds)
     except Exception:
         pass
 
