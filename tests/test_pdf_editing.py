@@ -94,6 +94,28 @@ class GetFileTests(unittest.TestCase):
         self.assertIsNone(client.get_file(DRIVE, ITEM))
 
 
+class GetFirstVersionTests(unittest.TestCase):
+    def _versions(self, *items):
+        return FakeResponse(200, {"value": [{"id": i, "lastModifiedDateTime": t} for i, t in items]})
+
+    def test_the_oldest_version_is_read(self):
+        client, http = _client([
+            ("GET", "/versions/1.0/content", [BinaryResponse(200, b"%PDF-original")]),
+            ("GET", "/versions?", [self._versions(("3.0", "2026-11-03T10:00:00Z"), ("1.0", "2026-11-01T09:00:00Z"),
+                                                  ("2.0", "2026-11-02T09:00:00Z"))]),
+        ])
+        self.assertEqual(client.get_first_version(DRIVE, ITEM), b"%PDF-original")
+        self.assertEqual({c["method"] for c in http.calls}, {"GET"})
+
+    def test_a_never_edited_file_has_no_earlier_version(self):
+        client, _ = _client([("GET", "/versions?", [self._versions(("1.0", "2026-11-01T09:00:00Z"))])])
+        self.assertIsNone(client.get_first_version(DRIVE, ITEM))
+
+    def test_unreadable_versions_give_none(self):
+        client, _ = _client([("GET", "/versions?", [FakeResponse(403, {"error": {"code": "accessDenied"}})])])
+        self.assertIsNone(client.get_first_version(DRIVE, ITEM))
+
+
 class ReplaceFileTests(unittest.TestCase):
     def test_a_small_file_is_put_with_if_match(self):
         client, http = _client([("PUT", f"/items/{ITEM}/content", [FakeResponse(200, {"eTag": NEW_ETAG, "size": 5})])])
@@ -165,9 +187,13 @@ def _logged_in():
 class FakeSharePoint:
     """Stands in for SharePointArchiveClient in the routes."""
 
-    def __init__(self, current=b"", etag=ETAG, readable=True, replace_status="saved"):
+    def __init__(self, current=b"", etag=ETAG, readable=True, replace_status="saved", first_version=None):
         self.current, self.etag, self.readable, self.replace_status = current, etag, readable, replace_status
+        self.first_version = first_version
         self.replaced = []
+
+    def get_first_version(self, drive_id, item_id):
+        return self.first_version
 
     def get_file(self, drive_id, item_id, with_content=False):
         if not self.readable:
@@ -324,6 +350,61 @@ class SaveTests(unittest.TestCase):
     def test_logged_out_cannot_save(self):
         resp, fake, _ = self._post(_pdf(2), client=TestClient(_app()))
         self.assertEqual((resp.status_code, resp.headers["location"]), (303, "/login"))
+        self.assertEqual(fake.replaced, [])
+
+
+class ResetTests(unittest.TestCase):
+    ORIGINAL, EDITED = b"%PDF-original", b"%PDF-edited"
+
+    def _post(self, fake, etag=ETAG, env=EDIT_ON, archived=ARCHIVED, azure_bytes=b"%PDF-azure"):
+        headers = {"If-Match": etag} if etag else {}
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(statements.queries, "get_sharepoint_pdf_for_statement", return_value=SHAREPOINT), \
+             mock.patch.object(statements.queries, "get_statement_pdf", return_value=archived), \
+             mock.patch.object(statements.queries, "record_pdf_edit") as record, \
+             mock.patch.object(statements, "_fetch_pdf_bytes", return_value=azure_bytes), \
+             mock.patch.object(statements, "_sharepoint_client", return_value=fake):
+            resp = _logged_in().post("/statements/STMT-60A970B4/pdf/reset", headers=headers)
+        return resp, record
+
+    def test_reset_puts_back_the_first_sharepoint_version(self):
+        fake = FakeSharePoint(current=self.EDITED, first_version=self.ORIGINAL)
+        resp, record = self._post(fake)
+        self.assertEqual(resp.json(), {"reset": True, "etag": NEW_ETAG})
+        self.assertEqual(fake.replaced, [(DRIVE, ITEM, self.ORIGINAL, ETAG)])
+        self.assertEqual(record.call_args[0][-1], hashlib.sha256(self.ORIGINAL).hexdigest())
+
+    def test_without_an_earlier_version_the_azure_copy_is_used(self):
+        fake = FakeSharePoint(current=self.EDITED, first_version=None)
+        resp, _ = self._post(fake)
+        self.assertEqual(resp.json()["reset"], True)
+        self.assertEqual(fake.replaced[0][2], b"%PDF-azure")
+
+    def test_an_unedited_file_is_left_alone(self):
+        fake = FakeSharePoint(current=self.ORIGINAL, first_version=None)
+        resp, record = self._post(fake, azure_bytes=self.ORIGINAL)
+        self.assertEqual(resp.json(), {"reset": True, "unchanged": True, "etag": ETAG})
+        self.assertEqual(fake.replaced, [])
+        record.assert_not_called()
+
+    def test_a_newer_save_by_someone_else_is_not_reset(self):
+        fake = FakeSharePoint(current=self.EDITED, first_version=self.ORIGINAL)
+        resp, _ = self._post(fake, etag='"{ABC},0"')
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(fake.replaced, [])
+        resp, _ = self._post(FakeSharePoint(current=self.EDITED, first_version=self.ORIGINAL, replace_status="conflict"))
+        self.assertEqual(resp.status_code, 409)
+
+    def test_no_original_anywhere_changes_nothing(self):
+        fake = FakeSharePoint(current=self.EDITED, first_version=None)
+        resp, _ = self._post(fake, archived=None)
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(fake.replaced, [])
+
+    def test_editing_off_or_no_if_match_is_refused(self):
+        fake = FakeSharePoint(current=self.EDITED, first_version=self.ORIGINAL)
+        self.assertEqual(self._post(fake, env={"PDF_EDIT_ENABLED": ""})[0].status_code, 404)
+        self.assertEqual(self._post(fake, etag=None)[0].status_code, 428)
         self.assertEqual(fake.replaced, [])
 
 

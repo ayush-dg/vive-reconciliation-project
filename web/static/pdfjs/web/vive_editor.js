@@ -13,6 +13,9 @@
      vive_editor.css. Opening the comments sidebar puts existing comments in
      edit mode, which PDF.js counts as a change (Save lights up; saving
      rewrites the same comments).
+   - "Reset": POST /statements/<id>/pdf/reset puts the SharePoint file back to
+     the PDF as it arrived (all edits gone; the edited version stays in
+     SharePoint's history), then the editor reopens.
    - "Save to SharePoint": PDF.js writes the annotations into the file
      (saveDocument) and it is POSTed to /statements/<id>/pdf with If-Match:
      <eTag>. The server replaces the SharePoint file only if nobody saved
@@ -39,6 +42,15 @@
   try { target = window.parent.document; } catch (e) { target = document; }
   target.addEventListener("webviewerloaded", onViewerLoaded);
   if (target !== document) { document.addEventListener("webviewerloaded", onViewerLoaded); }
+
+  // PDF.js 5.x asks "Leave page?" whenever the document holds any marks, saved
+  // or not -- so after a Save or a Reset, moving to the next statement still
+  // asked. Registered before the viewer's own handler, this lets the warning
+  // through only when there really are unsaved changes.
+  window.addEventListener("beforeunload", function (event) {
+    var app = window.PDFViewerApplication;
+    if (!(app && app._annotationStorageModified)) { event.stopImmediatePropagation(); }
+  }, true);
 
   // The floating "Comment" / "Highlight" buttons (shown on a text selection)
   // switch the viewer into highlight mode to create the highlight and leave it
@@ -120,14 +132,61 @@
     }
   }
 
+  // Reset: put the statement back exactly as it arrived (every comment and mark
+  // removed). The server refuses if someone saved since this was opened; the
+  // edited version stays in SharePoint's version history. Then reopen the
+  // editor on the new version.
+  async function reset() {
+    var app = window.PDFViewerApplication;
+    if (saving) { return; }
+    var question = "Remove all comments, highlights, text and drawings from this statement and put it back " +
+      "exactly as it arrived?\n\nThe edited version stays in SharePoint's version history.";
+    if (hasUnsavedEdits()) { question += "\n\nYour unsaved changes will be lost too."; }
+    if (!window.confirm(question)) { return; }
+    saving = true;
+    refresh();
+    setStatus("Resetting…");
+    try {
+      var response = await fetch("/statements/" + encodeURIComponent(statementId) + "/pdf/reset", {
+        method: "POST", credentials: "same-origin", headers: { "If-Match": etag }
+      });
+      if (response.redirected && /\/login/.test(response.url)) {
+        setStatus("Your session has ended. Log in again in another tab, then Reset.", true);
+        return;
+      }
+      var result = {};
+      try { result = await response.json(); } catch (e) { result = {}; }
+      if (response.ok && result.reset) {
+        if (app && app.pdfDocument) { app.pdfDocument.annotationStorage.resetModified(); }
+        setStatus("Reset to the original. Reopening…");
+        window.location.href = params.get("file") + "?edit=1";
+        return;
+      }
+      setStatus(result.error || ("Reset failed (HTTP " + response.status + "). Nothing was changed."), true);
+    } catch (e) {
+      setStatus("Reset failed: " + (e && e.message ? e.message : e) + ". Nothing was changed.", true);
+    } finally {
+      saving = false;
+      refresh();
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var anchor = document.getElementById("editorModeSeparator");
     if (!anchor) { return; }
+    var resetButton = document.createElement("button");
+    resetButton.id = "viveResetButton";
+    resetButton.type = "button";
+    resetButton.className = "vive-reset";
+    resetButton.textContent = "Reset";
+    resetButton.title = "Remove all comments and marks: put the statement back exactly as it arrived";
+    resetButton.addEventListener("click", reset);
     button = document.createElement("button");
     button.id = "viveSaveButton";
     button.type = "button";
     button.className = "vive-save";
-    button.textContent = "Save to SharePoint";
+    // Two labels; vive_editor.css shows the short one when the viewer is narrow (the PDF panel).
+    button.innerHTML = '<span class="vive-long">Save to SharePoint</span><span class="vive-short">Save</span>';
     button.title = "Save your comments, highlights, text and drawings into the statement's SharePoint file";
     button.disabled = true;
     button.addEventListener("click", save);
@@ -137,6 +196,7 @@
     status.setAttribute("role", "status");
     anchor.parentNode.insertBefore(status, anchor);
     anchor.parentNode.insertBefore(button, status);
+    anchor.parentNode.insertBefore(resetButton, status);
     window.setInterval(function () {
       refresh();
       if (hasUnsavedEdits() && status.textContent === "Saved to SharePoint") { setStatus(""); }

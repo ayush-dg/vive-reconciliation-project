@@ -255,6 +255,27 @@ class SharePointArchiveClient:
         except Exception:
             return None
 
+    def get_first_version(self, drive_id: str, item_id: str):
+        """The bytes of the file's oldest version -- the PDF exactly as intake
+        archived it, before any edit -- or None when there is no earlier
+        version (never edited) or it can't be read. Used by the editor's Reset."""
+        try:
+            self._deadline = self._clock() + UPLOAD_BUDGET_SECONDS
+            self._token = self._get_token()
+            item_url = f"{GRAPH}/drives/{self._q(drive_id)}/items/{self._q(item_id)}"
+            r = self._send("GET", f"{item_url}/versions?$select=id,lastModifiedDateTime", headers=self._auth())
+            if r.status_code != 200:
+                return None
+            versions = (r.json() or {}).get("value") or []
+            if len(versions) < 2:
+                return None
+            oldest = min(versions, key=lambda v: v.get("lastModifiedDateTime") or "")
+            r = self._send("GET", f"{item_url}/versions/{self._q(oldest['id'])}/content",
+                           headers=self._auth(), timeout=CHUNK_TIMEOUT)
+            return r.content if r.status_code == 200 and r.content else None
+        except Exception:
+            return None
+
     def replace_file(self, drive_id: str, item_id: str, data: bytes, if_match: str) -> SharePointReplaceResult:
         """Replaces the file's contents, only if it is still at eTag if_match.
         The item, its name and its link stay the same; SharePoint keeps the
