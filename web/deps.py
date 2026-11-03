@@ -406,3 +406,28 @@ def static_url(path: str) -> str:
 
 templates.env.globals["static_url"] = static_url
 
+
+_NETSUITE_RECORD_PAGES = {"bill": "vendbill", "credit": "vendcred"}
+_NETSUITE_INTERNAL_ID = re.compile(r"^\d+$")
+
+
+def netsuite_record_url(record_type, internal_id):
+    """The NetSuite page of a bill or credit -- what the "Find in NetSuite"
+    panel's bill numbers link to (2026-11-03) -- or None when it can't be
+    built, so the number stays plain text. The account is the one the panel's
+    rows come from: NETSUITE_CONNECT_ACCOUNT_ID (live search), else
+    NETSUITE_ACCOUNT_ID. NetSuite's domain writes a sandbox id like
+    7321761_SB1 as 7321761-sb1."""
+    page = _NETSUITE_RECORD_PAGES.get((record_type or "").strip().lower())
+    account = (os.getenv("NETSUITE_CONNECT_ACCOUNT_ID") or os.getenv("NETSUITE_ACCOUNT_ID") or "").strip()
+    internal_id = str(internal_id or "").strip()
+    if not page or not account or not _NETSUITE_INTERNAL_ID.match(internal_id):
+        return None
+    domain = account.lower().replace("_", "-")
+    if not re.match(r"^[a-z0-9-]+$", domain):
+        return None
+    return f"https://{domain}.app.netsuite.com/app/accounting/transactions/{page}.nl?id={internal_id}"
+
+
+templates.env.globals["netsuite_record_url"] = netsuite_record_url
+
