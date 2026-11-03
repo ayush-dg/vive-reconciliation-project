@@ -244,9 +244,14 @@ class SchemaParityTests(unittest.TestCase):
         self.assertEqual(list(log_store._RECORD_COLUMNS), self._sqlite_columns("netsuite_writeback_record")[1:])
 
     def test_the_new_azure_tables_come_last_so_they_cannot_block_an_older_one(self):
-        self.assertEqual(list(azure.TABLES)[-3:-1], ["netsuite_writeback_run", "netsuite_writeback_record"])
-        self.assertEqual(list(azure.INDEXES)[-4:-1],
-                         ["idx_nswb_run_statement", "idx_nswb_record_run", "idx_nswb_record_statement"])
+        # Only tables added later (job_step_timing, then statement_pdf_edits) follow them.
+        tables, indexes = list(azure.TABLES), list(azure.INDEXES)
+        start = tables.index("netsuite_writeback_run")
+        self.assertEqual(tables[start:], ["netsuite_writeback_run", "netsuite_writeback_record",
+                                          "job_step_timing", "statement_pdf_edits"])
+        start = indexes.index("idx_nswb_run_statement")
+        self.assertEqual(indexes[start:start + 4], ["idx_nswb_run_statement", "idx_nswb_record_run",
+                                                    "idx_nswb_record_statement", "idx_job_step_timing_job"])
 
 
 if __name__ == "__main__":

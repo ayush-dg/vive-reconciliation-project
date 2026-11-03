@@ -267,6 +267,22 @@ def check_cache(document_hash: str):
     return rows[0] if rows else None
 
 
+def find_edited_copy(document_hash: str):
+    """{"statement_id": ...} when this file is a statement PDF someone edited
+    and saved in the app's PDF editor (statement_pdf_edits.new_document_hash,
+    2026-11-02), else None. Such a copy is the same statement with annotations
+    -- treated as a duplicate of it, never as a new statement. Best-effort:
+    a lookup problem (e.g. the table not created yet) means "not an edit"."""
+    try:
+        rows = execute_query(
+            "SELECT statement_id FROM statement_pdf_edits WHERE new_document_hash = ? ORDER BY edited_at DESC",
+            [document_hash],
+        )
+    except Exception:
+        return None
+    return {"statement_id": rows[0]["statement_id"]} if rows else None
+
+
 def validate_invoice(invoice: dict, rules: dict):
     """
     Validate a single extracted invoice line.
@@ -1831,7 +1847,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     # statement this upload duplicates.
     if not allow_duplicate:
         early_hash = compute_file_hash(pdf_path)
-        existing = check_cache(early_hash)
+        existing = check_cache(early_hash) or find_edited_copy(early_hash)
         if existing and existing.get("statement_id"):
             existing_id = existing["statement_id"]
             bronze_count = execute_query(

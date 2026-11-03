@@ -88,7 +88,8 @@ Three worker threads start with the app (`VIVE_WORKER_POOL_SIZE`). Each polls `j
 | `GET /jobs`, `GET /jobs/history`, `GET /jobs/{job_id}/extracted` | Active jobs (polled by the dashboard), upload history, extracted rows with View PDF |
 | `GET /batches`, `GET /batches/{batch_id}` | Batches and per-file detail |
 | `GET /reports`, `GET /reports/{statement_id}` | Reconciliation reports |
-| `GET /statements/{document_hash}/pdf`, `GET /statements/{statement_id}/{filename}` | Serve the statement PDF |
+| `GET /statements/{document_hash}/pdf`, `GET /statements/{statement_id}/{filename}` | Serve the statement PDF. With `PDF_EDIT_ENABLED=true`: the SharePoint copy first (`?original=1` for the untouched Azure copy), `?edit=1` opens the PDF.js editor (`web/static/pdfjs/`) |
+| `POST /statements/{statement_id}/pdf` | Save from the PDF editor: replaces the statement's SharePoint file in place if it is still the version opened (`If-Match`); logged in `statement_pdf_edits` |
 | `GET /mailbox-sync`, `POST /mailbox-sync/*` | Manual mailbox sync (to blob / to web app / auto) |
 | `POST /api/intake-trigger` | Event Grid webhook — validation handshake + BlobCreated events |
 | `GET /users`, `POST /users/add`, `POST /users/remove` | User management |

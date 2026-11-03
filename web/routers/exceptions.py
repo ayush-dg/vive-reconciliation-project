@@ -25,7 +25,7 @@ from web.netsuite_status import without_sandbox, writeback_pill
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
 from web import queries
 from web import time_window as tw
-from web.routers.statements import _inline_filename
+from web.routers.statements import _inline_filename, pdf_editing_enabled
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
 from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, fetch_record, search_open_ap
@@ -252,17 +252,27 @@ def _statement_pdf_url(statement_id):
     PDF to open: neither an archived copy nor the mailbox blob it came in as
     (e.g. a web upload from before archiving), so the page can grey the
     button out instead of linking to a 404. Any database problem also just
-    greys it out."""
+    greys it out.
+
+    With PDF editing on, a statement archived to SharePoint links to the
+    editor (?edit=1) -- including one whose only copy is in SharePoint."""
     if not statement_id:
         return None
     try:
         archived = queries.get_statement_pdf(statement_id)
     except Exception:
         return None
-    if not archived:
+    sharepoint = None
+    if pdf_editing_enabled():
+        try:
+            sharepoint = queries.get_sharepoint_pdf_for_statement(statement_id)
+        except Exception:
+            sharepoint = None
+    if not archived and not sharepoint:
         return None
-    name = _inline_filename(os.path.basename((archived.get("original_filename") or "").replace("\\", "/")) or None)
-    return f"/statements/{statement_id}/{quote(name)}"
+    original = (archived or sharepoint).get("original_filename") or ""
+    name = _inline_filename(os.path.basename(original.replace("\\", "/")) or None)
+    return f"/statements/{statement_id}/{quote(name)}" + ("?edit=1" if sharepoint else "")
 
 
 @router.get("/exceptions/{vendor_name:path}")

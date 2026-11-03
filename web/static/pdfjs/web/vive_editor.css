@@ -1,0 +1,61 @@
+/* vive_editor.css -- see vive_editor.js. */
+
+/* Tools: highlight, text and draw only. No image/stamp tool, no opening other
+   files; the download stays in the Tools menu. */
+#editorStamp,
+#secondaryOpenFile,
+#downloadButton {
+  display: none !important;
+}
+
+/* The marker next to a commented highlight: smaller and faint until hovered
+   (PDF.js draws a 24px bordered button with a shadow). Its position is
+   computed from its measured size, so it stays next to the highlight. */
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton {
+  --comment-button-dim: 14px;
+  padding: 2px;
+  border-color: transparent;
+  box-shadow: none;
+  background-color: transparent;
+  opacity: 0.55;
+}
+
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton:hover,
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton:focus-visible,
+:is(.annotationLayer, .annotationEditorLayer) .annotationCommentButton.selected {
+  opacity: 1;
+}
+
+.vive-save {
+  margin: 0 6px;
+  padding: 3px 10px;
+  border: 1px solid #1f6feb;
+  border-radius: 4px;
+  background: #1f6feb;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vive-save:disabled {
+  background: transparent;
+  color: var(--main-color, #555);
+  border-color: var(--field-border-color, #aaa);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.vive-status {
+  max-width: 340px;
+  margin-right: 6px;
+  font-size: 12px;
+  color: var(--main-color, #333);
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.vive-status.vive-error {
+  color: #c0392b;
+}
