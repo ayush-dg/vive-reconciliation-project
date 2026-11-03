@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -262,6 +263,89 @@ class TimeoutTests(unittest.TestCase):
         # Matching passes no timeout: a slow (not dead) query still answers.
         threading.Timer(0.4, self.release.set).start()
         self.assertEqual(self.client.query("SELECT 1 FROM vendor"), [{"id": 1, "tranid": "A1"}])
+
+
+class SharedClientResetTests(unittest.TestCase):
+    """Timeouts in a row on the shared client replace it (2026-11-03): a query
+    stuck on a dead connection no longer blocks every later search until a
+    restart."""
+
+    def setUp(self):
+        from src.netsuite import connect_client as cc
+        self.cc = cc
+        self.release = threading.Event()
+        self.addCleanup(self.release.set)
+        self.made = []
+
+        def connect(conn_str, timeout):
+            conn = _Conn(hang=self.release if not self.made else None)
+            self.made.append(conn)
+            return conn
+
+        self.client = ConnectClient(load_config(_ENV), connect_fn=connect)
+        saved = (cc._shared, cc._timeouts_in_a_row)
+        cc._shared, cc._timeouts_in_a_row = self.client, 0
+        self.addCleanup(lambda: setattr(cc, "_shared", saved[0]))
+        self.addCleanup(lambda: setattr(cc, "_timeouts_in_a_row", saved[1]))
+
+    def _stuck_untimed_query(self):
+        worker = threading.Thread(target=lambda: self._swallow(lambda: self.client.query("SELECT 1 FROM vendor")),
+                                  daemon=True)
+        worker.start()  # like matching: no timeout, holds the lock on a dead socket
+        time.sleep(0.1)
+        return worker
+
+    @staticmethod
+    def _swallow(fn):
+        try:
+            fn()
+        except Exception:
+            pass
+
+    def _timed_search(self):
+        with self.assertRaises(QueryTimeout):
+            self.client.query("SELECT 2 FROM vendor", timeout=0.2)
+
+    def test_two_timeouts_in_a_row_reset_the_shared_client(self):
+        worker = self._stuck_untimed_query()
+        self._timed_search()
+        self.assertIs(self.cc._shared, self.client)       # one timeout: kept
+        self._timed_search()
+        self.assertIsNone(self.cc._shared)                # two: the next caller gets a new client
+        self.assertTrue(self.client._retired)
+        self.release.set()
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+        with self.assertRaises(ConnectionError):           # the retired client never reconnects
+            self.client.query("SELECT 3 FROM vendor", timeout=1)
+        self.assertEqual(len(self.made), 1)
+
+    def test_a_success_in_between_starts_the_count_again(self):
+        self.made.append(None)   # no hanging connection in this test
+        self.cc._timeouts_in_a_row = 1
+        self.assertEqual(self.client.query("SELECT 1 FROM vendor", timeout=2), [{"id": 1, "tranid": "A1"}])
+        self.assertEqual(self.cc._timeouts_in_a_row, 0)
+        self.assertIs(self.cc._shared, self.client)
+
+    def test_the_limit_can_be_set(self):
+        worker = self._stuck_untimed_query()
+        with mock.patch.dict(os.environ, {"NETSUITE_CONNECT_RESET_AFTER_TIMEOUTS": "3"}):
+            self._timed_search()
+            self._timed_search()
+            self.assertIs(self.cc._shared, self.client)
+            self._timed_search()
+            self.assertIsNone(self.cc._shared)
+        self.release.set()
+        worker.join(2)
+
+    def test_a_client_that_is_not_the_shared_one_is_never_reset(self):
+        self.cc._shared = object()
+        worker = self._stuck_untimed_query()
+        self._timed_search()
+        self._timed_search()
+        self.assertFalse(self.client._retired)
+        self.release.set()
+        worker.join(2)
 
 
 if __name__ == "__main__":

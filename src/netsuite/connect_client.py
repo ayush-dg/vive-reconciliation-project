@@ -166,6 +166,7 @@ class ConnectClient:
         self._last_used = None
         self.logins = 0
         self.last_login_seconds = None
+        self._retired = False
 
     # -- connection handling ------------------------------------------------
     def _open(self):
@@ -198,6 +199,8 @@ class ConnectClient:
             threading.Thread(target=_close_ignoring_errors, args=(conn,), daemon=True).start()
 
     def _connection(self):
+        if self._retired:
+            raise ConnectionError("this NetSuite Connect client was reset; get_shared_client() has a new one")
         now = self._clock()
         too_old = self._opened_at is not None and now - self._opened_at >= self.config["max_age_seconds"]
         too_idle = self._last_used is not None and now - self._last_used >= self.config["idle_seconds"]
@@ -216,12 +219,29 @@ class ConnectClient:
             self._last_used = self._clock()
         return rows
 
+    def retire(self) -> None:
+        """Takes this client out of service (the shared one was reset): its
+        connection is dropped without waiting on it, and it never opens
+        another -- a query still stuck in it fails once it wakes up."""
+        self._retired = True
+        self._abandon()
+
     # -- queries ------------------------------------------------------------
     def query(self, sql: str, params=None, timeout: float = None) -> list:
         """Rows as dicts with lowercase column names. Retries once on a fresh
         connection if the first attempt fails (e.g. a dropped connection).
         With `timeout` (seconds), the whole call -- waiting for the connection
-        and running -- raises QueryTimeout past it (see the module docstring)."""
+        and running -- raises QueryTimeout past it (see the module docstring).
+        Timeouts in a row reset the shared client (see _note_query_outcome)."""
+        try:
+            rows = self._query(sql, params, timeout)
+        except QueryTimeout:
+            _note_query_outcome(self, timed_out=True)
+            raise
+        _note_query_outcome(self, timed_out=False)
+        return rows
+
+    def _query(self, sql: str, params=None, timeout: float = None) -> list:
         check_read_only(sql)
         deadline = None if timeout is None else time.monotonic() + timeout
         if deadline is None:
@@ -282,6 +302,43 @@ def _close_ignoring_errors(conn) -> None:
 
 _shared = None
 _shared_lock = threading.Lock()
+
+# Self-healing (2026-11-03): dev's web app sat for hours with every NetSuite
+# search timing out at 25 s (so the panel showed "Live NetSuite unavailable --
+# nightly copy") while prod, with the same settings, answered in 2 s; only a
+# restart cleared it. A query without a timeout (matching, record lookups) stuck
+# on a dead socket holds the client's lock for good, and every timed search
+# waits behind it. After NETSUITE_CONNECT_RESET_AFTER_TIMEOUTS (default 2)
+# timeouts in a row the shared client is replaced: the stuck query keeps the
+# old, retired one, and the next query logs in on a fresh one.
+DEFAULT_RESET_AFTER_TIMEOUTS = 2
+_timeouts_in_a_row = 0
+
+
+def _reset_after_timeouts() -> int:
+    try:
+        value = int(os.getenv(_PREFIX + "RESET_AFTER_TIMEOUTS") or DEFAULT_RESET_AFTER_TIMEOUTS)
+    except ValueError:
+        return DEFAULT_RESET_AFTER_TIMEOUTS
+    return max(1, value)
+
+
+def _note_query_outcome(client, timed_out: bool) -> None:
+    """Counts the shared client's timeouts in a row; resets it at the limit."""
+    global _shared, _timeouts_in_a_row
+    with _shared_lock:
+        if client is not _shared:
+            return
+        if not timed_out:
+            _timeouts_in_a_row = 0
+            return
+        _timeouts_in_a_row += 1
+        if _timeouts_in_a_row < _reset_after_timeouts():
+            return
+        _shared, count, _timeouts_in_a_row = None, _timeouts_in_a_row, 0
+    logger.warning("NetSuite Connect: %d timeouts in a row -- resetting the shared client "
+                   "(the next query logs in on a fresh connection)", count)
+    client.retire()
 
 
 def get_shared_client() -> ConnectClient:
