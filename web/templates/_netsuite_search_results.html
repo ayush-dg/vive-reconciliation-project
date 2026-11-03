@@ -79,7 +79,14 @@
       </td>
       <td class="ns-cell-vendor">{{ row.vendor_name }}</td>
       <td>
+        {# The number opens the record in NetSuite, in a new tab (2026-11-03). #}
+        {% set ns_url = netsuite_record_url(row.record_type, row.internal_id) if row.tranid else None %}
+        {% if ns_url %}
+        <a class="ns-bill-no ns-bill-link" href="{{ ns_url }}" target="_blank" rel="noopener noreferrer"
+           title="Open {{ row.record_type | lower }} {{ row.tranid }} in NetSuite">{{ row.tranid }}<span class="ns-ext" aria-hidden="true">↗</span></a>
+        {% else %}
         <span class="ns-bill-no">{{ row.tranid or "—" }}</span>
+        {% endif %}
         {% if row.is_credit %}<span class="ns-tag-credit">Credit</span>{% endif %}
         {% if row.already_matched %}
         {% set am = row.already_matched %}
