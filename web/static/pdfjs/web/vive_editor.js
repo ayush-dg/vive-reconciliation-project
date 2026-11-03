@@ -52,6 +52,111 @@
     if (!(app && app._annotationStorageModified)) { event.stopImmediatePropagation(); }
   }, true);
 
+  // A comment lives on its highlight, so PDF.js's "Remove comment" left the
+  // yellow mark behind. Removing (or emptying) the comment of a highlight now
+  // removes the highlight itself, through PDF.js's own delete -- undo bar
+  // "Highlight removed -- Undo" brings back the highlight with its comment.
+  // Comments on text boxes and drawings keep the stock behaviour; plain
+  // highlights (never commented) are untouched.
+  //
+  // Every way a comment is cleared ends in the editor's comment setter calling
+  // uiManager.removeComment(editor) (the popup's Remove, an emptied edit, the
+  // stock deleteComment), so that is the hook. The comment is remembered as it
+  // is set (updateComment) and put back just before the delete, so undo
+  // restores it too. Patched once per document, once the manager exists.
+  // Select the editor, then delete it once PDF.js has finished building its
+  // little toolbar (selecting builds it asynchronously; deleting mid-build made
+  // PDF.js throw on the half-built toolbar).
+  function selectAndDelete(ui, editor, then) {
+    ui.setSelected(editor);
+    var tries = 0;
+    (function attempt() {
+      var built = editor._editToolbar && editor.div && editor.div.querySelector(".deleteButton");
+      if (!built && ++tries < 40) { window.setTimeout(attempt, 25); return; }
+      ui.delete();
+      if (then) { then(); }
+    })();
+  }
+
+  function patchCommentDelete() {
+    var app = window.PDFViewerApplication;
+    var ui = app && app.pdfViewer && app.pdfViewer._layerProperties &&
+             app.pdfViewer._layerProperties.annotationEditorUIManager;
+    if (!ui || ui.__viveCommentDelete || typeof ui.removeComment !== "function" ||
+        typeof ui.updateComment !== "function" || typeof ui.delete !== "function") { return; }
+    var lastComment = new WeakMap();
+    var stockUpdate = ui.updateComment.bind(ui);
+    ui.updateComment = function (editor) {
+      try { if (editor && editor.comment && editor.comment.text) { lastComment.set(editor, editor.comment); } } catch (e) {}
+      return stockUpdate.apply(ui, arguments);
+    };
+    var stockRemove = ui.removeComment.bind(ui);
+    ui.removeComment = function (editor) {
+      var result = stockRemove.apply(ui, arguments);
+      if (editor && editor.editorType === "highlight") {
+        window.setTimeout(function () {
+          if (!editor.div || !editor.div.isConnected) { return; }   // already deleted
+          var saved = lastComment.get(editor);
+          if (saved) { editor.comment = saved; }   // so undo brings the comment back too
+          selectAndDelete(ui, editor);
+        }, 0);
+      }
+      return result;
+    };
+    ui.__viveCommentDelete = true;
+  }
+
+  // A comment already saved in the PDF is not an editor: its Remove only
+  // stores {popup: {deleted: true}} for that annotation id. For a saved
+  // highlight, switch to highlight mode (which turns saved highlights into
+  // editors), delete that editor with PDF.js's own delete -- same undo bar --
+  // and go back to no tool.
+  var HIGHLIGHT = 9;
+  function findEditorFor(ui, annotationId) {
+    var app = window.PDFViewerApplication;
+    for (var page = 0; page < (app.pagesCount || 0); page++) {
+      var editors = ui.getEditors(page);
+      for (var step = editors.next(); !step.done; step = editors.next()) {
+        if (step.value.annotationElementId === annotationId) { return step.value; }
+      }
+    }
+    return null;
+  }
+  function deleteSavedHighlight(annotationId, storageKey) {
+    var app = window.PDFViewerApplication;
+    var ui = app.pdfViewer._layerProperties.annotationEditorUIManager;
+    var wasNoTool = app.pdfViewer.annotationEditorMode === 0;
+    if (wasNoTool) { app.eventBus.dispatch("switchannotationeditormode", { source: window, mode: HIGHLIGHT }); }
+    var tries = 0;
+    (function attempt() {
+      var editor = findEditorFor(ui, annotationId);
+      if (!editor) {
+        if (++tries < 60) { window.setTimeout(attempt, 50); } else if (wasNoTool) { noTool(); }
+        return;
+      }
+      // The deletion replaces the "comment removed" entry; without it, undo
+      // brings the highlight back with its comment.
+      try { app.pdfDocument.annotationStorage.remove(storageKey); } catch (e) {}
+      selectAndDelete(ui, editor, function () { if (wasNoTool) { window.setTimeout(noTool, 50); } });
+    })();
+  }
+  function patchSavedCommentDelete() {
+    var app = window.PDFViewerApplication;
+    var storage = app && app.pdfDocument && app.pdfDocument.annotationStorage;
+    if (!storage || storage.__viveCommentDelete || typeof storage.setValue !== "function") { return; }
+    var stockSet = storage.setValue.bind(storage);
+    storage.setValue = function (key, value) {
+      var result = stockSet.apply(storage, arguments);
+      if (value && !value.annotationEditorType && value.annotationType === HIGHLIGHT &&
+          value.popup && value.popup.deleted && value.id) {
+        window.setTimeout(function () { deleteSavedHighlight(value.id, key); }, 0);
+      }
+      return result;
+    };
+    storage.__viveCommentDelete = true;
+  }
+  window.setInterval(function () { patchCommentDelete(); patchSavedCommentDelete(); }, 500);
+
   // The floating "Comment" / "Highlight" buttons (shown on a text selection)
   // switch the viewer into highlight mode to create the highlight and leave it
   // there -- the mouse stays a highlighter pen. When it was in no tool before,
