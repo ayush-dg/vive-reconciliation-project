@@ -185,7 +185,8 @@
     button.id = "viveSaveButton";
     button.type = "button";
     button.className = "vive-save";
-    button.textContent = "Save to SharePoint";
+    // Two labels; vive_editor.css shows the short one when the viewer is narrow (the PDF panel).
+    button.innerHTML = '<span class="vive-long">Save to SharePoint</span><span class="vive-short">Save</span>';
     button.title = "Save your comments, highlights, text and drawings into the statement's SharePoint file";
     button.disabled = true;
     button.addEventListener("click", save);
