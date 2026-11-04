@@ -438,7 +438,13 @@ class TestResultsPartialRendering(unittest.TestCase):
 
     def test_credit_row_gets_a_credit_tag(self):
         html = self._render_rows([dict(self.ROW, is_credit=True, record_type="Credit")])
-        self.assertIn("ns-tag-credit", html)
+        self.assertIn('<span class="ns-tag-credit">Credit</span>', html)
+        self.assertNotIn(">Bill</span>", html)
+
+    def test_bill_row_gets_a_bill_tag(self):
+        html = self._render_rows([dict(self.ROW, is_credit=False, record_type="Bill")])
+        self.assertIn('<span class="ns-tag-credit ns-tag-bill">Bill</span>', html)
+        self.assertNotIn(">Credit</span>", html)
 
     def test_missing_duedate_omits_the_due_clause(self):
         """Credits carry a duedate on 0.03% of rows -- a bare "Due" label

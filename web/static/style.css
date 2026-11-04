@@ -880,6 +880,7 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
 .ns-ext { margin-left: 3px; font-size: 10px; font-weight: 400; opacity: .7; }
 .ns-bill-sub { margin-top: 3px; font-size: 11.5px; color: var(--text-faint); }
 .ns-tag-credit { display: inline-block; margin-left: 6px; padding: 1px 6px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); background: var(--steel-tint); border-radius: 100px; }
+.ns-tag-bill { color: var(--info); background: var(--info-tint); }
 
 .ns-pill { display: inline-block; padding: 2px 9px; font-size: 11px; font-weight: 600; border-radius: 100px; white-space: nowrap; }
 .ns-pill-open { background: var(--success-tint); color: var(--success); }
