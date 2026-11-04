@@ -240,8 +240,11 @@ def _run_with_retry(fn):
     exception unchanged.
     """
     for attempt in range(1, MAX_CONNECTION_RETRIES + 2):
-        conn = get_connection()
+        conn = None
         try:
+            # Inside the try: opening the connection can drop too
+            # ("TCP Provider: Error code 0x68", 2026-11-04).
+            conn = get_connection()
             return fn(conn)
         except Exception as e:
             if _is_dropped_connection_error(e) and attempt <= MAX_CONNECTION_RETRIES:
@@ -250,10 +253,11 @@ def _run_with_retry(fn):
                 continue
             raise
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 
 def execute_sql(sql, params=None):

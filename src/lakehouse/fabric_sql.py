@@ -80,8 +80,9 @@ def get_warehouse_connection():
 # idle one from a small per-database pool and give it back after the query.
 # A connection idle for over _POOL_IDLE_SECONDS (under Azure's ~4 min
 # idle-drop of outbound connections) or older than _POOL_MAX_AGE_SECONDS is
-# closed rather than reused, and a query that fails on a reused connection is
-# retried once on a fresh one. Callers that hold their own connection
+# closed rather than reused, and a query that fails on a reused connection,
+# or because the connection dropped, is retried on fresh ones (see
+# _pooled_query()). Callers that hold their own connection
 # (get_*_connection(): matching, dbt, the vendor resolver) are unchanged, and
 # so is execute_warehouse_sql() (writes keep a connection of their own).
 _POOL_IDLE_SECONDS = 180
@@ -126,10 +127,34 @@ def _give_back(database: str, conn, opened_at) -> None:
     _close_quietly(conn)
 
 
+def _drop_pool(database: str) -> None:
+    """Closes every idle connection to `database`. Used after a reused one
+    fails: a network drop kills them all at once, so retrying on another
+    pooled one just failed again (the 2026-11-04 500s on /exceptions and
+    /validation, TCP Provider error 0x20)."""
+    with _pool_lock:
+        dead = [conn for conn, _, _ in _pools.pop(database, [])]
+    for conn in dead:
+        _close_quietly(conn)
+
+
+# A query that fails on a reused connection, or with a dropped-connection
+# error (connection.CONNECTION_DROP_SQLSTATES), is retried on brand-new
+# connections, waiting a little longer each time.
+_QUERY_ATTEMPTS = 3
+_RETRY_WAIT_SECONDS = 1
+
+
 def _pooled_query(database: str, sql, params) -> list:
-    for attempt in (1, 2):
-        conn, opened_at, reused = _take(database)
+    from src.lakehouse.connection import _is_dropped_connection_error
+
+    for attempt in range(1, _QUERY_ATTEMPTS + 1):
+        conn, reused = None, False
         try:
+            if attempt == 1:
+                conn, opened_at, reused = _take(database)
+            else:
+                conn, opened_at = _connect(database), time.monotonic()
             cur = conn.cursor()
             try:
                 cur.execute(sql, params or [])
@@ -144,11 +169,17 @@ def _pooled_query(database: str, sql, params) -> list:
             # query on this reused connection kept seeing the data as of its
             # first one -- new matching results stayed hidden (2026-10-29).
             conn.rollback()
-        except Exception:
-            _close_quietly(conn)
-            if not reused or attempt == 2:
+        except Exception as exc:
+            if conn is not None:
+                _close_quietly(conn)
+            if reused:
+                _drop_pool(database)
+            if not (reused or _is_dropped_connection_error(exc)) or attempt == _QUERY_ATTEMPTS:
                 raise
-            logger.warning("Fabric query failed on a reused connection -- retrying on a new one", exc_info=True)
+            logger.warning("Fabric query failed (attempt %d/%d) -- retrying on a new connection",
+                           attempt, _QUERY_ATTEMPTS, exc_info=True)
+            if not reused:
+                time.sleep(_RETRY_WAIT_SECONDS * attempt)
             continue
         _give_back(database, conn, opened_at)
         return rows

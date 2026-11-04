@@ -19,7 +19,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -88,6 +88,35 @@ async def login_required_handler(request: Request, exc: LoginRequired):
     if request.method == "GET":
         request.session["next"] = request.url.path
     return RedirectResponse("/login", status_code=303)
+
+
+_DATABASE_DOWN_PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Try again</title>
+<meta http-equiv="refresh" content="10"></head>
+<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#1f2937">
+<h1 style="font-size:1.25rem">The database didn't answer</h1>
+<p>The connection to the database dropped and didn't come back after several tries.
+This page reloads itself in 10 seconds, or <a href="">try again now</a>.</p>
+</body></html>"""
+
+
+try:
+    import pyodbc
+except ImportError:  # local SQLite-only setups
+    pyodbc = None
+
+if pyodbc is not None:
+    @app.exception_handler(pyodbc.Error)
+    async def database_error_handler(request: Request, exc: pyodbc.Error):
+        # A connection that stayed down through every retry (fabric_sql /
+        # connection.py) gets a "try again" page instead of a bare Internal
+        # Server Error (2026-11-04). Any other database error is a real bug
+        # and still goes through as a 500.
+        from src.lakehouse.connection import _is_dropped_connection_error
+
+        if not _is_dropped_connection_error(exc):
+            raise exc
+        print(f"[web] {request.method} {request.url.path}: database connection dropped -- {exc}")
+        return HTMLResponse(_DATABASE_DOWN_PAGE, status_code=503, headers={"Retry-After": "10"})
 
 
 app.include_router(auth.router)
