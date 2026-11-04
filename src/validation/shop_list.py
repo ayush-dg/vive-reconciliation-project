@@ -35,6 +35,8 @@ _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 
 # Words a statement abbreviates in a city name ("W Hartford", "Mt Holly").
 _PLACE_WORDS = {"w": "west", "n": "north", "s": "south", "e": "east", "mt": "mount"}
+# Words a statement adds to a city name that NetSuite leaves out ("Mt Laurel Twp").
+_PLACE_SUFFIXES = {"township", "twp"}
 
 _STATE_ABBREVIATIONS = {
     "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca", "colorado": "co",
@@ -58,9 +60,13 @@ def normalize_text(text) -> str:
 
 
 def normalize_place(text) -> str:
-    """normalize_text() with the abbreviated place words spelled out: "W
-    Hartford" and "West Hartford" compare equal."""
-    return " ".join(_PLACE_WORDS.get(word, word) for word in normalize_text(text).split())
+    """normalize_text() with the abbreviated place words spelled out and a
+    trailing "Township" dropped: "W Hartford" and "West Hartford" compare
+    equal, and so do "Mt Laurel Twp" and "Mount Laurel"."""
+    words = [_PLACE_WORDS.get(word, word) for word in normalize_text(text).split()]
+    if len(words) > 1 and words[-1] in _PLACE_SUFFIXES:
+        words.pop()
+    return " ".join(words)
 
 
 def normalize_state(state) -> str:
@@ -141,10 +147,23 @@ def _forms() -> list:
     return [(form, shop) for form, shop in forms if form]
 
 
+@lru_cache(maxsize=1)
+def _alias_forms() -> frozenset:
+    """The normalized aliases that are not also a shop's own name."""
+    shop_names = {normalize_text(shop["name"]) for shop in _load()}
+    return frozenset(form for form, shop in _forms() if form not in shop_names)
+
+
 def reload():
     """Forget everything read from disk (after the files or their paths change)."""
-    for cached in (_mapping, _load, _indexes, _forms):
+    for cached in (_mapping, _load, _indexes, _forms, _alias_forms):
         cached.cache_clear()
+
+
+def is_alias(form) -> bool:
+    """True when `form` (as normalized by normalize_text) is an alias from
+    config/location_mapping.json rather than a shop's own name."""
+    return form in _alias_forms()
 
 
 def all_shops() -> list:

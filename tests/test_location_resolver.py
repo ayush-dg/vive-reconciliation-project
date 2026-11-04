@@ -255,5 +255,49 @@ class Logging(unittest.TestCase):
                 resolve_billing_location(*args)
 
 
+class Aliases(unittest.TestCase):
+    """Names a statement uses that are not the shop's NetSuite name
+    (config/location_mapping.json), and the city words NetSuite leaves out."""
+
+    def test_an_alias_names_its_shop_where_the_city_alone_is_shared(self):
+        # Bangor, ME holds two shops; Bernatche is the "Bangor" one.
+        self.assertEqual(resolve_billing_location("BANGOR ME", ["BERNATCHE AUTO BODY"]), ("Bangor", "name_match"))
+        self.assertEqual(resolve_billing_location("BANGOR, ME 04401", ["VIVE COLLISION MAINE COL CTR"]),
+                         ("Maine Collision", "name_match"))
+
+    def test_an_alias_outranks_a_city_that_points_elsewhere(self):
+        # Auburn, ME is Coleman's; the name says Hewitt's, whose name also holds Caron's.
+        self.assertEqual(resolve_billing_location("AUBURN, ME", ["CARONS BODY SHOP DBA HEWITTS AUTO B"]),
+                         ("Hewitt's", "name_match"))
+        self.assertEqual(resolve_billing_location("Auburn, ME", ["SEBAGO LAKE COLLISION, LLC"]), ("Sebago", "name_match"))
+        self.assertEqual(resolve_billing_location("MANCHESTER, NH", ["VIVE COLLISION- CROSSROADS NH"]),
+                         ("Crossroads", "name_match"))
+
+    def test_a_shops_own_name_still_conflicts_with_a_city_that_points_elsewhere(self):
+        self.assertEqual(resolve_billing_location("Auburn, ME", ["VIVE COLLISION - RP BELL"]), ("Auburn, ME", "conflict"))
+
+    def test_an_alias_does_not_outrank_a_street_at_another_shop(self):
+        street = [{"street": "181 S Main St", "city": "Neptune", "state": "NJ"}]
+        self.assertEqual(resolve_billing_location("Neptune, NJ", ["M3 Collision"], addresses=street),
+                         ("Neptune, NJ", "conflict"))
+
+    def test_abbreviated_shop_names(self):
+        self.assertEqual(resolve_billing_location("MT LAUREL TWP NJ", ["VIVE COLLISION - MT LAUREL (C60)"]),
+                         ("Mount Laurel", "name_match"))
+        self.assertEqual(resolve_billing_location("HUDSON, MA", ["VIVE BODY & PAINT COLLISION"]),
+                         ("Body & Paint Center", "name_match"))
+        self.assertEqual(resolve_billing_location("Lyndon, Vermont", ["VIVE - N E K Collision Repair"]),
+                         ("NEK", "name_match"))
+
+    def test_a_township_suffix_is_not_part_of_the_city(self):
+        for location in ("MT LAUREL TWP NJ", "Mount Laurel Township, New Jersey", "Mount Laurel, NJ"):
+            with self.subTest(location=location):
+                self.assertEqual(resolve_billing_location(location, None), ("Mount Laurel", "city_match"))
+
+    def test_aliases_are_told_from_shop_names(self):
+        self.assertTrue(shop_list.is_alias("bernatche"))
+        self.assertFalse(shop_list.is_alias("bangor"))
+
+
 if __name__ == "__main__":
     unittest.main()

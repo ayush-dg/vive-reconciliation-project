@@ -6,6 +6,14 @@
   "aliases": {
     "Highway 35": ["M3 Collision", "M 3 Collision", "M3 Collision Center", "M3 Hwy 35", "M3 Highway 35", "HW 3"],
     "South Main": ["M3 South Main", "M 3 South Main", "M3 S Main", "M3 181"],
-    "West Hartford": ["WH"]
+    "West Hartford": ["WH"],
+    "Bangor": ["Bernatche", "Bernatche Auto Body"],
+    "Maine Collision": ["Maine Col Ctr", "Maine Collision Center", "Maine Collision Ctr"],
+    "Hewitt's": ["Carons Body Shop DBA Hewitts"],
+    "Mount Laurel": ["Mt Laurel"],
+    "Crossroads": ["Crossroads NH"],
+    "Sebago": ["Sebago Lake Collision"],
+    "Body & Paint Center": ["Body & Paint Collision"],
+    "NEK": ["N E K"]
   }
 }
