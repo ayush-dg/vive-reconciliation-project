@@ -1,0 +1,18 @@
+{
+  "_comment": "Claude Opus 5.5 -- the validation-failure retry model (src/ai/opus_retry.py, EXTRACTION_OPUS_RETRY_ENABLED). Same client class and prompt as claude_sonnet_extraction.json, on the sonnet-5-5 Foundry resource. Opus 5.5 rejects temperature (400), so it is null (not sent); thinking is always on and effort is the depth control.",
+  "provider": "claude_sonnet",
+  "model": "claude-opus-5-5",
+  "api_key_env_var": "AZURE_CLAUDE_OPUS_API_KEY",
+  "endpoint_env_var": "AZURE_CLAUDE_OPUS_ENDPOINT",
+  "deployment_env_var": "AZURE_CLAUDE_OPUS_DEPLOYMENT",
+  "temperature": null,
+  "effort": "high",
+  "max_output_tokens": 64000,
+  "timeout_seconds": 600,
+  "retry_policy": {
+    "max_retries": 2,
+    "backoff_seconds": 2,
+    "backoff_multiplier": 2,
+    "retry_on_status_codes": [429, 500, 502, 503, 504, 529]
+  }
+}

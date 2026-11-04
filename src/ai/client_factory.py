@@ -51,6 +51,15 @@ def get_ai_client(provider_name: Optional[str] = None) -> AIClient:
         config = _load_json(config_paths.get("claude_sonnet", "config/ai/claude_sonnet_extraction.json"))
         return ClaudeSonnetClient(config)
 
+    elif provider_name == "claude_opus":
+        # Claude Opus 5.5 -- the same client and prompt as claude_sonnet, its
+        # own endpoint/key/deployment (config/ai/claude_opus_extraction.json).
+        # Not in provider_chain: only src/ai/opus_retry.py asks for it, to
+        # re-extract a PDF whose first extraction failed validation.
+        from .claude_sonnet_client import ClaudeSonnetClient
+        config = _load_json(config_paths.get("claude_opus", "config/ai/claude_opus_extraction.json"))
+        return ClaudeSonnetClient(config)
+
     else:
         raise ValueError(f"Unknown provider: '{provider_name}'. Add it to client_factory.py.")
 

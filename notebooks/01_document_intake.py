@@ -62,6 +62,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 from src.ai.document_understanding_engine import (
     CorruptedPDFError, DocumentUnderstandingEngine, extract_pdf_text, page_texts,
 )
+from src.ai import opus_retry
 # A deterministic pdfplumber extractor, used in place of
 # DocumentUnderstandingEngine for text-embedded PDFs matching the known
 # vendors listed in src/extraction/python_library/adapter.py's _FIELD_MAP
@@ -2092,6 +2093,18 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
 
     with timed_step("validation"):
         apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
+
+    # Failed validation -> up to two more reads by Claude Opus, each
+    # validated the same way; the first pass is kept, else the statement
+    # fails as before (src/ai/opus_retry.py, EXTRACTION_OPUS_RETRY_ENABLED).
+    with timed_step("opus_retry"):
+        schema_result = opus_retry.retry_on_validation_failure(
+            schema_result,
+            extract=lambda: DocumentUnderstandingEngine().understand_with(
+                opus_retry.OPUS_PROVIDER, pdf_path, statement_id=statement_id),
+            validate=lambda candidate: apply_arithmetic_validation(candidate, pdf_text, pdf_path),
+            started=extraction_started,
+        )
 
     # Map the extracted customer location onto a VIVE shop
     # (src/validation/location_lookup.py): by name, then phone, then city,

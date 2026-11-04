@@ -133,6 +133,18 @@
     <tr><td style="color:var(--text-secondary)">Statement period</td><td>{{ intake.statement_period | period_label }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Checked</td><td>{{ intake.ingestion_timestamp | friendly_dt }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Validated by</td><td>{{ intake.validation_method | validation_method_label if intake.validation_method else "—" }}</td></tr>
+    {# Opus re-extraction after a validation failure (2026-11-04, src/ai/opus_retry.py). #}
+    {% set attempts = intake.extraction_attempts or [] %}
+    <tr><td style="color:var(--text-secondary)">Read by</td><td>{{ intake.extraction_model or "—" }}
+      {% if attempts | length > 1 %}
+      <div class="extraction-attempts" style="color:var(--text-secondary);font-size:13px;margin-top:4px">
+        {{ attempts | length }} reads:
+        {% for a in attempts %}{{ a.attempt }}. {{ a.model or "—" }} &mdash;
+          {% if a.status == "matches" %}passed{% elif a.status == "no_rows" %}read no rows{% elif a.status == "skipped_time_limit" %}not started (time limit){% elif a.status == "mismatch" %}failed{% if a.difference is not none %} (diff {{ a.difference | money }}){% endif %}{% else %}failed ({{ a.status }}){% endif %}{% if not loop.last %}; {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </td></tr>
     {% if intake.primary_computed is not none %}
     <tr><td style="color:var(--text-secondary)">Charges − credits</td><td>{{ intake.primary_computed | money }}</td></tr>
     {% endif %}

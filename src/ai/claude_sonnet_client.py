@@ -862,6 +862,11 @@ class ClaudeSonnetClient(AIClient):
             # request ran at the API default of 1.0 whatever the config said.
             if temperature is not None:
                 payload["temperature"] = temperature
+            # Effort (config "effort", 2026-11-04): Claude Opus 5.5 rejects
+            # temperature and always thinks; effort sets how deeply. Not sent
+            # when the config has none (claude_sonnet_extraction.json).
+            if self.config.get("effort"):
+                payload["output_config"] = {"effort": self.config["effort"]}
             with ai_call_slot():
                 resp = requests.post(
                     url, headers=headers, json=payload,

@@ -214,6 +214,36 @@ class DocumentUnderstandingEngine:
                 except OSError:
                     pass
 
+    def understand_with(self, provider_name: str, pdf_path: str, statement_id: str = None):
+        """ONE extraction by the named provider (e.g. "claude_opus") -- no
+        shortfall retry, no deterministic reader, no pdfplumber fallback.
+        Returns the schema dict, or None when the call fails or reads no rows.
+        Used by src/ai/opus_retry.py after a validation failure (2026-11-04)."""
+        source_file = os.path.basename(pdf_path)
+        with timed_step("orientation"):
+            send_path, _rotations = upright_copy(pdf_path)
+        try:
+            client = client_factory.get_ai_client(provider_name)
+            try:
+                response = self._call(client, send_path, source_file, statement_id)
+            except Exception as e:
+                print(f"  [Engine] {provider_name} error: {e}")
+                return None
+            if not (response.success and response.parsed_json and response.parsed_json.get("invoices")):
+                print(f"  [Engine] {provider_name} ({response.model}) read no rows: {response.error or 'empty result'}")
+                return None
+            result = response.parsed_json
+            result["_provider_used"] = response.provider
+            result["_model_used"] = response.model
+            print(f"  [Engine] {provider_name} ({response.model}) -- {len(result['invoices'])} invoices extracted")
+            return result
+        finally:
+            if send_path != pdf_path:
+                try:
+                    os.remove(send_path)
+                except OSError:
+                    pass
+
     def _call(self, client, send_path: str, source_file: str, statement_id: str):
         """One AI call, audit-logged; raises what the client raises (after logging it)."""
         started = time.monotonic()

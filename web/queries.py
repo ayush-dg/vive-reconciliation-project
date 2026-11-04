@@ -3090,7 +3090,7 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
         SELECT statement_id, source_file, vendor_name, statement_period,
                statement_total_as_printed, validation_status, validation_difference,
                validation_method, validation_detail, previous_balance, previous_balance_source,
-               ingestion_timestamp
+               ingestion_timestamp, extraction_model
         FROM document_intake_log
         WHERE statement_id = ?
         """,
@@ -3110,6 +3110,9 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
         detail = None
     intake["validation_attempts"] = (detail or {}).get("attempts") or []
     intake["primary_computed"] = (detail or {}).get("primary_computed")
+    # Opus re-extraction after a validation failure (2026-11-04, src/ai/opus_retry.py):
+    # every read, in order, as [{"attempt", "model", "status", "difference"}].
+    intake["extraction_attempts"] = (detail or {}).get("extraction_attempts") or []
     # Invoice-balance check (2026-10-19): the flagged rows, and the pass it
     # turned into a mismatch, if any.
     intake["invoice_balance"] = (detail or {}).get("invoice_balance")

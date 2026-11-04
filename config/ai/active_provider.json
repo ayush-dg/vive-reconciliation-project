@@ -1,8 +1,12 @@
 {
-  "_comment": "Claude Sonnet 4.6 (claude_sonnet_client.py) is the extraction engine; deterministic pdfplumber (with OCR for scanned pages) is the non-AI last resort. \"claude\" (claude_client.py) is not in the chain: it is the exception-explanation model (src/ai/explanation_service.py). The Gemini, Mistral, Azure OpenAI and Document Intelligence providers were removed 2026-10-30.",
-  "provider_chain": ["claude_sonnet", "pdfplumber"],
+  "_comment": "Claude Sonnet 4.6 (claude_sonnet_client.py) is the extraction engine; deterministic pdfplumber (with OCR for scanned pages) is the non-AI last resort. \"claude\" (claude_client.py) is not in the chain: it is the exception-explanation model (src/ai/explanation_service.py). The Gemini, Mistral, Azure OpenAI and Document Intelligence providers were removed 2026-10-30. \"claude_opus\" (Claude Opus 5.5, same client) is not in the chain either: it re-extracts a PDF that failed validation (src/ai/opus_retry.py).",
+  "provider_chain": [
+    "claude_sonnet",
+    "pdfplumber"
+  ],
   "provider_config_paths": {
     "claude": "config/ai/claude.json",
-    "claude_sonnet": "config/ai/claude_sonnet_extraction.json"
+    "claude_sonnet": "config/ai/claude_sonnet_extraction.json",
+    "claude_opus": "config/ai/claude_opus_extraction.json"
   }
 }
