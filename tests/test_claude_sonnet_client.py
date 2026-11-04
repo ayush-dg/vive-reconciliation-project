@@ -322,6 +322,44 @@ class TestClaudeSonnetClientTolerantFallbackMapping(unittest.TestCase):
         self.assertTrue(any("2 row(s)" in m for m in messages))
 
 
+class TestClaudeSonnetClientCustomerLocation(unittest.TestCase):
+    """customer_addresses -- the input to the shop-list location lookup
+    (src/validation/location_lookup.py)."""
+
+    def test_addresses_are_kept_as_label_street_city_state(self):
+        raw = [{"label": "bill_to", "street": "PO Box 162", "city": "Mechanic Falls", "state": "ME"},
+               {"label": "ship_to", "street": " 1524 Minot Ave ", "city": " Auburn ", "state": "ME"}]
+        self.assertEqual(ClaudeSonnetClient._parse_customer_addresses(raw), [
+            {"label": "bill_to", "street": "PO Box 162", "city": "Mechanic Falls", "state": "ME"},
+            {"label": "ship_to", "street": "1524 Minot Ave", "city": "Auburn", "state": "ME"}])
+
+    def test_an_address_with_a_street_but_no_city_is_kept(self):
+        self.assertEqual(ClaudeSonnetClient._parse_customer_addresses([{"label": "bill_to", "street": "508 HIGHWAY 35"}]),
+                         [{"label": "bill_to", "street": "508 HIGHWAY 35", "city": "", "state": ""}])
+
+    def test_malformed_addresses_are_dropped(self):
+        for raw in (None, "Auburn, ME", [None, "Auburn", {"label": "ship_to"}, {"city": ""}, {"street": None}]):
+            with self.subTest(raw=raw):
+                self.assertEqual(ClaudeSonnetClient._parse_customer_addresses(raw), [])
+
+    def test_schema_carries_the_addresses_in_vendor_metadata(self):
+        client = ClaudeSonnetClient.__new__(ClaudeSonnetClient)
+        addresses = [{"label": "ship_to", "street": "1524 Minot Ave", "city": "Auburn", "state": "ME"}]
+        result = client._build_schema("x.pdf", [], [], salvaged=False, customer_addresses=addresses)
+        self.assertEqual(result["vendor_metadata"]["customer_addresses"], addresses)
+
+    def test_schema_defaults_when_the_model_returns_none(self):
+        client = ClaudeSonnetClient.__new__(ClaudeSonnetClient)
+        meta = client._build_schema("x.pdf", [], [], salvaged=False)["vendor_metadata"]
+        self.assertEqual(meta["customer_addresses"], [])
+        self.assertNotIn("customer_phone", meta)
+
+    def test_the_prompt_asks_for_the_street_and_not_for_a_phone(self):
+        from src.ai.claude_sonnet_client import EXTRACTION_PROMPT
+        self.assertIn("street", EXTRACTION_PROMPT)
+        self.assertNotIn("customer_phone", EXTRACTION_PROMPT)
+
+
 class TestClaudeSonnetClientToFloat(unittest.TestCase):
 
     def test_numeric_passthrough(self):

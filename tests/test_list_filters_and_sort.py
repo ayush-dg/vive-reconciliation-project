@@ -69,7 +69,7 @@ def _make_local_db():
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute(
-        "CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT)"
+        "CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT, billing_location TEXT, billing_location_source TEXT, shop_city TEXT, shop_state TEXT)"
     )
     conn.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT)")
     return conn
@@ -108,7 +108,7 @@ class _BackendTestCase(unittest.TestCase):
         )
         if period is not None or shop is not None:
             self.local.execute(
-                "INSERT INTO document_intake_log VALUES (?, ?, ?)",
+                "INSERT INTO document_intake_log (statement_id, statement_period, shop_or_entity) VALUES (?, ?, ?)",
                 [statement_id, period, f'["{shop}"]' if shop else None],
             )
 
@@ -176,7 +176,7 @@ class TestReconRunsPanel(_BackendTestCase):
         self._run("D", exception_count=0, ts="2026-09-01T00:00:00")  # no intake period
         # An intake row whose statement never reached recon_summary must not
         # add a period to the dropdown.
-        self.local.execute("INSERT INTO document_intake_log VALUES ('ORPHAN', '2026-01', NULL)")
+        self.local.execute("INSERT INTO document_intake_log (statement_id, statement_period, shop_or_entity) VALUES ('ORPHAN', '2026-01', NULL)")
 
         panel = queries.get_recon_runs_panel(status="reconciled", period="2026-07")
         # Built from all runs, before either filter.

@@ -47,6 +47,8 @@ import os
 import time
 from typing import Optional
 
+from src.validation.shop_list import LOCATION_COLUMNS
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Azure SQL tables holding this statement's rows (all have an IDENTITY id).
@@ -330,8 +332,7 @@ def new_from_schema(io, intake, state: dict, pdf_path: str, pdf_text: str, schem
     invoices = schema_result.get("invoices") or []
     intake.apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
     vendor_meta = schema_result.setdefault("vendor_metadata", {})
-    vendor_meta["billing_location"], vendor_meta["billing_location_source"] = intake.resolve_billing_location(
-        vendor_meta.get("billing_location"), vendor_meta.get("shop_or_entity"))
+    intake.apply_location(vendor_meta, intake.resolve_billing_location)
     if route.get("new_vendor_warning"):
         schema_result.setdefault("warnings", []).append(
             {"code": "NEW_VENDOR_TEXT_EMBEDDED", "message": route["new_vendor_warning"], "severity": "MEDIUM"})
@@ -615,7 +616,8 @@ def apply(io, intake, state: dict, new: dict, decision: dict, *, expected_finger
         io.delta_delete(t, sid)
     write_raw_statement(new["invoices"], new["vendor_id"], sid, source_file, new["provider"],
                         vendor_display_name=intake.display_name(new["vendor_name"]),
-                        version_number=new["version_info"]["version_number"])
+                        version_number=new["version_info"]["version_number"],
+                        location={column: new["intake_update"].get(column) for column in LOCATION_COLUMNS})
     try:
         result["raw_promoted"] = promote_raw(io, sid)
     except Exception as e:

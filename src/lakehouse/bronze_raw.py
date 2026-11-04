@@ -63,6 +63,7 @@ import os
 from datetime import datetime, timezone
 
 from src.lakehouse.fabric_dbt_runner import fabric_pipeline_lock
+from src.validation.shop_list import LOCATION_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,8 @@ def _refresh_sql_endpoint_metadata() -> None:
 def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
                          source_file_name: str, extraction_engine: str,
                          vendor_display_name: str = None,
-                         version_number: int = None) -> int:
+                         version_number: int = None,
+                         location: dict = None) -> int:
     """Appends exactly one row for this PDF/statement to
     bronze.raw_statement -- raw_payload is a JSON array of every
     line's raw (pre-mapping) row, each wrapped as {"_raw_row": ...,
@@ -187,6 +189,12 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
     (vendor_id remains the canonical key, same as everywhere else in this
     app). version_number is the same per-statement version_info already
     resolved by the caller (resolve_version_info()) before this is called.
+
+    location is the statement's customer location (LOCATION_COLUMNS keys:
+    billing_location_extracted, billing_location -- the mapped shop name --
+    and shop_phone/shop_city/shop_state, see src/validation/location_lookup.py);
+    one value per statement, so it lives on this row, not on each line. Omit
+    it (or leave keys out) and those columns are written null.
 
     Returns 1 if written, 0 if Fabric isn't configured, there's nothing to
     write, or the write failed (all non-fatal to the caller).
@@ -226,9 +234,12 @@ def write_raw_statement(invoices: list, vendor_id: str, statement_id: str,
             "invoice_count": len(invoices),
             "version_number": version_number,
             "raw_payload": json.dumps(raw_rows, default=str),
+            **{column: (location or {}).get(column) for column in LOCATION_COLUMNS},
         }
 
         df = pd.DataFrame([row])
+        for column in LOCATION_COLUMNS:
+            df[column] = df[column].astype("string")
         df["vendor_id"] = df["vendor_id"].astype("string")
         df["vendor_display_name"] = df["vendor_display_name"].astype("string")
         df["statement_id"] = df["statement_id"].astype("string")

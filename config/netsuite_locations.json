@@ -1,354 +1,803 @@
 {
   "1": {
     "name": "Clarkstown",
-    "inactive": false
+    "inactive": false,
+    "street": "95 NY-304",
+    "city": "Nanuet",
+    "state": "NY",
+    "zip": "10954",
+    "phone": "(845) 627-3100"
   },
   "2": {
     "name": "Corporate",
-    "inactive": false
+    "inactive": false,
+    "street": "",
+    "city": "",
+    "state": "",
+    "zip": "",
+    "phone": ""
   },
   "3": {
     "name": "Coleman's",
-    "inactive": false
+    "inactive": false,
+    "street": "1524 Minot Avenue",
+    "city": "Auburn",
+    "state": "ME",
+    "zip": "04210",
+    "phone": "(207) 784-6121"
   },
   "4": {
     "name": "Hewitt's",
-    "inactive": false
+    "inactive": false,
+    "street": "345 East Elm Street",
+    "city": "Yarmouth",
+    "state": "ME",
+    "zip": "04096",
+    "phone": "(207) 846-3113"
   },
   "5": {
     "name": "RP Bell",
-    "inactive": false
+    "inactive": false,
+    "street": "7 Ocean Park Road",
+    "city": "Saco",
+    "state": "ME",
+    "zip": "04072",
+    "phone": "(207) 282-6860"
   },
   "6": {
     "name": "Sebago",
-    "inactive": false
+    "inactive": false,
+    "street": "847 Roosevelt Trail, Unit #2",
+    "city": "Windham",
+    "state": "ME",
+    "zip": "04062",
+    "phone": "(207) 893-8505"
   },
   "7": {
     "name": "Rockland",
-    "inactive": false
+    "inactive": false,
+    "street": "157 Route 9W",
+    "city": "Haverstraw",
+    "state": "NY",
+    "zip": "10920",
+    "phone": "(845) 429-4747"
   },
   "8": {
     "name": "Pawtucket",
-    "inactive": false
+    "inactive": false,
+    "street": "180 Broadway",
+    "city": "Pawtucket",
+    "state": "RI",
+    "zip": "02860",
+    "phone": "(401) 728-8800"
   },
   "9": {
     "name": "Bristol",
-    "inactive": false
+    "inactive": false,
+    "street": "100 Broadcommon Road",
+    "city": "Bristol",
+    "state": "RI",
+    "zip": "02809",
+    "phone": "(401) 253-3400"
   },
   "10": {
     "name": "Middletown",
-    "inactive": false
+    "inactive": false,
+    "street": "950 Aquidneck Avenue",
+    "city": "MIddletown",
+    "state": "RI",
+    "zip": "02842",
+    "phone": "(401) 847-0664"
   },
   "11": {
     "name": "Acme",
-    "inactive": false
+    "inactive": false,
+    "street": "220 King Street",
+    "city": "Northampton",
+    "state": "MA",
+    "zip": "01060",
+    "phone": "(413) 584-3710"
   },
   "12": {
     "name": "Don Joe",
-    "inactive": false
+    "inactive": false,
+    "street": "247 East Shore Rd",
+    "city": "Great Neck",
+    "state": "NY",
+    "zip": "11023",
+    "phone": "(516) 466-2828"
   },
   "13": {
     "name": "Seacoast",
-    "inactive": false
+    "inactive": false,
+    "street": "47 Bath Rd",
+    "city": "Brunswick",
+    "state": "ME",
+    "zip": "04011",
+    "phone": "(207) 729-6512"
   },
   "14": {
     "name": "Hamden",
-    "inactive": false
+    "inactive": false,
+    "street": "2111 Dixwell Ave",
+    "city": "Hamden",
+    "state": "CT",
+    "zip": "06514",
+    "phone": "(203) 248-6116"
   },
   "15": {
     "name": "Superior",
-    "inactive": false
+    "inactive": false,
+    "street": "2106 NY-208",
+    "city": "Montgomery",
+    "state": "NY",
+    "zip": "12549",
+    "phone": "(845) 457-5500"
   },
   "16": {
     "name": "Springfield",
-    "inactive": false
+    "inactive": false,
+    "street": "1060 Bay Street",
+    "city": "Springfield",
+    "state": "MA",
+    "zip": "01109",
+    "phone": "(413) 736-5481"
   },
   "17": {
     "name": "Holyoke",
-    "inactive": false
+    "inactive": false,
+    "street": "1519 Dwight Street",
+    "city": "Holyoke",
+    "state": "MA",
+    "zip": "01040",
+    "phone": "(413) 532-9413"
   },
   "18": {
     "name": "Matawan",
-    "inactive": false
+    "inactive": false,
+    "street": "279 Main Street",
+    "city": "Matawan",
+    "state": "NJ",
+    "zip": "07747",
+    "phone": "(732) 583-6566"
   },
   "19": {
     "name": "Middletown - NJ",
-    "inactive": false
+    "inactive": false,
+    "street": "660 Route 35",
+    "city": "Middletown",
+    "state": "NJ",
+    "zip": "07748",
+    "phone": "(732) 671-1331"
   },
   "20": {
     "name": "JC Auto",
-    "inactive": false
+    "inactive": false,
+    "street": "1520 State St",
+    "city": "Veazie",
+    "state": "ME",
+    "zip": "04401",
+    "phone": "(207) 947-4271"
   },
   "21": {
     "name": "Caron's",
-    "inactive": false
+    "inactive": false,
+    "street": "258 Eastern Ave",
+    "city": "Augusta",
+    "state": "ME",
+    "zip": "04330",
+    "phone": "(207) 622-4191"
   },
   "23": {
     "name": "Collex",
-    "inactive": false
+    "inactive": false,
+    "street": "435 Shrewsbury Avenue",
+    "city": "Shrewsbury",
+    "state": "NJ",
+    "zip": "07702",
+    "phone": "(732) 741-2480"
   },
   "24": {
     "name": "Nutley",
-    "inactive": false
+    "inactive": false,
+    "street": "95 Park Ave",
+    "city": "Nutley",
+    "state": "NJ",
+    "zip": "07110",
+    "phone": "(973) 662-9000"
   },
   "25": {
     "name": "Lyndhurst",
-    "inactive": false
+    "inactive": false,
+    "street": "824 Riverside Ave",
+    "city": "Lyndhurst",
+    "state": "NJ",
+    "zip": "07071",
+    "phone": "(973) 662-8000"
   },
   "26": {
     "name": "Lehigh Valley",
-    "inactive": false
+    "inactive": false,
+    "street": "3115 Berger St",
+    "city": "Allentown",
+    "state": "PA",
+    "zip": "18103",
+    "phone": "(610) 965-1333"
   },
   "27": {
     "name": "Milford",
-    "inactive": false
+    "inactive": false,
+    "street": "901 Bridgeport Ave",
+    "city": "Milford",
+    "state": "CT",
+    "zip": "06460",
+    "phone": "(203) 874-1900"
   },
   "28": {
     "name": "Highway 35",
-    "inactive": false
+    "inactive": false,
+    "street": "508 State Route 35 North",
+    "city": "Neptune",
+    "state": "NJ",
+    "zip": "07753",
+    "phone": "(732) 988-9401"
   },
   "29": {
     "name": "South Main",
-    "inactive": false
+    "inactive": false,
+    "street": "181 South Main St",
+    "city": "Neptune",
+    "state": "NJ",
+    "zip": "07753",
+    "phone": "(732) 774-6635"
   },
   "30": {
     "name": "First Choice",
-    "inactive": false
+    "inactive": false,
+    "street": "200 Centennial Blvd",
+    "city": "Voorhees",
+    "state": "NJ",
+    "zip": "08043",
+    "phone": "(856) 782-7280"
   },
   "31": {
     "name": "Thomaston",
-    "inactive": false
+    "inactive": false,
+    "street": "301 McMahon Dr",
+    "city": "Thomaston",
+    "state": "CT",
+    "zip": "06787",
+    "phone": "(860) 283-9115"
   },
   "32": {
     "name": "Noaker's",
-    "inactive": false
+    "inactive": false,
+    "street": "819 New Bloomfield Rd",
+    "city": "Duncannon",
+    "state": "PA",
+    "zip": "17020",
+    "phone": "(717) 834-6500"
   },
   "33": {
     "name": "Harbour",
-    "inactive": false
+    "inactive": false,
+    "street": "401 Warren Ave",
+    "city": "Portland",
+    "state": "ME",
+    "zip": "04103",
+    "phone": "(207) 878-2121"
   },
   "34": {
     "name": "Prestige",
-    "inactive": false
+    "inactive": false,
+    "street": "729 Dutchess Turnpike",
+    "city": "Poughkeepsie",
+    "state": "NY",
+    "zip": "12603",
+    "phone": "(845) 485-2353"
   },
   "35": {
     "name": "Quonset",
-    "inactive": false
+    "inactive": false,
+    "street": "7335 Post Rd",
+    "city": "North Kingstown",
+    "state": "RI",
+    "zip": "02852",
+    "phone": "(401) 884-3900"
   },
   "36": {
     "name": "Neet's",
-    "inactive": false
+    "inactive": false,
+    "street": "2045 US-9",
+    "city": "Round Lake",
+    "state": "NY",
+    "zip": "12151",
+    "phone": "(518) 877-7133"
   },
   "37": {
     "name": "Albany",
-    "inactive": false
+    "inactive": false,
+    "street": "808 Central Ave",
+    "city": "Albany",
+    "state": "NY",
+    "zip": "12206",
+    "phone": ""
   },
   "38": {
     "name": "Natick",
-    "inactive": false
+    "inactive": false,
+    "street": "55 Middlesex Ave",
+    "city": "Natick",
+    "state": "MA",
+    "zip": "01760",
+    "phone": "(508) 655-0713"
   },
   "39": {
     "name": "Watertown",
-    "inactive": false
+    "inactive": false,
+    "street": "66 School Street",
+    "city": "Watertown",
+    "state": "MA",
+    "zip": "02472",
+    "phone": "(617) 244-2000"
   },
   "40": {
     "name": "International Auto Works",
-    "inactive": true
+    "inactive": true,
+    "street": "3 Middlesex Avenue",
+    "city": "Natick",
+    "state": "MA",
+    "zip": "01760",
+    "phone": "(508) 650-0672"
   },
   "41": {
     "name": "Thru It All",
-    "inactive": false
+    "inactive": false,
+    "street": "1230 W Main St",
+    "city": "Mount Joy",
+    "state": "PA",
+    "zip": "17552",
+    "phone": "(717) 653-4650"
   },
   "42": {
     "name": "zz_Growth",
-    "inactive": true
+    "inactive": true,
+    "street": "",
+    "city": "",
+    "state": "",
+    "zip": "",
+    "phone": ""
   },
   "43": {
     "name": "ClearDrive",
-    "inactive": false
+    "inactive": false,
+    "street": "",
+    "city": "",
+    "state": "",
+    "zip": "",
+    "phone": ""
   },
   "44": {
     "name": "Bangor",
-    "inactive": false
+    "inactive": false,
+    "street": "563 Odlin Rd",
+    "city": "Bangor",
+    "state": "ME",
+    "zip": "04401",
+    "phone": "(207) 941-5686"
   },
   "45": {
     "name": "Jake's",
-    "inactive": false
+    "inactive": false,
+    "street": "2302 Lucas Turnpike",
+    "city": "High Falls",
+    "state": "NY",
+    "zip": "12440",
+    "phone": "(845) 687-4004"
   },
   "46": {
     "name": "Prestige - NH",
-    "inactive": false
+    "inactive": false,
+    "street": "200 Frontage Rd",
+    "city": "Manchester",
+    "state": "NH",
+    "zip": "03103",
+    "phone": "(603) 669-0015"
   },
   "47": {
     "name": "Kingston",
-    "inactive": false
+    "inactive": false,
+    "street": "350 Brook Avenue, Suite 300",
+    "city": "Kingston",
+    "state": "PA",
+    "zip": "18704",
+    "phone": "(570) 283-1844"
   },
   "48": {
     "name": "Dallas",
-    "inactive": false
+    "inactive": false,
+    "street": "3169 SR 309",
+    "city": "Dallas",
+    "state": "PA",
+    "zip": "18612",
+    "phone": "(570) 675-7755"
   },
   "49": {
     "name": "Clarks Summit",
-    "inactive": false
+    "inactive": false,
+    "street": "205 Old Lackawanna Trail Road",
+    "city": "Clarks Summit",
+    "state": "PA",
+    "zip": "18411",
+    "phone": "(570) 585-6000"
   },
   "50": {
     "name": "Montoursville",
-    "inactive": false
+    "inactive": false,
+    "street": "28 Grey Fox Drive",
+    "city": "Montoursville",
+    "state": "PA",
+    "zip": "17754",
+    "phone": "(570) 546-4877"
   },
   "51": {
     "name": "Crossroads",
-    "inactive": false
+    "inactive": false,
+    "street": "733 S Mast St",
+    "city": "Goffstown",
+    "state": "NH",
+    "zip": "03102",
+    "phone": "(603) 669-3368"
   },
   "52": {
     "name": "Collision Restoration",
-    "inactive": false
+    "inactive": false,
+    "street": "111 Clinton Rd",
+    "city": "Fairfield",
+    "state": "NJ",
+    "zip": "07004",
+    "phone": "(973) 882-3866"
   },
   "53": {
     "name": "Maurice & Son",
-    "inactive": false
+    "inactive": false,
+    "street": "232 A College Ave",
+    "city": "Waterville",
+    "state": "ME",
+    "zip": "04901",
+    "phone": "(207) 453-6533"
   },
   "54": {
     "name": "Keene",
-    "inactive": false
+    "inactive": false,
+    "street": "543 Main Street",
+    "city": "Keene",
+    "state": "NH",
+    "zip": "03431",
+    "phone": "(603) 352-3103"
   },
   "55": {
     "name": "Newington",
-    "inactive": false
+    "inactive": false,
+    "street": "172 Kelsey St",
+    "city": "Newington",
+    "state": "CT",
+    "zip": "06111",
+    "phone": "(860) 296-1085"
   },
   "56": {
     "name": "Ben's",
-    "inactive": false
+    "inactive": false,
+    "street": "11 Mirona Rd",
+    "city": "Portsmouth",
+    "state": "NH",
+    "zip": "03801",
+    "phone": "(603) 436-3115"
   },
   "57": {
     "name": "Xtreme",
-    "inactive": false
+    "inactive": false,
+    "street": "897 Brooklyn St",
+    "city": "Morrisville",
+    "state": "VT",
+    "zip": "05661",
+    "phone": "(802) 888-4565"
   },
   "58": {
     "name": "Worcester",
-    "inactive": false
+    "inactive": false,
+    "street": "60 Gold Star Blvd",
+    "city": "Worcester",
+    "state": "MA",
+    "zip": "01606",
+    "phone": "(774) 312-7130"
   },
   "59": {
     "name": "Duncansville",
-    "inactive": false
+    "inactive": false,
+    "street": "1109 Plank Rd",
+    "city": "Duncansville",
+    "state": "PA",
+    "zip": "16635",
+    "phone": "(814) 696-8466"
   },
   "60": {
     "name": "Sprague",
-    "inactive": false
+    "inactive": false,
+    "street": "58 Henderson St",
+    "city": "New York Mills",
+    "state": "NY",
+    "zip": "13417",
+    "phone": "(315) 235-3882"
   },
   "61": {
     "name": "Clark's",
-    "inactive": false
+    "inactive": false,
+    "street": "697 S Barre Rd",
+    "city": "Barre",
+    "state": "VT",
+    "zip": "05641",
+    "phone": "(802) 476-4082"
   },
   "62": {
     "name": "Lund",
-    "inactive": false
+    "inactive": false,
+    "street": "910 Plymouth St",
+    "city": "Bridgewater",
+    "state": "MA",
+    "zip": "02324",
+    "phone": "(508) 807-0683"
   },
   "63": {
     "name": "Lee's",
-    "inactive": false
+    "inactive": false,
+    "street": "1100 St Georges Ave",
+    "city": "Avenel",
+    "state": "NJ",
+    "zip": "07001",
+    "phone": "(732) 634-6161"
   },
   "64": {
     "name": "Lamon",
-    "inactive": false
+    "inactive": false,
+    "street": "289 Rancocas Rd",
+    "city": "Mt Holly",
+    "state": "NJ",
+    "zip": "08060",
+    "phone": "(609) 267-7073"
   },
   "65": {
     "name": "Maine Collision",
-    "inactive": false
+    "inactive": false,
+    "street": "72 Target Industrial Cir",
+    "city": "Bangor",
+    "state": "ME",
+    "zip": "04401",
+    "phone": "(207) 941-1290"
   },
   "66": {
     "name": "Rotunda",
-    "inactive": false
+    "inactive": false,
+    "street": "1 Turcotte Rd",
+    "city": "Essex Junction",
+    "state": "VT",
+    "zip": "05452",
+    "phone": "(802) 878-9012"
   },
   "67": {
     "name": "Englishtown",
-    "inactive": false
+    "inactive": false,
+    "street": "14 Wood Ave",
+    "city": "Englishtown",
+    "state": "NJ",
+    "zip": "07726",
+    "phone": "(732) 446-6123"
   },
   "68": {
     "name": "Evolve",
-    "inactive": false
+    "inactive": false,
+    "street": "410 Churchmans Rd",
+    "city": "New Castle",
+    "state": "DE",
+    "zip": "19720",
+    "phone": "(302) 773-8658"
   },
   "69": {
     "name": "Vernon",
-    "inactive": false
+    "inactive": false,
+    "street": "244R Broad St",
+    "city": "Manchester",
+    "state": "CT",
+    "zip": "06040",
+    "phone": "(860) 643-2727"
   },
   "70": {
     "name": "J.A.S. Auto",
-    "inactive": false
+    "inactive": false,
+    "street": "1193 VT-14",
+    "city": "White River Junction",
+    "state": "VT",
+    "zip": "05001",
+    "phone": "(802) 296-2500"
   },
   "71": {
     "name": "Body & Paint Center",
-    "inactive": false
+    "inactive": false,
+    "street": "420 Main St",
+    "city": "Hudson",
+    "state": "MA",
+    "zip": "01749",
+    "phone": "(978) 562-5300"
   },
   "72": {
     "name": "Modern",
-    "inactive": false
+    "inactive": false,
+    "street": "343 Valley St",
+    "city": "South Orange",
+    "state": "NJ",
+    "zip": "07079",
+    "phone": "(973) 763-1149"
   },
   "73": {
     "name": "Binghamton",
-    "inactive": false
+    "inactive": false,
+    "street": "753 Conklin Rd",
+    "city": "Binghamton",
+    "state": "NY",
+    "zip": "13903",
+    "phone": "(607) 724-2712"
   },
   "74": {
     "name": "Owego",
-    "inactive": false
+    "inactive": false,
+    "street": "875 NY-17C",
+    "city": "Owego",
+    "state": "NY",
+    "zip": "13827",
+    "phone": "(607) 223-4465"
   },
   "75": {
     "name": "Vestal",
-    "inactive": false
+    "inactive": false,
+    "street": "2813 Old Vestal Rd",
+    "city": "Vestal",
+    "state": "NY",
+    "zip": "13850",
+    "phone": "(607) 797-9999"
   },
   "76": {
     "name": "Waverly",
-    "inactive": false
+    "inactive": false,
+    "street": "424 Waverly St",
+    "city": "Waverly",
+    "state": "NY",
+    "zip": "14892",
+    "phone": "(607) 565-4352"
   },
   "77": {
     "name": "Norwich",
-    "inactive": false
+    "inactive": false,
+    "street": "6177 NY-12",
+    "city": "Norwich",
+    "state": "NY",
+    "zip": "13815",
+    "phone": "(607) 336-7434"
   },
   "78": {
     "name": "Mount Laurel",
-    "inactive": false
+    "inactive": false,
+    "street": "1207 Route 73",
+    "city": "Mount Laurel",
+    "state": "NJ",
+    "zip": "08861",
+    "phone": "(856) 998-1777"
   },
   "79": {
     "name": "Millville",
-    "inactive": false
+    "inactive": false,
+    "street": "514 N 10th",
+    "city": "Millville",
+    "state": "NJ",
+    "zip": "",
+    "phone": "(856) 825-0904"
   },
   "80": {
     "name": "Cherry Hill",
-    "inactive": false
+    "inactive": false,
+    "street": "326 Haddonfield Rd",
+    "city": "Cherry Hill",
+    "state": "NJ",
+    "zip": "",
+    "phone": "(856) 663-0500"
   },
   "81": {
     "name": "NEK",
-    "inactive": false
+    "inactive": false,
+    "street": "1718 Industrial Parkway",
+    "city": "Lyndonville",
+    "state": "VT",
+    "zip": "05851",
+    "phone": "(802) 748-8694"
   },
   "82": {
     "name": "New Britain",
-    "inactive": false
+    "inactive": false,
+    "street": "325 Columbus Blvd",
+    "city": "New Britain",
+    "state": "CT",
+    "zip": "06051",
+    "phone": "(860) 893-1993"
   },
   "83": {
     "name": "West Hartford",
-    "inactive": false
+    "inactive": false,
+    "street": "1072 New Britain Ave",
+    "city": "West Hartford",
+    "state": "CT",
+    "zip": "06110",
+    "phone": "(860) 236-5020"
   },
   "84": {
     "name": "Trevose",
-    "inactive": false
+    "inactive": false,
+    "street": "",
+    "city": "",
+    "state": "",
+    "zip": "",
+    "phone": ""
   },
   "85": {
     "name": "Klapec",
-    "inactive": false
+    "inactive": false,
+    "street": "180 Regina Dr.",
+    "city": "Cranberry",
+    "state": "PA",
+    "zip": "16319",
+    "phone": "(814) 676-3662"
   },
   "86": {
     "name": "Jasmin",
-    "inactive": false
+    "inactive": false,
+    "street": "60 Jasmin Lane",
+    "city": "White River Junction",
+    "state": "VT",
+    "zip": "05001",
+    "phone": "(802) 295-7572"
   },
   "87": {
     "name": "Joe DiIorio",
-    "inactive": false
+    "inactive": false,
+    "street": "101 West 7th Ave",
+    "city": "Homestead",
+    "state": "PA",
+    "zip": "15120",
+    "phone": "(412) 461-7722"
   },
   "88": {
     "name": "Above All",
-    "inactive": false
+    "inactive": false,
+    "street": "45 Chenell Drive",
+    "city": "Concord",
+    "state": "NH",
+    "zip": "03301",
+    "phone": "(603) 224-6065"
   },
   "89": {
     "name": "Noaker's Truck Shop",
-    "inactive": false
+    "inactive": false,
+    "street": "819 New Bloomfield Rd",
+    "city": "Duncannon",
+    "state": "PA",
+    "zip": "17020",
+    "phone": ""
+  },
+  "90": {
+    "name": "Town And County",
+    "inactive": false,
+    "street": "18 Corporate Dr.",
+    "city": "North Haven",
+    "state": "CT",
+    "zip": "06473",
+    "phone": "(203) 234-9443"
   }
 }

@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.lakehouse import connection  # noqa: E402
 from src.lakehouse.bronze_unnest import _explode  # noqa: E402
 from src.rerun import in_place  # noqa: E402
+from src.validation.shop_list import LOCATION_COLUMNS  # noqa: E402
 from test_oct1_intake_worker_web import load_intake  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -234,7 +235,9 @@ class RerunTestCase(unittest.TestCase):
         # Fabric writers / builders used by apply()
         w = self.world
 
-        def write_raw(invoices, vendor_id, statement_id, source_file, engine, vendor_display_name=None, version_number=None):
+        def write_raw(invoices, vendor_id, statement_id, source_file, engine, vendor_display_name=None, version_number=None,
+                      location=None):
+            w.raw_locations = getattr(w, "raw_locations", []) + [location]
             w.lh["raw_statement_staging"].append({"statement_id": statement_id, "raw_payload": json.dumps([i.get("_raw_row") for i in invoices]),
                                                   "ingestion_timestamp": dt.datetime(2026, 10, 7, 9, 0)})
             return 1
@@ -429,7 +432,7 @@ class TestDryRun(RerunTestCase):
         self.world.sql("UPDATE document_intake_log SET billing_location = ?, billing_location_source = 'printed' "
                        "WHERE statement_id = ?", [stored, SID])
         state = in_place.load_state(self.io, SID)
-        with mock.patch.object(self.intake, "resolve_billing_location", lambda loc, shops: (extracted, "printed_new")):
+        with mock.patch.object(self.intake, "resolve_billing_location", lambda loc, shops, **_: (extracted, "printed_new")):
             new = in_place.reextract(self.io, self.intake, state, self.pdf)
         return new["intake_update"]
 
@@ -529,6 +532,15 @@ class TestApply(RerunTestCase):
             self.assertEqual(now[0][kept], old[0][kept], kept)
         self.assertEqual((now[0]["validation_status"], now[0]["validation_method"]), ("matches", "primary"))
         self.assertEqual(now[0]["extraction_method"], "python_library_pdfplumber")
+
+    def test_the_location_fields_reach_the_intake_row_and_the_raw_statement_write(self):
+        seed(self.world)
+        self.run_apply()
+        row = self.world.sql("SELECT * FROM document_intake_log WHERE statement_id = ?", [SID])[0]
+        written = self.world.raw_locations[-1]
+        self.assertEqual(set(written), set(LOCATION_COLUMNS))
+        for column in LOCATION_COLUMNS:
+            self.assertEqual(row[column], written[column], column)
 
     def test_old_lakehouse_rows_never_survive_next_to_new_ones(self):
         seed(self.world)

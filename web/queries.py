@@ -21,6 +21,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.lakehouse.connection import execute_query, execute_sql, execute_query_fabric, execute_sql_fabric
+from web.shop_display import SHOP_COLUMNS_TOKEN, query_with_shop_columns, shop_and_location
 # recon_query/recon_sql: Fabric Warehouse (silver.recon_*) -- see
 # migrations/013_add_recon_tables.sql's history (started on the local
 # backend, moved to Fabric 2026-08-26 per the user). Used by the Exceptions
@@ -347,14 +348,16 @@ def _attach_intake_period_and_shop(rows: list, statement_ids: list = None) -> No
         for i in range(0, len(statement_ids), _INTAKE_LOOKUP_CHUNK):
             chunk = statement_ids[i:i + _INTAKE_LOOKUP_CHUNK]
             placeholders = ", ".join("?" for _ in chunk)
-            intake_rows += execute_query(
-                f"SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log "
+            intake_rows += query_with_shop_columns(
+                execute_query,
+                f"SELECT statement_id, statement_period, {SHOP_COLUMNS_TOKEN} FROM document_intake_log "
                 f"WHERE statement_id IN ({placeholders})",
                 chunk,
             )
     else:
-        intake_rows = execute_query(
-            "SELECT statement_id, statement_period, shop_or_entity FROM document_intake_log"
+        intake_rows = query_with_shop_columns(
+            execute_query,
+            f"SELECT statement_id, statement_period, {SHOP_COLUMNS_TOKEN} FROM document_intake_log"
         )
     intake_by_statement = {}
     for r in intake_rows:
@@ -364,14 +367,11 @@ def _attach_intake_period_and_shop(rows: list, statement_ids: list = None) -> No
     for row in rows:
         intake_row = intake_by_statement.get(row["statement_id"])
         row["statement_period"] = (intake_row["statement_period"] if intake_row else None) or row["statement_period"]
-        # shop_or_entity is a JSON list (see write_intake_log()) -- same
-        # parse pattern as get_exception_runs()'s shop fix (2026-09-21):
-        # silver.recon_summary/statement have no populated shop field.
-        try:
-            shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
-        except (TypeError, ValueError):
-            shop_list = []
-        row["shop"] = ", ".join(shop_list) if shop_list else None
+        # The shop as extracted (shop_or_entity, a JSON list -- see
+        # write_intake_log()), or its NetSuite name once the location was
+        # mapped to a shop -- see web/shop_display.py.
+        shown = shop_and_location(intake_row)
+        row["shop"], row["shop_canonical"] = shown["shop"], shown["shop_canonical"]
 
 
 def _attach_job_ids_and_display_names(rows: list) -> None:
@@ -757,9 +757,10 @@ def get_exception_runs(window: TimeWindow = None) -> list:
         # has no per-line "shop" field on most vendor PDFs). document_intake_log's
         # shop_or_entity IS reliably populated at intake time -- same JSON-list
         # column, same parse pattern get_statement_report() already uses.
-        intake_rows = execute_query(
+        intake_rows = query_with_shop_columns(
+            execute_query,
             f"""
-            SELECT statement_id, billing_location, statement_period, shop_or_entity,
+            SELECT statement_id, statement_period, {SHOP_COLUMNS_TOKEN},
                    original_filename, source_file
             FROM document_intake_log
             WHERE statement_id IN ({placeholders})
@@ -776,13 +777,12 @@ def get_exception_runs(window: TimeWindow = None) -> list:
             }
             run["exception_count"] = sum(r["c"] for r in rows_for_run)
             intake_row = intake_by_statement.get(run["statement_id"])
-            run["billing_location"] = intake_row["billing_location"] if intake_row else None
             run["statement_period"] = intake_row["statement_period"] if intake_row else None
-            try:
-                shop_list = json.loads(intake_row["shop_or_entity"]) if intake_row and intake_row.get("shop_or_entity") else []
-            except (TypeError, ValueError):
-                shop_list = []
-            run["shop"] = ", ".join(shop_list) if shop_list else None
+            # Shop and Location as the cards and filters show them: the
+            # NetSuite shop name and its "City, ST" once the statement's
+            # location was mapped, otherwise the raw extracted text -- see
+            # web/shop_display.py.
+            run.update(shop_and_location(intake_row))
             # The statement's PDF name (2026-10-08), shown when hovering the
             # vendor name on the exceptions vendor cards.
             run["pdf_name"] = _pdf_name(intake_row)
@@ -2737,11 +2737,12 @@ def get_validation_report() -> list:
     Pass. 'total_not_found' (no printed total on the PDF to compare
     against) counts as Fail here too, same as a genuine 'mismatch' --
     also per the user 2026-09-21."""
-    rows = execute_query(
-        """
+    rows = query_with_shop_columns(
+        execute_query,
+        f"""
         SELECT statement_id, source_file, vendor_name, statement_period,
                statement_total_as_printed, validation_status, validation_difference,
-               validation_method, ingestion_timestamp, shop_or_entity
+               validation_method, ingestion_timestamp, {SHOP_COLUMNS_TOKEN}
         FROM document_intake_log
         WHERE validation_status IS NOT NULL
         ORDER BY ingestion_timestamp DESC
@@ -2749,15 +2750,10 @@ def get_validation_report() -> list:
     )
     for row in rows:
         row["passed"] = row["validation_status"] == "matches"
-        # shop_or_entity is a JSON list (see write_intake_log()) -- same
-        # parse pattern as get_recent_recon_runs()'s/get_exception_runs()'s
-        # own shop fix, since document_intake_log stores it this way
-        # rather than as a plain column.
-        try:
-            shop_list = json.loads(row["shop_or_entity"]) if row.get("shop_or_entity") else []
-        except (TypeError, ValueError):
-            shop_list = []
-        row["shop"] = ", ".join(shop_list) if shop_list else None
+        # The shop as extracted, or its NetSuite name once the location was
+        # mapped to a shop -- see web/shop_display.py.
+        shown = shop_and_location(row)
+        row["shop"], row["shop_canonical"] = shown["shop"], shown["shop_canonical"]
     return rows
 
 
