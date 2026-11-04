@@ -499,7 +499,7 @@ class TestHomeDashboardQuery(unittest.TestCase):
         )
         self.local = sqlite3.connect(":memory:", check_same_thread=False)
         self.local.row_factory = sqlite3.Row
-        self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT)")
+        self.local.execute("CREATE TABLE document_intake_log (statement_id TEXT, statement_period TEXT, shop_or_entity TEXT, billing_location TEXT, billing_location_source TEXT, shop_city TEXT, shop_state TEXT)")
         self.local.execute("CREATE TABLE jobs (job_id TEXT, statement_id TEXT, submitted_at TEXT, source_blob_path TEXT, "
                            "status TEXT, error_message TEXT)")
         for target, conn in (("web.queries.recon_query", self.fabric), ("web.queries.execute_query", self.local)):
@@ -524,7 +524,7 @@ class TestHomeDashboardQuery(unittest.TestCase):
             [sid, vendor, invoices, matched, exc, total, "RECONCILED" if exc == 0 else "EXCEPTIONS_PRESENT", ts],
         )
         if period:
-            self.local.execute("INSERT INTO document_intake_log VALUES (?, ?, NULL)", [sid, period])
+            self.local.execute("INSERT INTO document_intake_log (statement_id, statement_period, shop_or_entity) VALUES (?, ?, NULL)", [sid, period])
 
     def _window(self, *args, **kwargs):
         return tw.resolve_window(*args, timestamps=queries.get_run_timestamps(),

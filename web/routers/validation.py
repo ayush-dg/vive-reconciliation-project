@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, Request
 
 from web.deps import render, require_login, sidebar_context, smart_title
+from web.shop_display import display_shop
 from web import queries
 from web import statement_processing as sp
 from web import time_window as tw
@@ -73,7 +74,7 @@ def validation_list(request: Request, user: str = Depends(require_login)):
         # dropdown options and each card's data-vendor/data-shop
         # attributes in sync with what's actually shown.
         card["vendor_display_name"] = smart_title(vendor_display_name(card.get("vendor_name")))
-        card["shop"] = smart_title(card.get("shop"))
+        card["shop"] = display_shop(card)
         card["sync_time"] = (sync_by_statement.get(card.get("statement_id"))
                              or sync_by_job.get(card.get("job_id")) or "")
 

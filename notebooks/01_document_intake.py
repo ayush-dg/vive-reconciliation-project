@@ -85,7 +85,8 @@ from src.validation import (
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
 from src.validation.date_utils import normalize_statement_month
-from src.validation.location_lookup import resolve_billing_location
+from src.validation.location_lookup import apply_location, resolve_billing_location
+from src.validation.shop_list import LOCATION_COLUMNS
 from src.lakehouse.connection import execute_sql, execute_query, execute_sql_fabric, execute_query_fabric
 from src.lakehouse.bronze_raw import write_raw_statement
 from src.matching.engine import score_exception_confidence
@@ -874,6 +875,14 @@ def intake_log_values(document_id: str, pdf_path: str, document_hash: str,
         "billing_location": billing_location,
         "statement_month": statement_month,
         "billing_location_source": billing_location_source,
+        # migrations/026_add_shop_details_columns.sql -- what extraction
+        # returned for the customer location (billing_location above is the
+        # mapped shop name) and the shop's details from config/vive_shops.json;
+        # see src/validation/location_lookup.py apply_location().
+        "billing_location_extracted": vendor.get("billing_location_extracted"),
+        "shop_phone": vendor.get("shop_phone"),
+        "shop_city": vendor.get("shop_city"),
+        "shop_state": vendor.get("shop_state"),
         # migrations/019_add_validation_fallback_columns.sql -- which
         # check passed ("primary", "open_balance", ...; NULL when none
         # did), the fallback attempts as JSON, and the fallback inputs.
@@ -1966,6 +1975,8 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
                 ),
                 "billing_location": original_intake_row.get("billing_location") if original_intake_row else None,
                 "billing_location_source": original_intake_row.get("billing_location_source") if original_intake_row else None,
+                **{column: original_intake_row.get(column) if original_intake_row else None
+                   for column in LOCATION_COLUMNS if column != "billing_location"},
             },
             "statement_metadata": {
                 "statement_date": original_intake_row.get("statement_date") if original_intake_row else None,
@@ -2082,21 +2093,14 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
     with timed_step("validation"):
         apply_arithmetic_validation(schema_result, pdf_text, pdf_path)
 
-    # Three-tier billing_location fallback (src/validation/location_lookup.py)
-    # -- a printed address always wins (tier 1); when extraction found none
-    # (confirmed real case: templates like the lowercase-"nucar" statements
-    # never print a separate customer address at all), fall back to a
-    # curated shop-keyword lookup (tier 2), then a low-confidence guess
-    # parsed out of the shop name itself (tier 3). The source is stored
-    # alongside the result so a fallback value is never confused with a
-    # genuinely printed one downstream.
-    vendor_meta_for_location = schema_result.get("vendor_metadata", {})
-    resolved_location, location_source = resolve_billing_location(
-        vendor_meta_for_location.get("billing_location"),
-        vendor_meta_for_location.get("shop_or_entity"),
-    )
-    vendor_meta_for_location["billing_location"] = resolved_location
-    vendor_meta_for_location["billing_location_source"] = location_source
+    # Map the extracted customer location onto a VIVE shop
+    # (src/validation/location_lookup.py): by name, then phone, then city,
+    # against config/vive_shops.json. A mapped result is the shop's name; an
+    # unmapped or conflicting one keeps the extracted value. The source is
+    # stored alongside so the two are never confused downstream.
+    vendor_meta_for_location = apply_location(schema_result.setdefault("vendor_metadata", {}), resolve_billing_location)
+    print(f"  Billing location: {vendor_meta_for_location['billing_location_extracted']!r} -> "
+          f"{vendor_meta_for_location['billing_location']!r} ({vendor_meta_for_location['billing_location_source']})")
 
     if route["new_vendor_warning"]:
         schema_result.setdefault("warnings", []).append(
@@ -2155,6 +2159,7 @@ def run_intake(pdf_path: str, statement_id: str = None, statement_period: str = 
             os.path.basename(pdf_path), provider_used,
             vendor_display_name=display_name(vendor_name),
             version_number=version_info["version_number"],
+            location={column: vendor_meta_for_location.get(column) for column in LOCATION_COLUMNS},
         )
     # Promote this statement's row from bronze.raw_statement_staging (just
     # written above) into the real, shared bronze.raw_statement table --

@@ -184,6 +184,14 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(merged["vendor_name"], "Fred Beans")
         self.assertTrue(any(note.startswith("vendor_name") for note in merged["_merge_notes"]))
 
+    def test_customer_addresses_survive_the_merge(self):
+        parts = [up.UploadPart(b"", 1, 2), up.UploadPart(b"", 3, 4)]
+        addresses = [{"label": "ship_to", "street": "1524 Minot Ave", "city": "Auburn", "state": "ME"}]
+        first = {"rows": [], "customer_addresses": []}
+        second = {"rows": [], "customer_addresses": addresses}
+        merged = up.merge_chunk_results(parts, [first, second])
+        self.assertEqual(merged["customer_addresses"], addresses)
+
 
 # --------------------------------------------------------------------------
 # The client with a fake model

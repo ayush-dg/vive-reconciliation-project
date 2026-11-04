@@ -619,6 +619,16 @@ COLUMNS = {
         ("sharepoint_path", "ALTER TABLE document_intake_log ADD sharepoint_path NVARCHAR(1000)"),
         ("sharepoint_error", "ALTER TABLE document_intake_log ADD sharepoint_error NVARCHAR(1000)"),
         ("sharepoint_uploaded_at", "ALTER TABLE document_intake_log ADD sharepoint_uploaded_at NVARCHAR(40)"),
+        # migrations/026_add_shop_details_columns.sql (SQLite side of this
+        # same change) -- the customer location as extracted (billing_location
+        # now holds the mapped shop name) and the VIVE shop it was mapped to
+        # (src/validation/location_lookup.py): its phone, city and state from
+        # config/vive_shops.json. NULL when the location was not mapped to a
+        # shop, and for rows written before this migration.
+        ("billing_location_extracted", "ALTER TABLE document_intake_log ADD billing_location_extracted NVARCHAR(MAX)"),
+        ("shop_phone", "ALTER TABLE document_intake_log ADD shop_phone NVARCHAR(50)"),
+        ("shop_city", "ALTER TABLE document_intake_log ADD shop_city NVARCHAR(200)"),
+        ("shop_state", "ALTER TABLE document_intake_log ADD shop_state NVARCHAR(50)"),
     ],
     "silver_reconciliation_standard": [
         ("charges", "ALTER TABLE silver_reconciliation_standard ADD charges FLOAT"),

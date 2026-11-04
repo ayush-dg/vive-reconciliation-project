@@ -1,0 +1,11 @@
+{
+  "excluded": [
+    "zz_Growth",
+    "International Auto Works"
+  ],
+  "aliases": {
+    "Highway 35": ["M3 Collision", "M 3 Collision", "M3 Collision Center", "M3 Hwy 35", "M3 Highway 35", "HW 3"],
+    "South Main": ["M3 South Main", "M 3 South Main", "M3 S Main", "M3 181"],
+    "West Hartford": ["WH"]
+  }
+}

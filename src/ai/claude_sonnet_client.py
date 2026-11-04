@@ -294,6 +294,15 @@ an incorrect answer here is worse than no answer.
 - billing_location: the customer's city and state as printed
   (e.g. "Clarks Summit, PA"), or null if not confidently
   identifiable.
+- customer_addresses: every address printed for the CUSTOMER, as a list of
+  {label, street, city, state}. label is "bill_to" for the billed-to address
+  and "ship_to" for a separate ship-to / deliver-to address. street is the
+  street line exactly as printed, with its house number and any route or
+  direction (e.g. "508 HIGHWAY 35", "181 S MAIN ST"), or null if no street
+  line is printed (a P.O. box is not a street line). A statement with only
+  one customer address has one entry. Never include the vendor's own
+  address or a remit-to address. Use [] if none is confidently the
+  customer's.
 
 Return JSON:
 {
@@ -305,6 +314,7 @@ Return JSON:
   section_totals: [{section: '...', subtotal: <number>, invoice_count: <number or null>}] or null,
   shop_or_entity: <string or null>,
   billing_location: <string or null>,
+  customer_addresses: [{label: 'bill_to' or 'ship_to', street: '...' or null, city: '...', state: '..'}] or [],
   columns_found: [exact column names from header, in left-to-right order],
   rows: [{<same keys as columns_found>: val, ..., confidence: 0.0-1.0}]
 }"""
@@ -730,6 +740,7 @@ class ClaudeSonnetClient(AIClient):
         statement_date = parsed.get("statement_date") or None
         shop_or_entity_raw = parsed.get("shop_or_entity") or None
         billing_location = parsed.get("billing_location") or None
+        customer_addresses = self._parse_customer_addresses(parsed.get("customer_addresses"))
         statement_total_as_printed = parsed.get("statement_total_as_printed")
         if statement_total_as_printed is not None:
             try:
@@ -770,6 +781,7 @@ class ClaudeSonnetClient(AIClient):
             vendor_name=vendor_name, statement_date=statement_date,
             statement_total_as_printed=statement_total_as_printed,
             shop_or_entity=shop_or_entity_raw, billing_location=billing_location,
+            customer_addresses=customer_addresses,
             previous_balance=previous_balance, previous_balance_label=previous_balance_label,
             section_totals=section_totals,
         )
@@ -1646,6 +1658,17 @@ class ClaudeSonnetClient(AIClient):
         return -value if negative else value
 
     @staticmethod
+    def _parse_customer_addresses(raw) -> list:
+        """The model's customer_addresses as [{label, street, city, state}],
+        dropping anything that is not a dict with a street or a city, so a
+        malformed answer never reaches the location lookup."""
+        if not isinstance(raw, list):
+            return []
+        return [{"label": str(a.get("label") or ""), "street": str(a.get("street") or "").strip(),
+                 "city": str(a.get("city") or "").strip(), "state": str(a.get("state") or "").strip()}
+                for a in raw if isinstance(a, dict) and (a.get("city") or a.get("street"))]
+
+    @staticmethod
     def _to_float(val) -> Optional[float]:
         if val is None:
             return None
@@ -1668,6 +1691,7 @@ class ClaudeSonnetClient(AIClient):
                        statement_total_as_printed: Optional[float] = None,
                        shop_or_entity: Optional[str] = None,
                        billing_location: Optional[str] = None,
+                       customer_addresses: Optional[list] = None,
                        previous_balance: Optional[float] = None,
                        previous_balance_label: Optional[str] = None,
                        section_totals: Optional[list] = None) -> dict:
@@ -1696,6 +1720,7 @@ class ClaudeSonnetClient(AIClient):
                 "vendor_address": None,
                 "shop_or_entity": [shop_or_entity] if shop_or_entity else [],
                 "billing_location": billing_location,
+                "customer_addresses": customer_addresses or [],
                 "vendor_confidence": 0.50 if vendor_name else 0.10,
             },
             "statement_metadata": {

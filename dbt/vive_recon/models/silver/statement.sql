@@ -18,7 +18,7 @@
 --   read bronze's raw_currency) -- defaulted to 'USD' instead of NULL,
 --   matching the old model's own COALESCE(raw_currency, 'USD') fallback,
 --   which was actually what most rows resolved to anyway.
-{{ config(unique_key='statement_id') }}
+{{ config(unique_key='statement_id', on_schema_change='append_new_columns') }}
 
 {% set target_statement_id = var('statement_id', none) %}
 
@@ -34,6 +34,11 @@ with header_ranked as (
         vendor_id,
         vendor_display_name,
         ingestion_timestamp,
+        billing_location_extracted,
+        billing_location,
+        shop_phone,
+        shop_city,
+        shop_state,
         row_number() over (partition by statement_id order by ingestion_timestamp desc) as rn
     from {{ source('bronze', 'raw_statement') }}
     {% if target_statement_id is not none %}
@@ -44,7 +49,8 @@ with header_ranked as (
 
 header as (
 
-    select statement_id, vendor_id, vendor_display_name
+    select statement_id, vendor_id, vendor_display_name,
+           billing_location_extracted, billing_location, shop_phone, shop_city, shop_state
     from header_ranked
     where rn = 1
 
@@ -64,6 +70,11 @@ select
     h.vendor_display_name                as vendor_name_raw,
     cast(null as varchar(50))            as shop_id,
     s.shop_name_raw,
+    h.billing_location_extracted,
+    h.billing_location,
+    h.shop_phone,
+    h.shop_city,
+    h.shop_state,
     cast(null as varchar(50))            as statement_number,
     cast(null as date)                   as statement_date,
     cast(null as date)                   as period_start,

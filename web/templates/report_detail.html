@@ -54,7 +54,13 @@
     <tr><td style="color:var(--text-secondary)">Source file</td><td>{{ intake.source_file if intake else "—" }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Extraction method</td><td>{{ intake.extraction_method if intake else "—" }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Shop</td><td>{{ intake.shop_display if intake and intake.shop_display else "—" }}</td></tr>
-    <tr><td style="color:var(--text-secondary)">Billing location</td><td>{{ intake.billing_location if intake and intake.billing_location else "—" }}{% if intake and intake.billing_location and intake.billing_location_source == "lookup_table" %} (from shop lookup table){% elif intake and intake.billing_location and intake.billing_location_source == "shop_name_fallback" %} (best guess from shop name){% endif %}</td></tr>
+    <tr><td style="color:var(--text-secondary)">Billing location</td><td>{{ intake.billing_location if intake and intake.billing_location else "—" }}{% if intake and intake.billing_location %}{% set loc_source = intake.billing_location_source %}{% if loc_source == "name_match" %} (matched to shop by name){% elif loc_source == "phone_match" %} (matched to shop by phone){% elif loc_source == "street_match" %} (matched to shop by street address){% elif loc_source == "fuzzy_match" %} (matched to shop by close name){% elif loc_source == "ambiguous" %} (several shops fit the name — needs review){% elif loc_source == "city_match" %} (matched to shop by city){% elif loc_source == "conflict" %} (conflicting shop matches — needs review){% elif loc_source == "unmapped" %} (not matched to a shop){% elif loc_source == "lookup_table" %} (from shop lookup table){% elif loc_source == "shop_name_fallback" %} (best guess from shop name){% endif %}{% endif %}</td></tr>
+    {% if intake and intake.billing_location_extracted and intake.billing_location_extracted != intake.billing_location %}
+    <tr><td style="color:var(--text-secondary)">Extracted location</td><td>{{ intake.billing_location_extracted }}</td></tr>
+    {% endif %}
+    {% if intake and (intake.shop_city or intake.shop_phone) %}
+    <tr><td style="color:var(--text-secondary)">Shop details</td><td>{{ [intake.shop_city, intake.shop_state] | select | join(", ") }}{% if intake.shop_phone %} · {{ intake.shop_phone }}{% endif %}</td></tr>
+    {% endif %}
     <tr><td style="color:var(--text-secondary)">Statement month</td><td>{{ intake.statement_month if intake and intake.statement_month else "—" }}</td></tr>
     <tr><td style="color:var(--text-secondary)">Arithmetic check</td><td>{{ intake.validation_status if intake else "—" }}{% if intake and intake.validation_difference is not none %} ({{ intake.validation_difference | money_signed }}){% endif %}</td></tr>
     {% if summary %}

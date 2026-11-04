@@ -23,6 +23,7 @@ from fastapi.responses import RedirectResponse
 
 from web.netsuite_status import without_sandbox, writeback_pill
 from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
+from web.shop_display import display_shop
 from web import queries
 from web import time_window as tw
 from web.routers.statements import _inline_filename, pdf_editing_enabled
@@ -140,7 +141,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         # data-* attributes built from these same fields below, keeping
         # filtering and display in sync.
         v["vendor_display_name"] = smart_title(v.get("vendor_display_name"))
-        v["shop"] = smart_title(v.get("shop"))
+        v["shop"] = display_shop(v)
         v["billing_location"] = smart_title(v.get("billing_location"))
 
     # Location canonicalization -- billing_location has no alias system

@@ -240,7 +240,7 @@ def plan_upload(pdf_path: str, *, max_bytes: int = MAX_REQUEST_PDF_BYTES, max_pa
 # statement prints at the top; the LAST part wins for what it prints at the
 # end (the printed total sits on the last page).
 _FIRST_WINS = ("vendor_name", "statement_date", "shop_or_entity", "billing_location",
-               "previous_balance", "previous_balance_label")
+               "customer_addresses", "previous_balance", "previous_balance_label")
 _LAST_WINS = ("statement_total_as_printed",)
 
 

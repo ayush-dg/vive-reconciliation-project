@@ -78,6 +78,14 @@ def main():
         "invoice_count": pd.Series(dtype="float64"),
         "version_number": pd.Series(dtype="float64"),
         "raw_payload": pd.Series(dtype="string"),
+        # The statement's customer location (src/validation/shop_list.py's
+        # LOCATION_COLUMNS) -- what extraction returned, the mapped shop name,
+        # and that shop's details.
+        "billing_location_extracted": pd.Series(dtype="string"),
+        "billing_location": pd.Series(dtype="string"),
+        "shop_phone": pd.Series(dtype="string"),
+        "shop_city": pd.Series(dtype="string"),
+        "shop_state": pd.Series(dtype="string"),
     })
     _create_empty("raw_statement", raw_statement)
 

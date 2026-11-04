@@ -1,0 +1,611 @@
+[
+  {
+    "name": "Above All",
+    "phone": "(603) 224-6065",
+    "city": "Concord",
+    "state": "NH",
+    "country": "US"
+  },
+  {
+    "name": "Acme",
+    "phone": "(413) 584-3710",
+    "city": "Northampton",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Albany",
+    "phone": "",
+    "city": "Albany",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Bangor",
+    "phone": "(207) 941-5686",
+    "city": "Bangor",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Ben's",
+    "phone": "(603) 436-3115",
+    "city": "Portsmouth",
+    "state": "NH",
+    "country": "US"
+  },
+  {
+    "name": "Binghamton",
+    "phone": "(607) 724-2712",
+    "city": "Binghamton",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Body & Paint Center",
+    "phone": "(978) 562-5300",
+    "city": "Hudson",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Bristol",
+    "phone": "(401) 253-3400",
+    "city": "Bristol",
+    "state": "RI",
+    "country": "US"
+  },
+  {
+    "name": "Caron's",
+    "phone": "(207) 622-4191",
+    "city": "Augusta",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Cherry Hill",
+    "phone": "(856) 663-0500",
+    "city": "Cherry Hill",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Clark's",
+    "phone": "(802) 476-4082",
+    "city": "Barre",
+    "state": "VT",
+    "country": "US"
+  },
+  {
+    "name": "Clarks Summit",
+    "phone": "(570) 585-6000",
+    "city": "Clarks Summit",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Clarkstown",
+    "phone": "(845) 627-3100",
+    "city": "Nanuet",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "ClearDrive",
+    "phone": "",
+    "city": "",
+    "state": "",
+    "country": "US"
+  },
+  {
+    "name": "Coleman's",
+    "phone": "(207) 784-6121",
+    "city": "Auburn",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Collex",
+    "phone": "(732) 741-2480",
+    "city": "Shrewsbury",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Collision Restoration",
+    "phone": "(973) 882-3866",
+    "city": "Fairfield",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Corporate",
+    "phone": "",
+    "city": "",
+    "state": "",
+    "country": "US"
+  },
+  {
+    "name": "Crossroads",
+    "phone": "(603) 669-3368",
+    "city": "Goffstown",
+    "state": "NH",
+    "country": "US"
+  },
+  {
+    "name": "Dallas",
+    "phone": "(570) 675-7755",
+    "city": "Dallas",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Don Joe",
+    "phone": "(516) 466-2828",
+    "city": "Great Neck",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Duncansville",
+    "phone": "(814) 696-8466",
+    "city": "Duncansville",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Englishtown",
+    "phone": "(732) 446-6123",
+    "city": "Englishtown",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Evolve",
+    "phone": "(302) 773-8658",
+    "city": "New Castle",
+    "state": "DE",
+    "country": "US"
+  },
+  {
+    "name": "First Choice",
+    "phone": "(856) 782-7280",
+    "city": "Voorhees",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Hamden",
+    "phone": "(203) 248-6116",
+    "city": "Hamden",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Harbour",
+    "phone": "(207) 878-2121",
+    "city": "Portland",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Hewitt's",
+    "phone": "(207) 846-3113",
+    "city": "Yarmouth",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Highway 35",
+    "phone": "(732) 988-9401",
+    "city": "Neptune",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Holyoke",
+    "phone": "(413) 532-9413",
+    "city": "Holyoke",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "J.A.S. Auto",
+    "phone": "(802) 296-2500",
+    "city": "White River Junction",
+    "state": "VT",
+    "country": "US"
+  },
+  {
+    "name": "Jake's",
+    "phone": "(845) 687-4004",
+    "city": "High Falls",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Jasmin",
+    "phone": "(802) 295-7572",
+    "city": "White River Junction",
+    "state": "VT",
+    "country": "US"
+  },
+  {
+    "name": "JC Auto",
+    "phone": "(207) 947-4271",
+    "city": "Veazie",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Joe DiIorio",
+    "phone": "(412) 461-7722",
+    "city": "Homestead",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Keene",
+    "phone": "(603) 352-3103",
+    "city": "Keene",
+    "state": "NH",
+    "country": "US"
+  },
+  {
+    "name": "Kingston",
+    "phone": "(570) 283-1844",
+    "city": "Kingston",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Klapec",
+    "phone": "(814) 676-3662",
+    "city": "Cranberry",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Lamon",
+    "phone": "(609) 267-7073",
+    "city": "Mt Holly",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Lee's",
+    "phone": "(732) 634-6161",
+    "city": "Avenel",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Lehigh Valley",
+    "phone": "(610) 965-1333",
+    "city": "Allentown",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Lund",
+    "phone": "(508) 807-0683",
+    "city": "Bridgewater",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Lyndhurst",
+    "phone": "(973) 662-8000",
+    "city": "Lyndhurst",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Maine Collision",
+    "phone": "(207) 941-1290",
+    "city": "Bangor",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Matawan",
+    "phone": "(732) 583-6566",
+    "city": "Matawan",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Maurice & Son",
+    "phone": "(207) 453-6533",
+    "city": "Waterville",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Middletown",
+    "phone": "(401) 847-0664",
+    "city": "MIddletown",
+    "state": "RI",
+    "country": "US"
+  },
+  {
+    "name": "Middletown - NJ",
+    "phone": "(732) 671-1331",
+    "city": "Middletown",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Milford",
+    "phone": "(203) 874-1900",
+    "city": "Milford",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Millville",
+    "phone": "(856) 825-0904",
+    "city": "Millville",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Modern",
+    "phone": "(973) 763-1149",
+    "city": "South Orange",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Montoursville",
+    "phone": "(570) 546-4877",
+    "city": "Montoursville",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Mount Laurel",
+    "phone": "(856) 998-1777",
+    "city": "Mount Laurel",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Natick",
+    "phone": "(508) 655-0713",
+    "city": "Natick",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Neet's",
+    "phone": "(518) 877-7133",
+    "city": "Round Lake",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "NEK",
+    "phone": "(802) 748-8694",
+    "city": "Lyndonville",
+    "state": "VT",
+    "country": "US"
+  },
+  {
+    "name": "New Britain",
+    "phone": "(860) 893-1993",
+    "city": "New Britain",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Newington",
+    "phone": "(860) 296-1085",
+    "city": "Newington",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Noaker's",
+    "phone": "(717) 834-6500",
+    "city": "Duncannon",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Noaker's Truck Shop",
+    "phone": "",
+    "city": "Duncannon",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Norwich",
+    "phone": "(607) 336-7434",
+    "city": "Norwich",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Nutley",
+    "phone": "(973) 662-9000",
+    "city": "Nutley",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Owego",
+    "phone": "(607) 223-4465",
+    "city": "Owego",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Pawtucket",
+    "phone": "(401) 728-8800",
+    "city": "Pawtucket",
+    "state": "RI",
+    "country": "US"
+  },
+  {
+    "name": "Prestige",
+    "phone": "(845) 485-2353",
+    "city": "Poughkeepsie",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Prestige - NH",
+    "phone": "(603) 669-0015",
+    "city": "Manchester",
+    "state": "NH",
+    "country": "US"
+  },
+  {
+    "name": "Quonset",
+    "phone": "(401) 884-3900",
+    "city": "North Kingstown",
+    "state": "RI",
+    "country": "US"
+  },
+  {
+    "name": "Rockland",
+    "phone": "(845) 429-4747",
+    "city": "Haverstraw",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Rotunda",
+    "phone": "(802) 878-9012",
+    "city": "Essex Junction",
+    "state": "VT",
+    "country": "US"
+  },
+  {
+    "name": "RP Bell",
+    "phone": "(207) 282-6860",
+    "city": "Saco",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Seacoast",
+    "phone": "(207) 729-6512",
+    "city": "Brunswick",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "Sebago",
+    "phone": "(207) 893-8505",
+    "city": "Windham",
+    "state": "ME",
+    "country": "US"
+  },
+  {
+    "name": "South Main",
+    "phone": "(732) 774-6635",
+    "city": "Neptune",
+    "state": "NJ",
+    "country": "US"
+  },
+  {
+    "name": "Sprague",
+    "phone": "(315) 235-3882",
+    "city": "New York Mills",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Springfield",
+    "phone": "(413) 736-5481",
+    "city": "Springfield",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Superior",
+    "phone": "(845) 457-5500",
+    "city": "Montgomery",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Thomaston",
+    "phone": "(860) 283-9115",
+    "city": "Thomaston",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Thru It All",
+    "phone": "(717) 653-4650",
+    "city": "Mount Joy",
+    "state": "PA",
+    "country": "US"
+  },
+  {
+    "name": "Town And County",
+    "phone": "(203) 234-9443",
+    "city": "North Haven",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Trevose",
+    "phone": "",
+    "city": "",
+    "state": "",
+    "country": "US"
+  },
+  {
+    "name": "Vernon",
+    "phone": "(860) 643-2727",
+    "city": "Manchester",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Vestal",
+    "phone": "(607) 797-9999",
+    "city": "Vestal",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "Watertown",
+    "phone": "(617) 244-2000",
+    "city": "Watertown",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Waverly",
+    "phone": "(607) 565-4352",
+    "city": "Waverly",
+    "state": "NY",
+    "country": "US"
+  },
+  {
+    "name": "West Hartford",
+    "phone": "(860) 236-5020",
+    "city": "West Hartford",
+    "state": "CT",
+    "country": "US"
+  },
+  {
+    "name": "Worcester",
+    "phone": "(774) 312-7130",
+    "city": "Worcester",
+    "state": "MA",
+    "country": "US"
+  },
+  {
+    "name": "Xtreme",
+    "phone": "(802) 888-4565",
+    "city": "Morrisville",
+    "state": "VT",
+    "country": "US"
+  }
+]
