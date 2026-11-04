@@ -261,6 +261,9 @@ resource "azurerm_linux_web_app" "app" {
     ADMIN_EMAIL    = var.admin_email
     ADMIN_PASSWORD = var.admin_password
 
+    # Who may add and remove users (web/deps.py is_admin()).
+    ADMIN_EMAILS = var.admin_emails
+
     # TEMPORARY (see variable's own description) -- faster extraction at
     # the cost of the read-after-write race wait_for_visibility() guards
     # against. Flip skip_fabric_visibility_wait back to false to restore.

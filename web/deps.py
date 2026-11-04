@@ -35,6 +35,21 @@ def require_login(request: Request) -> str:
     return user
 
 
+def is_admin(email) -> bool:
+    """Admins (may add and remove users) are the emails in the ADMIN_EMAILS
+    app setting (comma-separated), plus the fallback admin login
+    (ADMIN_LOGIN_EMAIL, see web/routers/auth.py), so an environment with no
+    users can still be set up. Read on every call: no restart-time cache."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+    admins = {e.strip().lower() for e in (os.getenv("ADMIN_EMAILS") or "").split(",") if e.strip()}
+    fallback = (os.getenv("ADMIN_LOGIN_EMAIL") or "").strip().lower()
+    if fallback:
+        admins.add(fallback)
+    return email in admins
+
+
 # The sidebar's two counts (the Exceptions and Review queue dots), kept for
 # SIDEBAR_COUNTS_TTL_SECONDS (default 30 min, 2026-10-29) instead of
 # recounted on every page: the open-exceptions count opens a new Fabric

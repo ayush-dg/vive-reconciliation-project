@@ -47,7 +47,7 @@
       <td>
         {% if u.email == user_email %}
         <span style="font-size:11px;color:var(--text-secondary)">You</span>
-        {% else %}
+        {% elif can_manage_users %}
         <form method="post" action="/users/remove" style="margin:0">
           <input type="hidden" name="email" value="{{ u.email }}">
           <button class="btn btn-dispute" type="submit" style="padding:5px 12px;font-size:11px">Remove</button>
@@ -62,6 +62,9 @@
 <div class="empty-state">No users yet.</div>
 {% endif %}
 
+{% if not can_manage_users %}
+<div class="empty-state">Only admins can add or remove users.</div>
+{% else %}
 <div class="section-header">
   <div class="section-title">Add user</div>
 </div>
@@ -80,4 +83,5 @@
   </div>
   <button class="btn btn-primary" type="submit">Add user</button>
 </form>
+{% endif %}
 {% endblock %}

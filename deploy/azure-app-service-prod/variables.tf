@@ -62,6 +62,12 @@ variable "admin_password" {
   default     = ""
 }
 
+variable "admin_emails" {
+  description = "Comma-separated emails allowed to add and remove users on the Users page (ADMIN_EMAILS, web/deps.py is_admin()). Everyone else sees the list read-only."
+  type        = string
+  default     = ""
+}
+
 variable "app_service_location" {
   description = "Region for the App Service Plan and Web App. West US 2, matching vivecollision-plan."
   type        = string
