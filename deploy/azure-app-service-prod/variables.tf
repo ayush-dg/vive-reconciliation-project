@@ -68,6 +68,12 @@ variable "admin_emails" {
   default     = ""
 }
 
+variable "pdf_edit_enabled" {
+  description = "In-app PDF editor: comments, highlights and drawings saved back to the statement's SharePoint file (PDF_EDIT_ENABLED, web/routers/statements.py). Off: PDFs open read-only."
+  type        = bool
+  default     = false
+}
+
 variable "app_service_location" {
   description = "Region for the App Service Plan and Web App. West US 2, matching vivecollision-plan."
   type        = string

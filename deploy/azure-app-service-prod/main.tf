@@ -264,6 +264,9 @@ resource "azurerm_linux_web_app" "app" {
     # Who may add and remove users (web/deps.py is_admin()).
     ADMIN_EMAILS = var.admin_emails
 
+    # In-app PDF editor, saving back to SharePoint (web/routers/statements.py).
+    PDF_EDIT_ENABLED = var.pdf_edit_enabled ? "true" : "false"
+
     # TEMPORARY (see variable's own description) -- faster extraction at
     # the cost of the read-after-write race wait_for_visibility() guards
     # against. Flip skip_fabric_visibility_wait back to false to restore.
