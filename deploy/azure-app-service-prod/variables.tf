@@ -68,6 +68,12 @@ variable "admin_emails" {
   default     = ""
 }
 
+variable "clarity_project_id" {
+  description = "Microsoft Clarity project id (CLARITY_PROJECT_ID, web/deps.py clarity_project_id()): its tag goes on every page, sessions identified by user. Empty: no tag. Set masking to Strict in the Clarity project."
+  type        = string
+  default     = ""
+}
+
 variable "pdf_edit_enabled" {
   description = "In-app PDF editor: comments, highlights and drawings saved back to the statement's SharePoint file (PDF_EDIT_ENABLED, web/routers/statements.py). Off: PDFs open read-only."
   type        = bool
