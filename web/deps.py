@@ -446,3 +446,19 @@ def netsuite_record_url(record_type, internal_id):
 
 templates.env.globals["netsuite_record_url"] = netsuite_record_url
 
+
+_CLARITY_PROJECT_ID = re.compile(r"^[a-z0-9]{6,20}$")
+
+
+def clarity_project_id():
+    """The Microsoft Clarity project whose tag _clarity.html puts on every page
+    (2026-11-04: page time, session length, recordings), or None -- no tag at
+    all -- when CLARITY_PROJECT_ID is unset or not a project id. Mask text in
+    the Clarity project's settings (Strict): recordings otherwise show vendor
+    names, amounts and invoice numbers."""
+    project_id = (os.getenv("CLARITY_PROJECT_ID") or "").strip().lower()
+    return project_id if _CLARITY_PROJECT_ID.match(project_id) else None
+
+
+templates.env.globals["clarity_project_id"] = clarity_project_id
+
