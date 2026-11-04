@@ -26,6 +26,7 @@ STATUS_MATCHED = "Matched"
 STATUS_MATCHED_MANUALLY = "Matched manually"
 STATUS_ACCEPTED = "Accepted"
 STATUS_REJECTED = "Rejected"
+STATUS_CLEARED = "Cleared"  # "Clear exception" on the review page (2026-11-04)
 STATUS_NOT_RECONCILED = "Not reconciled"
 
 # The matcher's exception_reason -> the status shown in recon.
@@ -38,7 +39,7 @@ STATUS_BY_REASON = {
 }
 
 # exception_dispositions.disposition_status -> recon status.
-STATUS_BY_DISPOSITION = {"ACCEPTED": STATUS_ACCEPTED, "DISPUTED": STATUS_REJECTED}
+STATUS_BY_DISPOSITION = {"ACCEPTED": STATUS_ACCEPTED, "DISPUTED": STATUS_REJECTED, "CLEARED": STATUS_CLEARED}
 
 SOURCE_AUTO, SOURCE_MANUAL = "auto", "manual"
 
@@ -358,6 +359,58 @@ def set_writeback(statement_id: str, invoice_number: str, result: dict) -> None:
         [result.get("status"), result.get("detail"), result.get("statement_line_id"), result.get("before"),
          _now(), statement_id, invoice_number, SOURCE_MANUAL],
     )
+
+
+def set_clear_writeback(statement_id: str, invoice_number: str, result: dict) -> None:
+    """As set_writeback(), for a cleared exception: the outcome of removing its
+    NetSuite flag (src/netsuite/clear_exception.py) goes on the invoice's
+    Cleared rows, with the values before (JSON, for Undo)."""
+    execute_sql(
+        "UPDATE recon SET writeback_status = ?, writeback_detail = ?, netsuite_before = ?, updated_at = ? "
+        "WHERE statement_id = ? AND invoice_number = ? AND source = ? AND is_active = 1 AND status = ?",
+        [result.get("status"), result.get("detail"), result.get("before"), _now(),
+         statement_id, invoice_number, SOURCE_AUTO, STATUS_CLEARED],
+    )
+
+
+def clear_writeback_before(statement_id: str, invoice_number: str):
+    """The NetSuite "before" JSON saved when the invoice's exception was cleared, or None."""
+    rows = execute_query(
+        "SELECT netsuite_before FROM recon WHERE statement_id = ? AND invoice_number = ? AND source = ? "
+        "AND is_active = 1 AND status = ? AND netsuite_before IS NOT NULL",
+        [statement_id, invoice_number, SOURCE_AUTO, STATUS_CLEARED],
+    )
+    return rows[0]["netsuite_before"] if rows else None
+
+
+def undo_clear(statement_id: str, invoice_number: str, undo_writeback: dict = None) -> int:
+    """Undo of "Clear exception": the invoice's Cleared rows get their
+    exception status back (Amount mismatch, Not found in NetSuite, ...), with
+    the NetSuite undo's outcome when there was one. Returns the rows changed."""
+    now = _now()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cleared = _rows(cur, "SELECT recon_id, exception_reason FROM recon WHERE statement_id = ? AND "
+                             "invoice_number = ? AND source = ? AND is_active = 1 AND status = ?",
+                        [statement_id, invoice_number, SOURCE_AUTO, STATUS_CLEARED])
+        for row in cleared:
+            cur.execute("UPDATE recon SET status = ?, matched_by = NULL, matched_at = NULL, note = NULL, "
+                        "writeback_status = ?, writeback_detail = ?, netsuite_before = NULL, updated_at = ? "
+                        "WHERE recon_id = ?",
+                        [status_for_reason(row["exception_reason"]),
+                         (undo_writeback or {}).get("status"), (undo_writeback or {}).get("detail"),
+                         now, row["recon_id"]])
+        conn.commit()
+        return len(cleared)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
 
 
 def manual_writeback_before(statement_id: str, invoice_number: str):

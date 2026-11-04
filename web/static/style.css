@@ -1004,7 +1004,8 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
 .ns-accept-date { color: var(--text-muted); }
 .ns-accept-diff.ns-off b { color: var(--warning); }
 .ns-accept .btn-accept { margin-left: auto; width: auto; }
-.ns-confirm { width: min(520px, 92vw); padding: 22px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); }
+/* margin: auto centres it -- see .ns-modal above (the Accept-as-match confirm was top-left too). */
+.ns-confirm { margin: auto; width: min(520px, 92vw); padding: 22px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 .ns-confirm::backdrop { background: rgba(15, 23, 42, .55); }
 .ns-confirm p { margin: 10px 0; font-size: 13.5px; }
 .ns-confirm .ns-confirm-sub { color: var(--text-muted); font-size: 12.5px; }
@@ -1015,6 +1016,10 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
 .manual-match-head { padding: 12px 18px 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-faint); border-top: 1px solid var(--border); }
 .manual-match-row { cursor: default; }
 .manual-match-row form { margin: 0; }
+/* "Clear exception" (2026-11-04): the button under the exception, and a cleared row's note. */
+.clear-exc { display: flex; justify-content: flex-end; margin: 0 0 24px; }
+.clear-exc .btn { width: auto; margin-top: 0; }
+.cleared-note { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Find in NetSuite (2026-10-27): where the rows came from, and records already matched. */
 .ns-source { font-weight: 600; }

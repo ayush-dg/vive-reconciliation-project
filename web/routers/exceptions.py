@@ -380,6 +380,9 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         # matches (the recon table), each with Undo, and the message an
         # accept/undo redirect carries back.
         "manual_matches": [] if exceptions_only else queries.get_manual_matches((statement or {}).get("statement_id")),
+        # "Clear exception" (2026-11-04): this statement's cleared exceptions,
+        # each with its note and Undo.
+        "cleared": [] if exceptions_only else queries.get_cleared_exceptions((statement or {}).get("statement_id")),
         "match_msg": (match_msg or "")[:300] or None,
         **sidebar_context(request),
     }
@@ -488,6 +491,50 @@ def exceptions_undo_match(vendor_name: str, request: Request, user: str = Depend
     undone = queries.undo_manual_match(statement_id, invoice_number, vendor_name, user)
     text = (f"Match for invoice {invoice_number} undone -- the exception is open again." if undone
             else f"Invoice {invoice_number} had no manual match to undo.")
+    return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
+
+
+@router.post("/exceptions/{vendor_name}/clear")
+def exceptions_clear(vendor_name: str, request: Request, user: str = Depends(require_login),
+                     exception_id: str = Form(...), note: str = Form(""),
+                     filter: str = Form("all"), statement_id: str = Form(""), sort: str = Form("")):
+    """"Clear exception" (2026-11-04): the exception needs no further action.
+    A note is required; it is saved with the clear (queries.clear_exception()),
+    which also removes the exception's NetSuite flag. Registered ahead of the
+    {vendor_name:path} POST route below, like accept-match."""
+    vendor_name = unquote(vendor_name)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{suffix}"
+    joiner = "&" if "?" in back else "?"
+
+    def _message(text):
+        return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
+
+    note = note.strip()
+    if not note:
+        return _message("Not cleared: add a note saying why this exception needs no action. Nothing was changed.")
+    exception = queries.get_recon_exception(exception_id)
+    if not exception or exception.get("exception_status") != "OPEN":
+        return _message("Not cleared: this exception was already resolved (by you or someone else). "
+                        "Nothing was changed.")
+    netsuite = queries.clear_exception(exception, vendor_name, user, note[:2000]) or {}
+    return _message(f"Invoice {exception['invoice_number']} cleared. "
+                    f"NetSuite: {without_sandbox(netsuite.get('status') or 'not written')}.")
+
+
+@router.post("/exceptions/{vendor_name}/undo-clear")
+def exceptions_undo_clear(vendor_name: str, request: Request, user: str = Depends(require_login),
+                          exception_id: str = Form(...), statement_id: str = Form(...),
+                          invoice_number: str = Form(""), filter: str = Form("all"), sort: str = Form("")):
+    """Undo of "Clear exception": reopens it and puts its NetSuite flag back
+    (queries.undo_clear_exception())."""
+    vendor_name = unquote(vendor_name)
+    suffix = _filter_redirect_suffix(filter, statement_id, sort)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{suffix}"
+    joiner = "&" if "?" in back else "?"
+    undone = queries.undo_clear_exception(exception_id, statement_id, vendor_name, user)
+    text = (f"Invoice {invoice_number} is open again -- the clear was undone." if undone
+            else f"Invoice {invoice_number} was not cleared, so there was nothing to undo.")
     return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
 
 

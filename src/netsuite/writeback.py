@@ -40,7 +40,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from src.lakehouse.fabric_sql import get_warehouse_connection
-from src.lakehouse.recon_table import SOURCE_AUTO, STATUS_MATCHED
+from src.lakehouse.recon_table import SOURCE_AUTO, STATUS_CLEARED, STATUS_MATCHED
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.fields import BODY_FIELDS, STATEMENT_LINE_RECORD
 from src.netsuite.guard import KEY_FIELD_COLUMNS, WriteBlocked, key_field_changes, key_snapshot
@@ -206,6 +206,13 @@ def _matched_records(recon_rows) -> dict:
             picked.setdefault(r["invoice_number"].lower(), set()).add(
                 (str(r["netsuite_internal_id"]), r.get("netsuite_amount")))
     return picked
+
+
+def _cleared_invoices(recon_rows) -> set:
+    """Lowercased invoices whose exception was cleared on the review page
+    ("Clear exception", 2026-11-04): a rerun must not flag them again."""
+    return {r["invoice_number"].lower() for r in recon_rows or []
+            if r.get("status") == STATUS_CLEARED and r.get("invoice_number")}
 
 
 def _matched_record_id(row, picked: dict):
@@ -633,7 +640,9 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
                      category=CAT_VENDOR_UNRESOLVED)
                      for r in results["matched"] + results["exceptions"]]
 
-    picked = _matched_records(load_recon_rows(statement_id))
+    recon_rows = load_recon_rows(statement_id)
+    picked = _matched_records(recon_rows)
+    cleared = _cleared_invoices(recon_rows)
     record_ids = {id(r): _matched_record_id(r, picked) for r in results["matched"]}
 
     tranids = [r["invoice_number"] for r in results["matched"] + results["exceptions"]]
@@ -652,6 +661,10 @@ def build_plans(statement_id: str, ns, today: str = None) -> tuple:
 
     plans = [plan_matched(r, found, ctx) for r, found in matched]
     for r in results["exceptions"]:
+        if r["invoice_number"].lower() in cleared:
+            plans.append(_skip(r["invoice_number"], r["statement_amount"], "exception cleared in the app -- not flagged",
+                               SKIP_UP_TO_DATE, CAT_UP_TO_DATE))
+            continue
         plans.extend(plan_exception_row(r, sandbox.get(r["invoice_number"].lower(), []), ctx, existing_lines))
     # Link-only writes go last (stable sort): every reconciliation result is
     # written first, whatever happens to a link.

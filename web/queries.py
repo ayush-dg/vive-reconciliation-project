@@ -1405,6 +1405,106 @@ def undo_manual_match(statement_id: str, invoice_number: str, vendor_name: str, 
     return True
 
 
+def _statement_entity_ids(exception: dict, vendor_name: str) -> list:
+    try:
+        from src.matching.netsuite_vendor_resolver import resolve_entity_ids
+        return [str(e) for e in resolve_entity_ids(exception.get("vendor_id") or "", vendor_name or "") or []]
+    except Exception:
+        return []
+
+
+def clear_exception(exception: dict, vendor_name: str, cleared_by: str, note: str) -> dict:
+    """"Clear exception" on the review page (2026-11-04): the OPEN exception
+    needs no further action. Resolved like any other resolution -- a CLEARED
+    disposition with the note, the invoice's recon lines Cleared, the summary
+    counts recomputed -- then its NetSuite flag is removed
+    (src/netsuite/clear_exception.py), best-effort: the clear is already
+    saved, so a NetSuite problem is reported in the result, never raised."""
+    from src.lakehouse import recon_table
+    from src.netsuite.clear_exception import STATUS_FAILED, clear_exception_writes
+    statement_id, invoice_number = exception["statement_id"], exception["invoice_number"]
+    resolve_exception(exception["exception_id"], statement_id, vendor_name, invoice_number,
+                      exception.get("exception_reason"), "CLEARED", note, cleared_by)
+    result = clear_exception_writes(statement_id, invoice_number, _statement_entity_ids(exception, vendor_name))
+    try:
+        recon_table.set_clear_writeback(statement_id, invoice_number, result)
+    except Exception:
+        logger.exception("saving the NetSuite outcome failed for %s / %s", statement_id, invoice_number)
+        result = dict(result, status=result.get("status") or STATUS_FAILED)
+    return result
+
+
+def _latest_dispositions_sql(where: str) -> str:
+    """Each exception's most recent disposition (an Undo adds a newer PENDING
+    row), filtered by `where` -- fixed SQL from the callers, never user input."""
+    return (
+        "SELECT d.exception_id, d.statement_id, d.vendor_name, d.invoice_number, d.reason_code, "
+        "d.disposition_status, d.disposition_notes, d.disposed_by, d.disposed_at "
+        "FROM exception_dispositions d "
+        "WHERE d.id = (SELECT MAX(d2.id) FROM exception_dispositions d2 WHERE d2.exception_id = d.exception_id) "
+        f"AND {where} ORDER BY d.id DESC"
+    )
+
+
+def get_cleared_exceptions(statement_id: str) -> list:
+    """The statement's cleared exceptions for the review page (newest first),
+    each with its note, who cleared it and when; [] when it can't be read
+    (the page must still load)."""
+    if not statement_id:
+        return []
+    try:
+        return execute_query(
+            _latest_dispositions_sql("d.statement_id = ? AND d.disposition_status = 'CLEARED'"), [statement_id])
+    except Exception:
+        logger.exception("reading cleared exceptions failed for %s (non-fatal)", statement_id)
+        return []
+
+
+def undo_clear_exception(exception_id: str, statement_id: str, vendor_name: str, undone_by: str) -> bool:
+    """Undo of "Clear exception": NetSuite's flag goes back first (best-effort,
+    only where NetSuite still holds what the clear wrote), then the exception
+    is OPEN again with a PENDING disposition recording the undo, and the
+    invoice's recon lines get their exception status back. False when the
+    exception's latest disposition isn't CLEARED (nothing to undo)."""
+    from src.lakehouse import recon_table
+    rows = execute_query(_latest_dispositions_sql("d.exception_id = ? AND d.statement_id = ?"),
+                         [exception_id, statement_id])
+    if not rows or rows[0]["disposition_status"] != "CLEARED":
+        return False
+    cleared = rows[0]
+    invoice_number = cleared["invoice_number"]
+    ns_undo = None
+    try:
+        before = recon_table.clear_writeback_before(statement_id, invoice_number)
+        if before:
+            from src.netsuite.clear_exception import undo_clear_writes
+            undone = undo_clear_writes(before)
+            ns_undo = {"status": f"undo: {undone['status']}"[:30], "detail": undone["detail"]}
+    except Exception:
+        logger.exception("NetSuite undo of a clear failed for %s / %s (non-fatal)", statement_id, invoice_number)
+    recon_sql(
+        "UPDATE silver.recon_exceptions SET exception_status = 'OPEN', date_resolved = NULL WHERE exception_id = ?",
+        [exception_id],
+    )
+    execute_sql(
+        """
+        INSERT INTO exception_dispositions (
+            exception_id, statement_id, vendor_name, invoice_number, reason_code,
+            disposition_status, disposition_notes, disposed_by, disposed_at
+        ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)
+        """,
+        [exception_id, statement_id, vendor_name, invoice_number, cleared.get("reason_code"),
+         f"Undo: cleared exception reopened (was: {cleared.get('disposition_notes') or 'no note'})"[:4000],
+         undone_by, datetime.now(timezone.utc).isoformat()],
+    )
+    try:
+        recon_table.undo_clear(statement_id, invoice_number, ns_undo)
+    except Exception:
+        logger.exception("recon table undo of a clear failed for %s / %s (non-fatal)", statement_id, invoice_number)
+    _recompute_summary_counts(statement_id)
+    return True
+
+
 def get_manual_matches(statement_id: str) -> list:
     """Active manual matches on a statement for the review page; [] when the
     recon table can't be read (the page must still load)."""
@@ -2895,7 +2995,7 @@ def get_recon_card_status() -> dict:
             reason = _OPEN_RECON_REASON[status]
             card["reasons"][reason] = card["reasons"].get(reason, 0) + (r["exc"] or 0)
             card["exceptions"] += r["exc"] or 0
-        elif status in ("Accepted", "Rejected", "Matched manually"):
+        elif status in ("Accepted", "Rejected", "Matched manually", "Cleared"):
             card["resolved"] += r["exc"] or 0
         elif status == "Matched":
             card["matched"] += r["n"] or 0

@@ -324,9 +324,9 @@ class TestReviewPageCarriesSort(unittest.TestCase):
         self.assertIn('class="filter-tab ">Invoice #', html)
 
     def test_both_post_forms_carry_sort(self):
-        # Accept as match -- the only form left since Escalate and Accept/Reject were removed (2026-10-28).
+        # Accept as match and Clear exception (2026-11-04) -- Escalate and Accept/Reject were removed (2026-10-28).
         html = _render_review(sort="amount")
-        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 1)
+        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 2)
 
     def test_modal_still_has_no_form(self):
         html = _render_review()

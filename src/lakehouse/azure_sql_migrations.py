@@ -290,8 +290,9 @@ TABLES = {
             vendor_name NVARCHAR(255) NOT NULL,
             invoice_number NVARCHAR(255) NOT NULL,
             reason_code NVARCHAR(255),
-            disposition_status NVARCHAR(50) NOT NULL CHECK(disposition_status IN
-                ('ACCEPTED', 'DISPUTED', 'DUPLICATE', 'WRITE_OFF', 'PENDING')),
+            disposition_status NVARCHAR(50) NOT NULL CONSTRAINT ck_exception_dispositions_status
+                CHECK(disposition_status IN
+                ('ACCEPTED', 'DISPUTED', 'DUPLICATE', 'WRITE_OFF', 'PENDING', 'CLEARED')),
             disposition_notes NVARCHAR(MAX),
             disposed_by NVARCHAR(MAX),
             disposed_at NVARCHAR(MAX),
@@ -673,6 +674,17 @@ COLUMNS = {
 # INSERT/UPDATE ever targets it) -- keeping it visually distinct from
 # COLUMNS is a reminder not to try. See migrations/009_add_routing_aging.sql
 # for why SQLite has no equivalent stored column at all.
+# A CHECK constraint whose allowed values changed after its table already
+# existed (TABLES only ever runs CREATE TABLE): (table, column, constraint name,
+# the value that must be allowed, CHECK body). run_migrations() drops every
+# CHECK on that column that doesn't allow the value -- the original ones were
+# created without a name -- and adds the named one. migrations/027 is the
+# SQLite side ("Clear exception", 2026-11-04).
+CHECK_CONSTRAINTS = [
+    ("exception_dispositions", "disposition_status", "ck_exception_dispositions_status", "CLEARED",
+     "disposition_status IN ('ACCEPTED', 'DISPUTED', 'DUPLICATE', 'WRITE_OFF', 'PENDING', 'CLEARED')"),
+]
+
 COMPUTED_COLUMNS = {
     "gold_exceptions": [
         ("days_open", "ALTER TABLE gold_exceptions ADD days_open AS (DATEDIFF(day, date_raised, GETUTCDATE()))"),
@@ -741,6 +753,22 @@ def run_migrations():
                 cursor.execute(add_column_sql)
                 conn.commit()
                 created_columns.append(f"{table_name}.{column_name}")
+
+        for table_name, column_name, constraint_name, required_value, check_sql in CHECK_CONSTRAINTS:
+            cursor.execute(
+                "SELECT cc.name, cc.definition FROM sys.check_constraints cc "
+                "JOIN sys.columns c ON c.object_id = cc.parent_object_id AND c.column_id = cc.parent_column_id "
+                "WHERE cc.parent_object_id = OBJECT_ID(?) AND c.name = ?",
+                [table_name, column_name],
+            )
+            existing = cursor.fetchall()
+            if any(f"'{required_value}'" in definition for _, definition in existing):
+                continue
+            for name, _ in existing:
+                cursor.execute(f"ALTER TABLE {table_name} DROP CONSTRAINT [{name}]")
+            cursor.execute(f"ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} CHECK({check_sql})")
+            conn.commit()
+            created_columns.append(f"{table_name}.{column_name} (CHECK {constraint_name})")
     finally:
         conn.close()
 

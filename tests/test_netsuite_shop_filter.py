@@ -109,9 +109,10 @@ class TestPanelMarkup(unittest.TestCase):
     def test_panel_is_open_on_the_page_not_a_dialog(self):
         html = self._render()
         self.assertIn('<section class="ns-inline" id="nsPanel"', html)
-        # The only dialog is the Accept-as-match confirm (2026-10-19), never the search.
+        # The only dialogs are the Accept-as-match confirm (2026-10-19) and Clear
+        # exception (2026-11-04), never the search.
         self.assertNotIn('<dialog class="ns-modal"', html)
-        self.assertEqual(html.count("<dialog"), 1)
+        self.assertEqual(html.count("<dialog"), 2)
         self.assertNotIn('id="nsFindBtn"', html)
 
     def test_shop_list_offers_netsuite_names_and_starts_on_any_shop(self):

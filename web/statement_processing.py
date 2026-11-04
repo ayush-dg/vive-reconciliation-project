@@ -254,6 +254,7 @@ _RECON_GROUPS = {
     "Not found in NetSuite": ("missing", "Not in NetSuite"),
     "Accepted": ("resolved", "Accepted"),
     "Rejected": ("resolved", "Rejected"),
+    "Cleared": ("resolved", "Cleared"),
 }
 _REASON_LABEL = {MISMATCH: "amount mismatch", NOT_FOUND: "not in NetSuite"}
 

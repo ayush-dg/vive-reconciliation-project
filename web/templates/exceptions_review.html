@@ -104,6 +104,33 @@
       </div>
       {% endfor %}
       {% endif %}
+
+      {# Cleared (2026-11-04): exceptions cleared with "Clear exception", each
+         with its note and Undo (reopens it and puts its NetSuite flag back). #}
+      {% if cleared %}
+      <div class="manual-match-head">Cleared ({{ cleared | length }})</div>
+      {% for c in cleared %}
+      <div class="exception-row manual-match-row">
+        <div class="exception-row-top">
+          <div class="exception-row-main">
+            <div class="einv">Invoice #{{ c.invoice_number }}</div>
+            <span class="badge badge-neutral">Cleared</span>
+            {% if c.disposition_notes %}<div class="edate cleared-note">{{ c.disposition_notes }}</div>{% endif %}
+            <div class="edate">By {{ c.disposed_by }} · {{ c.disposed_at | friendly_dt }}</div>
+          </div>
+          <form method="post" action="/exceptions/{{ vendor_url_name }}/undo-clear"
+                onsubmit='return confirm({{ ("Undo the clear for invoice " ~ c.invoice_number ~ "? The exception will be open again.") | tojson }});'>
+            <input type="hidden" name="exception_id" value="{{ c.exception_id }}">
+            <input type="hidden" name="statement_id" value="{{ c.statement_id }}">
+            <input type="hidden" name="invoice_number" value="{{ c.invoice_number }}">
+            <input type="hidden" name="filter" value="{{ filter }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <button type="submit" class="btn-ghost">Undo</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+      {% endif %}
     </div>
   </div>
 
@@ -371,9 +398,36 @@
     </dialog>
     {% endif %}
 
+    {# "Clear exception" (2026-11-04): for an exception that needs no further
+       action, whatever its reason. The note is required and saved with it;
+       the exception moves to "Cleared" in the list, with Undo. #}
+    <div class="clear-exc">
+      <button type="button" class="btn" id="clearExcBtn"
+              onclick="document.getElementById('clearExcDialog').showModal()">Clear exception</button>
+    </div>
+    <dialog class="ns-confirm" id="clearExcDialog" aria-labelledby="clearExcTitle">
+      <form method="post" action="/exceptions/{{ vendor_url_name }}/clear">
+        <input type="hidden" name="exception_id" value="{{ selected.exception_id }}">
+        <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
+        <input type="hidden" name="filter" value="{{ filter }}">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <h2 class="ns-modal-title" id="clearExcTitle">Clear exception</h2>
+        <p>Clear the exception on invoice <b>{{ selected.invoice_number }}</b>
+          ({{ selected.statement_amount | money }})? It needs no further action.</p>
+        <p class="ns-confirm-sub">Its NetSuite exception flag is removed. You can undo this from the Cleared list.</p>
+        <label class="ns-search-label" for="clearExcNote">Note <span class="field-hint">(required)</span></label>
+        <textarea id="clearExcNote" name="note" rows="3" required maxlength="2000"
+                  placeholder="Why it needs no action, e.g. paid by credit card, not ours"></textarea>
+        <div class="ns-confirm-actions">
+          <button type="button" class="btn" onclick="document.getElementById('clearExcDialog').close()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Clear exception</button>
+        </div>
+      </form>
+    </dialog>
+
     {# Accept / Reject (and "Approve N at 99%+ confidence") were removed from
-       this page on 2026-10-28: an exception is resolved here only through
-       Accept as match above. The POST routes behind them still exist. #}
+       this page on 2026-10-28: an exception is resolved here through Accept as
+       match or Clear exception above. The POST routes behind them still exist. #}
     {% else %}
     {% if total and resolved == total %}
     <div class="empty-state">🎉 All exceptions resolved for {{ vendor_display_name }}.</div>
