@@ -28,6 +28,9 @@ mapped name is never indistinguishable from an unmapped extraction:
                  says which; needs review
   "conflict"  -- two signals pointed at different shops; needs review
   "unmapped"  -- no signal found a shop; the extracted value is kept as-is
+  "invoice_match" -- set later, not here: a statement left ambiguous, in
+              conflict or unmapped takes the location of its matched NetSuite
+              bills (src/validation/invoice_location.py)
 """
 
 import logging
@@ -49,8 +52,9 @@ SOURCE_CITY = "city_match"
 SOURCE_AMBIGUOUS = "ambiguous"
 SOURCE_CONFLICT = "conflict"
 SOURCE_UNMAPPED = "unmapped"
+SOURCE_INVOICE = "invoice_match"
 
-MAPPED_SOURCES = (SOURCE_NAME, SOURCE_FUZZY, SOURCE_PHONE, SOURCE_STREET, SOURCE_CITY)
+MAPPED_SOURCES = (SOURCE_NAME, SOURCE_FUZZY, SOURCE_PHONE, SOURCE_STREET, SOURCE_CITY, SOURCE_INVOICE)
 
 # A close match needs this similarity, beating the next-best shop by the
 # margin; names shorter than the minimum (Acme, Lund, NEK) must match exactly,

@@ -85,6 +85,7 @@ from datetime import datetime, timezone
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection, get_warehouse_connection
 from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, line_amount, replace_auto_rows, status_for_reason
+from src.validation.invoice_location import refresh_quietly as refresh_location_from_bills
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.netsuite import connect_source
@@ -1240,7 +1241,9 @@ def _write_recon_rows(statement: dict, all_lines: list, results: dict, now: str)
     matching. Returns the number of rows written, or None on failure."""
     try:
         rows = build_auto_rows(statement, all_lines, results, now)
-        return replace_auto_rows(statement["statement_id"], rows)
+        written = replace_auto_rows(statement["statement_id"], rows)
+        refresh_location_from_bills(statement["statement_id"])
+        return written
     except Exception:
         logger.exception("recon table write failed for statement_id=%s (non-fatal)",
                          statement.get("statement_id"))
