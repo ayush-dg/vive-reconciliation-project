@@ -220,3 +220,16 @@ def test_review_page_shows_the_paid_bill_and_its_payment():
 def test_paid_filter_selects_only_appears_to_be_paid():
     from web import queries
     assert queries._REASON_FILTER_SQL["paid"] == [fm.APPEARS_PAID]
+
+
+@pytest.mark.parametrize("table,selects_status", [("netsuite_vendorbill", True), ("netsuite_vendorcredit", False)])
+def test_fabric_query_reads_status_only_from_bills(table, selects_status):
+    # Fabric's bronze.netsuite_vendorcredit has no status column: selecting it
+    # failed every Fabric read (prod, 2026-11-05).
+    cur = mock.Mock()
+    cur.fetchall.return_value = [("CM1", 10.0, "5", "VC5", "4242", "12", None)]
+    with mock.patch.dict(os.environ, {"NETSUITE_SOURCE": "fabric"}):
+        fm._fetch_netsuite_candidates(cur, ["4242"], table)
+    sql = cur.execute.call_args[0][0]
+    assert (", status FROM" in sql) is selects_status
+    assert selects_status or "NULL AS status" in sql
