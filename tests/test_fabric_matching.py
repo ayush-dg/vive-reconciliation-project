@@ -6,8 +6,11 @@ is gated by _fabric_configured()."""
 from src.matching.fabric_matching import (
     _amounts_tie_out,
     _build_invoice_shapes,
+    _Candidates,
     _earliest_of_type,
+    _keystone_credit_record,
     _match_credit,
+    _pick_credit,
     _shape_target,
 )
 
@@ -122,6 +125,31 @@ def test_match_credit_multiple_candidates_ambiguous_reports_none():
     total, count = _match_credit("435584", 999.0, candidates)
     assert total is None
     assert count == 2
+
+
+def test_two_credits_that_tie_out_the_one_numbered_exactly_as_the_invoice_wins():
+    # Keystone BANC7740: credit BANC7740 (9/2) and BANC7740-1 (9/4), both $99.00.
+    candidates = [("banc7740-1", 99.0), ("banc7740", 99.0)]
+    assert _pick_credit("banc7740", 99.0, candidates) == ("banc7740", 99.0, 2)
+    assert _match_credit("banc7740", 99.0, candidates) == (99.0, 2)
+
+
+def test_two_tying_credits_neither_numbered_as_the_invoice_stay_ambiguous():
+    candidates = [("banc7740-1", 99.0), ("cmbanc7740", 99.0)]
+    assert _pick_credit("banc7740", 99.0, candidates) == (None, None, 2)
+
+
+def test_two_identical_credits_stay_ambiguous():
+    assert _pick_credit("banc7740", 99.0, [("banc7740", 99.0), ("banc7740", 99.0)]) == (None, None, 2)
+
+
+def test_the_credit_record_is_the_chosen_one_not_the_first_of_that_amount():
+    credits = _Candidates()
+    credits.records[("banc7740-1", 99.0)] = [{"tranid": "BANC7740-1", "id": 1}]
+    credits.records[("banc7740", 99.0)] = [{"tranid": "BANC7740", "id": 2}]
+    candidates = [("banc7740-1", 99.0), ("banc7740", 99.0)]
+    chosen, total, _ = _pick_credit("banc7740", 99.0, candidates)
+    assert _keystone_credit_record(credits, candidates, "BANC7740", total, chosen)["id"] == 2
 
 
 def test_amounts_tie_out_within_epsilon():
