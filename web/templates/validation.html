@@ -142,7 +142,7 @@
     <ul class="ns-popover sync-picker-list" id="vendor-filter-list" role="listbox" aria-labelledby="vendor-filter-btn" hidden></ul>
   </div>
   <select id="shop-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true">
-    <option value="">All shops</option>
+    <option value="">All locations</option>
     {% for sname in shop_options %}
     <option value="{{ sname }}">{{ sname }}</option>
     {% endfor %}
@@ -150,7 +150,7 @@
   <div class="ns-chip-wrap picker-select" data-sync-picker="shop-filter" data-picker-label>
     <button type="button" class="filter-chip sync-picker-btn" id="shop-filter-btn"
             aria-haspopup="listbox" aria-expanded="false" aria-controls="shop-filter-list">
-      <span class="picker-label">All shops</span><svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+      <span class="picker-label">All locations</span><svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
     </button>
     <ul class="ns-popover sync-picker-list" id="shop-filter-list" role="listbox" aria-labelledby="shop-filter-btn" hidden></ul>
   </div>
