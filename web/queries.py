@@ -3139,6 +3139,8 @@ def get_extraction_validation_detail(statement_id: str) -> dict:
     intake["printed_total_read_from"] = (detail or {}).get("printed_total_read_from") or []
     # A printed invoice-net line dropped as an extra row (2026-10-21).
     intake["net_line_drops"] = (detail or {}).get("net_line_drops") or []
+    # Amounts moved to the side a running balance shows (2026-11-05, src/validation/running_balance_sides.py).
+    intake["running_balance_corrections"] = (detail or {}).get("running_balance_corrections") or []
     # Full match with no printed total (2026-10-22): rows verified, columns, and the
     # safety check of every total-like amount the PDF prints.
     intake["full_match_no_total"] = (detail or {}).get("full_match_no_total")

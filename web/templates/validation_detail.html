@@ -273,6 +273,28 @@
 </table>
 {% endif %}
 {% endif %}
+{% if intake.running_balance_corrections %}
+<div class="section-header">
+  <div class="section-title">Amounts moved by the running balance</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="running-balance-corrections">
+  {{ intake.running_balance_corrections | length }} amount{{ "" if intake.running_balance_corrections | length == 1 else "s" }} had been read on the wrong side. The statement's balance column is a running balance, and on each of these rows it moved by exactly that amount in the other direction, so the amount was moved there. The running balance then holds on every row, and the statement passed only after these corrections.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Invoice</th><th>Date</th><th>Amount</th><th>Moved</th><th>Balance on that row</th></tr>
+  </thead>
+  <tbody>
+    {% for m in intake.running_balance_corrections %}
+    <tr>
+      <td>{{ m.row_number }}</td><td>{{ m.invoice_number or "—" }}</td><td>{{ m.date or "—" }}</td>
+      <td>{{ m.amount | money }}</td><td>{{ m.from }} → {{ m.to }}</td><td>{{ m.balance | money if m.balance is not none else "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 {% if intake.net_line_drops %}
 <div class="section-header">
   <div class="section-title">Invoice-net line removed</div>
