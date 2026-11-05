@@ -1,7 +1,7 @@
 """"Appears to be Paid" (2026-11-05): a statement line that matches a vendor
-BILL by its own invoice number and amount, at the statement's own shop, is an
-exception when NetSuite already shows that bill Paid In Full. Unknown shop or
-bill location -> not flagged. Not written back to NetSuite. Behind
+BILL by its own invoice number and amount is an exception when NetSuite already
+shows that bill Paid In Full -- at any shop/location (same vendor is enough).
+Not written back to NetSuite. Behind
 APPEARS_PAID_ENABLED. run_fabric_matching() runs here as a dry run against a
 fake Fabric (warehouse + lakehouse cursors)."""
 import os
@@ -17,7 +17,6 @@ from src.matching import fabric_matching as fm
 from src.netsuite import writeback as wb
 from web import statement_processing as sp
 
-LOCATIONS = {"64": "Lamon", "12": "Vestal", "13": "Binghamton"}
 LINE_COLS = ["statement_line_id", "line_number", "invoice_number", "document_number", "invoice_number_ref",
              "transaction_code", "line_type", "charge_amount", "payment_amount", "po_number", "ro_number",
              "line_date"]
@@ -38,9 +37,6 @@ class _Cursor:
         if "FROM silver.statement WHERE" in sql:
             cols = ["statement_id", "vendor_id", "vendor_name_raw", "shop_name_raw", "source_bronze_table"]
             row = ["STMT-P", "HOSELTON", "Hoselton", "Vive Collision Of Vestal", "bronze.raw_statement"]
-            if "billing_location" in sql:
-                cols.append("billing_location")
-                row.append(self.f["billing_location"])
             self.description, self._rows = [(c,) for c in cols], [tuple(row)]
         elif "FROM silver.statement_line" in sql:
             self.description, self._rows = [(c,) for c in LINE_COLS], list(self.f["lines"])
@@ -73,8 +69,8 @@ def _bill(tranid, total, bill_id, location="12", status="B"):
     return (tranid, total, bill_id, f"BILL{bill_id}", "4242", location, status)
 
 
-def _run(lines, bills, billing_location="Vestal", enabled=True):
-    fabric = {"lines": lines, "bills": bills, "billing_location": billing_location}
+def _run(lines, bills, enabled=True):
+    fabric = {"lines": lines, "bills": bills}
     env = {"APPEARS_PAID_ENABLED": "true" if enabled else "", "NETSUITE_SOURCE": "fabric"}
     with mock.patch.dict(os.environ, env), \
             mock.patch.object(fm, "_fabric_configured", return_value=True), \
@@ -83,7 +79,6 @@ def _run(lines, bills, billing_location="Vestal", enabled=True):
             mock.patch.object(fm, "resolve_entity_ids", return_value=["4242"]), \
             mock.patch.object(fm, "get_shop_owner", return_value=None), \
             mock.patch.object(fm, "_load_line_selection_rules", return_value={}), \
-            mock.patch.object(fm, "location_names", return_value=LOCATIONS), \
             mock.patch.object(fm, "_alternate_tranids", return_value=[]):
         result = fm.run_fabric_matching("STMT-P", dry_run=True)
     assert "error" not in result, result
@@ -94,7 +89,7 @@ def _by_invoice(result):
     return {r["invoice_number"]: r for r in result["recon_rows"]}
 
 
-def test_a_paid_bill_at_the_same_shop_is_flagged():
+def test_a_paid_bill_is_flagged():
     result = _run([_line(1, "452527G", 298.47), _line(2, "452600G", 100.00)],
                   [_bill("452527G", 298.47, "4646903", status="B"), _bill("452600G", 100.00, "4646904", status="A")])
     rows = _by_invoice(result)
@@ -112,21 +107,11 @@ def test_switched_off_a_paid_bill_still_matches():
     assert _by_invoice(result)["452527G"]["status"] == recon_table.STATUS_MATCHED
 
 
-def test_a_paid_bill_at_another_shop_is_not_flagged():
-    result = _run([_line(1, "452527G", 298.47)], [_bill("452527G", 298.47, "1", location="13", status="B")])
-    assert _by_invoice(result)["452527G"]["status"] == recon_table.STATUS_MATCHED
-
-
-@pytest.mark.parametrize("billing_location", [None, "", "Vive Collision Of Vestal (raw, not mapped)"])
-def test_an_unknown_or_unmapped_shop_is_never_flagged(billing_location):
-    result = _run([_line(1, "452527G", 298.47)], [_bill("452527G", 298.47, "1", status="B")],
-                  billing_location=billing_location)
-    assert _by_invoice(result)["452527G"]["status"] == recon_table.STATUS_MATCHED
-
-
-def test_a_bill_with_no_location_is_not_flagged():
-    result = _run([_line(1, "452527G", 298.47)], [_bill("452527G", 298.47, "1", location=None, status="B")])
-    assert _by_invoice(result)["452527G"]["status"] == recon_table.STATUS_MATCHED
+@pytest.mark.parametrize("location", ["12", "13", None])
+def test_shop_does_not_matter_a_paid_bill_anywhere_is_flagged(location):
+    # Any shop's location, or none at all: the same vendor is enough (2026-11-05).
+    result = _run([_line(1, "452527G", 298.47)], [_bill("452527G", 298.47, "1", location=location, status="B")])
+    assert _by_invoice(result)["452527G"]["status"] == "Appears to be paid"
 
 
 def test_a_paid_bill_with_a_different_amount_stays_an_amount_mismatch():
@@ -137,15 +122,14 @@ def test_a_paid_bill_with_a_different_amount_stays_an_amount_mismatch():
 def test_a_paid_bill_found_only_by_an_alternate_number_is_not_flagged():
     line = _line(1, "0000-452527G", 298.47)
     with mock.patch.object(fm, "_alternate_tranids", return_value=["452527G"]):
-        fabric = {"lines": [line], "bills": [_bill("452527G", 298.47, "1", status="B")], "billing_location": "Vestal"}
+        fabric = {"lines": [line], "bills": [_bill("452527G", 298.47, "1", status="B")]}
         with mock.patch.dict(os.environ, {"APPEARS_PAID_ENABLED": "true", "NETSUITE_SOURCE": "fabric"}), \
                 mock.patch.object(fm, "_fabric_configured", return_value=True), \
                 mock.patch.object(fm, "get_warehouse_connection", lambda: _Conn(fabric)), \
                 mock.patch.object(fm, "get_lakehouse_connection", lambda: _Conn(fabric)), \
                 mock.patch.object(fm, "resolve_entity_ids", return_value=["4242"]), \
                 mock.patch.object(fm, "get_shop_owner", return_value=None), \
-                mock.patch.object(fm, "_load_line_selection_rules", return_value={}), \
-                mock.patch.object(fm, "location_names", return_value=LOCATIONS):
+                mock.patch.object(fm, "_load_line_selection_rules", return_value={}):
             result = fm.run_fabric_matching("STMT-P", dry_run=True)
     assert _by_invoice(result)["0000-452527G"]["status"] == recon_table.STATUS_MATCHED
 

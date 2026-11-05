@@ -88,7 +88,6 @@ from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, line_amou
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.netsuite import connect_source
-from src.netsuite.locations import location_names
 from src.shop_owners import get_shop_owner
 
 logger = logging.getLogger(__name__)
@@ -112,20 +111,11 @@ def _fetch_statement(cur, statement_id: str):
     # produces per-invoice-row data, not statement-level metadata like
     # period (see dbt/README.md's known gaps). recon_summary.statement_period
     # is left null for rows from this pipeline until that's addressed.
-    # billing_location (the shop mapped onto NetSuite's own location name,
-    # 2026-11-04) is read when the column exists -- "Appears to be Paid" needs it.
-    try:
-        cur.execute(
-            "SELECT statement_id, vendor_id, vendor_name_raw, shop_name_raw, "
-            "source_bronze_table, billing_location FROM silver.statement WHERE statement_id = ?",
-            [statement_id],
-        )
-    except Exception:
-        cur.execute(
-            "SELECT statement_id, vendor_id, vendor_name_raw, shop_name_raw, "
-            "source_bronze_table FROM silver.statement WHERE statement_id = ?",
-            [statement_id],
-        )
+    cur.execute(
+        "SELECT statement_id, vendor_id, vendor_name_raw, shop_name_raw, "
+        "source_bronze_table FROM silver.statement WHERE statement_id = ?",
+        [statement_id],
+    )
     row = cur.fetchone()
     if not row:
         return None
@@ -300,17 +290,6 @@ def _appears_paid_enabled() -> bool:
     return os.environ.get("APPEARS_PAID_ENABLED", "").strip().lower() == "true"
 
 
-def _shop_location_codes(billing_location) -> set:
-    """NetSuite location codes whose name IS the statement's mapped shop
-    (silver.statement.billing_location holds NetSuite's own location names
-    when location mapping found one). Empty when the shop is unknown or was
-    not mapped -- then nothing is flagged."""
-    name = str(billing_location or "").strip().lower()
-    if not name:
-        return set()
-    return {code for code, loc in location_names().items() if str(loc or "").strip().lower() == name}
-
-
 def _is_paid_in_full(status) -> bool:
     """A vendor bill's status is "Paid In Full": NetSuite's code "B" (as in
     Fabric's copy), "VendBill:B", or the label itself."""
@@ -318,17 +297,14 @@ def _is_paid_in_full(status) -> bool:
     return text.split(":")[-1].strip().upper() == "B" or text.lower().replace(" ", "") == "paidinfull"
 
 
-def _appears_paid(table, match_rule, ns_record, shop_locations) -> bool:
-    """"Appears to be Paid" (2026-11-05): the line matched a vendor BILL by
-    its own invoice number (no alternate/DT#/CM rule) and amount, the bill is
-    Paid In Full, and it sits at the statement's own shop. An unknown shop
-    or a bill with no location is never flagged."""
+def _appears_paid(table, match_rule, ns_record) -> bool:
+    """"Appears to be Paid" (2026-11-05): the line matched one of this
+    vendor's BILLS by its own invoice number (no alternate/DT#/CM rule) and
+    amount, and NetSuite shows that bill Paid In Full. The shop/location does
+    not matter -- same vendor is enough (the user, 2026-11-05)."""
     if not _appears_paid_enabled() or table != "netsuite_vendorbill" or match_rule != "invoice number":
         return False
-    if not ns_record or not shop_locations:
-        return False
-    location = str(ns_record.get("location") or "").strip()
-    return bool(location) and location in shop_locations and _is_paid_in_full(ns_record.get("status"))
+    return bool(ns_record) and _is_paid_in_full(ns_record.get("status"))
 
 
 def _record_key(record):
@@ -904,9 +880,6 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
         vendor_uses_shapes = bool(vendor_rules) and (vendor_rules.get("charge") or {}).get("rule_type") == "transaction_code_priority"
 
         entity_ids = resolve_entity_ids(vendor_id, vendor_name)
-        # NetSuite location codes of this statement's shop ("Appears to be
-        # Paid" only flags a bill at the statement's own shop).
-        shop_locations = _shop_location_codes(header.get("billing_location"))
 
         # The recon table's per-line results: {statement_line_id: result}.
         # _record() fills it for each matched/excepted item -- every Silver
@@ -1081,7 +1054,7 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
                     decision["kind"] = "Not Found in NetSuite"
                 elif is_exact:
                     decision["kind"] = (APPEARS_PAID
-                                        if _appears_paid(table, match_rule, ns_record, shop_locations)
+                                        if _appears_paid(table, match_rule, ns_record)
                                         else "match")
                 else:
                     # No candidate for this tranid tied out exactly --
