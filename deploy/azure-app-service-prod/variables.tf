@@ -74,6 +74,37 @@ variable "clarity_project_id" {
   default     = ""
 }
 
+variable "extraction_opus_retry_enabled" {
+  description = "Re-extract a statement that fails validation with Claude Opus, up to 2 tries (EXTRACTION_OPUS_RETRY_ENABLED, src/ai/opus_retry.py)."
+  type        = bool
+  default     = false
+}
+
+variable "claude_opus_endpoint" {
+  description = "Anthropic route of the Foundry resource hosting the Opus deployment (AZURE_CLAUDE_OPUS_ENDPOINT), e.g. https://sonnet-5-5.services.ai.azure.com/anthropic -- not the /openai/v1 route."
+  type        = string
+  default     = ""
+}
+
+variable "claude_opus_deployment_name" {
+  description = "Opus deployment name on that resource (AZURE_CLAUDE_OPUS_DEPLOYMENT)."
+  type        = string
+  default     = "claude-opus-5-5"
+}
+
+variable "claude_opus_api_key" {
+  description = "Key of the Foundry resource hosting the Opus deployment (AZURE_CLAUDE_OPUS_API_KEY)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "appears_paid_enabled" {
+  description = "Flag a matched bill that NetSuite already shows Paid In Full as an 'Appears to be Paid' exception (APPEARS_PAID_ENABLED). Not written back to NetSuite."
+  type        = bool
+  default     = false
+}
+
 variable "pdf_edit_enabled" {
   description = "In-app PDF editor: comments, highlights and drawings saved back to the statement's SharePoint file (PDF_EDIT_ENABLED, web/routers/statements.py). Off: PDFs open read-only."
   type        = bool

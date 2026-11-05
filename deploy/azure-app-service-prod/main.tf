@@ -281,6 +281,18 @@ resource "azurerm_linux_web_app" "app" {
     AZURE_CLAUDE_SONNET_DEPLOYMENT = var.claude_sonnet_deployment_name
     AZURE_CLAUDE_DEPLOYMENT        = var.claude_haiku_deployment_name
 
+    # Claude Opus re-extraction when a statement fails validation
+    # (src/ai/opus_retry.py, up to 2 tries) -- on the sonnet-5-5 Foundry
+    # resource's Anthropic route.
+    EXTRACTION_OPUS_RETRY_ENABLED = var.extraction_opus_retry_enabled ? "true" : "false"
+    AZURE_CLAUDE_OPUS_ENDPOINT    = var.claude_opus_endpoint
+    AZURE_CLAUDE_OPUS_DEPLOYMENT  = var.claude_opus_deployment_name
+    AZURE_CLAUDE_OPUS_API_KEY     = var.claude_opus_api_key
+
+    # "Appears to be Paid": a matched bill NetSuite already shows Paid In
+    # Full becomes an exception (src/matching/fabric_matching.py).
+    APPEARS_PAID_ENABLED = var.appears_paid_enabled ? "true" : "false"
+
     # Statement PDF archive (the vendor-statements container above, in the
     # mailbox account). Prod ran without one from 2026-09-23 to 2026-10-20;
     # View PDF falls back to the mailbox blob for statements from then.
