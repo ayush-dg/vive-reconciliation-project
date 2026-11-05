@@ -1223,3 +1223,15 @@ LKQ_BUFFALO,purchase_order_number,po_number,string,v1,1
 LKQ_BUFFALO,period_activity,charge_amount,decimal,v1,1
 LKQ_BUFFALO,credit_applied,charge_amount,decimal,v1,1
 LKQ_BUFFALO,balance_due,amount_remaining,decimal,v1,1
+NASHUA_KIA,DATE,line_date,date,v1,1
+NASHUA_KIA,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+NASHUA_KIA,PURCHASES,charge_amount,decimal,v1,1
+NASHUA_KIA,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+NASHUA_KIA,BALANCE,amount_remaining,decimal,v1,1
+VAN_BORTEL_MOTORCAR_INC.,DATE,line_date,date,v1,1
+VAN_BORTEL_MOTORCAR_INC.,REF NO.,original_invoice_number,string,v1,1
+VAN_BORTEL_MOTORCAR_INC.,APPLY TO,invoice_number_ref,string,v1,1
+VAN_BORTEL_MOTORCAR_INC.,SRC,transaction_code,string,v1,1
+VAN_BORTEL_MOTORCAR_INC.,CHARGES,charge_amount,decimal,v1,1
+VAN_BORTEL_MOTORCAR_INC.,CREDITS,payment_amount,decimal,v1,1
+VAN_BORTEL_MOTORCAR_INC.,BALANCE,amount_remaining,decimal,v1,1
