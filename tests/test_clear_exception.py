@@ -145,8 +145,9 @@ class NetSuiteClearTests(unittest.TestCase):
         self.assertIsNone(ns.txns["700"]["custbody_reconciliation_exception"])
         self.assertEqual(ns.txns["700"]["custbody_reconciled"], "F")          # flag off, NOT reconciled
         self.assertEqual(ns.txns["701"]["custbody_reconciliation_exception"], "7")  # another statement's
-        self.assertEqual((ns.lines["55"]["custrecord_sl_status"], ns.lines["55"]["custrecord_sl_exception_type"]),
-                         ("Cleared", None))
+        # The write-back's "No match found" Statement Line is deleted (2026-11-05).
+        self.assertNotIn("55", ns.lines)
+        self.assertIn(("DELETE", "customrecord_statement_line", "55"), ns.calls)
 
     def test_undo_puts_the_flag_back(self):
         ns = _sandbox()
@@ -155,8 +156,66 @@ class NetSuiteClearTests(unittest.TestCase):
             undone = ce.undo_clear_writes(result["before"], ns=ns)
         self.assertEqual(undone["status"], "undone", undone["detail"])
         self.assertEqual(ns.txns["700"]["custbody_reconciliation_exception"], "7")
-        self.assertEqual((ns.lines["55"]["custrecord_sl_status"], ns.lines["55"]["custrecord_sl_exception_type"]),
-                         ("No match found", "No match found"))
+        # The deleted Statement Line is created again (a new id) as it was.
+        [line] = [l for l in ns.lines.values() if l["custrecord_sl_invoice_number"] == "INV123"]
+        self.assertNotEqual(line["id"], "55")
+        self.assertEqual((line["custrecord_sl_statement_id"], line["custrecord_sl_status"],
+                          line["custrecord_sl_exception_type"]), ("STMT-1", "No match found", "No match found"))
+        self.assertIn("re-created as", undone["detail"])
+
+    def test_a_statement_line_that_is_not_a_not_found_line_is_patched_not_deleted(self):
+        ns = FakeSandbox()
+        ns.add_line(56, "STMT-1", "INV123", custrecord_sl_status="Exception",
+                    custrecord_sl_exception_type="Amount differs")
+        with mock.patch.dict(os.environ, ON):
+            result = ce.clear_exception_writes("STMT-1", "INV123", ["81667"], ns=ns)
+        self.assertEqual(result["status"], mm.STATUS_WRITTEN, result["detail"])
+        self.assertEqual((ns.lines["56"]["custrecord_sl_status"], ns.lines["56"]["custrecord_sl_exception_type"]),
+                         ("Cleared", None))
+        self.assertFalse([c for c in ns.calls if c[0] == "DELETE"])
+
+    def test_a_failed_delete_keeps_the_line_and_undo_creates_nothing(self):
+        ns = _sandbox()
+
+        def refuse(record_type, record_id, statement_id=None):
+            ns.calls.append(("DELETE", record_type, str(record_id)))
+            raise RuntimeError("403 Forbidden: permission to delete")
+        ns.delete_record = refuse
+        with mock.patch.dict(os.environ, ON):
+            result = ce.clear_exception_writes("STMT-1", "INV123", ["81667"], ns=ns)
+            self.assertIn("55", ns.lines)
+            self.assertEqual(result["status"], mm.STATUS_PARTLY, result["detail"])  # bill unflagged, line not
+            self.assertIn("permission to delete", result["detail"])
+            ce.undo_clear_writes(result["before"], ns=ns)
+        self.assertFalse([c for c in ns.calls if c[0] == "POST"])
+
+    def test_the_recreate_body_passes_the_write_guard(self):
+        from src.netsuite import guard
+        copy = {"name": "STMT-1 INV123", "custrecord_sl_vendor": "81667", "custrecord_sl_statement_id": "STMT-1",
+                "custrecord_sl_invoice_number": "INV123", "custrecord_sl_statement_amount": "50.51",
+                "custrecord_sl_status": "No match found", "custrecord_sl_exception_type": "No match found",
+                "custrecord_sl_matched_bill": None, "custrecord_sl_shop": "Vestal",
+                "custrecord_sl_statement_link": "https://vive.sharepoint.com/x.pdf", "custrecord_sl_location": "12",
+                "custrecord_sl_date": "10/14/2026", "custrecord_sl_reconciled": "F",
+                "custrecord_sl_reconciled_date": ""}
+        body = ce.recreate_body(copy)
+        guard.check_create("customrecord_statement_line", body)   # raises if anything is off
+        self.assertEqual(body["custrecord_sl_date"], "2026-10-14")
+        self.assertEqual(body["custrecord_sl_vendor"], {"id": "81667"})
+        self.assertEqual(body["custrecord_sl_location"], {"id": "12"})
+        self.assertIs(body["custrecord_sl_reconciled"], False)
+        self.assertEqual(body["custrecord_sl_statement_amount"], 50.51)
+        self.assertNotIn("custrecord_sl_matched_bill", body)
+
+    def test_undo_with_write_back_off_changes_nothing(self):
+        ns = _sandbox()
+        with mock.patch.dict(os.environ, ON):
+            result = ce.clear_exception_writes("STMT-1", "INV123", ["81667"], ns=ns)
+        calls = len(ns.calls)
+        with mock.patch.dict(os.environ, {"NETSUITE_WRITEBACK_ENABLED": ""}):
+            undone = ce.undo_clear_writes(result["before"], ns=ns)
+        self.assertEqual(undone["status"], mm.STATUS_OFF)
+        self.assertEqual(len(ns.calls), calls)
 
     def test_with_write_back_off_nothing_is_written(self):
         ns = _sandbox()

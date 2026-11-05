@@ -88,6 +88,7 @@ from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, line_amou
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.netsuite import connect_source
+from src.netsuite.locations import location_names
 from src.shop_owners import get_shop_owner
 
 logger = logging.getLogger(__name__)
@@ -111,11 +112,20 @@ def _fetch_statement(cur, statement_id: str):
     # produces per-invoice-row data, not statement-level metadata like
     # period (see dbt/README.md's known gaps). recon_summary.statement_period
     # is left null for rows from this pipeline until that's addressed.
-    cur.execute(
-        "SELECT statement_id, vendor_id, vendor_name_raw, shop_name_raw, "
-        "source_bronze_table FROM silver.statement WHERE statement_id = ?",
-        [statement_id],
-    )
+    # billing_location (the shop mapped onto NetSuite's own location name,
+    # 2026-11-04) is read when the column exists -- "Appears to be Paid" needs it.
+    try:
+        cur.execute(
+            "SELECT statement_id, vendor_id, vendor_name_raw, shop_name_raw, "
+            "source_bronze_table, billing_location FROM silver.statement WHERE statement_id = ?",
+            [statement_id],
+        )
+    except Exception:
+        cur.execute(
+            "SELECT statement_id, vendor_id, vendor_name_raw, shop_name_raw, "
+            "source_bronze_table FROM silver.statement WHERE statement_id = ?",
+            [statement_id],
+        )
     row = cur.fetchone()
     if not row:
         return None
@@ -260,7 +270,7 @@ def _settle_unmatched_lines(decisions: list, lines: list) -> None:
     Lines that still don't match stay exceptions -- a partial credit no
     NetSuite record explains is a real thing to review."""
     used = {_record_key(d["ns_record"]) for d in decisions
-            if d.get("kind") == "match" and d.get("ns_record")}
+            if d.get("kind") in ("match", APPEARS_PAID) and d.get("ns_record")}
     used.discard(None)
     for d in decisions:
         if d.get("kind") == "Amount Mismatch" and _record_key(d.get("ns_record")) in used:
@@ -274,12 +284,51 @@ def _settle_unmatched_lines(decisions: list, lines: list) -> None:
                 charges.setdefault(line["invoice_number"], set()).add(abs(amount))
     for d in decisions:
         item = d["item"]
-        if d.get("kind") == "match" or item.get("line_type") not in ("CREDIT", "PAYMENT"):
+        if d.get("kind") in ("match", APPEARS_PAID) or item.get("line_type") not in ("CREDIT", "PAYMENT"):
             continue
         amount = _rounded(d.get("stmt_amount"))
         if amount is not None and abs(amount) in charges.get(item.get("invoice_number"), ()):
             d.update(kind="set_aside",
                      note=f"payment/reversal of invoice {item.get('invoice_number')}'s charge -- set aside, not an exception")
+
+
+APPEARS_PAID = "Appears to be Paid"
+
+
+def _appears_paid_enabled() -> bool:
+    """APPEARS_PAID_ENABLED=true turns the check on (off when unset)."""
+    return os.environ.get("APPEARS_PAID_ENABLED", "").strip().lower() == "true"
+
+
+def _shop_location_codes(billing_location) -> set:
+    """NetSuite location codes whose name IS the statement's mapped shop
+    (silver.statement.billing_location holds NetSuite's own location names
+    when location mapping found one). Empty when the shop is unknown or was
+    not mapped -- then nothing is flagged."""
+    name = str(billing_location or "").strip().lower()
+    if not name:
+        return set()
+    return {code for code, loc in location_names().items() if str(loc or "").strip().lower() == name}
+
+
+def _is_paid_in_full(status) -> bool:
+    """A vendor bill's status is "Paid In Full": NetSuite's code "B" (as in
+    Fabric's copy), "VendBill:B", or the label itself."""
+    text = str(status or "").strip()
+    return text.split(":")[-1].strip().upper() == "B" or text.lower().replace(" ", "") == "paidinfull"
+
+
+def _appears_paid(table, match_rule, ns_record, shop_locations) -> bool:
+    """"Appears to be Paid" (2026-11-05): the line matched a vendor BILL by
+    its own invoice number (no alternate/DT#/CM rule) and amount, the bill is
+    Paid In Full, and it sits at the statement's own shop. An unknown shop
+    or a bill with no location is never flagged."""
+    if not _appears_paid_enabled() or table != "netsuite_vendorbill" or match_rule != "invoice number":
+        return False
+    if not ns_record or not shop_locations:
+        return False
+    location = str(ns_record.get("location") or "").strip()
+    return bool(location) and location in shop_locations and _is_paid_in_full(ns_record.get("status"))
 
 
 def _record_key(record):
@@ -336,7 +385,7 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     if rows is None:
         placeholders = ",".join("?" * len(entity_ids))
         cur.execute(
-            f"SELECT tranid, total, id, transactionnumber, entity, location FROM bronze.{table} "
+            f"SELECT tranid, total, id, transactionnumber, entity, location, status FROM bronze.{table} "
             f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
             entity_ids,
         )
@@ -355,7 +404,11 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     # from, so the recon table can say which bill/credit a line matched.
     by_tranid = _Candidates()
     record_type = "credit" if table == "netsuite_vendorcredit" else "bill"
-    for tranid, total, record_id, transaction_number, entity, location in rows:
+    for row in rows:
+        # status (7th column) since 2026-11-05, for "Appears to be Paid"; a
+        # 6-column row (older callers/tests) has none.
+        tranid, total, record_id, transaction_number, entity, location = row[:6]
+        status = row[6] if len(row) > 6 else None
         try:
             total_f = float(total)
         except (TypeError, ValueError):
@@ -364,7 +417,7 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
         by_tranid.records.setdefault((tranid.lower(), round(total_f, 2)), []).append({
             "record_type": record_type, "id": record_id, "tranid": tranid,
             "transaction_number": transaction_number, "entity": entity, "location": location,
-            "amount": total_f,
+            "status": status, "amount": total_f,
         })
     return by_tranid
 
@@ -851,6 +904,9 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
         vendor_uses_shapes = bool(vendor_rules) and (vendor_rules.get("charge") or {}).get("rule_type") == "transaction_code_priority"
 
         entity_ids = resolve_entity_ids(vendor_id, vendor_name)
+        # NetSuite location codes of this statement's shop ("Appears to be
+        # Paid" only flags a bill at the statement's own shop).
+        shop_locations = _shop_location_codes(header.get("billing_location"))
 
         # The recon table's per-line results: {statement_line_id: result}.
         # _record() fills it for each matched/excepted item -- every Silver
@@ -1024,7 +1080,9 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
                 if netsuite_total is None:
                     decision["kind"] = "Not Found in NetSuite"
                 elif is_exact:
-                    decision["kind"] = "match"
+                    decision["kind"] = (APPEARS_PAID
+                                        if _appears_paid(table, match_rule, ns_record, shop_locations)
+                                        else "match")
                 else:
                     # No candidate for this tranid tied out exactly --
                     # netsuite_total here is the single CLOSEST candidate
@@ -1172,6 +1230,41 @@ def fetch_netsuite_record_for_invoice(vendor_id: str, vendor_name: str, invoice_
             vendor_id, invoice_number,
         )
         return None
+
+
+def fetch_bill_payments(bill_id) -> list:
+    """The vendor payments applied to one bill, oldest first, for the
+    "Appears to be Paid" review (2026-11-05): [{"tranid", "transactionnumber",
+    "trandate", "amount"}] from Fabric's NetSuite copy (vendorpayment_apply's
+    doc is JSON whose "id" is the bill). Voided payments are left out.
+    Display only: [] when Fabric isn't configured or the read fails."""
+    if not _fabric_configured() or not str(bill_id or "").strip():
+        return []
+    try:
+        conn = get_lakehouse_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT p.tranid, p.transactionnumber, p.trandate, a.amount "
+                "FROM bronze.netsuite_vendorpayment_apply a "
+                "JOIN bronze.netsuite_vendorpayment p ON p.id = a.vendorpayment_id "
+                "WHERE JSON_VALUE(a.doc, '$.id') = ? AND a.apply = 'true' AND p.voided = 'F'",
+                [str(bill_id).strip()],
+            )
+            seen, payments = set(), []
+            for tranid, number, trandate, amount in cur.fetchall():
+                key = (tranid, number, str(trandate), amount)
+                if key in seen:  # the apply table repeats a row per extract run
+                    continue
+                seen.add(key)
+                payments.append({"tranid": tranid, "transactionnumber": number,
+                                 "trandate": trandate, "amount": amount})
+            return payments
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("Payment lookup failed for bill %s", bill_id)
+        return []
 
 
 _MATCH_COLUMNS = [

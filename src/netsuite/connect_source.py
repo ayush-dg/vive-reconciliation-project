@@ -102,20 +102,22 @@ _TYPE_BY_TABLE = {"netsuite_vendorbill": "VendBill", "netsuite_vendorcredit": "V
 
 
 def candidate_rows(entity_ids, table: str) -> list:
-    """[(tranid, total, id, transactionnumber, entity, location), ...] -- the
+    """[(tranid, total, id, transactionnumber, entity, location, status), ...] -- the
     same columns, in the same order, as fabric_matching's Fabric query: every
     non-voided bill (or credit) of these vendors. total is positive (NetSuite
-    stores bills negative)."""
+    stores bills negative). status is the bill's status code ("B" = Paid In
+    Full), for "Appears to be Paid" (2026-11-05)."""
     entities = _entity_list(entity_ids)
     if not entities:
         return []
     rows = _client().query(
-        "SELECT t.tranid, ABS(t.foreigntotal) AS total, t.id, t.transactionnumber, t.entity, tl.location "
+        "SELECT t.tranid, ABS(t.foreigntotal) AS total, t.id, t.transactionnumber, t.entity, tl.location, t.status "
         "FROM transaction t LEFT JOIN transactionline tl ON tl.transaction = t.id AND tl.mainline = 'T' "
         f"WHERE t.type = '{_TYPE_BY_TABLE[table]}' AND t.voided = 'F' AND t.tranid IS NOT NULL "
         f"AND t.entity IN ({entities})"
     )
-    return [(r["tranid"], r["total"], _text(r["id"]), r.get("transactionnumber"), _text(r["entity"]), _text(r.get("location")))
+    return [(r["tranid"], r["total"], _text(r["id"]), r.get("transactionnumber"), _text(r["entity"]), _text(r.get("location")),
+             r.get("status"))
             for r in rows]
 
 

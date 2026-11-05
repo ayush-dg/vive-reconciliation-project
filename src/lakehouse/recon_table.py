@@ -36,6 +36,8 @@ STATUS_BY_REASON = {
     "Invoice Missing": "Not found in NetSuite",
     "Possible Duplicate in NetSuite": "Possible duplicate",
     "Vendor Not Resolved in NetSuite": "Vendor not resolved",
+    # 2026-11-05: matched a bill that NetSuite already shows Paid In Full.
+    "Appears to be Paid": "Appears to be paid",
 }
 
 # exception_dispositions.disposition_status -> recon status.

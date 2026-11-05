@@ -129,7 +129,7 @@ class ConnectQueryTests(unittest.TestCase):
 
     def test_candidate_rows_shape_and_filters(self):
         client = self._fake_client([{"tranid": "A1", "total": 12.5, "id": 4, "transactionnumber": "VB1",
-                                     "entity": 7, "location": None}])
+                                     "entity": 7, "location": None, "status": "B"}])
         with mock.patch.object(connect_source, "_client", return_value=client):
             rows = connect_source.candidate_rows(["7", "8; DROP TABLE x", 9], "netsuite_vendorcredit")
         sql = client.query.call_args[0][0]
@@ -138,7 +138,8 @@ class ConnectQueryTests(unittest.TestCase):
         self.assertIn("ABS(t.foreigntotal)", sql)
         self.assertIn("t.entity IN (7,9)", sql)
         self.assertNotIn("DROP", sql)
-        self.assertEqual(rows, [("A1", 12.5, "4", "VB1", "7", None)])
+        self.assertIn("t.status", sql)  # for "Appears to be Paid" (2026-11-05)
+        self.assertEqual(rows, [("A1", 12.5, "4", "VB1", "7", None, "B")])
 
     def test_no_valid_entities_sends_no_query(self):
         client = self._fake_client([])

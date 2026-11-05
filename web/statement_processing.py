@@ -25,6 +25,7 @@ VALIDATION_NOTES = {
 }
 
 MISMATCH, NOT_FOUND, DUPLICATE = "Amount Mismatch", "Not Found in NetSuite", "Possible Duplicate in NetSuite"
+PAID = "Appears to be Paid"
 ACTIVE_JOB = ("PENDING", "PROCESSING")
 
 
@@ -50,8 +51,11 @@ def reason_summary(reasons: dict) -> str:
         parts.append(f"{_plural(n, 'invoice')} not found in NetSuite" if not parts else f"{n} not found in NetSuite")
     if reasons.get(DUPLICATE):
         parts.append(f"{_plural(reasons[DUPLICATE], 'possible duplicate')} in NetSuite")
+    if reasons.get(PAID):
+        n = reasons[PAID]
+        parts.append(f"{_plural(n, 'invoice')} {'appears' if n == 1 else 'appear'} to be paid already")
     for reason, n in sorted(reasons.items()):
-        if reason not in (MISMATCH, NOT_FOUND, DUPLICATE):
+        if reason not in (MISMATCH, NOT_FOUND, DUPLICATE, PAID):
             parts.append(f"{n} {reason.lower()}")
     text = ", ".join(parts)
     return text[0].upper() + text[1:] + "."
@@ -255,8 +259,9 @@ _RECON_GROUPS = {
     "Accepted": ("resolved", "Accepted"),
     "Rejected": ("resolved", "Rejected"),
     "Cleared": ("resolved", "Cleared"),
+    "Appears to be paid": ("other", "Appears to be paid"),
 }
-_REASON_LABEL = {MISMATCH: "amount mismatch", NOT_FOUND: "not in NetSuite"}
+_REASON_LABEL = {MISMATCH: "amount mismatch", NOT_FOUND: "not in NetSuite", PAID: "appears to be paid"}
 
 
 def recon_view(recon_rows: list) -> dict:
@@ -310,7 +315,8 @@ def recon_view(recon_rows: list) -> dict:
     }
     counts = {s: sum(1 for r in rows if r["status"] == s)
               for s in ("matched", "mismatch", "missing", "other", "resolved", "set_aside", "none")}
-    reasons = Counter({"mismatch": MISMATCH, "missing": NOT_FOUND}.get(g, "Other") for g, _ in open_ids.values())
+    reasons = Counter({"mismatch": MISMATCH, "missing": NOT_FOUND}.get(g) or (r.get("exception_reason") or "Other")
+                      for g, r in open_ids.values())
     return {"rows": rows, "tiles": tiles, "counts": counts, "source": "recon",
             "open_reasons": dict(reasons)}
 
@@ -373,7 +379,8 @@ def line_results(lines: list, matched: list, exceptions: list, set_aside: dict =
         elif kind == "exception":
             reason = result.get("exception_reason")
             status = {MISMATCH: "mismatch", NOT_FOUND: "missing"}.get(reason, "other")
-            label = {MISMATCH: "Amount mismatch", NOT_FOUND: "Not in NetSuite"}.get(reason, reason or "Exception")
+            label = {MISMATCH: "Amount mismatch", NOT_FOUND: "Not in NetSuite",
+                     PAID: "Appears to be paid"}.get(reason, reason or "Exception")
         elif kind == "set_aside":
             status, label = "set_aside", "Set aside"
         else:

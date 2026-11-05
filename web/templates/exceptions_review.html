@@ -45,6 +45,7 @@
         <a href="/exceptions/{{ vendor_url_name }}?filter=all{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'all' }}">All</a>
         <a href="/exceptions/{{ vendor_url_name }}?filter=missing{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'missing' }}">Missing</a>
         <a href="/exceptions/{{ vendor_url_name }}?filter=mismatch{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'mismatch' }}">Mismatch</a>
+        <a href="/exceptions/{{ vendor_url_name }}?filter=paid{{ stmt_qs }}{{ sort_qs }}" class="filter-tab {{ 'active' if filter == 'paid' }}">Appears paid</a>
       </div>
       {# Sort chips -- same .filter-tab pill as the reason tabs above. Keep
          filter, statement_id and the selected exception; "Invoice #" is
@@ -201,6 +202,25 @@
       {{ selected.exception_reason }}
       {% endif %}
     </div>
+
+    {% if selected.exception_reason == "Appears to be Paid" %}
+    <div class="sec-label">Paid in NetSuite</div>
+    <div class="ns-panel bill-payments">
+      <p style="margin:0 0 8px">This invoice matched a bill that NetSuite already shows as <strong>Paid In Full</strong>, yet the vendor still lists it on this statement. Research before paying it again.</p>
+      {% if bill_payments %}
+      <table class="table">
+        <thead><tr><th>Payment</th><th>Transaction #</th><th>Date</th><th>Amount applied</th></tr></thead>
+        <tbody>
+        {% for p in bill_payments %}
+        <tr><td>{{ p.tranid or "—" }}</td><td>{{ p.transactionnumber or "—" }}</td><td>{{ p.trandate or "—" }}</td><td>{{ p.amount | money if p.amount is not none else "—" }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p style="margin:0;color:var(--text-secondary)">No vendor payment record was found for this bill in the NetSuite copy (it may have been paid by a credit or a journal).</p>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% if netsuite_record %}
     <div class="sec-label">NetSuite record</div>

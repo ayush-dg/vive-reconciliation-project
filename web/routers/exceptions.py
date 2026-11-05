@@ -28,7 +28,7 @@ from web import queries
 from web import time_window as tw
 from web.routers.statements import _inline_filename, pdf_editing_enabled
 from src.vendor_identity import display_name as vendor_display_name
-from src.matching.fabric_matching import fetch_netsuite_record_for_invoice
+from src.matching.fabric_matching import fetch_bill_payments, fetch_netsuite_record_for_invoice
 from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, fetch_record, search_open_ap
 from src.lakehouse.recon_table import MatchConflict
 from src.matching.netsuite_status_codes import decode_netsuite_status
@@ -54,6 +54,8 @@ REASON_BADGE = {
     # New reasons from src/matching/fabric_matching.py's NetSuite matching.
     "Not Found in NetSuite": {"label": "Not found in NetSuite", "css": "exception"},
     "Vendor Not Resolved in NetSuite": {"label": "Vendor not resolved", "css": "grey"},
+    # 2026-11-05: the invoice matched a bill NetSuite already shows Paid In Full.
+    "Appears to be Paid": {"label": "Appears to be paid", "css": "review"},
 }
 
 # Bulk approve only ever targets exceptions the matching engine scored
@@ -336,8 +338,10 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
     # query, once per page view of this one exception -- see
     # fetch_netsuite_record_for_invoice()'s own docstring for why this
     # isn't cached.
-    netsuite_record = None
-    if selected_exc and selected_exc.get("exception_reason") == "Amount Mismatch":
+    # "Appears to be Paid" (2026-11-05) shows the paid bill too, plus the
+    # payment(s) that paid it.
+    netsuite_record, bill_payments = None, []
+    if selected_exc and selected_exc.get("exception_reason") in ("Amount Mismatch", "Appears to be Paid"):
         netsuite_record = fetch_netsuite_record_for_invoice(
             selected_exc.get("vendor_id"), vendor_name, selected_exc.get("invoice_number")
         )
@@ -349,6 +353,8 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
             netsuite_record["status_label"] = decode_netsuite_status(
                 netsuite_record.get("_source_table"), netsuite_record.get("status")
             ) or netsuite_record.get("status")
+            if selected_exc.get("exception_reason") == "Appears to be Paid":
+                bill_payments = fetch_bill_payments(netsuite_record.get("id"))
 
     ctx = {
         "active_page": "exceptions",
@@ -368,6 +374,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "sort": sort or "",
         "reason_badge": REASON_BADGE,
         "netsuite_record": netsuite_record,
+        "bill_payments": bill_payments,
         "writeback": None if exceptions_only else _writeback_status(statement_id),
         # "View PDF" in the top bar (2026-10-20): opens the statement's PDF
         # in a new tab; None greys the button out.

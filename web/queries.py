@@ -51,6 +51,7 @@ REASON_LABELS = {
     "EXTRACTION_INCOMPLETE": "extraction incomplete",
     "Not Found in NetSuite": "not found in NetSuite",
     "Vendor Not Resolved in NetSuite": "vendor not resolved",
+    "Appears to be Paid": "appears to be paid",
 }
 
 
@@ -1077,6 +1078,8 @@ _REASON_FILTER_SQL = {
     # so any old data still using the legacy string keeps working too.
     "missing": ["Invoice Missing", "Not Found in NetSuite"],
     "mismatch": ["Amount Mismatch"],
+    # 2026-11-05: matched a bill NetSuite already shows Paid In Full.
+    "paid": ["Appears to be Paid"],
 }
 
 
@@ -2948,7 +2951,8 @@ def get_processing_jobs() -> list:
 
 _OPEN_RECON_REASON = {"Amount mismatch": "Amount Mismatch", "Not found in NetSuite": "Not Found in NetSuite",
                       "Possible duplicate": "Possible Duplicate in NetSuite",
-                      "Vendor not resolved": "Vendor Not Resolved in NetSuite"}
+                      "Vendor not resolved": "Vendor Not Resolved in NetSuite",
+                      "Appears to be paid": "Appears to be Paid"}
 
 
 def get_matched_netsuite_records(records) -> dict:
