@@ -81,7 +81,8 @@ from src.validation.ocr_text import ocr_pdf_text
 from src.validation.previous_balance import has_text_layer, resolve_previous_balance
 from src.validation.printed_total import find_box_total, find_printed_total, labelled_amounts
 from src.validation import (
-    account_blocks, due_column, full_match_no_total, net_lines, payment_column, section_totals, text_columns,
+    account_blocks, due_column, full_match_no_total, net_lines, payment_column, running_balance_sides, section_totals,
+    text_columns,
 )
 from src.ai.claude_sonnet_client import NOT_A_STATEMENT
 from src.pipeline_markers import DUPLICATE_MARKER, NOT_A_STATEMENT_MARKER
@@ -1512,9 +1513,9 @@ def _apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: s
     if validation.get("status") != "mismatch":
         return validation
     if not text_columns.enabled():
-        return _try_payment_column(schema_result, _try_net_line_drop(
+        return _try_running_balance_sides(schema_result, _try_payment_column(schema_result, _try_net_line_drop(
             schema_result, _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path), pdf_text,
-            pdf_path), pdf_text, pdf_path)
+            pdf_path), pdf_text, pdf_path), pdf_text, pdf_path)
     printed = validation.get("printed")
     plan = text_columns.plan_text_column_corrections(schema_result.get("invoices") or [], pdf_path, printed)
     reason = plan["reason"]
@@ -1547,9 +1548,48 @@ def _apply_arithmetic_validation(schema_result: dict, pdf_text: str, pdf_path: s
     validation["detail"] = {**(validation.get("detail") or {}),
                             "text_column_check": {"applied": False, "reason": reason, "row_check": row_reason}}
     schema_result["validation"] = validation
-    return _try_payment_column(schema_result, _try_net_line_drop(
+    return _try_running_balance_sides(schema_result, _try_payment_column(schema_result, _try_net_line_drop(
         schema_result, _try_due_column_corrections(schema_result, validation, pdf_text, pdf_path), pdf_text,
-        pdf_path), pdf_text, pdf_path)
+        pdf_path), pdf_text, pdf_path), pdf_text, pdf_path)
+
+
+def _try_running_balance_sides(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
+    """Amounts on the wrong side of a running balance (src/validation/running_balance_sides.py, 2026-11-05,
+    Elite Auto Glass STMT-ADEF9707; RUNNING_BALANCE_SIDES_ENABLED=false switches it off): on a statement that
+    still fails, a charge-only row whose running balance went DOWN by exactly that amount becomes a payment
+    (and the reverse) -- only if the running balance then holds on every row, and kept only if the whole gate
+    then passes (tried on a copy first). The moves are listed in detail["running_balance_corrections"];
+    otherwise nothing changes and detail["running_balance_check"] says why."""
+    if validation.get("status") != "mismatch" or not running_balance_sides.enabled():
+        return validation
+    previous = (schema_result.get("statement_metadata") or {}).get("previous_balance")
+    plan = running_balance_sides.plan_running_balance_sides(schema_result.get("invoices") or [], previous)
+    reason = plan["reason"]
+    if plan["applicable"]:
+        trial = copy.deepcopy(schema_result)
+        running_balance_sides.apply_running_balance_sides(plan, trial.get("invoices") or [])
+        trial.setdefault("statement_metadata", {})["statement_total_computed"] =             compute_statement_total_from_invoices(trial.get("invoices") or [])
+        with contextlib.redirect_stdout(io.StringIO()):
+            trial_validation = _validate_extraction(trial, pdf_text, pdf_path)
+        if trial_validation.get("status") == "matches":
+            moved = running_balance_sides.record(plan, schema_result.get("invoices") or [])
+            running_balance_sides.apply_running_balance_sides(plan, schema_result.get("invoices") or [])
+            schema_result.setdefault("statement_metadata", {})["statement_total_computed"] =                 compute_statement_total_from_invoices(schema_result.get("invoices") or [])
+            for m in moved:
+                print(f"  Running balance: row {m['row_number']} {m['invoice_number']} {m['amount']:,.2f} "
+                      f"moved from {m['from']} to {m['to']} (balance {m['balance']:,.2f})")
+            print(f"  {len(moved)} amount(s) put on the side the running balance shows -- re-validating.")
+            validation = _validate_extraction(schema_result, pdf_text, pdf_path)
+            validation["detail"] = {**(validation.get("detail") or {}), "running_balance_corrections": moved}
+            schema_result["validation"] = validation
+            return validation
+        reason = (f"with the amounts moved the statement still does not pass "
+                  f"(status {trial_validation.get('status')})")
+    if reason != running_balance_sides.NOT_APPLICABLE:
+        validation["detail"] = {**(validation.get("detail") or {}),
+                                "running_balance_check": {"applied": False, "reason": reason}}
+        schema_result["validation"] = validation
+    return validation
 
 
 def _try_due_column_corrections(schema_result: dict, validation: dict, pdf_text: str, pdf_path: str) -> dict:
