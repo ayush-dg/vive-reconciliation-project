@@ -125,6 +125,18 @@ def main():
     for item in plan:
         write_values(item["id"], item["new"])
     print(f"\nUpdated {len(plan)} rows. Old values saved to {backup}; undo with --undo {backup}")
+    # Azure SQL is done; bring Fabric (bronze, then silver) in line, statement by statement.
+    from src.lakehouse import fabric_location
+    if not os.environ.get("FABRIC_WORKSPACE_ID"):
+        print("Fabric settings not set: run scripts/sync_locations_to_fabric.py where they are.")
+        return
+    print("Fabric:")
+    try:
+        fabric_location.sync_many(fabric_location.plan_sync({item["statement_id"] for item in plan}))
+    except Exception as exc:
+        # Azure SQL is already updated; the sync script continues where this stopped.
+        print(f"  Fabric copy failed ({type(exc).__name__}: {str(exc)[:200]}) -- "
+              "re-run scripts/sync_locations_to_fabric.py --apply")
 
 
 if __name__ == "__main__":

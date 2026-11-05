@@ -179,6 +179,7 @@ def main():
     write_backup(backup, [item["old"] for item in plan])
     apply_updates(plan)
     print(f"\nUpdated {len(plan)} rows. Old values saved to {backup}; undo with --undo {backup}")
+    print("Azure SQL only: copy to Fabric with  python scripts/sync_locations_to_fabric.py --apply")
 
 
 if __name__ == "__main__":

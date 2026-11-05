@@ -271,6 +271,13 @@ def main():
                 _run_matching(statement_id)
             else:
                 print(f"    Fabric Silver build: skipped/failed (non-fatal, see logs)")
+    if visibility_confirmed:
+        # Matching may have given the statement the shop of its matched bills
+        # (Azure SQL, src/validation/invoice_location.py); copy it to Fabric
+        # here, outside the lock the matching can hold. A no-op if unchanged.
+        from src.lakehouse.fabric_location import sync_statement_location
+        with timed_step("fabric_location"):
+            sync_statement_location(statement_id)
     record_step("fabric_pipeline_total", time.monotonic() - pipeline_started)
 
     if intake_result.get("bronze_count", 0) == 0:

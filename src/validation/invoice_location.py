@@ -130,3 +130,15 @@ def refresh_quietly(statement_id: str) -> Optional[str]:
     except Exception:
         logger.exception("taking the location from the matched bills failed for %s (non-fatal)", statement_id)
         return None
+
+
+def refresh_and_sync_quietly(statement_id: str) -> None:
+    """refresh_quietly(), then the copy to Fabric (src/lakehouse/fabric_location.py)
+    on a background thread: for a person's Accept as match or its undo, which
+    must not wait for the Fabric lock. Not for the matching run, which can hold it."""
+    refresh_quietly(statement_id)
+    try:
+        from src.lakehouse.fabric_location import sync_in_background
+        sync_in_background(statement_id)
+    except Exception:
+        logger.exception("starting the Fabric location copy failed for %s (non-fatal)", statement_id)
