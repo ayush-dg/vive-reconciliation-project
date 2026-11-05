@@ -362,7 +362,10 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     if rows is None:
         placeholders = ",".join("?" * len(entity_ids))
         cur.execute(
-            f"SELECT tranid, total, id, transactionnumber, entity, location, status FROM bronze.{table} "
+            # status only on bills: Fabric's vendorcredit copy has no status
+            # column (2026-11-05: selecting it failed every Fabric read).
+            f"SELECT tranid, total, id, transactionnumber, entity, location, "
+            f"{'status' if table == 'netsuite_vendorbill' else 'NULL AS status'} FROM bronze.{table} "
             f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
             entity_ids,
         )
