@@ -85,6 +85,7 @@ from datetime import datetime, timezone
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection, get_warehouse_connection
 from src.lakehouse.recon_table import STATUS_MATCHED, build_auto_rows, line_amount, replace_auto_rows, status_for_reason
+from src.validation.invoice_location import refresh_quietly as refresh_location_from_bills
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.matching.vendor_line_selection import select_lines, _load_line_selection_rules
 from src.netsuite import connect_source
@@ -527,17 +528,32 @@ def _match_credit(invoice_number: str, statement_amount, credit_candidates: list
     answer even though other candidates exist); otherwise None is
     returned so the caller reports "Possible Duplicate" rather than an
     amount mismatch it can't actually attribute to one record."""
+    tranid, total, count = _pick_credit(invoice_number, statement_amount, credit_candidates)
+    return total, count
+
+
+def _pick_credit(invoice_number: str, statement_amount, credit_candidates: list) -> tuple:
+    """_match_credit() plus WHICH credit it chose: (tranid, total, candidate_count),
+    (None, None, count) when it is ambiguous, (None, None, 0) for no candidate.
+
+    When several credits tie out exactly, the one whose tranid IS the invoice
+    number wins (BANC7740 over BANC7740-1, both $99.00: the suffixed one is the
+    credit applied against the bill, not the line on the statement). Two
+    credits that tie out and neither is the bare invoice number stay ambiguous."""
     if not invoice_number or statement_amount is None:
-        return None, 0
-    matches = [total for tranid, total in credit_candidates if invoice_number in tranid]
+        return None, None, 0
+    matches = [(tranid, total) for tranid, total in credit_candidates if invoice_number in tranid]
     if not matches:
-        return None, 0
+        return None, None, 0
     if len(matches) == 1:
-        return matches[0], 1
-    exact = [t for t in matches if _amounts_tie_out(statement_amount, t)]
+        return matches[0][0], matches[0][1], 1
+    exact = [(tranid, total) for tranid, total in matches if _amounts_tie_out(statement_amount, total)]
     if len(exact) == 1:
-        return exact[0], len(matches)
-    return None, len(matches)
+        return exact[0][0], exact[0][1], len(matches)
+    same_number = [(tranid, total) for tranid, total in exact if tranid == invoice_number]
+    if len(same_number) == 1:
+        return same_number[0][0], same_number[0][1], len(matches)
+    return None, None, len(matches)
 
 
 def _build_invoice_shapes(lines: list) -> dict:
@@ -970,10 +986,11 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
                 decision["inv"] = inv
 
                 if table == "netsuite_vendorcredit" and keystone_credit_candidates is not None:
-                    netsuite_total, candidate_count = _match_credit(
+                    chosen_tranid, netsuite_total, candidate_count = _pick_credit(
                         inv.lower(), stmt_amount, keystone_credit_candidates
                     )
-                    ks_record = _keystone_credit_record(credits, keystone_credit_candidates, inv, netsuite_total)
+                    ks_record = _keystone_credit_record(credits, keystone_credit_candidates, inv, netsuite_total,
+                                                        chosen_tranid)
                     decision.update(netsuite_total=netsuite_total, ns_record=ks_record,
                                     rule="credit number contains the invoice")
                     if netsuite_total is None:
@@ -1287,13 +1304,16 @@ def _note_set_aside(all_lines: list, kept: list, why: str) -> None:
             line["_recon_note"] = why
 
 
-def _keystone_credit_record(credits, keystone_candidates, inv, total):
+def _keystone_credit_record(credits, keystone_candidates, inv, total, chosen_tranid=None):
     """The NetSuite credit behind a Keystone fuzzy credit match
-    (_match_credit()): the candidate whose tranid contains the invoice and
-    whose total is the one chosen."""
+    (_pick_credit()): the candidate whose tranid contains the invoice and
+    whose total is the one chosen -- the chosen tranid itself when known, so
+    two credits of the same amount are not mixed up."""
     if total is None or not keystone_candidates or credits is None:
         return None
     for tranid, candidate_total in keystone_candidates:
+        if chosen_tranid is not None and tranid != chosen_tranid:
+            continue
         if inv.lower() in tranid and abs(candidate_total - total) <= EXACT_AMOUNT_EPSILON:
             return credits.record_for(tranid, candidate_total)
     return None
@@ -1306,7 +1326,9 @@ def _write_recon_rows(statement: dict, all_lines: list, results: dict, now: str)
     matching. Returns the number of rows written, or None on failure."""
     try:
         rows = build_auto_rows(statement, all_lines, results, now)
-        return replace_auto_rows(statement["statement_id"], rows)
+        written = replace_auto_rows(statement["statement_id"], rows)
+        refresh_location_from_bills(statement["statement_id"])
+        return written
     except Exception:
         logger.exception("recon table write failed for statement_id=%s (non-fatal)",
                          statement.get("statement_id"))

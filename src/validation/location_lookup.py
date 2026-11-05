@@ -28,6 +28,9 @@ mapped name is never indistinguishable from an unmapped extraction:
                  says which; needs review
   "conflict"  -- two signals pointed at different shops; needs review
   "unmapped"  -- no signal found a shop; the extracted value is kept as-is
+  "invoice_match" -- set later, not here: a statement left ambiguous, in
+              conflict or unmapped takes the location of its matched NetSuite
+              bills (src/validation/invoice_location.py)
 """
 
 import logging
@@ -35,7 +38,7 @@ import re
 from difflib import SequenceMatcher
 from typing import Optional
 
-from src.validation.shop_list import (all_shops, by_city, by_name, by_phone, name_forms, normalize_place,
+from src.validation.shop_list import (all_shops, by_city, by_name, by_phone, is_alias, name_forms, normalize_place,
                                       normalize_state, normalize_text, shop_details)
 from src.validation.street_match import same_street
 
@@ -49,8 +52,9 @@ SOURCE_CITY = "city_match"
 SOURCE_AMBIGUOUS = "ambiguous"
 SOURCE_CONFLICT = "conflict"
 SOURCE_UNMAPPED = "unmapped"
+SOURCE_INVOICE = "invoice_match"
 
-MAPPED_SOURCES = (SOURCE_NAME, SOURCE_FUZZY, SOURCE_PHONE, SOURCE_STREET, SOURCE_CITY)
+MAPPED_SOURCES = (SOURCE_NAME, SOURCE_FUZZY, SOURCE_PHONE, SOURCE_STREET, SOURCE_CITY, SOURCE_INVOICE)
 
 # A close match needs this similarity, beating the next-best shop by the
 # margin; names shorter than the minimum (Acme, Lund, NEK) must match exactly,
@@ -89,17 +93,30 @@ def _split_city_state(address) -> tuple:
     return (match.group("city"), match.group("state")) if match else (text, "")
 
 
-def _shop_named_in(text) -> Optional[dict]:
-    """The shop whose whole-word name (or alias) appears in `text`. The longest
-    form wins ("Clarks Summit" over "Clark's", "Prestige - NH" over "Prestige");
-    a tie between different shops is no match."""
+def _named_in(text) -> tuple:
+    """(shop, form) for the shop whose whole-word name (or alias) appears in
+    `text`, and the form that was found. The longest form wins ("Clarks
+    Summit" over "Clark's", "Prestige - NH" over "Prestige"); a tie between
+    different shops is no match."""
     padded = f" {normalize_text(text)} "
     hits = [(form, shop) for form, shop in name_forms() if f" {form} " in padded]
     if not hits:
-        return None
+        return None, None
     longest = max(len(name) for name, _ in hits)
-    top = {shop["name"]: shop for name, shop in hits if len(name) == longest}
-    return next(iter(top.values())) if len(top) == 1 else None
+    top = {shop["name"]: (shop, name) for name, shop in hits if len(name) == longest}
+    return next(iter(top.values())) if len(top) == 1 else (None, None)
+
+
+def _shop_named_in(text) -> Optional[dict]:
+    return _named_in(text)[0]
+
+
+def _shop_named_by_alias(text) -> Optional[dict]:
+    """The shop an alias in `text` names. An alias is a hand-picked pairing
+    ("Bernatche" is the Bangor shop), so unlike a shop's own name it is
+    trusted over a city that points elsewhere."""
+    shop, form = _named_in(text)
+    return shop if shop and is_alias(form) else None
 
 
 def _name_tokens(text) -> list:
@@ -273,6 +290,14 @@ def resolve_billing_location(printed_location, shop_or_entity, phone=None, addre
     name; for "unmapped", "ambiguous" and "conflict" the extracted value is
     returned unchanged so nothing is lost, and the source tells review it is
     not a verified shop."""
+    aliased = _shop_named_by_alias(_first_text(shop_or_entity))
+    # An alias outranks a city, but not a street address: "M3" is Highway 35
+    # or South Main, and its street says which.
+    street_elsewhere = _match_by_street(addresses)
+    if aliased and not (street_elsewhere and street_elsewhere["name"] != aliased["name"]):
+        logger.info("billing_location %s: extracted=%r shop_or_entity=%r -> %r (alias)",
+                    SOURCE_NAME, printed_location, shop_or_entity, aliased["name"])
+        return aliased["name"], SOURCE_NAME
     name_shop, name_source = _match_by_name(printed_location, shop_or_entity)
     phone_shop = by_phone(phone) if phone else None
     street_shop = _match_by_street(addresses)

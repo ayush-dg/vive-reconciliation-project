@@ -1340,6 +1340,8 @@ def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepte
     except Exception:
         recon_table.undo_manual_match(statement_id, invoice_number, accepted_by)
         raise
+    from src.validation.invoice_location import refresh_and_sync_quietly
+    refresh_and_sync_quietly(statement_id)
     return _write_manual_match_to_netsuite(exception, record, vendor_name)
 
 
@@ -1388,6 +1390,8 @@ def undo_manual_match(statement_id: str, invoice_number: str, vendor_name: str, 
     undone = recon_table.undo_manual_match(statement_id, invoice_number, undone_by)
     if not undone:
         return False
+    from src.validation.invoice_location import refresh_and_sync_quietly
+    refresh_and_sync_quietly(statement_id)
     now = datetime.now(timezone.utc).isoformat()
     for exception_id in undone["exception_ids"]:
         recon_sql(
