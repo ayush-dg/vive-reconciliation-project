@@ -151,45 +151,60 @@ def _sl_check(ns, body):
     return check
 
 
-def write_manual_match(statement_id: str, invoice_number: str, statement_amount, record: dict,
+def write_manual_match(statement_id: str, invoice_number: str, statement_amount, record,
                        statement_entity_ids: list = None, shop: str = None, ns=None, today: str = None) -> dict:
-    """Writes one accepted manual match to the sandbox. Returns
-    {"status", "detail", "statement_line_id", "before" (JSON text for undo)}.
-    Never raises."""
+    """Writes one accepted manual match to NetSuite. `record` is the picked
+    bill/credit, or a list of them for a split payment (2026-11-06): each is
+    reconciled with Matched Bill = the invoice, and the invoice's Statement
+    Line points at all of them (a Multiple Select) or at the first (while the
+    field is still a single link). Every record is found first; if any is
+    missing, ambiguous or reconciled by another statement, NOTHING is
+    written. Returns {"status", "detail", "statement_line_id", "before"
+    (JSON text for undo)}. Never raises."""
     if not writeback_enabled():
         return {"status": STATUS_OFF, "detail": "NETSUITE_WRITEBACK_ENABLED is not true -- NetSuite not written",
                 "statement_line_id": None, "before": None}
     today = today or date.today().isoformat()
+    records = record if isinstance(record, (list, tuple)) else [record]
     try:
         ns = ns or _client()
-        txn, problem = find_sandbox_record(ns, record)
-        if not txn:
-            return {"status": problem, "detail": f"{record.get('record_type')} {record.get('tranid')}: {problem}",
-                    "statement_line_id": None, "before": None}
-        reference = txn.get("custbody_statement_reference")
-        if _is_true(txn.get("custbody_reconciled")) and reference and reference != statement_id:
-            return {"status": STATUS_RECONCILED_ELSEWHERE,
-                    "detail": f"{txn['tranid']} is already reconciled by {reference} -- not changed",
-                    "statement_line_id": None, "before": None}
+        txns = []
+        for rec in records:
+            txn, problem = find_sandbox_record(ns, rec)
+            if not txn:
+                return {"status": problem, "detail": f"{rec.get('record_type')} {rec.get('tranid')}: {problem}"
+                        + (" -- nothing written" if len(records) > 1 else ""),
+                        "statement_line_id": None, "before": None}
+            reference = txn.get("custbody_statement_reference")
+            if _is_true(txn.get("custbody_reconciled")) and reference and reference != statement_id:
+                return {"status": STATUS_RECONCILED_ELSEWHERE,
+                        "detail": f"{txn['tranid']} is already reconciled by {reference} -- not changed"
+                        + (" (nothing written)" if len(records) > 1 else ""),
+                        "statement_line_id": None, "before": None}
+            if any(str(t["id"]) == str(txn["id"]) for t in txns):
+                continue
+            txns.append(txn)
+        txn = txns[0]   # the Statement Line's vendor/location come from the first
 
-        record_type = _RECORD_TYPE[txn["type"]]
         writes = []
         link, _ = resolve_pdf_link(statement_id)
 
-        # 1. The picked bill/credit.
-        bill_body = {"custbody_reconciled": True, "custbody_reconciled_date": today,
-                     "custbody_statement_reference": statement_id, "custbody_reconciliation_exception": None,
-                     MATCHED_BILL_FIELD: invoice_number}
-        if link:
-            bill_body["custbody_statement_link"] = link
-        before_bill = _read_bill(ns, txn["id"])
-        _write(ns, writes, "bill", record_type, txn["id"], bill_body, before_bill,
-               _bill_check(ns, bill_body, before_bill))
+        # 1. Each picked bill/credit.
+        for picked in txns:
+            bill_body = {"custbody_reconciled": True, "custbody_reconciled_date": today,
+                         "custbody_statement_reference": statement_id, "custbody_reconciliation_exception": None,
+                         MATCHED_BILL_FIELD: invoice_number}
+            if link:
+                bill_body["custbody_statement_link"] = link
+            before_bill = _read_bill(ns, picked["id"])
+            _write(ns, writes, "bill", _RECORD_TYPE[picked["type"]], picked["id"], bill_body, before_bill,
+                   _bill_check(ns, bill_body, before_bill))
 
         # 2. A different bill the write-back flagged for this invoice: clear the flag only.
+        picked_ids = {str(t["id"]) for t in txns}
         flagged = [r for r in fetch_sandbox_transactions(ns, [e for e in (statement_entity_ids or []) if str(e).isdigit()],
                                                          [invoice_number]).get(invoice_number.lower(), [])
-                   if str(r["id"]) != str(txn["id"]) and r.get("custbody_reconciliation_exception")
+                   if str(r["id"]) not in picked_ids and r.get("custbody_reconciliation_exception")
                    and r.get("custbody_statement_reference") == statement_id]
         for old in flagged:
             body = {"custbody_reconciliation_exception": None}
@@ -198,10 +213,11 @@ def write_manual_match(statement_id: str, invoice_number: str, statement_amount,
                    before_old, _bill_check(ns, body, before_old))
 
         # 3. The Statement Line for the invoice: update it, or create it.
-        # A single bill link or a Multiple Select -- whichever NetSuite has now.
+        # A single bill link (the first record) or a Multiple Select (all of
+        # them) -- whichever NetSuite has now.
         sl_body = {"custrecord_sl_status": "Matched", "custrecord_sl_exception_type": None,
                    matched_bill_field.FIELD: matched_bill_field.value_for(matched_bill_field.field_mode(ns),
-                                                                          [str(txn["id"])]),
+                                                                          [str(t["id"]) for t in txns]),
                    "custrecord_sl_reconciled": True, "custrecord_sl_reconciled_date": today}
         sl_id = find_statement_line(ns, statement_id, invoice_number)
         if sl_id:

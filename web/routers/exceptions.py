@@ -16,6 +16,7 @@ under /exceptions/ is safe from it).
 
 import os
 from collections import Counter
+from typing import List
 from urllib.parse import quote, unquote, urlencode
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -30,7 +31,7 @@ from web.routers.statements import _inline_filename, pdf_editing_enabled
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_bill_payments, fetch_netsuite_record_for_invoice
 from src.matching.netsuite_search import TOLERANCES, REMOVED_TOLERANCES, STATUSES, fetch_record, search_open_ap
-from src.lakehouse.recon_table import MatchConflict
+from src.lakehouse.recon_table import MAX_RECORDS, MatchConflict
 from src.matching.netsuite_status_codes import decode_netsuite_status
 from src.matching.netsuite_vendor_resolver import resolve_entity_ids
 from src.netsuite.locations import known_codes, shop_options
@@ -449,13 +450,17 @@ def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(
 
 @router.post("/exceptions/{vendor_name}/accept-match")
 def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depends(require_login),
-                            exception_id: str = Form(...), record_type: str = Form(...),
-                            internal_id: str = Form(...), note: str = Form(""),
+                            exception_id: str = Form(...), record_type: str = Form(""),
+                            internal_id: str = Form(""), picks: List[str] = Form([]), note: str = Form(""),
                             filter: str = Form("all"), statement_id: str = Form(""), sort: str = Form("")):
     """"Accept as match" from the Find in NetSuite panel (2026-10-19): links
     the open exception's statement invoice to the picked NetSuite bill or
     credit -- re-read here by internal id, never taken from the page -- in
     the recon table, and resolves the exception (queries.accept_manual_match()).
+    Several can be picked for a split payment (2026-11-06): each comes as a
+    `picks` field "bill:123" / "credit:456"; one pick may still come as
+    record_type + internal_id. They don't have to add up to the statement
+    amount -- the difference is saved with the match.
     Registered ahead of the {vendor_name:path} POST route below, like escalate.
     A conflict comes back as a message on the page, not an error."""
     vendor_name = unquote(vendor_name)
@@ -466,22 +471,40 @@ def exceptions_accept_match(vendor_name: str, request: Request, user: str = Depe
     def _message(text):
         return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
 
+    wanted = []
+    for pick in picks or ([f"{record_type}:{internal_id}"] if record_type or internal_id else []):
+        kind, _, rid = str(pick).partition(":")
+        if (kind.lower(), rid) not in wanted:
+            wanted.append((kind.lower(), rid))
+    if not wanted:
+        return _message("Not matched: pick at least one NetSuite bill or credit. Nothing was changed.")
+    if len(wanted) > MAX_RECORDS:
+        return _message(f"Not matched: at most {MAX_RECORDS} NetSuite records can be matched to one invoice. "
+                        "Nothing was changed.")
+
     exception = queries.get_recon_exception(exception_id)
     if not exception or exception.get("exception_status") != "OPEN":
         return _message("Not matched: this exception was already resolved (by you or someone else), "
                         "so there's nothing left to match. Nothing was changed.")
+    records = []
+    for kind, rid in wanted:
+        try:
+            record = fetch_record(kind, rid)
+        except Exception:
+            return _message("Not matched: couldn't reach NetSuite just now. Nothing was changed -- "
+                            "try again in a minute.")
+        if not record:
+            return _message("Not matched: " + ("that NetSuite bill or credit" if len(wanted) == 1 else
+                                               f"one of the picked records ({kind} {rid})")
+                            + " no longer exists. Nothing was changed.")
+        records.append(record)
     try:
-        record = fetch_record(record_type, internal_id)
-    except Exception:
-        return _message("Not matched: couldn't reach NetSuite just now. Nothing was changed -- try again in a minute.")
-    if not record:
-        return _message("Not matched: that NetSuite bill or credit no longer exists. Nothing was changed.")
-    try:
-        netsuite = queries.accept_manual_match(exception, record, vendor_name, user, note.strip() or None) or {}
+        netsuite = queries.accept_manual_match(exception, records[0] if len(records) == 1 else records,
+                                               vendor_name, user, note.strip() or None) or {}
     except (MatchConflict, ValueError) as exc:
         return _message(f"Not matched: {exc}")
     return _message(f"Invoice {exception['invoice_number']} matched to NetSuite "
-                    f"{record['record_type'].lower()} {record.get('tranid')}. "
+                    f"{queries.describe_records(records)}. "
                     f"NetSuite: {without_sandbox(netsuite.get('status') or 'not written')}.")
 
 
