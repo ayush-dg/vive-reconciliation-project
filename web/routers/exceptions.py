@@ -56,7 +56,8 @@ REASON_BADGE = {
     "Not Found in NetSuite": {"label": "Not found in NetSuite", "css": "exception"},
     "Vendor Not Resolved in NetSuite": {"label": "Vendor not resolved", "css": "grey"},
     # 2026-11-05: the invoice matched a bill NetSuite already shows Paid In Full.
-    "Appears to be Paid": {"label": "Appears to be paid", "css": "review"},
+    # Green (2026-11-06), so it no longer looks like an amount mismatch (yellow).
+    "Appears to be Paid": {"label": "Appears to be paid", "css": "matched"},
 }
 
 # Bulk approve only ever targets exceptions the matching engine scored
