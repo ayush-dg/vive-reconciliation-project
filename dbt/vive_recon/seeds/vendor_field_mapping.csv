@@ -1235,3 +1235,28 @@ VAN_BORTEL_MOTORCAR_INC.,SRC,transaction_code,string,v1,1
 VAN_BORTEL_MOTORCAR_INC.,CHARGES,charge_amount,decimal,v1,1
 VAN_BORTEL_MOTORCAR_INC.,CREDITS,payment_amount,decimal,v1,1
 VAN_BORTEL_MOTORCAR_INC.,BALANCE,amount_remaining,decimal,v1,1
+802_SUBARU,DATE,line_date,date,v1,1
+802_SUBARU,REF NO.,original_invoice_number,string,v1,1
+802_SUBARU,APPLY TO,invoice_number_ref,string,v1,1
+802_SUBARU,SRC,transaction_code,string,v1,1
+802_SUBARU,CHARGES,charge_amount,decimal,v1,1
+802_SUBARU,CREDITS,payment_amount,decimal,v1,1
+802_SUBARU,BALANCE,amount_remaining,decimal,v1,1
+ARTIOLI_DODGE,DATE,line_date,date,v1,1
+ARTIOLI_DODGE,REF NO.,original_invoice_number,string,v1,1
+ARTIOLI_DODGE,APPLY TO,invoice_number_ref,string,v1,1
+ARTIOLI_DODGE,SRC,transaction_code,string,v1,1
+ARTIOLI_DODGE,CHARGES,charge_amount,decimal,v1,1
+ARTIOLI_DODGE,CREDITS,payment_amount,decimal,v1,1
+ARTIOLI_DODGE,BALANCE,amount_remaining,decimal,v1,1
+TOWNE_AUTOMOTIVE_GROUP,DATE,line_date,date,v1,1
+TOWNE_AUTOMOTIVE_GROUP,REFERENCE #,original_invoice_number,string,v1,1
+TOWNE_AUTOMOTIVE_GROUP,PURCHASES ($),charge_amount,decimal,v1,1
+TOWNE_AUTOMOTIVE_GROUP,PAYMENTS & CREDITS ($),payment_amount,decimal,v1,1
+TOWNE_AUTOMOTIVE_GROUP,BALANCE DUE ($),amount_remaining,decimal,v1,1
+ELITE_AUTO_GLASS_SOLUTIONS_LLC,Date,line_date,date,v1,1
+ELITE_AUTO_GLASS_SOLUTIONS_LLC,Transaction,original_invoice_number,string,v1,1
+ELITE_AUTO_GLASS_SOLUTIONS_LLC,Reference,ro_number,string,v1,1
+ELITE_AUTO_GLASS_SOLUTIONS_LLC,Invoiced,charge_amount,decimal,v1,1
+ELITE_AUTO_GLASS_SOLUTIONS_LLC,Paid,payment_amount,decimal,v1,1
+ELITE_AUTO_GLASS_SOLUTIONS_LLC,Balance,amount_remaining,decimal,v1,1

@@ -220,3 +220,56 @@ def test_review_page_shows_the_paid_bill_and_its_payment():
 def test_paid_filter_selects_only_appears_to_be_paid():
     from web import queries
     assert queries._REASON_FILTER_SQL["paid"] == [fm.APPEARS_PAID]
+
+
+@pytest.mark.parametrize("table,selects_status", [("netsuite_vendorbill", True), ("netsuite_vendorcredit", False)])
+def test_fabric_query_reads_status_only_from_bills(table, selects_status):
+    # Fabric's bronze.netsuite_vendorcredit has no status column: selecting it
+    # failed every Fabric read (prod, 2026-11-05).
+    cur = mock.Mock()
+    cur.fetchall.return_value = [("CM1", 10.0, "5", "VC5", "4242", "12", None)]
+    with mock.patch.dict(os.environ, {"NETSUITE_SOURCE": "fabric"}):
+        fm._fetch_netsuite_candidates(cur, ["4242"], table)
+    sql = cur.execute.call_args[0][0]
+    assert (", status FROM" in sql) is selects_status
+    assert selects_status or "NULL AS status" in sql
+
+
+def _payment_rows():
+    # VENDPYMT158694 as Fabric holds it (2026-11-05): extracted before the
+    # check was printed (no check number, planned date 9/29) and again after
+    # (check 7117796, date moved to 9/22).
+    from datetime import datetime as dt
+    before = ("4664146", None, "VENDPYMT158694", "9/29/2026", 30.96, "2026-09-21 12:50:31",
+              dt(2026, 9, 22, 1, 0, 26), dt(2026, 9, 22, 1, 0, 26), "F")
+    after = ("4664146", "7117796", "VENDPYMT158694", "9/22/2026", 30.96, "2026-09-22 09:53:29",
+             dt(2026, 9, 24, 3, 30, 23), dt(2026, 9, 24, 3, 30, 23), "F")
+    return before, after
+
+
+@pytest.mark.parametrize("order", ["old_first", "new_first"])
+def test_bill_payments_show_only_the_newest_version(order):
+    before, after = _payment_rows()
+    rows = [before, after] if order == "old_first" else [after, before]
+    assert fm._latest_payment_versions(rows) == [
+        {"tranid": "7117796", "transactionnumber": "VENDPYMT158694", "trandate": "9/22/2026", "amount": 30.96}]
+
+
+def test_bill_payments_repeated_extract_rows_collapse_to_one():
+    _, after = _payment_rows()
+    assert len(fm._latest_payment_versions([after, after, after])) == 1
+
+
+def test_bill_payments_voided_in_newest_version_is_left_out():
+    before, after = _payment_rows()
+    voided = after[:5] + ("2026-10-01 08:00:00",) + after[6:8] + ("T",)
+    assert fm._latest_payment_versions([before, after, voided]) == []
+
+
+def test_bill_payments_separate_payments_kept_oldest_first():
+    _, after = _payment_rows()
+    other = ("4700001", "7120000", "VENDPYMT160001", "10/15/2026", 12.0, "2026-10-15 10:00:00",
+             None, None, "F")
+    first = ("4600000", "7000000", "VENDPYMT150000", "8/02/2026", 5.0, "2026-08-02 10:00:00", None, None, "F")
+    got = fm._latest_payment_versions([other, after, first])
+    assert [p["transactionnumber"] for p in got] == ["VENDPYMT150000", "VENDPYMT158694", "VENDPYMT160001"]

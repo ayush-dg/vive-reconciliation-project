@@ -387,7 +387,11 @@ DATE_KEYWORDS = ("invoice date", "posting date", "transaction date", "date")
 OUTSTANDING_KEYWORDS = ("amount due", "balance", "outstanding", "remaining", "remain", "net amount", "unpaid", "due",
                         "open amount", "open amt")
 CREDIT_KEYWORDS = ("credits", "payments", "credit memo", "credit", "applied", "paid", "pymt", "pymts")
-CHARGE_KEYWORDS = ("charges", "purchases", "amount charged", "invoice amt", "debit", "gross amount", "orig amt", "original amount", "charged", "invoice amount")
+# "invoiced"/"billed" (2026-11-05): Elite Auto Glass prints Invoiced / Paid /
+# Balance; with no charge column recognised, its RUNNING Balance was summed as
+# the charge amount ($655,373.85 against a printed $4,712.50).
+CHARGE_KEYWORDS = ("charges", "purchases", "amount charged", "invoice amt", "debit", "gross amount", "orig amt", "original amount", "charged", "invoice amount",
+                   "invoiced", "billed")
 # Exact-match headers (2026-10-06). Substring matching can't be used for
 # these: "charge"/"payment" would also hit "Finance Charge"/"Payment Due
 # Date"-style headers. Headlights Depot and Wheel Collision print singular

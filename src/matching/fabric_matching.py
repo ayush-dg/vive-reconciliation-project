@@ -362,7 +362,10 @@ def _fetch_netsuite_candidates(cur, entity_ids: list, table: str) -> dict:
     if rows is None:
         placeholders = ",".join("?" * len(entity_ids))
         cur.execute(
-            f"SELECT tranid, total, id, transactionnumber, entity, location, status FROM bronze.{table} "
+            # status only on bills: Fabric's vendorcredit copy has no status
+            # column (2026-11-05: selecting it failed every Fabric read).
+            f"SELECT tranid, total, id, transactionnumber, entity, location, "
+            f"{'status' if table == 'netsuite_vendorbill' else 'NULL AS status'} FROM bronze.{table} "
             f"WHERE entity IN ({placeholders}) AND voided = 'F' AND tranid IS NOT NULL",
             entity_ids,
         )
@@ -1227,7 +1230,13 @@ def fetch_bill_payments(bill_id) -> list:
     "Appears to be Paid" review (2026-11-05): [{"tranid", "transactionnumber",
     "trandate", "amount"}] from Fabric's NetSuite copy (vendorpayment_apply's
     doc is JSON whose "id" is the bill). Voided payments are left out.
-    Display only: [] when Fabric isn't configured or the read fails."""
+
+    The copy keeps every extracted version of a record, and a payment
+    changes after it is created (printing the check adds the check number
+    and moves the date), so the same payment appears more than once. Only
+    its newest version is shown: one row per payment internal id, the
+    latest lastmodifieddate / extraction. Display only: [] when Fabric
+    isn't configured or the read fails."""
     if not _fabric_configured() or not str(bill_id or "").strip():
         return []
     try:
@@ -1235,26 +1244,46 @@ def fetch_bill_payments(bill_id) -> list:
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT p.tranid, p.transactionnumber, p.trandate, a.amount "
+                "SELECT p.id, p.tranid, p.transactionnumber, p.trandate, a.amount, "
+                "p.lastmodifieddate, p._extracted_at, a._extracted_at, p.voided "
                 "FROM bronze.netsuite_vendorpayment_apply a "
                 "JOIN bronze.netsuite_vendorpayment p ON p.id = a.vendorpayment_id "
-                "WHERE JSON_VALUE(a.doc, '$.id') = ? AND a.apply = 'true' AND p.voided = 'F'",
+                "WHERE JSON_VALUE(a.doc, '$.id') = ? AND a.apply = 'true'",
                 [str(bill_id).strip()],
             )
-            seen, payments = set(), []
-            for tranid, number, trandate, amount in cur.fetchall():
-                key = (tranid, number, str(trandate), amount)
-                if key in seen:  # the apply table repeats a row per extract run
-                    continue
-                seen.add(key)
-                payments.append({"tranid": tranid, "transactionnumber": number,
-                                 "trandate": trandate, "amount": amount})
-            return payments
+            return _latest_payment_versions(cur.fetchall())
         finally:
             conn.close()
     except Exception:
         logger.exception("Payment lookup failed for bill %s", bill_id)
         return []
+
+
+def _latest_payment_versions(rows) -> list:
+    """One row per payment id -- its newest version -- oldest payment first.
+    A payment voided in its newest version is left out (an older, unvoided
+    copy must not bring it back)."""
+    def stamp(value):
+        return str(value) if value is not None else ""
+
+    newest = {}
+    for pid, tranid, number, trandate, amount, modified, pay_extracted, apply_extracted, voided in rows:
+        key = str(pid or number or tranid)
+        version = (stamp(modified), stamp(pay_extracted), stamp(apply_extracted))
+        if key not in newest or version > newest[key][0]:
+            newest[key] = (version, voided, {"tranid": tranid, "transactionnumber": number,
+                                             "trandate": trandate, "amount": amount})
+    payments = [row for _, voided, row in newest.values() if str(voided or "F").upper() != "T"]
+    payments.sort(key=lambda r: _payment_date_sort_key(r["trandate"]))
+    return payments
+
+
+def _payment_date_sort_key(value):
+    """NetSuite dates come as 'M/D/YYYY'; unparseable ones sort last."""
+    try:
+        return (0, datetime.strptime(str(value).strip(), "%m/%d/%Y"))
+    except (TypeError, ValueError):
+        return (1, datetime.max)
 
 
 _MATCH_COLUMNS = [
