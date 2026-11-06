@@ -27,6 +27,9 @@ EXTRACTED = {
     "802_SUBARU": {"APPLY TO", "BALANCE", "CHARGES", "CREDITS", "DATE", "REF NO.", "SRC"},
     # Dev STMT-2F0ADBE9 (2026-11-04); resolves to Artioli Dodge Inc. (3997) by name.
     "ARTIOLI_DODGE": {"APPLY TO", "BALANCE", "CHARGES", "CREDITS", "DATE", "REF NO.", "SRC"},
+    # Prod STMT-1C33163B / -697847A1 / -3106CCA6 (2026-11-05). JOURNAL ID and COMPANY ID are
+    # internal codes (36; 12/13) and are deliberately left unmapped.
+    "TOWNE_AUTOMOTIVE_GROUP": {"BALANCE DUE ($)", "DATE", "PAYMENTS & CREDITS ($)", "PURCHASES ($)", "REFERENCE #"},
 }
 
 

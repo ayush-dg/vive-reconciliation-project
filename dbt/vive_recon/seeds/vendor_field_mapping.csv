@@ -1249,3 +1249,8 @@ ARTIOLI_DODGE,SRC,transaction_code,string,v1,1
 ARTIOLI_DODGE,CHARGES,charge_amount,decimal,v1,1
 ARTIOLI_DODGE,CREDITS,payment_amount,decimal,v1,1
 ARTIOLI_DODGE,BALANCE,amount_remaining,decimal,v1,1
+TOWNE_AUTOMOTIVE_GROUP,DATE,line_date,date,v1,1
+TOWNE_AUTOMOTIVE_GROUP,REFERENCE #,original_invoice_number,string,v1,1
+TOWNE_AUTOMOTIVE_GROUP,PURCHASES ($),charge_amount,decimal,v1,1
+TOWNE_AUTOMOTIVE_GROUP,PAYMENTS & CREDITS ($),payment_amount,decimal,v1,1
+TOWNE_AUTOMOTIVE_GROUP,BALANCE DUE ($),amount_remaining,decimal,v1,1
