@@ -24,6 +24,7 @@ import json
 import logging
 import re
 
+from src.netsuite import matched_bill_field
 from src.netsuite.fields import STATEMENT_LINE_RECORD
 from src.netsuite.manual_match import (
     STATUS_FAILED, STATUS_OFF, STATUS_PARTLY, STATUS_PERIOD_LOCKED, STATUS_WRITTEN, _RECORD_TYPE, _bill_check,
@@ -69,15 +70,19 @@ def _read_full_statement_line(ns, record_id) -> dict:
     return rows[0] if rows else {}
 
 
-def recreate_body(copy: dict) -> dict:
+def recreate_body(copy: dict, matched_bill_mode: str = matched_bill_field.SINGLE) -> dict:
     """The create body (guard.STATEMENT_LINE_FIELDS shapes) for a Statement
-    Line from the copy read before it was deleted. Empty values are left out."""
+    Line from the copy read before it was deleted. Empty values are left out.
+    The Matched Bill goes in the shape NetSuite has now (`matched_bill_mode`)."""
     body = {}
     for key in _COPY_FIELDS:
         value = copy.get(key)
         if value is None or value == "":
             continue
-        if key in _LINK_FIELDS:
+        if key == matched_bill_field.FIELD:
+            if matched_bill_field.ids_from(value):
+                body[key] = matched_bill_field.value_for(matched_bill_mode, value)
+        elif key in _LINK_FIELDS:
             if str(value).strip().isdigit():
                 body[key] = {"id": str(value).strip()}
         elif key in _BOOL_FIELDS:
@@ -191,9 +196,12 @@ def undo_clear_writes(before_json: str, ns=None) -> dict:
     notes, failed = [], False
     try:
         ns = ns or _client()
+        mode = (matched_bill_field.field_mode(ns)
+                if any(matched_bill_field.ids_from((w.get("before") or {}).get(matched_bill_field.FIELD))
+                       for w in deleted) else matched_bill_field.SINGLE)
         for entry in deleted:
             try:
-                new_id = ns.create_record(STATEMENT_LINE_RECORD, recreate_body(entry["before"]))
+                new_id = ns.create_record(STATEMENT_LINE_RECORD, recreate_body(entry["before"], mode))
                 notes.append(f"statement line {entry['record_id']}: re-created as {new_id}")
             except Exception as exc:
                 failed = True

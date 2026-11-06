@@ -88,6 +88,22 @@ def _record_link(value):
     return ""
 
 
+_MAX_LINKS = 50
+
+
+def _record_link_or_links(value):
+    """One link ({"id"}) or a Multiple Select ({"items": [{"id"}, ...]}, at
+    most _MAX_LINKS) -- the Statement Line's Matched Bill can be either
+    (src/netsuite/matched_bill_field.py)."""
+    if isinstance(value, dict) and "items" in value:
+        if set(value) != {"items"} or not isinstance(value["items"], list):
+            return 'must be {"items": [{"id": "<digits>"}, ...]}'
+        if len(value["items"]) > _MAX_LINKS:
+            return f"more than {_MAX_LINKS} links"
+        return next((p for p in map(_record_link, value["items"]) if p), "")
+    return _record_link(value)
+
+
 # ----------------------------------------------------------------------
 # The allowlists
 # ----------------------------------------------------------------------
@@ -109,7 +125,7 @@ STATEMENT_LINE_FIELDS = {
     "custrecord_sl_statement_amount": _optional(_number),
     "custrecord_sl_status": _optional(_text(100)),
     "custrecord_sl_exception_type": _optional(_text(100)),
-    "custrecord_sl_matched_bill": _optional(_record_link),
+    "custrecord_sl_matched_bill": _optional(_record_link_or_links),
     "custrecord_sl_shop": _optional(_text(300)),
     "custrecord_sl_statement_link": _optional(_url(999)),
     "custrecord_sl_location": _optional(_record_link),

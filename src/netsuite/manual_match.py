@@ -28,6 +28,7 @@ import os
 from datetime import date
 
 from src.netsuite.fields import MATCHED_BILL_FIELD, STATEMENT_LINE_RECORD
+from src.netsuite import matched_bill_field
 from src.netsuite.guard import KEY_FIELDS, key_field_changes
 from src.netsuite.writeback import (
     KEY_FIELD_CHANGED, _is_period_locked, _is_true, _sql_literal, _ties, fetch_sandbox_transactions,
@@ -144,7 +145,7 @@ def _sl_check(ns, body):
         row = _read_statement_line(ns, record_id)
         if not row:
             return "record not found on read-back"
-        if str(row.get("custrecord_sl_matched_bill") or "") != str(body["custrecord_sl_matched_bill"]["id"]):
+        if not matched_bill_field.same_bills(row.get(matched_bill_field.FIELD), body[matched_bill_field.FIELD]):
             return "read-back mismatch on matched bill"
         return ""
     return check
@@ -197,8 +198,10 @@ def write_manual_match(statement_id: str, invoice_number: str, statement_amount,
                    before_old, _bill_check(ns, body, before_old))
 
         # 3. The Statement Line for the invoice: update it, or create it.
+        # A single bill link or a Multiple Select -- whichever NetSuite has now.
         sl_body = {"custrecord_sl_status": "Matched", "custrecord_sl_exception_type": None,
-                   "custrecord_sl_matched_bill": {"id": str(txn["id"])},
+                   matched_bill_field.FIELD: matched_bill_field.value_for(matched_bill_field.field_mode(ns),
+                                                                          [str(txn["id"])]),
                    "custrecord_sl_reconciled": True, "custrecord_sl_reconciled_date": today}
         sl_id = find_statement_line(ns, statement_id, invoice_number)
         if sl_id:
@@ -241,12 +244,16 @@ def write_manual_match(statement_id: str, invoice_number: str, statement_amount,
                 "statement_line_id": None, "before": None}
 
 
-def _restore(key, value):
-    """A value read by SuiteQL, in the shape the REST PATCH takes."""
+def _restore(key, value, mode=matched_bill_field.SINGLE):
+    """A value read by SuiteQL, in the shape the REST PATCH takes. The
+    Matched Bill goes back in the shape NetSuite has NOW (`mode`), not the
+    one it had when the match was written."""
     from src.netsuite.writeback import _previous_date_as_iso
     if key in ("custbody_reconciled", "custrecord_sl_reconciled"):
         return _is_true(value)
-    if key in ("custbody_reconciliation_exception", "custrecord_sl_matched_bill"):
+    if key == matched_bill_field.FIELD:
+        return matched_bill_field.value_for(mode, value)
+    if key == "custbody_reconciliation_exception":
         return {"id": str(value)} if value else None
     if key in ("custbody_reconciled_date", "custrecord_sl_reconciled_date"):
         return _previous_date_as_iso(value)
@@ -260,8 +267,8 @@ def _still_ours(current: dict, sent: dict) -> list:
         now = current.get(key)
         if isinstance(value, bool):
             same = _is_true(now) == value
-        elif isinstance(value, dict):
-            same = str(now or "") == str(value.get("id") or "")
+        elif isinstance(value, dict):   # a link, or a Multiple Select's {"items": [...]}
+            same = matched_bill_field.same_bills(now, value)
         elif key.endswith("_date"):
             same = True  # SuiteQL and REST spell dates differently; the date alone never blocks an undo
         else:
@@ -282,7 +289,7 @@ def undo_manual_match_writes(before_json: str, ns=None) -> dict:
         return {"status": STATUS_OFF, "detail": "NETSUITE_WRITEBACK_ENABLED is not true -- NetSuite not changed"}
     try:
         ns = ns or _client()
-        notes, failed = [], False
+        notes, failed, mode = [], False, None
         for entry in json.loads(before_json).get("writes", []):
             if not entry.get("ok"):
                 continue
@@ -294,7 +301,9 @@ def undo_manual_match_writes(before_json: str, ns=None) -> dict:
                     continue
                 current = _read_statement_line(ns, rid) if rtype == STATEMENT_LINE_RECORD else _read_bill(ns, rid)
                 changed = _still_ours(current, entry["sent"])
-                body = {k: _restore(k, entry["before"].get(k)) for k in entry["sent"] if k not in changed}
+                if matched_bill_field.FIELD in entry["sent"] and mode is None:
+                    mode = matched_bill_field.field_mode(ns)
+                body = {k: _restore(k, entry["before"].get(k), mode) for k in entry["sent"] if k not in changed}
                 if body:
                     ns.patch_record(rtype, rid, body)
                 notes.append(f"{entry['kind']} {rid}: restored" +
