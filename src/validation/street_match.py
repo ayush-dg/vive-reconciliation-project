@@ -18,7 +18,7 @@ _HOUSE_NUMBER_RE = re.compile(r"^(\d+)[a-z]?$")
 _ROUTE_WORDS = {"hwy", "highway", "route", "rte", "rt", "sr"}
 # Words that say what kind of street it is or which side of it, not which one.
 _SET_ASIDE = {
-    "street", "st", "avenue", "ave", "road", "rd", "pike", "drive", "dr", "lane", "ln", "boulevard", "blvd",
+    "street", "st", "avenue", "ave", "road", "rd", "pike", "turnpike", "tpke", "tpk", "drive", "dr", "lane", "ln", "boulevard", "blvd",
     "court", "ct", "way", "place", "pl", "parkway", "pkwy", "trail", "trl", "circle", "cir", "terrace", "ter",
     "square", "sq", "unit", "suite", "ste", "north", "south", "east", "west", "ne", "nw", "se", "sw",
     "state", "us",

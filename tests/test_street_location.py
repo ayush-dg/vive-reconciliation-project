@@ -131,10 +131,10 @@ class StreetStep(NetSuiteShops):
         self.assertEqual(resolve_billing_location("Springfield, MA", ["VIVE COLLISION"], addresses=addresses),
                          ("Springfield, MA", "unmapped"))
 
-    def test_two_shops_at_one_address_are_not_picked(self):
+    def test_two_shops_at_one_address_take_the_default(self):
         addresses = [{"label": "bill_to", "street": "819 New Bloomfield Rd", "city": "Duncannon", "state": "PA"}]
         self.assertEqual(resolve_billing_location("Duncannon, PA", ["VIVE COLLISION"], addresses=addresses),
-                         ("Duncannon, PA", "unmapped"))
+                         ("Noaker's", "street_match"))
 
     def test_noakers_at_the_shared_address_is_noakers(self):
         # KSI (Noakers): "Noakers Collision" at 819 New Bloomfield Rd, which is both shops' address.
@@ -149,10 +149,10 @@ class StreetStep(NetSuiteShops):
         self.assertEqual(resolve_billing_location("Neptune, NJ", ["VIVE COLLISION"], addresses=addresses),
                          ("Neptune, NJ", "unmapped"))
 
-    def test_name_and_street_naming_different_shops_conflict(self):
+    def test_the_name_wins_over_a_street_at_another_shop(self):
         addresses = [{"label": "bill_to", "street": "1524 Minot Ave", "city": "Auburn", "state": "ME"}]
         self.assertEqual(resolve_billing_location("Auburn, ME", ["VIVE COLLISION - RP BELL"], addresses=addresses),
-                         ("Auburn, ME", "conflict"))
+                         ("RP Bell", "name_match"))
 
     def test_name_and_street_agreeing(self):
         addresses = [{"label": "bill_to", "street": "508 HIGHWAY 35", "city": "NEPTUNE", "state": "NJ"}]

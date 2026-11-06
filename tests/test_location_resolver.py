@@ -94,14 +94,18 @@ class Unmapped(unittest.TestCase):
 
 
 class Conflict(unittest.TestCase):
-    def test_name_and_phone_naming_different_shops(self):
+    def test_the_name_wins_over_a_phone_for_another_shop(self):
         # RP Bell by name, Coleman's by phone.
         self.assertEqual(resolve_billing_location("Scarborough, ME", "VIVE COLLISION - RP BELL", phone="(207) 784-6121"),
-                         ("Scarborough, ME", "conflict"))
+                         ("RP Bell", "name_match"))
 
-    def test_name_and_city_naming_different_shops(self):
+    def test_the_name_wins_over_a_city_that_points_elsewhere(self):
         self.assertEqual(resolve_billing_location("Auburn, ME", "VIVE COLLISION - RP BELL"),
-                         ("Auburn, ME", "conflict"))
+                         ("RP Bell", "name_match"))
+
+    def test_without_a_name_address_signals_that_disagree_are_a_conflict(self):
+        # Auburn's city is Coleman's; the phone is RP Bell's.
+        self.assertEqual(resolve_billing_location("Auburn, ME", None, phone="(207) 282-6860")[1], "conflict")
 
     def test_signals_that_agree_are_not_a_conflict(self):
         self.assertEqual(resolve_billing_location("Auburn, ME", "Coleman's Auto Body", phone="(207) 784-6121"),
@@ -134,7 +138,7 @@ class NameFamilies(unittest.TestCase):
                          ("Prestige - NH", "name_match"))
 
     def test_a_family_name_with_nothing_else_is_ambiguous(self):
-        for text in ("VIVE COLLISION - MIDDLETOWN", "Prestige", "Noaker's"):
+        for text in ("VIVE COLLISION - MIDDLETOWN", "Prestige"):
             with self.subTest(text=text):
                 self.assertEqual(resolve_billing_location(None, text), (None, "ambiguous"))
 
@@ -147,7 +151,13 @@ class NameFamilies(unittest.TestCase):
         self.assertEqual(resolve_billing_location("Duncannon, PA", "Noaker's"), ("Noaker's", "name_match"))
 
     def test_a_family_name_at_an_address_that_is_not_the_familys_stays_ambiguous(self):
-        self.assertEqual(resolve_billing_location("Somewhere, PA", "Noaker's"), ("Somewhere, PA", "ambiguous"))
+        self.assertEqual(resolve_billing_location("Somewhere, PA", "Prestige"), ("Somewhere, PA", "ambiguous"))
+
+    def test_noakers_is_the_default_when_nothing_says_which_of_its_shops(self):
+        self.assertEqual(resolve_billing_location(None, "Noaker's"), ("Noaker's", "name_match"))
+        self.assertEqual(resolve_billing_location(None, "VIVE COLLISION NOAKERS"), ("Noaker's", "name_match"))
+        self.assertEqual(resolve_billing_location("Duncannon, PA", ["VIVE COLLISION OF DUNCANNON"]), ("Noaker's", "city_match"))
+        self.assertEqual(resolve_billing_location(None, "Noaker's Truck Shop"), ("Noaker's Truck Shop", "name_match"))
 
     def test_the_phone_separates_a_shared_city(self):
         # The sheet has no phone for Noaker's Truck Shop; Noaker's has one.
@@ -160,9 +170,9 @@ class NameFamilies(unittest.TestCase):
         self.assertEqual(resolve_billing_location("Middletown, NJ", "VIVE COLLISION - MIDDLETOWN"),
                          ("Middletown - NJ", "name_match"))
 
-    def test_a_signal_for_another_shop_is_a_conflict_not_a_family_pick(self):
+    def test_a_signal_for_another_shop_does_not_settle_the_family(self):
         self.assertEqual(resolve_billing_location(None, "Middletown", phone=shop_list.by_name("Coleman's")["phone"])[1],
-                         "conflict")
+                         "ambiguous")
 
 
 class FuzzyStep(unittest.TestCase):
@@ -184,9 +194,46 @@ class FuzzyStep(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(resolve_billing_location(None, text)[1], "unmapped")
 
-    def test_a_close_match_that_disagrees_with_the_phone_is_a_conflict(self):
+    def test_a_close_match_wins_over_a_phone_for_another_shop(self):
         self.assertEqual(resolve_billing_location(None, "Colmans Auto Body",
-                                                  phone=shop_list.by_name("RP Bell")["phone"])[1], "conflict")
+                                                  phone=shop_list.by_name("RP Bell")["phone"]), ("Coleman's", "fuzzy_match"))
+
+
+class CutOffNames(unittest.TestCase):
+    """A name the PDF cut short is the shop it starts."""
+
+    def test_a_cut_off_shop_name(self):
+        for text, shop in (("VIVE COLLISION MAINE COLL", "Maine Collision"),
+                           ("VIVE COLLISION DBA MAINE COLLI", "Maine Collision"),
+                           ("VIVE COLLISION - MAINE", "Maine Collision"),
+                           ("VIVE COLLISION-LYNDH", "Lyndhurst")):
+            with self.subTest(text=text):
+                self.assertEqual(resolve_billing_location(None, [text]), (shop, "fuzzy_match"))
+
+    def test_the_whole_text_being_a_shops_significant_name(self):
+        self.assertEqual(resolve_billing_location(None, ["VIVE COLLISION- J.A.S. AUTOBODY"]), ("J.A.S. Auto", "fuzzy_match"))
+
+    def test_a_country_after_the_city_is_not_a_state(self):
+        self.assertEqual(resolve_billing_location("Allentown, US", ["VIVE COLLISION"]), ("Lehigh Valley", "city_match"))
+
+    def test_a_city_in_the_shop_text_is_a_city(self):
+        self.assertEqual(resolve_billing_location("ESSEX", ["VIVE COLLISION OF SOUTH ORANGE"]), ("Modern", "city_match"))
+        self.assertEqual(resolve_billing_location(None, ["VIVE HIGH FALLS"]), ("Jake's", "city_match"))
+
+    def test_a_city_shared_by_shops_in_the_text_is_still_no_match(self):
+        self.assertEqual(resolve_billing_location(None, ["VIVE COLLISION OF NEPTUNE"])[1], "unmapped")
+
+    def test_a_street_returned_as_the_location_is_matched_as_a_street(self):
+        self.assertEqual(resolve_billing_location("2302 LUCAS TPKE", ["VIVE HIGH FALLS"]), ("Jake's", "street_match"))
+
+    def test_a_generic_word_is_not_a_cut_off_name(self):
+        # "Collision" starts "Collision Restoration".
+        for text in ("VIVE 508 COLLISION", "CROWN COLLISION", "VIVE COLLISION"):
+            self.assertEqual(resolve_billing_location(None, [text])[1], "unmapped")
+
+    def test_a_street_word_is_not_a_cut_off_name(self):
+        # "Main" starts "Maine Collision", but "Neptune S Main" is a street.
+        self.assertEqual(resolve_billing_location(None, ["VIVE COLLISION -NEPTUNE S MAIN"])[1], "unmapped")
 
 
 class ShopDetails(unittest.TestCase):
@@ -250,7 +297,7 @@ class Logging(unittest.TestCase):
         self.assertIn("name_match", logs.output[0])
 
     def test_unmapped_and_conflict_are_warnings(self):
-        for args in (("Scarborough, ME", None), ("Auburn, ME", "VIVE COLLISION - RP BELL")):
+        for args in (("Scarborough, ME", None), ("Auburn, ME", None, "(207) 282-6860")):
             with self.subTest(args=args), self.assertLogs("src.validation.location_lookup", level="WARNING"):
                 resolve_billing_location(*args)
 
@@ -272,9 +319,6 @@ class Aliases(unittest.TestCase):
         self.assertEqual(resolve_billing_location("Auburn, ME", ["SEBAGO LAKE COLLISION, LLC"]), ("Sebago", "name_match"))
         self.assertEqual(resolve_billing_location("MANCHESTER, NH", ["VIVE COLLISION- CROSSROADS NH"]),
                          ("Crossroads", "name_match"))
-
-    def test_a_shops_own_name_still_conflicts_with_a_city_that_points_elsewhere(self):
-        self.assertEqual(resolve_billing_location("Auburn, ME", ["VIVE COLLISION - RP BELL"]), ("Auburn, ME", "conflict"))
 
     def test_an_alias_does_not_outrank_a_street_at_another_shop(self):
         street = [{"street": "181 S Main St", "city": "Neptune", "state": "NJ"}]
