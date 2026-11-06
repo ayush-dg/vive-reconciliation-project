@@ -264,6 +264,36 @@ _RECON_GROUPS = {
 _REASON_LABEL = {MISMATCH: "amount mismatch", NOT_FOUND: "not in NetSuite", PAID: "appears to be paid"}
 
 
+def _one_row_per_manual_line(recon_rows: list) -> list:
+    """A line matched by hand to several bills/credits (a split payment,
+    2026-11-06) has one manual row per record; the tab shows the line once,
+    with every record's number and what they add up to."""
+    from src.lakehouse.recon_table import SOURCE_MANUAL, net_amount, records_of
+    out, groups = [], {}
+    for r in recon_rows:
+        if r.get("source") != SOURCE_MANUAL:
+            out.append(r)
+            continue
+        key = (r.get("statement_line_id") or ("line", r.get("line_number")), r.get("invoice_number"))
+        if key not in groups:
+            groups[key] = []
+            out.append(key)
+        groups[key].append(r)
+    merged = []
+    for item in out:
+        if not isinstance(item, tuple):
+            merged.append(item)
+            continue
+        rows = groups[item]
+        records = records_of(rows)
+        if len(records) <= 1:
+            merged.append(rows[0])
+            continue
+        merged.append(dict(rows[0], netsuite_tranid=", ".join(str(x["tranid"]) for x in records),
+                           netsuite_amount=net_amount(records, rows[0].get("line_amount"))))
+    return merged
+
+
 def recon_view(recon_rows: list) -> dict:
     """The Reconciliation tab from the recon table ONLY (2026-10-22): one
     active row per statement line with its CURRENT status -- so a manual
@@ -272,7 +302,7 @@ def recon_view(recon_rows: list) -> dict:
     counted once each (by exception id) in the tiles and header, as on the
     Exceptions page; the filters count lines. Same shape as line_results()."""
     rows, open_ids, resolved_ids = [], {}, set()
-    for r in recon_rows:
+    for r in _one_row_per_manual_line(recon_rows):
         status = r.get("status") or ""
         group, label = _RECON_GROUPS.get(status, (None, status))
         if group is None:

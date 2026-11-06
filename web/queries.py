@@ -1316,10 +1316,17 @@ def get_recon_exception(exception_id: str):
     return rows[0] if rows else None
 
 
-def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepted_by: str,
+def describe_records(records) -> str:
+    """"bill 23" / "bill 23, credit CM9" for messages and notes."""
+    from src.lakehouse.recon_table import as_records
+    return ", ".join(f"{str(r.get('record_type') or '').lower()} {r.get('tranid')}" for r in as_records(records))
+
+
+def accept_manual_match(exception: dict, record, vendor_name: str, accepted_by: str,
                         note: str = None) -> None:
     """"Accept as match" (2026-10-19): the person picked NetSuite `record`
-    (a netsuite_search row, re-read by internal id) for this OPEN exception.
+    (a netsuite_search row, re-read by internal id) -- or several, a list,
+    for a split payment (2026-11-06) -- for this OPEN exception.
     The recon table gets Matched-manually rows first -- so a conflict
     (record already matched elsewhere) stops here before anything is
     resolved -- then the exception is resolved like Accept, with the match
@@ -1332,7 +1339,7 @@ def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepte
         exception.get("statement_amount"), record, accepted_by, note,
         vendor_id=exception.get("vendor_id"), vendor_name=vendor_name,
     )
-    match_note = f"Matched to NetSuite {record['record_type'].lower()} {record.get('tranid')}"
+    match_note = f"Matched to NetSuite {describe_records(record)}"
     try:
         resolve_exception(exception["exception_id"], statement_id, vendor_name, invoice_number,
                           exception.get("exception_reason"), "ACCEPTED",
@@ -1345,7 +1352,7 @@ def accept_manual_match(exception: dict, record: dict, vendor_name: str, accepte
     return _write_manual_match_to_netsuite(exception, record, vendor_name)
 
 
-def _write_manual_match_to_netsuite(exception: dict, record: dict, vendor_name: str) -> dict:
+def _write_manual_match_to_netsuite(exception: dict, record, vendor_name: str) -> dict:
     """The NetSuite sandbox write for an accepted manual match
     (src/netsuite/manual_match.py), with its outcome saved on the recon rows.
     Best-effort: the match and the resolution are already saved, so a

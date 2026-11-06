@@ -221,17 +221,66 @@ def _rows(cur, sql, params):
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+MAX_RECORDS = 50   # bills/credits in one manual match (the Statement Line's Multiple Select takes this many)
+
+
+def as_records(record) -> list:
+    """One picked record (a dict) or several (a list) -> a list."""
+    return list(record) if isinstance(record, (list, tuple)) else [record]
+
+
+def _is_credit(record: dict) -> bool:
+    return str(record.get("record_type") or "").lower() == "credit"
+
+
+def net_amount(records, statement_amount=None):
+    """What the picked NetSuite records add up to, comparable with the
+    statement line's amount (2026-11-06, split payments: one statement
+    invoice matched to several bills and/or credits). All of one kind: their
+    totals add up. Bills and credits mixed: bills minus credits for a charge
+    line, credits minus bills for a credit line -- e.g. a $150 bill and a $50
+    credit are $100 against a $100 invoice. None when any total is unknown."""
+    records = as_records(records)
+    totals = [_float(r.get("total")) for r in records]
+    if not records or any(t is None for t in totals):
+        return None
+    totals = [abs(t) for t in totals]
+    if len({_is_credit(r) for r in records}) == 1:
+        return round(sum(totals), 2)
+    charges = sum(t for r, t in zip(records, totals) if not _is_credit(r))
+    credits = sum(t for r, t in zip(records, totals) if _is_credit(r))
+    stmt = _float(statement_amount)
+    return round((credits - charges) if stmt is not None and stmt < 0 else (charges - credits), 2)
+
+
+def match_difference(records, statement_amount):
+    """Statement amount (as printed, unsigned) minus net_amount(), or None."""
+    net, stmt = net_amount(records, statement_amount), _float(statement_amount)
+    return None if net is None or stmt is None else round(abs(stmt) - net, 2)
+
+
 def accept_manual_match(statement_id: str, invoice_number: str, exception_id: str,
-                        exception_reason: str, statement_amount, record: dict, matched_by: str,
+                        exception_reason: str, statement_amount, record, matched_by: str,
                         note: str = None, vendor_id: str = None, vendor_name: str = None) -> int:
-    """A person accepted a NetSuite bill/credit for one statement invoice
-    ("Accept as match"). Adds a "manual" Matched-manually row for each of the
-    invoice's lines -- linked to `record` (a netsuite_search row: internal_id,
-    tranid, record_type, total, ...), difference = statement amount minus the
-    record's total -- and sets the invoice's auto rows inactive, in one
-    transaction. Raises MatchConflict when that record is already matched to
-    another statement line, ValueError when this invoice already has an
-    active manual match. Returns the number of rows added."""
+    """A person accepted one NetSuite bill/credit -- or several, for a split
+    payment (2026-11-06) -- for one statement invoice ("Accept as match").
+    `record` is one netsuite_search row (internal_id, tranid, record_type,
+    total, ...) or a list of them. Adds a "manual" Matched-manually row for
+    each of the invoice's lines and each record (the invoice is the group:
+    Undo and the NetSuite outcome go by invoice), every row carrying the
+    match's difference = statement amount minus net_amount(), and sets the
+    invoice's auto rows inactive, in one transaction. Raises MatchConflict
+    when a record is already matched to another statement line, ValueError
+    when this invoice already has an active manual match or the records are
+    empty, repeated or too many. Returns the number of rows added."""
+    records = as_records(record)
+    keys = [(str(r.get("record_type") or "").lower(), str(r.get("internal_id"))) for r in records]
+    if not records:
+        raise ValueError("Pick at least one NetSuite bill or credit.")
+    if len(set(keys)) != len(keys):
+        raise ValueError("The same NetSuite record was picked twice.")
+    if len(records) > MAX_RECORDS:
+        raise ValueError(f"At most {MAX_RECORDS} NetSuite records can be matched to one invoice.")
     now = _now()
     conn = get_connection()
     try:
@@ -239,14 +288,15 @@ def accept_manual_match(statement_id: str, invoice_number: str, exception_id: st
         if _rows(cur, "SELECT recon_id FROM recon WHERE statement_id = ? AND invoice_number = ? "
                       "AND source = ? AND is_active = 1", [statement_id, invoice_number, SOURCE_MANUAL]):
             raise ValueError(f"Invoice {invoice_number} already has a manual match on this statement.")
-        taken = _rows(cur, "SELECT statement_id, invoice_number FROM recon WHERE netsuite_internal_id = ? "
-                           "AND netsuite_record_type = ? AND is_active = 1 AND status IN (?, ?) "
-                           "AND NOT (statement_id = ? AND invoice_number = ?)",
-                      [str(record["internal_id"]), record["record_type"].lower(), *_MATCHED_STATUSES,
-                       statement_id, invoice_number])
-        if taken:
-            raise MatchConflict(f"NetSuite {record['record_type'].lower()} {record.get('tranid')} is already "
-                                f"matched to invoice {taken[0]['invoice_number']} on {taken[0]['statement_id']}.")
+        for rec in records:
+            taken = _rows(cur, "SELECT statement_id, invoice_number FROM recon WHERE netsuite_internal_id = ? "
+                               "AND netsuite_record_type = ? AND is_active = 1 AND status IN (?, ?) "
+                               "AND NOT (statement_id = ? AND invoice_number = ?)",
+                          [str(rec["internal_id"]), rec["record_type"].lower(), *_MATCHED_STATUSES,
+                           statement_id, invoice_number])
+            if taken:
+                raise MatchConflict(f"NetSuite {rec['record_type'].lower()} {rec.get('tranid')} is already "
+                                    f"matched to invoice {taken[0]['invoice_number']} on {taken[0]['statement_id']}.")
         # Only the exception's own line(s) (2026-10-22): another line printed
         # under the same invoice number keeps its own result -- Nucar line 49
         # ($75, matched) was overwritten by line 46's manual match.
@@ -259,11 +309,10 @@ def accept_manual_match(statement_id: str, invoice_number: str, exception_id: st
                               "AND is_active = 1 AND status NOT IN (?, ?) ORDER BY line_number",
                          [statement_id, invoice_number, SOURCE_AUTO, *_MATCHED_STATUSES])
         lines = auto or [{"vendor_id": vendor_id, "vendor_name": vendor_name, "line_amount": _float(statement_amount)}]
-        ns_amount, stmt_amount = _float(record.get("total")), _float(statement_amount)
-        difference = (round(abs(stmt_amount) - ns_amount, 2)
-                      if stmt_amount is not None and ns_amount is not None else None)
+        difference = match_difference(records, statement_amount)
         rows = []
-        for line in lines:
+        for line, record in ((line, record) for line in lines for record in records):
+            ns_amount = _float(record.get("total"))
             rows.append({
                 "recon_id": str(uuid.uuid4()), "statement_id": statement_id,
                 "vendor_id": line.get("vendor_id") or vendor_id, "vendor_name": line.get("vendor_name") or vendor_name,
@@ -323,8 +372,9 @@ def undo_manual_match(statement_id: str, invoice_number: str, undone_by: str) ->
             cur.execute("UPDATE recon SET is_active = 1, status = ?, updated_at = ? WHERE recon_id = ?",
                         [status, now, row["recon_id"]])
         conn.commit()
+        tranids = list(dict.fromkeys(m.get("netsuite_tranid") for m in manual if m.get("netsuite_tranid")))
         return {"exception_ids": sorted({m["exception_id"] for m in manual if m.get("exception_id")}),
-                "tranid": manual[0].get("netsuite_tranid")}
+                "tranid": ", ".join(tranids) or None}
     except Exception:
         try:
             conn.rollback()
@@ -335,18 +385,36 @@ def undo_manual_match(statement_id: str, invoice_number: str, undone_by: str) ->
         conn.close()
 
 
+def records_of(rows) -> list:
+    """The distinct NetSuite records a set of manual rows is linked to, in
+    order: [{"record_type", "internal_id", "tranid", "total"}]."""
+    seen, out = set(), []
+    for r in rows:
+        key = ((r.get("netsuite_record_type") or "").lower(), str(r.get("netsuite_internal_id")))
+        if key not in seen and r.get("netsuite_internal_id"):
+            seen.add(key)
+            out.append({"record_type": key[0], "internal_id": key[1], "tranid": r.get("netsuite_tranid"),
+                        "total": _float(r.get("netsuite_amount"))})
+    return out
+
+
 def manual_matches(statement_id: str) -> list:
     """Active manual matches on one statement, one per invoice (its first
-    line's row), for the review page's "Matched manually" list."""
+    line's row), for the review page's "Matched manually" list. Each carries
+    "records" (every bill/credit it is matched to -- several for a split
+    payment) and "net_amount" (what they add up to)."""
     rows = execute_query(
         "SELECT * FROM recon WHERE statement_id = ? AND source = ? AND is_active = 1 ORDER BY invoice_number, line_number",
         [statement_id, SOURCE_MANUAL],
     )
-    seen, out = set(), []
+    by_invoice = {}
     for row in rows:
-        if row["invoice_number"] not in seen:
-            seen.add(row["invoice_number"])
-            out.append(row)
+        by_invoice.setdefault(row["invoice_number"], []).append(row)
+    out = []
+    for invoice_rows in by_invoice.values():
+        records = records_of(invoice_rows)
+        first = invoice_rows[0]
+        out.append(dict(first, records=records, net_amount=net_amount(records, first.get("line_amount"))))
     return out
 
 

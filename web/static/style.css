@@ -1005,6 +1005,18 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
 .ns-accept-date { color: var(--text-muted); }
 .ns-accept-diff.ns-off b { color: var(--warning); }
 .ns-accept .btn-accept { margin-left: auto; width: auto; }
+/* Several picks (2026-11-06, split payments): one chip per record with a
+   remove button, the totals row under them, and a Paid warning. */
+.ns-pick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
+.ns-pick-item { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--navy-tint); font-size: 13px; }
+.ns-pick-remove { border: 0; background: transparent; cursor: pointer; font-size: 16px; line-height: 1;
+  padding: 0 6px; color: var(--text-muted); }
+.ns-pick-remove:hover { color: var(--text); }
+.ns-accept-totals { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; width: 100%; }
+.ns-accept-warn { color: var(--warning); font-size: 13px; width: 100%; }
+.ns-confirm-list { margin: 4px 0 8px; padding-left: 20px; }
+.ns-confirm-list[hidden] { display: none; }
 /* margin: auto centres it -- see .ns-modal above (the Accept-as-match confirm was top-left too). */
 .ns-confirm { margin: auto; width: min(520px, 92vw); padding: 22px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text); }
 .ns-confirm::backdrop { background: rgba(15, 23, 42, .55); }

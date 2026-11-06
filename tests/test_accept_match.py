@@ -252,8 +252,10 @@ class TestRoutes(unittest.TestCase):
     def _post(self, **patches):
         with mock.patch.object(exceptions.queries, "get_recon_exception", patches.get("exception", lambda _: EXCEPTION)), \
                 mock.patch.object(exceptions, "fetch_record", patches.get("fetch", lambda t, i: BILL_23)), \
-                mock.patch.object(exceptions.queries, "accept_manual_match", patches.get("accept", mock.Mock())) as accept:
-            resp = self.client.post("/exceptions/Conicelli%20Toyota/accept-match", data=self.form, follow_redirects=False)
+                mock.patch.object(exceptions.queries, "accept_manual_match",
+                                  patches.get("accept", mock.Mock(return_value={"status": "written"}))) as accept:
+            resp = self.client.post("/exceptions/Conicelli%20Toyota/accept-match", data=patches.get("form", self.form),
+                                    follow_redirects=False)
         return resp, accept
 
     def test_accept_uses_the_re_read_record_and_redirects_back(self):

@@ -4,9 +4,10 @@
    filter re-renders only this table, never the exception under review.
 
    No <form>, no action=, no method= and no button that posts in this
-   file. Since 2026-10-19 each row has a "pick" checkbox (class ns-pick,
-   one at a time) carrying the record's type/internal id/number/amount/
-   date; static/app.js shows the picked record in the "Accept as match"
+   file. Since 2026-10-19 each row has a "pick" checkbox (class ns-pick;
+   several at once since 2026-11-06, for a split payment) carrying the
+   record's type/internal id/number/amount/date/status; static/app.js
+   keeps the picks across searches and shows them in the "Accept as match"
    bar below the panel, whose own form does the posting -- the server
    re-reads the record by internal id. A test asserts this file stays free
    of form/action/method markup.
@@ -74,7 +75,7 @@
         <input type="checkbox" class="ns-pick" aria-label="Pick {{ row.record_type | lower }} {{ row.tranid }} for {{ row.total | money }}"
                data-record-type="{{ row.record_type | lower }}" data-internal-id="{{ row.internal_id }}"
                data-tranid="{{ row.tranid or '' }}" data-amount="{{ '%.2f' | format(row.total) if row.total is not none else '' }}"
-               data-date="{{ row.trandate_display or row.trandate or '' }}">
+               data-date="{{ row.trandate_display or row.trandate or '' }}" data-status="{{ row.status_label or '' }}">
         {% endif %}
       </td>
       <td class="ns-cell-vendor">{{ row.vendor_name }}</td>

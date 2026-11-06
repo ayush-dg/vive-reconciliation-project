@@ -88,8 +88,16 @@
         <div class="exception-row-top">
           <div class="exception-row-main">
             <div class="einv">Invoice #{{ m.invoice_number }}</div>
+            {% set recs = m.records or [] %}
+            {% if recs | length > 1 %}
+            {# A split payment (2026-11-06): every bill/credit, and what they add up to. #}
+            <span class="badge badge-matched">Reconciled · matches {{ recs | length }} NetSuite records</span>
+            <div class="edate">{% for r in recs %}{{ r.record_type }} {{ r.tranid }} {{ r.total | money }}{{ ", " if not loop.last }}{% endfor %}</div>
+            <div class="edate">Together {{ m.net_amount | money }}{% if m.difference %} · difference {{ m.difference | money_signed }} accepted{% endif %}</div>
+            {% else %}
             <span class="badge badge-matched">Reconciled · matches {{ m.netsuite_tranid }}</span>
             <div class="edate">NetSuite {{ m.netsuite_record_type }} {{ m.netsuite_amount | money }}{% if m.difference %} · difference {{ m.difference | money_signed }} accepted{% endif %}</div>
+            {% endif %}
             <div class="edate">By {{ m.matched_by }} · {{ m.matched_at | friendly_dt }}</div>
             {% if m.writeback_status %}<div class="edate" title="{{ m.writeback_detail | without_sandbox }}">NetSuite: {{ m.writeback_status | without_sandbox }}</div>{% endif %}
           </div>
@@ -384,15 +392,24 @@
        (.ns-pick); the dialog's form posts only the exception and the record's
        type + internal id -- the server re-reads the record and saves the match
        in the recon table, then resolves the exception. #}
+    {# Several can be ticked (2026-11-06): a split payment, e.g. two $50
+       bills for a $100 invoice, or a bill and a credit. The picks stay
+       ticked across searches; they don't have to add up -- the difference
+       is shown and saved with the match. data-statement-signed keeps the
+       line's sign (a credit line nets credits minus bills). #}
     <div class="ns-accept" id="nsAccept" data-state="empty"
-         data-statement-amount="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}">
-      <div class="ns-accept-empty">Tick the NetSuite bill or credit that matches this statement line, then accept it.</div>
+         data-statement-amount="{{ '%.2f' | format(selected.statement_amount | abs) if selected.statement_amount is not none else '' }}"
+         data-statement-signed="{{ '%.2f' | format(selected.statement_amount) if selected.statement_amount is not none else '' }}">
+      <div class="ns-accept-empty">Tick the NetSuite bill or credit that matches this statement line &mdash; or several, for a split payment &mdash; then accept.</div>
       <div class="ns-accept-picked">
-        <span><span id="nsPickKind">Bill</span> <b id="nsPickTranid">—</b> <span class="ns-accept-date" id="nsPickDate"></span></span>
-        <span>Statement <b id="nsPickStmt">—</b></span>
-        <span>NetSuite <b id="nsPickNs">—</b></span>
-        <span class="ns-accept-diff" id="nsPickDiffWrap">Difference <b id="nsPickDiff">—</b></span>
-        <button type="button" class="btn btn-accept" id="nsAcceptBtn">Accept as match</button>
+        <ul class="ns-pick-list" id="nsPickList"></ul>
+        <div class="ns-accept-totals">
+          <span>Statement <b id="nsPickStmt">—</b></span>
+          <span><span id="nsPickNsLabel">NetSuite</span> <b id="nsPickNs">—</b></span>
+          <span class="ns-accept-diff" id="nsPickDiffWrap">Difference <b id="nsPickDiff">—</b></span>
+          <button type="button" class="btn btn-accept" id="nsAcceptBtn">Accept as match</button>
+        </div>
+        <div class="ns-accept-warn" id="nsPickPaidWarn" hidden></div>
       </div>
     </div>
     <dialog class="ns-confirm" id="nsAcceptDialog" aria-labelledby="nsAcceptTitle">
@@ -401,12 +418,13 @@
         <input type="hidden" name="statement_id" value="{{ selected.statement_id }}">
         <input type="hidden" name="filter" value="{{ filter }}">
         <input type="hidden" name="sort" value="{{ sort }}">
-        <input type="hidden" name="record_type" id="nsAcceptType" value="">
-        <input type="hidden" name="internal_id" id="nsAcceptId" value="">
+        <div id="nsAcceptPicks"></div>
         <h2 class="ns-modal-title" id="nsAcceptTitle">Accept as match</h2>
-        <p>Accept <span id="nsConfirmKind">bill</span> <b id="nsConfirmTranid">—</b> (<span id="nsConfirmAmount">—</span>)
+        <p>Accept <span id="nsConfirmWhat">—</span>
           as the NetSuite match for invoice <b>{{ selected.invoice_number }}</b>?</p>
+        <ul class="ns-confirm-list" id="nsConfirmList"></ul>
         <p class="ns-confirm-sub" id="nsConfirmDiff"></p>
+        <p class="ns-confirm-sub ns-accept-warn" id="nsConfirmPaid" hidden></p>
         <p class="ns-confirm-sub">This resolves the exception. Any note you add is saved with it.</p>
         <label class="ns-search-label" for="nsAcceptNote">Add a note <span class="field-hint">(optional)</span></label>
         <textarea id="nsAcceptNote" name="note" rows="3"></textarea>

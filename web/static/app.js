@@ -280,8 +280,9 @@ document.addEventListener("DOMContentLoaded", function () {
         date_to: dates[1],
         locations: state.shops.join(",")
       });
+      // Picks are kept across searches (2026-11-06): a split payment's bills
+      // are often found by separate searches.
       nsResults.innerHTML = '<div class="ns-modal-empty">Searching…</div>';
-      setPick(null);
       fetch("/netsuite-search?" + params.toString())
         .then(function (r) { return r.text(); })
         .then(function (html) {
@@ -296,34 +297,102 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     }
 
-    // "Accept as match" (2026-10-19): one result can be picked at a time
-    // (.ns-pick); the bar below the panel shows it, and its button opens
-    // the confirm dialog, whose form posts the record's type + internal id.
+    // "Accept as match" (2026-10-19): the bar below the panel shows the
+    // picked results (.ns-pick) and its button opens the confirm dialog,
+    // whose form posts each record's type + internal id. Several can be
+    // picked since 2026-11-06 (a split payment: two $50 bills for a $100
+    // invoice, or a bill and a credit); the picks are kept here, keyed by
+    // type:id, so they stay picked when a new search re-renders the results.
+    // They don't have to add up -- the bar shows the difference.
     const nsAccept = document.getElementById("nsAccept");
     const nsAcceptDialog = document.getElementById("nsAcceptDialog");
-    let picked = null;
+    const MAX_PICKS = 50;
+    const picks = new Map();
+    const PAID = ["Paid In Full", "Fully Applied"];
 
     function money(n) {
       const v = Math.abs(n);
       return (n < 0 ? "−$" : "$") + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    function setPick(box) {
-      picked = box ? box.dataset : null;
+    function pickKey(d) { return d.recordType + ":" + d.internalId; }
+    function kindOf(p) { return p.recordType === "credit" ? "Credit" : "Bill"; }
+
+    // What the picks add up to, as src/lakehouse/recon_table.py net_amount():
+    // one kind -> their sum; bills and credits mixed -> bills minus credits
+    // (credits minus bills on a credit line). null when an amount is unknown.
+    function netOfPicks() {
+      const list = Array.from(picks.values());
+      if (!list.length || list.some(function (p) { return isNaN(parseFloat(p.amount)); })) return null;
+      const amt = function (p) { return Math.abs(parseFloat(p.amount)); };
+      const credits = list.filter(function (p) { return p.recordType === "credit"; });
+      const bills = list.filter(function (p) { return p.recordType !== "credit"; });
+      const sum = function (xs) { return xs.reduce(function (a, p) { return a + amt(p); }, 0); };
+      if (!credits.length || !bills.length) return Math.round(sum(list) * 100) / 100;
+      const signed = parseFloat(nsAccept.dataset.statementSigned);
+      const net = (!isNaN(signed) && signed < 0) ? sum(credits) - sum(bills) : sum(bills) - sum(credits);
+      return Math.round(net * 100) / 100;
+    }
+
+    function paidPicks() {
+      return Array.from(picks.values()).filter(function (p) { return PAID.indexOf(p.status) !== -1; });
+    }
+
+    function paidText(paid) {
+      if (!paid.length) return "";
+      const names = paid.map(function (p) { return kindOf(p).toLowerCase() + " " + p.tranid; }).join(", ");
+      return "Heads up: " + names + (paid.length === 1 ? " is" : " are") +
+        " already " + (paid.length === 1 && paid[0].recordType === "credit" ? "fully applied" : "paid") +
+        " in NetSuite. You can still accept.";
+    }
+
+    function syncBoxes() {
+      if (!nsResults) return;
+      nsResults.querySelectorAll(".ns-pick:not([disabled])").forEach(function (box) {
+        const on = picks.has(pickKey(box.dataset));
+        box.checked = on;
+        box.closest("tr").classList.toggle("ns-picked", on);
+      });
+    }
+
+    function renderPicks() {
       if (!nsAccept) return;
-      nsAccept.dataset.state = picked ? "picked" : "empty";
-      if (!picked) return;
+      nsAccept.dataset.state = picks.size ? "picked" : "empty";
+      const list = document.getElementById("nsPickList");
+      list.innerHTML = "";
+      picks.forEach(function (p, key) {
+        const li = document.createElement("li");
+        li.className = "ns-pick-item";
+        const label = document.createElement("span");
+        label.textContent = kindOf(p) + " " + p.tranid + (p.date ? " · " + p.date : "") + " · " +
+          (isNaN(parseFloat(p.amount)) ? "—" : money(Math.abs(parseFloat(p.amount)))) +
+          (PAID.indexOf(p.status) !== -1 ? " · " + p.status : "");
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "ns-pick-remove";
+        remove.setAttribute("aria-label", "Remove " + kindOf(p).toLowerCase() + " " + p.tranid);
+        remove.textContent = "×";
+        remove.addEventListener("click", function () { picks.delete(key); syncBoxes(); renderPicks(); });
+        li.appendChild(label);
+        li.appendChild(remove);
+        list.appendChild(li);
+      });
+      if (!picks.size) return;
       const stmt = parseFloat(nsAccept.dataset.statementAmount);
-      const ns = parseFloat(picked.amount);
-      const kind = picked.recordType === "credit" ? "Credit" : "Bill";
-      document.getElementById("nsPickKind").textContent = kind;
-      document.getElementById("nsPickTranid").textContent = picked.tranid;
-      document.getElementById("nsPickDate").textContent = picked.date || "";
+      const net = netOfPicks();
       document.getElementById("nsPickStmt").textContent = isNaN(stmt) ? "—" : money(stmt);
-      document.getElementById("nsPickNs").textContent = isNaN(ns) ? "—" : money(ns);
-      const diff = (isNaN(stmt) || isNaN(ns)) ? null : Math.round((stmt - ns) * 100) / 100;
+      document.getElementById("nsPickNsLabel").textContent =
+        picks.size === 1 ? "NetSuite" : "Selected (" + picks.size + ")";
+      document.getElementById("nsPickNs").textContent = net === null ? "—" : money(net);
+      const diff = (isNaN(stmt) || net === null) ? null : Math.round((stmt - net) * 100) / 100;
       document.getElementById("nsPickDiff").textContent = diff === null ? "—" : money(diff);
       document.getElementById("nsPickDiffWrap").classList.toggle("ns-off", !!diff);
+      document.getElementById("nsAcceptBtn").textContent =
+        picks.size === 1 ? "Accept as match" : "Accept " + picks.size + " as match";
+      const warn = document.getElementById("nsPickPaidWarn");
+      const text = paidText(paidPicks());
+      warn.textContent = text;
+      warn.hidden = !text;
     }
 
     // Records already matched are hidden by default (2026-10-27); "Show"
@@ -347,31 +416,57 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     function wirePicks() {
-      const boxes = nsResults.querySelectorAll(".ns-pick");
-      boxes.forEach(function (box) {
+      nsResults.querySelectorAll(".ns-pick:not([disabled])").forEach(function (box) {
         box.addEventListener("change", function () {
-          boxes.forEach(function (other) {
-            if (other !== box) { other.checked = false; other.closest("tr").classList.remove("ns-picked"); }
-          });
+          const key = pickKey(box.dataset);
+          if (box.checked) {
+            if (picks.size >= MAX_PICKS) {
+              box.checked = false;
+              window.alert("At most " + MAX_PICKS + " NetSuite records can be matched to one invoice.");
+              return;
+            }
+            picks.set(key, Object.assign({}, box.dataset));
+          } else {
+            picks.delete(key);
+          }
           box.closest("tr").classList.toggle("ns-picked", box.checked);
-          setPick(box.checked ? box : null);
+          renderPicks();
         });
       });
+      syncBoxes();   // a new search keeps what was already picked
     }
 
     if (nsAccept && nsAcceptDialog) {
       document.getElementById("nsAcceptBtn").addEventListener("click", function () {
-        if (!picked) return;
-        const ns = parseFloat(picked.amount);
+        if (!picks.size) return;
         const stmt = parseFloat(nsAccept.dataset.statementAmount);
-        document.getElementById("nsAcceptType").value = picked.recordType;
-        document.getElementById("nsAcceptId").value = picked.internalId;
-        document.getElementById("nsConfirmKind").textContent = picked.recordType;
-        document.getElementById("nsConfirmTranid").textContent = picked.tranid;
-        document.getElementById("nsConfirmAmount").textContent = isNaN(ns) ? "—" : money(ns);
-        const diff = (isNaN(stmt) || isNaN(ns)) ? 0 : Math.round((stmt - ns) * 100) / 100;
+        const net = netOfPicks();
+        const holder = document.getElementById("nsAcceptPicks");
+        const list = document.getElementById("nsConfirmList");
+        holder.innerHTML = "";
+        list.innerHTML = "";
+        picks.forEach(function (p) {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "picks";
+          input.value = p.recordType + ":" + p.internalId;
+          holder.appendChild(input);
+          const li = document.createElement("li");
+          const amount = parseFloat(p.amount);
+          li.textContent = kindOf(p) + " " + p.tranid + " (" + (isNaN(amount) ? "—" : money(Math.abs(amount))) + ")";
+          list.appendChild(li);
+        });
+        const first = picks.values().next().value;
+        document.getElementById("nsConfirmWhat").textContent = picks.size === 1
+          ? kindOf(first).toLowerCase() + " " + first.tranid
+          : "these " + picks.size + " NetSuite records, together " + (net === null ? "—" : money(net)) + ",";
+        list.hidden = picks.size === 1;
+        const diff = (isNaN(stmt) || net === null) ? 0 : Math.round((stmt - net) * 100) / 100;
         document.getElementById("nsConfirmDiff").textContent =
           diff ? "The " + money(diff) + " difference is accepted as-is." : "";
+        const paid = document.getElementById("nsConfirmPaid");
+        paid.textContent = paidText(paidPicks());
+        paid.hidden = !paid.textContent;
         nsAcceptDialog.showModal();
       });
       document.getElementById("nsAcceptCancel").addEventListener("click", function () {
