@@ -88,9 +88,14 @@ def reset_cache() -> None:
 
 
 def value_for(mode: str, bill_ids) -> object:
-    """What to send NetSuite for these bills. No bills -> None (single) or an
-    empty list (multiple). A single link can only hold the first bill."""
+    """What to send NetSuite for these bills. A single link can only hold the
+    first bill. No bills -> None in BOTH modes: checked in the sandbox
+    2026-11-06, a Multiple Select PATCHed with {"items": []} keeps its old
+    bills (Undo left them on Statement Line 8303), while null clears it; a
+    non-empty {"items": [...]} replaces the whole list."""
     ids = list(dict.fromkeys(ids_from(bill_ids)))
+    if not ids:
+        return None
     if mode == MULTIPLE:
         return {"items": [{"id": i} for i in ids]}
-    return {"id": ids[0]} if ids else None
+    return {"id": ids[0]}

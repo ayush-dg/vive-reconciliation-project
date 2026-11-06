@@ -59,7 +59,11 @@ class FakeNetSuite(FakeSandbox):
     def patch_record(self, record_type, record_id, body):
         guard.check_patch(record_type, record_id, body)
         self._check(record_type, body)
-        super().patch_record(record_type, record_id, body)
+        # Like the real sandbox (checked 2026-11-06): an empty {"items": []}
+        # changes nothing on a Multiple Select -- only null clears it.
+        body = {k: v for k, v in body.items() if not (isinstance(v, dict) and v.get("items") == [])}
+        if body:
+            super().patch_record(record_type, record_id, body)
 
     def create_record(self, record_type, body):
         guard.check_create(record_type, body)
@@ -97,7 +101,8 @@ class TestValues(Base):
         self.assertEqual(mbf.value_for(mbf.SINGLE, ["555"]), {"id": "555"})
         self.assertIsNone(mbf.value_for(mbf.SINGLE, []))
         self.assertEqual(mbf.value_for(mbf.MULTIPLE, "555, 556"), {"items": [{"id": "555"}, {"id": "556"}]})
-        self.assertEqual(mbf.value_for(mbf.MULTIPLE, None), {"items": []})
+        self.assertIsNone(mbf.value_for(mbf.MULTIPLE, None))   # an empty list would not clear it
+        self.assertIsNone(mbf.value_for(mbf.MULTIPLE, []))
         self.assertEqual(mbf.value_for(mbf.MULTIPLE, ["555", "555"]), {"items": [{"id": "555"}]})
 
 
@@ -221,7 +226,7 @@ class TestUndoAcrossTheSwitch(Base):
         self.assertIsNone(ns.lines["77"][FIELD])
         self.assertEqual(ns.lines["77"]["custrecord_sl_status"], "No match found")
         last_line_patch = [c[3] for c in ns.calls if c[1] == mbf.STATEMENT_LINE_RECORD][-1]
-        self.assertEqual(last_line_patch[FIELD], {"items": []})
+        self.assertIsNone(last_line_patch[FIELD])   # null clears; {"items": []} would not
 
     def test_a_previous_bill_goes_back_in_the_new_shape(self):
         ns, undone = self._accept_then_switch_then_undo({"custrecord_sl_status": "Amount differs", FIELD: "333"})
