@@ -30,6 +30,10 @@ EXTRACTED = {
     # Prod STMT-1C33163B / -697847A1 / -3106CCA6 (2026-11-05). JOURNAL ID and COMPANY ID are
     # internal codes (36; 12/13) and are deliberately left unmapped.
     "TOWNE_AUTOMOTIVE_GROUP": {"BALANCE DUE ($)", "DATE", "PAYMENTS & CREDITS ($)", "PURCHASES ($)", "REFERENCE #"},
+    # Prod STMT-ADEF9707 (0_6ae898dc0e494.pdf, 2026-11-02); resolves to Elite Auto Glass Solutions LLC
+    # (635711) by name. Transaction is the NetSuite bill number (43 of 48 charge rows); Reference is an
+    # RO/claim number that repeats across invoices; Account (the shop name) is left unmapped.
+    "ELITE_AUTO_GLASS_SOLUTIONS_LLC": {"Balance", "Date", "Invoiced", "Paid", "Reference", "Transaction"},
 }
 
 
