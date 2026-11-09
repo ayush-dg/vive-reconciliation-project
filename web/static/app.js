@@ -748,6 +748,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     // The page restores saved filters into the select before this runs.
     showSelection();
+    // A change made outside the list (e.g. a location switch put back on "")
+    // shows too.
+    select.addEventListener("change", showSelection);
 
     button.addEventListener("click", function () {
       if (list.hidden) { open(); } else { close(false); }
@@ -803,7 +806,18 @@ document.addEventListener("DOMContentLoaded", function () {
 // web/templates/_location_scope.html). Picking the one not in force visits
 // /location-scope, which remembers the choice and reloads the page. Caught
 // on the way down (capture), so the page's own filter code never sees the
-// "__scope_" value and never saves it as a filter.
+// "__scope_" value. The select is put back on its "" option at once: a page
+// the browser restores (Back, reload) or a later filter change must never
+// read "__scope_..." as a shop -- it was saved as ?shop=__scope_mine and
+// matched no card (2026-11-09). static/filters.js also drops such values.
+function resetScopeSelects() {
+  document.querySelectorAll("select[data-scope-next]").forEach(function (select) {
+    if ((select.value || "").indexOf("__scope_") === 0) {
+      select.value = "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+}
 document.addEventListener("change", function (ev) {
   const select = ev.target;
   if (!select || !select.dataset || !select.dataset.scopeNext) return;
@@ -811,6 +825,9 @@ document.addEventListener("change", function (ev) {
   if (value.indexOf("__scope_") !== 0) return;
   ev.stopImmediatePropagation();
   ev.stopPropagation();
+  select.value = "";
   window.location.href = "/location-scope?value=" + value.slice("__scope_".length)
     + "&next=" + encodeURIComponent(select.dataset.scopeNext);
 }, true);
+window.addEventListener("pageshow", resetScopeSelects);
+resetScopeSelects();

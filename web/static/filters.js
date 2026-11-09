@@ -47,17 +47,24 @@ window.ViveFilters = (function () {
     (names || []).forEach(function (name) {
       // The address wins; a control the address doesn't mention keeps its
       // remembered value (e.g. a time-window chip link carries no vendor).
-      values[name] = fromUrl.has(name) ? fromUrl.get(name) : (fallback.get(name) || "");
+      values[name] = clean(fromUrl.has(name) ? fromUrl.get(name) : (fallback.get(name) || ""));
     });
     if (!names || !names.length) { write(location.search); }
     return values;
+  }
+
+  // The "My locations" / "All locations" entries of a location filter
+  // (static/app.js) are switches, not filters: never saved or restored.
+  function clean(value) {
+    return value && String(value).indexOf("__scope_") === 0 ? "" : value;
   }
 
   // Puts the page's own control values into the address and remembers it.
   function save(values) {
     var params = new URLSearchParams(location.search);
     Object.keys(values || {}).forEach(function (name) {
-      if (values[name]) { params.set(name, values[name]); } else { params.delete(name); }
+      var value = clean(values[name]);
+      if (value) { params.set(name, value); } else { params.delete(name); }
     });
     var query = params.toString() ? "?" + params.toString() : "";
     history.replaceState(null, "", location.pathname + query + location.hash);
