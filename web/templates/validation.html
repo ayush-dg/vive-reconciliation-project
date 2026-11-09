@@ -143,10 +143,7 @@
     <ul class="ns-popover sync-picker-list" id="vendor-filter-list" role="listbox" aria-labelledby="vendor-filter-btn" hidden></ul>
   </div>
   <select id="shop-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true" data-scope-next="{{ loc.scope_next(location_scope) }}">
-    {{ loc.scope_options(location_scope) }}
-    {% for sname in shop_options %}
-    <option value="{{ sname }}">{{ sname }}</option>
-    {% endfor %}
+    {{ loc.shop_filter_options(location_scope, shop_options) }}
   </select>
   <div class="ns-chip-wrap picker-select" data-sync-picker="shop-filter" data-picker-label>
     <button type="button" class="filter-chip sync-picker-btn" id="shop-filter-btn"
@@ -245,6 +242,14 @@
     heroDonut.style.setProperty("--pct", pct);
   }
 
+  // Each location in the location filter shows how many statements it has
+  // among the cards the other filters (status, vendor, period, time) allow.
+  function updateShopCounts(counts) {
+    Array.prototype.forEach.call(shopFilter.options, function (opt) {
+      if (opt.dataset.name) { opt.textContent = opt.dataset.name + " (" + (counts[opt.value] || 0) + ")"; }
+    });
+  }
+
   function applyFilters() {
     var vendor = vendorFilter.value;
     var shop = shopFilter.value;
@@ -253,6 +258,7 @@
     var day = dateInput.value;
     var heroCount = 0;
     var heroPassedCount = 0;
+    var shopCounts = {};
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all"
         || (currentStatus === "pass" && card.dataset.validation === "pass")
@@ -271,8 +277,13 @@
         if (card.dataset.validation === "pass") { heroPassedCount += 1; }
       }
       card.style.display = (matchesStatus && inWindow) ? "" : "none";
+      if (matchesStatus && (!vendor || card.dataset.vendor === vendor) && (!period || card.dataset.period === period)
+          && (!sync || card.dataset.sync === sync) && (!day || card.dataset.day === day)) {
+        shopCounts[card.dataset.shop] = (shopCounts[card.dataset.shop] || 0) + 1;
+      }
     });
     updateHero(heroCount, heroPassedCount);
+    updateShopCounts(shopCounts);
   }
 
   // Kept in the address and remembered for this tab (static/filters.js),

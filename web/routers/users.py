@@ -109,10 +109,9 @@ def users_locations(request: Request, user: str = Depends(require_login),
 
 
 @router.get("/location-scope")
-def location_scope_switch(user: str = Depends(require_login), value: str = "", next: str = "/"):
-    """The My / All locations switch: remembers the choice in a cookie and
-    goes back to the page it was clicked on."""
-    response = RedirectResponse(ul.safe_next(next), status_code=303)
-    response.set_cookie(ul.SCOPE_COOKIE, ul.SCOPE_ALL if value == ul.SCOPE_ALL else ul.SCOPE_MINE,
-                        max_age=ul.SCOPE_COOKIE_MAX_AGE, httponly=True, samesite="lax")
-    return response
+def location_scope_switch(request: Request, user: str = Depends(require_login), value: str = "",
+                          next: str = "/"):
+    """The My / All locations switch: remembers the choice until logout (the
+    login session) and goes back to the page it was clicked on."""
+    request.session[ul.SCOPE_SESSION_KEY] = ul.SCOPE_ALL if value == ul.SCOPE_ALL else ul.SCOPE_MINE
+    return RedirectResponse(ul.safe_next(next), status_code=303)

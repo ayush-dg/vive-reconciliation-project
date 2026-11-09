@@ -84,10 +84,7 @@
     {% endfor %}
   </select>
   <select id="shop-filter" class="filter-chip" style="cursor:pointer" data-scope-next="{{ loc.scope_next(location_scope) }}">
-    {{ loc.scope_options(location_scope) }}
-    {% for sname in shop_options %}
-    <option value="{{ sname }}">{{ sname }}</option>
-    {% endfor %}
+    {{ loc.shop_filter_options(location_scope, shop_options) }}
   </select>
   <select id="location-filter" class="filter-chip" style="cursor:pointer">
     <option value="">All regions</option>
@@ -191,6 +188,22 @@
     });
   }
 
+  // Each location in the location filter: statements among the cards the
+  // vendor and region filters allow.
+  function updateShopCounts() {
+    var vendor = vendorFilter.value;
+    var location = locationFilter.value;
+    var counts = {};
+    cards.forEach(function (card) {
+      if ((!vendor || card.dataset.vendor === vendor) && (!location || card.dataset.location === location)) {
+        counts[card.dataset.shop] = (counts[card.dataset.shop] || 0) + 1;
+      }
+    });
+    Array.prototype.forEach.call(shopFilter.options, function (opt) {
+      if (opt.dataset.name) { opt.textContent = opt.dataset.name + " (" + (counts[opt.value] || 0) + ")"; }
+    });
+  }
+
   // Kept in the address and remembered for this tab (static/filters.js),
   // so coming back from a statement brings the same filters back.
   function remember() {
@@ -206,11 +219,12 @@
   setIfOffered(shopFilter, start.shop);
   setIfOffered(locationFilter, start.location);
 
-  vendorFilter.addEventListener("change", function () { applyFilters(); remember(); });
+  vendorFilter.addEventListener("change", function () { updateShopCounts(); applyFilters(); remember(); });
   shopFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); remember(); });
-  locationFilter.addEventListener("change", function () { updateVendorCounts(); applyFilters(); remember(); });
+  locationFilter.addEventListener("change", function () { updateVendorCounts(); updateShopCounts(); applyFilters(); remember(); });
   // A browser can restore a previous shop/location pick on Back/reload.
   updateVendorCounts();
+  updateShopCounts();
   applyFilters();
   remember();
 })();

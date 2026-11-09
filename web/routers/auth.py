@@ -80,6 +80,8 @@ def login_submit(request: Request, email: str = Form(...), password: str = Form(
         # in web/routers/users.py).
         request.session["user"] = email.strip().lower()
         request.session["user_name"] = name
+        # Every login starts on "My locations" (web/user_locations.py).
+        request.session.pop("location_scope", None)
         return RedirectResponse(_post_login_destination(request), status_code=303)
     return render(request, "login.html", {"error": "Invalid email or password."}, status_code=401)
 

@@ -1,35 +1,45 @@
 {# "My locations" (web/user_locations.py) inside the location filters.
 
-   scope_options(): the first options of a page's existing shop filter
-   (Statement Processing, Exceptions). For a user with shops:
-     My locations (N) -- the user's shops (plus unassigned statements)
-     All locations    -- every location
-   whichever is in force has value "" (the filter's "nothing picked"), the
-   other a "__scope_..." value that static/app.js turns into a visit to
-   /location-scope (which remembers the choice and reloads the page). The
-   shops listed after these still filter the cards as before. For a user with
-   no shops it is the plain "All locations" option.
+   shop_filter_options(): every option of a page's location filter
+   (Statement Processing, Exceptions). For a user with shops, in
+   "My locations":
+     My locations (N)   -- all of the user's shops (value "")
+       Cherry Hill (12) -- one of them; the count follows the other filters
+       ...
+     All locations      -- switch to every location
+   and in "All locations":
+     My locations (N)   -- switch back
+     All locations      -- every location (value "")
+       <every shop on the cards>
+   A switch has a "__scope_..." value that static/app.js turns into a visit
+   to /location-scope (which remembers the choice and reloads the page); it
+   is never kept as a filter. A user with no shops gets the plain list.
+   Options with data-name are shops; the page script writes their counts.
 
-   standalone(): the same choice as its own dropdown, for Home, which has no
-   shop filter. Nothing for a user with no shops.
+   standalone(): the same switch as its own dropdown, for Home, which has no
+   location filter. Nothing for a user with no shops.
 
-   The select carrying these options needs data-scope-next (scope_next()). #}
+   The select needs data-scope-next="{{ scope_next(location_scope) }}". #}
 
 {% macro scope_next(location_scope) -%}
 {{ location_scope.here if location_scope else '/' }}
 {%- endmacro %}
 
-{% macro scope_options(location_scope, all_label="All locations") -%}
-{% if location_scope and location_scope.has_shops %}
-  {% if location_scope.mine %}
+{% macro shop_filter_options(location_scope, shops) -%}
+{% if location_scope and location_scope.has_shops and location_scope.mine %}
   <option value="" title="{{ location_scope.shops | join(', ') }}">My locations ({{ location_scope.shops | length }})</option>
-  <option value="__scope_all">{{ all_label }}</option>
-  {% else %}
-  <option value="__scope_mine" title="{{ location_scope.shops | join(', ') }}">My locations ({{ location_scope.shops | length }})</option>
-  <option value="">{{ all_label }}</option>
-  {% endif %}
+  {% for sname in shops %}
+  <option value="{{ sname }}" data-name="{{ sname }}">{{ sname }}</option>
+  {% endfor %}
+  <option value="__scope_all">All locations</option>
 {% else %}
-  <option value="">{{ all_label }}</option>
+  {% if location_scope and location_scope.has_shops %}
+  <option value="__scope_mine" title="{{ location_scope.shops | join(', ') }}">My locations ({{ location_scope.shops | length }})</option>
+  {% endif %}
+  <option value="">All locations</option>
+  {% for sname in shops %}
+  <option value="{{ sname }}" data-name="{{ sname }}">{{ sname }}</option>
+  {% endfor %}
 {% endif %}
 {%- endmacro %}
 

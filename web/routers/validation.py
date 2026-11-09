@@ -85,6 +85,10 @@ def validation_list(request: Request, user: str = Depends(require_login)):
 
     vendor_options = sorted({c["vendor_display_name"] for c in cards if c.get("vendor_display_name")})
     shop_options = sorted({c["shop"] for c in cards if c.get("shop")})
+    if scope.mine:
+        # "My locations": just the user's shops, each listed even with no
+        # statements, so the list keeps its shape as other filters change.
+        shop_options = list(scope.shops)
     # Newest first -- statement_period is "YYYY-MM" (see deps.period_label),
     # so a reverse string sort is a reverse date sort.
     period_options = sorted({c["statement_period"] for c in cards if c.get("statement_period")}, reverse=True)

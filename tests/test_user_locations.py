@@ -3,8 +3,8 @@ tests/test_user_locations.py
 
 "My locations" (2026-11-09, web/user_locations.py): admins set the VIVE shops
 each user works; Home, Statement Processing and Exceptions then open on that
-user's shops plus statements with no mapped shop, with a switch to "All
-locations". A user with no shops sees everything, as before.
+user's shops only, with a switch to "All locations" (which also has the
+statements matched to no shop). A user with no shops sees everything.
 """
 
 import os
@@ -17,7 +17,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -82,11 +82,11 @@ class ScopeTests(unittest.TestCase):
             _row("some raw text", canonical=False, statement_id="3"), _row(None, canonical=False, statement_id="4"),
             _row("Norwich", statement_id="5")]
 
-    def test_mine_keeps_the_users_shops_and_every_unassigned_statement(self):
+    def test_mine_keeps_only_the_users_shops(self):
         scope = ul.LocationScope(shops=["Vestal", "Norwich"], mine=True)
         kept = scope.apply(list(self.ROWS))
-        self.assertEqual([r["statement_id"] for r in kept], ["1", "3", "4", "5"])
-        self.assertEqual((scope.hidden, scope.unassigned), (1, 2))
+        self.assertEqual([r["statement_id"] for r in kept], ["1", "5"])
+        self.assertEqual((scope.hidden, scope.unassigned), (3, 2))
 
     def test_shop_names_compare_without_case_or_apostrophe_differences(self):
         scope = ul.LocationScope(shops=["Ben's"], mine=True)
@@ -96,19 +96,19 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(ul.LocationScope(shops=["Vestal"], mine=False).apply(list(self.ROWS)), self.ROWS)
         self.assertEqual(ul.LocationScope().apply(list(self.ROWS)), self.ROWS)
 
-    def test_the_cookie_picks_all_otherwise_mine(self):
-        request = mock.Mock(cookies={})
+    def test_the_session_picks_all_otherwise_mine(self):
+        request = mock.Mock(session={})
         with mock.patch.object(ul, "get_user_shops", return_value=["Vestal"]):
             self.assertTrue(ul.location_scope(request, "u@v.com").mine)
-            request.cookies = {ul.SCOPE_COOKIE: "all"}
+            request.session = {ul.SCOPE_SESSION_KEY: "all"}
             self.assertFalse(ul.location_scope(request, "u@v.com").mine)
         with mock.patch.object(ul, "get_user_shops", return_value=[]):
-            scope = ul.location_scope(mock.Mock(cookies={}), "u@v.com")
+            scope = ul.location_scope(mock.Mock(session={}), "u@v.com")
             self.assertFalse(scope.mine)
             self.assertFalse(scope.has_shops)
 
     def test_the_scope_knows_the_page_to_return_to(self):
-        request = mock.Mock(cookies={})
+        request = mock.Mock(session={})
         request.url.path, request.url.query = "/exceptions", "range=all"
         with mock.patch.object(ul, "get_user_shops", return_value=["Vestal"]):
             self.assertEqual(ul.location_scope(request, "u@v.com").here, "/exceptions?range=all")
@@ -144,12 +144,12 @@ class HomeScopeTests(unittest.TestCase):
                 mock.patch.object(queries, "_attach_job_ids_and_display_names"):
             return queries.get_home_dashboard(window=None, scope=scope)
 
-    def test_my_locations_counts_only_my_shops_and_unassigned(self):
+    def test_my_locations_counts_only_my_shops(self):
         data = self._home(ul.LocationScope(shops=["Vestal"], mine=True))
-        self.assertEqual({r["statement_id"] for r in data["runs"]}, {"S1", "S3"})
-        self.assertEqual(data["kpis"]["total_invoices"], 14)
-        self.assertEqual(data["kpis"]["open_exceptions"], 5)
-        self.assertEqual(data["statement_count"], 2)
+        self.assertEqual({r["statement_id"] for r in data["runs"]}, {"S1"})
+        self.assertEqual(data["kpis"]["total_invoices"], 10)
+        self.assertEqual(data["kpis"]["open_exceptions"], 2)
+        self.assertEqual(data["statement_count"], 1)
 
     def test_all_locations_is_unchanged(self):
         data = self._home(ul.LocationScope(shops=["Vestal"], mine=False))
@@ -211,16 +211,70 @@ class UsersPageTests(_TempDb):
         self.assertEqual(ul.get_user_shops("jenn@vivecollision.com"), [])
 
     def test_the_switch_remembers_the_choice_and_goes_back(self):
-        client = self._client("jenn@vivecollision.com")
+        app = FastAPI()
+        app.add_middleware(SessionMiddleware, secret_key="test-secret")
+        app.include_router(users.router)
+        app.dependency_overrides[require_login] = lambda: "jenn@vivecollision.com"
+
+        @app.get("/seen")
+        def seen(request: Request):
+            return {"scope": request.session.get(ul.SCOPE_SESSION_KEY)}
+
+        client = TestClient(app)
         r = client.get("/location-scope", params={"value": "all", "next": "/exceptions?range=all"},
                        follow_redirects=False)
         self.assertEqual(r.status_code, 303)
         self.assertEqual(r.headers["location"], "/exceptions?range=all")
-        self.assertIn(f"{ul.SCOPE_COOKIE}=all", r.headers["set-cookie"])
+        self.assertEqual(client.get("/seen").json(), {"scope": "all"})
         r = client.get("/location-scope", params={"value": "mine", "next": "https://evil.example"},
                        follow_redirects=False)
         self.assertEqual(r.headers["location"], "/")
-        self.assertIn(f"{ul.SCOPE_COOKIE}=mine", r.headers["set-cookie"])
+        self.assertEqual(client.get("/seen").json(), {"scope": "mine"})
+
+    def test_logging_in_starts_on_my_locations(self):
+        from web.routers import auth
+        app = FastAPI()
+        app.add_middleware(SessionMiddleware, secret_key="test-secret")
+        app.include_router(auth.router)
+        app.include_router(users.router)
+        app.dependency_overrides[require_login] = lambda: "jenn@vivecollision.com"
+
+        @app.get("/seen")
+        def seen(request: Request):
+            return {"scope": request.session.get(ul.SCOPE_SESSION_KEY)}
+
+        client = TestClient(app)
+        client.get("/location-scope", params={"value": "all"}, follow_redirects=False)
+        with mock.patch.object(auth, "_authenticate", return_value="Jenn"):
+            client.post("/login", data={"email": "jenn@vivecollision.com", "password": "x"}, follow_redirects=False)
+        self.assertEqual(client.get("/seen").json(), {"scope": None})
+
+
+
+class ShopFilterOptionsTests(unittest.TestCase):
+    """The location filter's options (web/templates/_location_scope.html)."""
+
+    def _options(self, scope, shops):
+        from web.deps import templates
+        t = templates.env.from_string(
+            '{% import "_location_scope.html" as loc %}{{ loc.shop_filter_options(s, shops) }}')
+        import re
+        return re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', t.render(s=scope, shops=shops))
+
+    def test_my_locations_lists_my_shops_then_the_switch_to_all(self):
+        scope = ul.LocationScope(shops=["Collex", "Dallas"], mine=True)
+        self.assertEqual(self._options(scope, ["Collex", "Dallas"]),
+                         [("", "My locations (2)"), ("Collex", "Collex"), ("Dallas", "Dallas"),
+                          ("__scope_all", "All locations")])
+
+    def test_all_locations_offers_the_switch_back_then_every_shop(self):
+        scope = ul.LocationScope(shops=["Collex"], mine=False)
+        self.assertEqual(self._options(scope, ["Albany", "Collex"]),
+                         [("__scope_mine", "My locations (1)"), ("", "All locations"),
+                          ("Albany", "Albany"), ("Collex", "Collex")])
+
+    def test_no_shops_is_the_plain_list(self):
+        self.assertEqual(self._options(ul.LocationScope(), ["Albany"]), [("", "All locations"), ("Albany", "Albany")])
 
 
 if __name__ == "__main__":

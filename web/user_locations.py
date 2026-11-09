@@ -6,12 +6,13 @@ and Exceptions can open on that user's own workload.
 
 - Admins set a user's shops on the Users page; users cannot change their own.
 - A user with shops gets a "My locations / All locations" switch on those
-  three pages. "My locations" is the default; the choice is remembered in a
-  browser cookie (SCOPE_COOKIE), the same choice on every page.
+  three pages. "My locations" is the default at every login; picking "All
+  locations" lasts until logout (kept in the login session, SCOPE_SESSION_KEY),
+  the same choice on every page.
 - A user with no shops sees everything, as before, and gets no switch.
-- A statement whose location was never mapped to a shop (no shop_canonical:
-  unmapped, ambiguous, conflict, a failed extraction) belongs to nobody, so
-  it stays in everyone's "My locations" view as "Unassigned location".
+- "My locations" shows only statements of the user's shops (2026-11-09). A
+  statement whose location was never mapped to a shop (unmapped, ambiguous,
+  conflict, a failed extraction) is in "All locations" only.
 
 Shops are stored by their name in config/vive_shops.json
 (src/validation/shop_list.py), the same name a mapped statement carries as
@@ -35,10 +36,9 @@ from web import queries
 
 logger = logging.getLogger(__name__)
 
-SCOPE_COOKIE = "vive_location_scope"
+SCOPE_SESSION_KEY = "location_scope"
 SCOPE_MINE = "mine"
 SCOPE_ALL = "all"
-SCOPE_COOKIE_MAX_AGE = 365 * 24 * 3600
 
 _SQLITE_DDL = (
     "CREATE TABLE IF NOT EXISTS user_locations ("
@@ -163,32 +163,32 @@ class LocationScope:
 
     def apply(self, rows: list) -> list:
         """The rows this scope shows (each row a card/run with "shop" and
-        "shop_canonical"): everything in "All", else the user's shops plus
-        any statement with no mapped shop. Also counts what it hid and how
-        many kept rows are unassigned (for the switch's label)."""
+        "shop_canonical"): everything in "All", else only the statements of
+        the user's shops -- one with no mapped shop is left out. Also counts
+        what it hid, and how many of those had no mapped shop."""
         if not self.mine:
             return rows
         wanted = {_key(s) for s in self.shops}
         kept, hidden, unassigned = [], 0, 0
         for row in rows:
-            if not row.get("shop_canonical") or not row.get("shop"):
-                kept.append(row)
-                unassigned += 1
-            elif _key(row["shop"]) in wanted:
+            if row.get("shop_canonical") and row.get("shop") and _key(row["shop"]) in wanted:
                 kept.append(row)
             else:
                 hidden += 1
+                if not row.get("shop_canonical") or not row.get("shop"):
+                    unassigned += 1
         self.hidden, self.unassigned = hidden, unassigned
         return kept
 
 
 def location_scope(request, user) -> LocationScope:
-    """The scope for this request: the user's shops, narrowed unless their
-    browser chose "All locations"."""
+    """The scope for this request: the user's shops, narrowed unless they
+    chose "All locations" since logging in."""
     shops = get_user_shops(user)
     if not shops:
         return LocationScope()
-    choice = request.cookies.get(SCOPE_COOKIE) if request is not None else None
+    session = getattr(request, "session", None) if request is not None else None
+    choice = session.get(SCOPE_SESSION_KEY) if isinstance(session, dict) else None
     here = "/"
     if request is not None:
         url = getattr(request, "url", None)

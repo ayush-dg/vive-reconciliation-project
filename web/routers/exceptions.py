@@ -190,6 +190,10 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     # recounts it when a shop or location is picked.
     vendor_counts = Counter(v["vendor_display_name"] for v in runs if v.get("vendor_display_name"))
     shop_options = sorted({v["shop"] for v in runs if v.get("shop")})
+    if scope.mine:
+        # "My locations": just the user's shops, each listed even with no
+        # statements, so the list keeps its shape as other filters change.
+        shop_options = list(scope.shops)
     location_options = sorted({v["billing_location"] for v in runs if v.get("billing_location")})
 
     filters = {"range": window.range, "date": window.date, "month": window.month, "sync": sync or ""}
