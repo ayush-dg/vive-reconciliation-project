@@ -48,6 +48,9 @@ class UsersPageTests(unittest.TestCase):
             mock.patch("web.deps._sidebar_counts", return_value={}),
             mock.patch("web.queries.list_users", return_value=USERS),
             mock.patch("web.queries.get_user_by_email", return_value=None),
+            # Locations (web/user_locations.py) are tested in test_user_locations.py.
+            mock.patch("web.user_locations.all_user_shops", return_value={}),
+            mock.patch("web.user_locations.delete_user_shops"),
         ]
         for p in patches:
             p.start()

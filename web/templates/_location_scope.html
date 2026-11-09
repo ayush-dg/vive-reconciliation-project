@@ -1,0 +1,44 @@
+{# "My locations" (web/user_locations.py) inside the location filters.
+
+   scope_options(): the first options of a page's existing shop filter
+   (Statement Processing, Exceptions). For a user with shops:
+     My locations (N) -- the user's shops (plus unassigned statements)
+     All locations    -- every location
+   whichever is in force has value "" (the filter's "nothing picked"), the
+   other a "__scope_..." value that static/app.js turns into a visit to
+   /location-scope (which remembers the choice and reloads the page). The
+   shops listed after these still filter the cards as before. For a user with
+   no shops it is the plain "All locations" option.
+
+   standalone(): the same choice as its own dropdown, for Home, which has no
+   shop filter. Nothing for a user with no shops.
+
+   The select carrying these options needs data-scope-next (scope_next()). #}
+
+{% macro scope_next(location_scope) -%}
+{{ location_scope.here if location_scope else '/' }}
+{%- endmacro %}
+
+{% macro scope_options(location_scope, all_label="All locations") -%}
+{% if location_scope and location_scope.has_shops %}
+  {% if location_scope.mine %}
+  <option value="" title="{{ location_scope.shops | join(', ') }}">My locations ({{ location_scope.shops | length }})</option>
+  <option value="__scope_all">{{ all_label }}</option>
+  {% else %}
+  <option value="__scope_mine" title="{{ location_scope.shops | join(', ') }}">My locations ({{ location_scope.shops | length }})</option>
+  <option value="">{{ all_label }}</option>
+  {% endif %}
+{% else %}
+  <option value="">{{ all_label }}</option>
+{% endif %}
+{%- endmacro %}
+
+{% macro standalone(location_scope) -%}
+{% if location_scope and location_scope.has_shops %}
+<select class="filter-chip location-scope-select {{ 'active' if location_scope.mine }}" aria-label="Locations shown"
+        title="My locations: {{ location_scope.shops | join(', ') }}" data-scope-next="{{ scope_next(location_scope) }}">
+  <option value="{{ '' if location_scope.mine else '__scope_mine' }}" {{ 'selected' if location_scope.mine }}>My locations ({{ location_scope.shops | length }})</option>
+  <option value="{{ '' if not location_scope.mine else '__scope_all' }}" {{ 'selected' if not location_scope.mine }}>All locations</option>
+</select>
+{% endif %}
+{%- endmacro %}

@@ -8,9 +8,30 @@
 </div>
 {% endblock %}
 
+{% macro shop_picker(picked) %}
+<div class="shop-picker" data-shop-picker>
+  <div class="shop-picker-bar">
+    <input type="search" class="shop-picker-search" placeholder="Search shops" aria-label="Search shops" data-shop-search>
+    <span class="shop-picker-count" data-shop-count></span>
+    <button type="button" class="shop-picker-clear" data-shop-clear>Clear</button>
+  </div>
+  <div class="shop-picker-list">
+    {% for shop in shop_choices %}
+    <label class="shop-picker-item" data-shop-name="{{ shop | lower }}">
+      <input type="checkbox" name="shops" value="{{ shop }}" {% if shop in picked %}checked{% endif %}>
+      <span>{{ shop }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
 {% block content %}
 {% if error %}
 <div class="upload-error">{{ error }}</div>
+{% endif %}
+{% if notice %}
+<div class="upload-notice">{{ notice }}</div>
 {% endif %}
 
 <div class="section-header">
@@ -23,6 +44,7 @@
     <tr>
       <th>Name</th>
       <th>Email</th>
+      <th>Locations</th>
       <th>Created</th>
       <th>Status</th>
       <th></th>
@@ -36,6 +58,39 @@
         <span style="font-weight:500">{{ u.name }}</span>
       </td>
       <td style="color:var(--text-secondary)">{{ u.email }}</td>
+      <td class="user-locations-cell">
+        <div class="user-locations-summary">
+          {% if u.shops %}
+          <span title="{{ u.shops | join(', ') }}">{{ u.shops[:3] | join(', ') }}{% if u.shops | length > 3 %} <span class="user-locations-more">+{{ u.shops | length - 3 }} more</span>{% endif %}</span>
+          {% else %}
+          <span class="user-locations-all">All locations</span>
+          {% endif %}
+          {% if can_manage_users %}
+          <button type="button" class="user-locations-edit-btn" data-open-dialog="loc-{{ u.id }}">Edit</button>
+          {% endif %}
+        </div>
+        {% if can_manage_users %}
+        <dialog class="ns-modal user-loc-modal" id="loc-{{ u.id }}" aria-labelledby="loc-{{ u.id }}-title">
+          <form method="post" action="/users/locations" class="user-loc-form">
+            <div class="ns-modal-head">
+              <div>
+                <h2 class="ns-modal-title" id="loc-{{ u.id }}-title">Locations for {{ u.name }}</h2>
+                <p class="ns-modal-sub">{{ u.email }} sees these shops on Home, Statement Processing and Exceptions. None ticked = every location.</p>
+              </div>
+              <button type="button" class="ns-modal-close" data-close-dialog aria-label="Close">&times;</button>
+            </div>
+            <div class="user-loc-body">
+              <input type="hidden" name="email" value="{{ u.email }}">
+              {{ shop_picker(u.shops) }}
+            </div>
+            <div class="user-loc-foot">
+              <button type="button" class="btn btn-secondary" data-close-dialog>Cancel</button>
+              <button type="submit" class="btn btn-primary">Save locations</button>
+            </div>
+          </form>
+        </dialog>
+        {% endif %}
+      </td>
       <td style="color:var(--text-secondary)">{{ u.created_at | friendly_dt }}</td>
       <td>
         {% if u.is_active %}
@@ -68,7 +123,7 @@
 <div class="section-header">
   <div class="section-title">Add user</div>
 </div>
-<form method="post" action="/users/add" style="max-width:420px">
+<form method="post" action="/users/add" style="max-width:600px">
   <div class="form-group">
     <label class="form-label">Name</label>
     <input type="text" name="name" placeholder="e.g. Jane Doe" required />
@@ -81,7 +136,54 @@
     <label class="form-label">Password</label>
     <input type="password" name="password" placeholder="••••••••" required minlength="8" />
   </div>
+  <div class="form-group">
+    <label class="form-label">Locations <span class="form-note">optional — none ticked = sees every location</span></label>
+    {{ shop_picker([]) }}
+  </div>
   <button class="btn btn-primary" type="submit">Add user</button>
 </form>
 {% endif %}
+
+<script>
+// Shop picker: filter by the search box, count the ticked shops, Clear unticks all.
+document.querySelectorAll("[data-shop-picker]").forEach(function (picker) {
+  var search = picker.querySelector("[data-shop-search]");
+  var count = picker.querySelector("[data-shop-count]");
+  var boxes = picker.querySelectorAll("input[name=shops]");
+  function recount() {
+    var n = picker.querySelectorAll("input[name=shops]:checked").length;
+    count.textContent = n ? n + " selected" : "None selected";
+  }
+  search.addEventListener("input", function () {
+    var q = search.value.trim().toLowerCase();
+    picker.querySelectorAll(".shop-picker-item").forEach(function (item) {
+      item.hidden = !!q && item.dataset.shopName.indexOf(q) === -1;
+    });
+  });
+  // Enter in the search box must not submit the form.
+  search.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); } });
+  picker.querySelector("[data-shop-clear]").addEventListener("click", function () {
+    boxes.forEach(function (b) { b.checked = false; });
+    recount();
+  });
+  picker.addEventListener("change", recount);
+  recount();
+});
+// Edit locations dialogs. Cancel, close and a backdrop click put the ticks back as saved.
+document.querySelectorAll("[data-open-dialog]").forEach(function (btn) {
+  btn.addEventListener("click", function () { document.getElementById(btn.dataset.openDialog).showModal(); });
+});
+document.querySelectorAll("dialog.user-loc-modal").forEach(function (dlg) {
+  var form = dlg.querySelector("form");
+  function close() {
+    form.reset();
+    form.querySelectorAll(".shop-picker-item").forEach(function (item) { item.hidden = false; });
+    form.querySelector("[data-shop-picker]").dispatchEvent(new Event("change"));
+    dlg.close();
+  }
+  dlg.querySelectorAll("[data-close-dialog]").forEach(function (b) { b.addEventListener("click", close); });
+  dlg.addEventListener("click", function (e) { if (e.target === dlg) { close(); } });
+  dlg.addEventListener("cancel", function (e) { e.preventDefault(); close(); });
+});
+</script>
 {% endblock %}

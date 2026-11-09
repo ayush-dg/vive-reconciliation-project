@@ -226,7 +226,7 @@ def get_outlook_synced_jobs() -> list:
 
 
 def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: str = None,
-                       limit: int = 10) -> dict:
+                       limit: int = 10, scope=None) -> dict:
     """Everything on Home that the time filter drives, from ONE
     runs-in-window query, so the KPI cards, the "N of M statements
     reconciled" line and the runs table always cover exactly the same set
@@ -281,6 +281,17 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
     if window is not None and window.statement_ids is not None:
         rows = [r for r in rows if r.get("statement_id") in window.statement_ids]
 
+    # All time reads the whole intake log in one go; a bounded window
+    # (calendar or "last"'s statement_ids) looks up just its own
+    # statement_ids.
+    all_time = window is None or (window.start_utc is None and window.statement_ids is None and not window.empty)
+    _attach_intake_period_and_shop(rows, None if all_time else [r["statement_id"] for r in rows])
+    # "My locations" (web/user_locations.py, 2026-11-09): the user's shops plus
+    # unassigned statements, before anything is counted, so the cards, the
+    # "N of M" line and the table all cover the same statements.
+    if scope is not None:
+        rows = scope.apply(rows)
+
     total_invoices = sum(r.get("total_invoice_count") or 0 for r in rows)
     auto_reconciled = sum(r.get("matched_count") or 0 for r in rows)
     kpis = {
@@ -291,12 +302,6 @@ def get_home_dashboard(window: TimeWindow = None, status: str = "all", period: s
         "vendor_count": len({r["vendor_name"] for r in rows if r.get("vendor_name")}),
         "match_rate": round((auto_reconciled / total_invoices) * 100, 1) if total_invoices else None,
     }
-
-    # All time reads the whole intake log in one go; a bounded window
-    # (calendar or "last"'s statement_ids) looks up just its own
-    # statement_ids.
-    all_time = window is None or (window.start_utc is None and window.statement_ids is None and not window.empty)
-    _attach_intake_period_and_shop(rows, None if all_time else [r["statement_id"] for r in rows])
 
     period_options = sorted({r["statement_period"] for r in rows if r.get("statement_period")}, reverse=True)
 

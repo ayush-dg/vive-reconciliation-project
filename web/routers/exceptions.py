@@ -27,6 +27,7 @@ from web.deps import render, require_login, sidebar_context, smart_title, locati
 from web.shop_display import display_shop
 from web import queries
 from web import time_window as tw
+from web.user_locations import location_scope
 from web.routers.statements import _inline_filename, pdf_editing_enabled
 from src.vendor_identity import display_name as vendor_display_name
 from src.matching.fabric_matching import fetch_bill_payments, fetch_netsuite_record_for_invoice
@@ -130,6 +131,10 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     # appended inside get_exception_runs() AFTER the window filter, so
     # they always show and always count below, regardless of `window`.
     runs = queries.get_exception_runs(window)
+    # "My locations" (web/user_locations.py): the user's shops plus statements
+    # with no mapped shop, before the header counts and filter options.
+    scope = location_scope(request, user)
+    runs = scope.apply(runs)
     _attach_writeback_status(runs)
     summary_backed_count = sum(1 for v in runs if v.get("statement_id"))
     for v in runs:
@@ -197,6 +202,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
 
     ctx = {
         "active_page": "exceptions",
+        "location_scope": scope,
         "vendors": runs,
         "vendor_options": vendor_options,
         "vendor_counts": vendor_counts,

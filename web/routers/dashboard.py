@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Request
 from web.deps import render, require_login, sidebar_context
 from web import queries
 from web import time_window as tw
+from web.user_locations import location_scope
 
 router = APIRouter()
 
@@ -77,7 +78,8 @@ def home(request: Request, user: str = Depends(require_login),
                                default=tw.HOME_DEFAULT_RANGE)
     if status not in queries.RECON_RUN_STATUS_FILTERS:
         status = "all"
-    data = queries.get_home_dashboard(window=window, status=status, period=period or None, limit=10)
+    scope = location_scope(request, user)
+    data = queries.get_home_dashboard(window=window, status=status, period=period or None, limit=10, scope=scope)
 
     filters = {"range": window.range, "date": window.date, "month": window.month,
                "sync": sync or "", "status": status, "period": period or ""}
@@ -105,6 +107,7 @@ def home(request: Request, user: str = Depends(require_login),
 
     ctx = {
         "active_page": "home",
+        "location_scope": scope,
         "kpis": kpis,
         "active_jobs": queries.get_active_jobs(),
         "failed_jobs": queries.get_failed_jobs(),

@@ -798,3 +798,19 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
 });
+
+// "My locations" / "All locations" inside the location filters (2026-11-09,
+// web/templates/_location_scope.html). Picking the one not in force visits
+// /location-scope, which remembers the choice and reloads the page. Caught
+// on the way down (capture), so the page's own filter code never sees the
+// "__scope_" value and never saves it as a filter.
+document.addEventListener("change", function (ev) {
+  const select = ev.target;
+  if (!select || !select.dataset || !select.dataset.scopeNext) return;
+  const value = select.value || "";
+  if (value.indexOf("__scope_") !== 0) return;
+  ev.stopImmediatePropagation();
+  ev.stopPropagation();
+  window.location.href = "/location-scope?value=" + value.slice("__scope_".length)
+    + "&next=" + encodeURIComponent(select.dataset.scopeNext);
+}, true);

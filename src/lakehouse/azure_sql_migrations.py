@@ -451,6 +451,18 @@ TABLES = {
             new_document_hash NVARCHAR(64) NOT NULL
         )
     """,
+    # migrations/028_add_user_locations.sql -- the shops each user works, for the
+    # "My locations" view (web/user_locations.py, which also creates it on first use).
+    "user_locations": """
+        CREATE TABLE user_locations (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            email NVARCHAR(255) NOT NULL,
+            shop NVARCHAR(255) NOT NULL,
+            created_at NVARCHAR(40) NOT NULL,
+            created_by NVARCHAR(255),
+            CONSTRAINT uq_user_locations UNIQUE (email, shop)
+        )
+    """,
 }
 
 INDEXES = {

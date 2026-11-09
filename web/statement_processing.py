@@ -87,6 +87,7 @@ def intake_card(intake: dict, job: dict = None, recon: dict = None) -> dict:
     card = {
         "statement_id": intake.get("statement_id"), "job_id": (job or {}).get("job_id"),
         "vendor_name": intake.get("vendor_name"), "shop": intake.get("shop"),
+        "shop_canonical": bool(intake.get("shop_canonical")),
         "source_file": intake.get("source_file"), "statement_period": intake.get("statement_period"),
         "printed_total": intake.get("statement_total_as_printed"),
         "difference": intake.get("validation_difference"), "method": intake.get("validation_method"),

@@ -118,7 +118,7 @@ class SchemaParityTests(unittest.TestCase):
     def test_it_comes_after_the_older_tables_so_it_cannot_block_one(self):
         # Only tables added after it (statement_pdf_edits, 2026-11-02) may follow it.
         tables, indexes = list(azure.TABLES), list(azure.INDEXES)
-        self.assertEqual(tables[tables.index("job_step_timing") + 1:], ["statement_pdf_edits"])
+        self.assertEqual(tables[tables.index("job_step_timing") + 1:], ["statement_pdf_edits", "user_locations"])
         self.assertEqual(indexes[indexes.index("idx_job_step_timing_job") + 1:],
                          ["idx_statement_pdf_edits_statement", "idx_statement_pdf_edits_hash"])
 

@@ -19,6 +19,7 @@ from web.shop_display import display_shop
 from web import queries
 from web import statement_processing as sp
 from web import time_window as tw
+from web.user_locations import location_scope
 from web.routers.exceptions import _statement_pdf_url
 from src.vendor_identity import display_name as vendor_display_name
 
@@ -47,6 +48,10 @@ def validation_list(request: Request, user: str = Depends(require_login)):
     # the stored matching results.
     recon = {**recon, **{sid: status for sid, status in recon_cards.items() if sid in recon}}
     cards = sp.build_cards(intake_rows, jobs, recon)
+    # "My locations" (web/user_locations.py): the user's shops plus cards with
+    # no mapped shop (failed extractions, unmapped locations).
+    scope = location_scope(request, user)
+    cards = scope.apply(cards)
 
     # "Last run" dropdown (2026-09-30) -- same Outlook-sync definitions as
     # Home/Exceptions (web/time_window.py's outlook_all_syncs()), applied
@@ -86,6 +91,7 @@ def validation_list(request: Request, user: str = Depends(require_login)):
 
     ctx = {
         "active_page": "validation",
+        "location_scope": scope,
         "runs": cards,
         "vendor_options": vendor_options,
         "shop_options": shop_options,

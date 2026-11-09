@@ -681,7 +681,7 @@ class TestHomeRouteTimeWindow(unittest.TestCase):
             "total": 47, "reconciled": 19, "period_options": ["2026-08"], "statement_count": 4,
         }
 
-        def get_home_dashboard(window=None, status="all", period=None, limit=10):
+        def get_home_dashboard(window=None, status="all", period=None, limit=10, scope=None):
             self.windows.append((window, status, period))
             return self.result
 
@@ -899,7 +899,7 @@ class TestHomeRouteSyncDropdown(unittest.TestCase):
             "runs": [], "total": 0, "reconciled": 0, "period_options": [], "statement_count": 0,
         }
 
-        def get_home_dashboard(window=None, status="all", period=None, limit=10):
+        def get_home_dashboard(window=None, status="all", period=None, limit=10, scope=None):
             self.windows.append(window)
             return result
 
