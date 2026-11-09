@@ -1260,3 +1260,9 @@ ELITE_AUTO_GLASS_SOLUTIONS_LLC,Reference,ro_number,string,v1,1
 ELITE_AUTO_GLASS_SOLUTIONS_LLC,Invoiced,charge_amount,decimal,v1,1
 ELITE_AUTO_GLASS_SOLUTIONS_LLC,Paid,payment_amount,decimal,v1,1
 ELITE_AUTO_GLASS_SOLUTIONS_LLC,Balance,amount_remaining,decimal,v1,1
+MERCEDES-BENZ_OF_BUFFALO,Invoice Date,line_date,date,v1,1
+MERCEDES-BENZ_OF_BUFFALO,Invoice#,original_invoice_number,string,v1,1
+MERCEDES-BENZ_OF_BUFFALO,PO Number,po_number,string,v1,1
+MERCEDES-BENZ_OF_BUFFALO,Purchases,charge_amount,decimal,v1,1
+MERCEDES-BENZ_OF_BUFFALO,Payments,payment_amount,decimal,v1,1
+MERCEDES-BENZ_OF_BUFFALO,Balance,amount_remaining,decimal,v1,1

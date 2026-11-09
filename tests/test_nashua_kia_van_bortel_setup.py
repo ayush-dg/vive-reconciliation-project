@@ -34,6 +34,9 @@ EXTRACTED = {
     # (635711) by name. Transaction is the NetSuite bill number (43 of 48 charge rows); Reference is an
     # RO/claim number that repeats across invoices; Account (the shop name) is left unmapped.
     "ELITE_AUTO_GLASS_SOLUTIONS_LLC": {"Balance", "Date", "Invoiced", "Paid", "Reference", "Transaction"},
+    # Prod STMT-517258E4 (AR Statement_94097_2026_OCT_Tekion.pdf, Vestal, 2026-11). The Tekion layout,
+    # mapped as Casco Bay Ford / Asbury; '#' (a row counter) and 'section' are left unmapped.
+    "MERCEDES-BENZ_OF_BUFFALO": {"Balance", "Invoice Date", "Invoice#", "PO Number", "Payments", "Purchases"},
 }
 
 
