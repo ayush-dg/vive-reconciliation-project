@@ -68,5 +68,15 @@ class TestVanBortelEntity(unittest.TestCase):
         self.assertEqual(resolve_entity_ids("VAN_BORTEL_MOTORCAR_INC.", "Van Bortel Motorcar, Inc."), ["600978"])
 
 
+
+class TestAutoZoneEntities(unittest.TestCase):
+    """AutoZone has five NetSuite vendor records (2026-11-09); its statements'
+    bills are mostly under 181322, which the old 10661-only override missed."""
+
+    def test_resolves_to_all_five_records(self):
+        self.assertEqual(sorted(resolve_entity_ids("AUTOZONE", "AutoZone, Inc.")),
+                         sorted(["10661", "19292", "38516", "136921", "181322"]))
+
+
 if __name__ == "__main__":
     unittest.main()

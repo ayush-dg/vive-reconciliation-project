@@ -600,8 +600,8 @@
     "note": "Audi Service Conshohocken (457780). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."
   },
   "AUTOZONE": {
-    "entity_ids": ["10661"],
-    "note": "Auto Zone (10661). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 2 lines tie out verbatim across ALL NetSuite entities."
+    "entity_ids": ["181322", "10661", "136921", "38516", "19292"],
+    "note": "All five AutoZone vendor records (2026-11-09): AutoZone (181322, most bills), Auto Zone (10661), Autozone 3 (136921), Autozone 2 (38516), Autozone 1 (19292). Was 10661 only (2026-10-06 trace of one statement): every line of prod STMT-1726BB16 / -5A84E9DE / -3EA060A1 came back Not Found, and the 20 of those 30 invoices that are in NetSuite are all under 181322."
   },
   "BEST_CHEVROLET": {
     "entity_ids": ["2328"],
