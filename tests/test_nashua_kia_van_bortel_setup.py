@@ -84,6 +84,8 @@ NEW_2026_11_09 = {
     "MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE",
                                                           "REFERENCE", "SOURCE"},
     "DENOOYER": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE", "REFERENCE", "SOURCE"},
+    # Prod STMT-91096ABB (VIVE.pdf, 2026-11-09): no column headings, so the fields are unlabeled.
+    "COLONIE_GARAGE_INC.": {"UNLABELED_TRANSACTION_CODE", "UNLABELED_TRANSACTION_CODE_2", "UNLABELED_TRANSACTION_CODE_3"},
 }
 
 
@@ -119,6 +121,12 @@ class TestNov9Entities(unittest.TestCase):
         self.assertEqual(rules[("SHULTS_FORD_LINCOLN", "CMFOW")], ("5", "CM{invoice}"))
         self.assertEqual(rules[("MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S", "K1W")], ("3", ""))
         self.assertEqual(rules[("DENOOYER", "CVW")], ("3", ""))
+
+    def test_colonie_garage_takes_the_number_after_invoice_number(self):
+        with open(os.path.join(ROOT, "dbt", "vive_recon", "seeds", "vendor_normalization_rule.csv"),
+                  encoding="utf-8", newline="") as f:
+            rules = [r for r in csv.DictReader(f) if r["vendor_id"] == "COLONIE_GARAGE_INC." and r["is_active"] == "1"]
+        self.assertEqual([(r["rule_type"], r["pattern"]) for r in rules], [("token_after", "Invoice Number")])
 
 
 class TestAutoZoneEntities(unittest.TestCase):

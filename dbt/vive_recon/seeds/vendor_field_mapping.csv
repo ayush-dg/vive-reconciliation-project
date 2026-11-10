@@ -1313,3 +1313,6 @@ DENOOYER,REFERENCE,invoice_number_ref,string,v1,1
 DENOOYER,DESCRIPTION,description_raw,string,v1,1
 DENOOYER,AMOUNT,charge_amount,decimal,v1,1
 DENOOYER,AGE IN DAYS,age_in_days,integer,v1,1
+COLONIE_GARAGE_INC.,UNLABELED_TRANSACTION_CODE,line_date,date,v1,1
+COLONIE_GARAGE_INC.,UNLABELED_TRANSACTION_CODE_2,original_invoice_number,string,v1,1
+COLONIE_GARAGE_INC.,UNLABELED_TRANSACTION_CODE_3,charge_amount,decimal,v1,1
