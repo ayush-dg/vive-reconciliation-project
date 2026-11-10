@@ -99,6 +99,28 @@ class TestNov9Mappings(unittest.TestCase):
             self.assertIn("charge_amount", canon, vendor)
 
 
+class TestNov9Entities(unittest.TestCase):
+    """NetSuite vendors traced from the prod statements' invoice numbers (2026-11-10)."""
+
+    def test_overrides(self):
+        self.assertEqual(resolve_entity_ids("MARTIN_NEMER_VOLKSWAGEN_CORP", "Martin Nemer Volkswagen Corp"), ["187347"])
+        self.assertEqual(resolve_entity_ids("ROHRICH_TOYOTA", "Rohrich Toyota"), ["643941", "638095"])
+        self.assertEqual(resolve_entity_ids("MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S", "Matthews"),
+                         ["383462"])
+
+    def test_reynolds_prefixes_are_stripped(self):
+        with open(os.path.join(ROOT, "dbt", "vive_recon", "seeds", "vendor_normalization_rule.csv"),
+                  encoding="utf-8", newline="") as f:
+            rules = {(r["vendor_id"], r["prefix_pattern"]): (r["pattern"], r["reconstruct_template"])
+                     for r in csv.DictReader(f) if r["is_active"] == "1"}
+        self.assertEqual(rules[("ROHRICH_TOYOTA", "TOW")], ("3", ""))
+        self.assertEqual(rules[("ROHRICH_TOYOTA", "CMTOW")], ("5", "CM{invoice}"))
+        self.assertEqual(rules[("SHULTS_FORD_LINCOLN", "FOW")], ("3", ""))
+        self.assertEqual(rules[("SHULTS_FORD_LINCOLN", "CMFOW")], ("5", "CM{invoice}"))
+        self.assertEqual(rules[("MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S", "K1W")], ("3", ""))
+        self.assertEqual(rules[("DENOOYER", "CVW")], ("3", ""))
+
+
 class TestAutoZoneEntities(unittest.TestCase):
     """AutoZone has five NetSuite vendor records (2026-11-09); its statements'
     bills are mostly under 181322, which the old 10661-only override missed."""

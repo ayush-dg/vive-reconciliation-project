@@ -1,825 +1,216 @@
 {
-  "FRED_BEANS_PARTS": {
-    "entity_ids": ["18706", "590648"],
-    "note": "Dynamic name lookup was only resolving entity 18706, missing 'FRED BEANS PARTS PRIMARY' (590648) -- a separate NetSuite vendor record for the same real company, name-mismatched just enough (PRIMARY suffix) that fuzzy/exact lookup never found it. Confirmed live 2026-09-23 against STMT-F18B0DB4: 64 of 87 'Not Found in NetSuite' exceptions on that one statement tied out exactly under entity 590648 (e.g. 9503708X2 -> $52.04 exact, 9538536 -> $1355.91 exact) -- the shape/table classification (netsuite_vendorbill via Rule A) was already correct, the entity scope was just missing this one record. No entity override existed for this vendor at all before this -- it had been running on dynamic lookup alone since Fred Beans was first onboarded."
-  },
-  "BALD_HILL": {
-    "entity_ids": ["3482", "4121", "74524"],
-    "note": "Bald Hill Dodge Chrysler (3482) + Bald Hill Kia (4121), both bill through one consolidated statement -- confirmed 2026-08-24. Dynamic name lookup can't find both: they're separate NetSuite vendor records with different company names, and neither matches the statement's own vendor name exactly. Key renamed from BALD_HILL_DODGE_CHRYSLER_JEEP_KIA to BALD_HILL 2026-08-27 to match config/vendor_aliases.json's renamed vendor_id -- same entity_ids, no re-tracing needed. Bald Hill Auto Group (74524) added 2026-10-05: three exception lines from real August statements tie out exactly there and nowhere under 3482/4121 -- Quonset 181675 ($66.40), Vive Worcester 180877 ($1,044.40) and 180873 ($444.40). 74524 is an active vendor with 838 bills in 2026."
-  },
-  "BERLIN_CITY_AUTO_GROUP": {
-    "entity_ids": ["25530", "6696", "6697", "497086", "6683", "38717"],
-    "note": "Berlin City Toyota (25530), Berlin City Honda of Portland (6696), Berlin City Nissan (6697), Berlin City Lexus of Portland (497086) -- derived 2026-08-26 by tracing all 89 exception invoice_numbers from a real statement (STMT-53731B9C) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 85 of 89 matched, split across exactly these 4 entities (42/24/15/4), none under the parent 'Berlin City Auto Group' (6683) that dynamic name lookup had picked. 6683 kept in the list too as a fallback in case a future statement's invoices DO land there -- NOT independently confirmed the way Bald Hill's mapping was, worth a sanity check against a second statement. Berlin City Lexus (38717) added 2026-09-06 -- a genuinely SEPARATE entity from 'Berlin City Lexus of Portland' (497086), easy to miss precisely because the two names look like duplicates rather than distinct rooftops. Found via a real second statement: a live UI run flagged 8 bills as 'Not Found' that the hand-validated Reconciliation_Status.xlsx had as cleanly MATCHED (same tranids, same totals, not ambiguous, not voided) -- confirmed they all sit under entity 38717, which this list was missing. This is exactly the 'sanity check against a second statement' the original note called for, and it found a real gap."
-  },
-  "NUCAR": {
-    "entity_ids": ["2330", "2331", "287097", "2399", "80532", "3020"],
-    "note": "Nucar Hyundai of Norwood (2330), Nucar Toyota of Norwood (2331), Nucar Volkswagen of Norwood (287097) -- derived 2026-08-26 by tracing all 57 exception invoice_numbers from a real statement (STMT-27F34603) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 45 of 57 matched under exactly these 3 entities (8/28/9). Nucar Honda of Norwood (2399) added too even though it had 0 hits in this batch -- it's literally the statement's own group label ('DCD BH, INC. DBA NUCAR HONDA OF NORWOOD'), so a future statement is likely to need it. Deliberately did NOT include entity 134807 (Lehigh Valley Honda) despite one tranid match there -- unrelated dealer, mismatching amount (223.42 vs NetSuite's 465.03), a coincidental tranid collision, not a real match. 'DCD Parts Distribution LLC' (the statement's other group label, ~12 remaining invoices, several with R/reversal suffixes) has NO known NetSuite entity yet -- searched every name variant, nothing found; still unresolved -- turns out that's expected, per the user 2026-08-27: 'DCD' isn't actually this vendor's real name, it's Nucar, so its NetSuite entity will surface once extracted-name-to-vendor mapping is fixed, not through more NetSuite-side searching. Key renamed from DCD_AUTOMOTIVE_HOLDINGS to NUCAR 2026-08-27 to match config/vendor_aliases.json's renamed vendor_id -- same entity_ids, no re-tracing needed. 'Nucar Dealerships' (80532) added 2026-09-21 -- a completely different Nucar statement layout (the 'Lees' Reynolds and Reynolds template, letter-prefixed invoices like CVW6283711, not the Pawtucket/DCD consolidated-statement layout the other 4 entities cover) posts under this entity instead. Confirmed live: CVW6283711 (stripped to 6283711 per the new NUCAR normalization rule) ties out exactly to bronze.netsuite_vendorbill entity 80532, total 754.04; its CM6283711 credit ties out to bronze.netsuite_vendorcredit entity 80532, unapplied 75. 'Nucar Nissan Of Norwood' (3020) added 2026-09-21 -- the Pawtucket/DCD layout is itself multi-brand (like the Norwood group), and Nissan was a brand this list was missing: STMT-62484E48's exceptions 66254-1/63370-1/66254-2/65028-1/63370-2 all tied out exactly under entity 3020 once found by an untargeted tranid search across every bronze.netsuite_vendorbill row (not scoped to the existing entity list). Other same-statement exceptions (55548-1, 54576-5, 55838-1, 66388-1, 876622-1, 67026-1, 59065-1) were searched the same way and found nowhere in bronze.netsuite_vendorbill/netsuite_vendorcredit under any entity -- genuinely not present in the extracted NetSuite data, not a config gap; likely more undiscovered Pawtucket-layout brand entities exist beyond 3020 (the Norwood roster alone lists ~15+ Nucar-branded vendor records: Chevrolet/387922, Infiniti/3704, Tarbox Hyundai+Toyota/180987+180988, North Kingstown Toyota+Hyundai/295614+295615, Nissan of Keene/302106, etc.) -- add on confirmed hits only, same as this one, not preemptively."
-  },
-  "BOWSER": {
-    "entity_ids": ["635577", "30237"],
-    "note": "Derived 2026-09-18 by tracing real invoice/credit samples from two separately-fragmented bronze tables against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: bronze_bowser_pontiac_subaru_inc__raw (vendor_id BOWSER_PONTIAC_SUBARU_INC., 5/5 charge + 5/5 credit matched, amounts tying out) and bronze_power_bowser_raw (vendor_id POWER_BOWSER, letterhead brand name 'Power Bowser' for the same real-world vendor -- confirmed via matching remit address/legal name on the statement PDF itself). Power Bowser has NO vendor_aliases.json entry today, so it falls through to the first-word LIKE fallback on 'Power' -- confirmed live that this resolves to 10 unrelated entities with a 0% invoice match rate. Forcing entity_ids=['635577','30237'] (the ones that work for the other Bowser table) gave a 5/5 + 5/5 match instead. This override exists specifically to stop that bad fallback -- vendor_aliases.json should also be updated to alias 'Power Bowser' (and 'Bowser Pontiac Subaru, Inc.') to one consolidated canonical vendor_id matching this key, otherwise POWER_BOWSER-keyed lookups won't even reach this override. Direct tranid match confirmed on both sides (charge and credit) -- no invoice-number normalization rule needed for this vendor."
-  },
-  "RH_LONG_MOTOR_SALES": {
-    "entity_ids": ["1760", "1761"],
-    "note": "Long Automotive Group (1760), per user 2026-09-18. NOT independently confirmed: entity 1760 has ~2,958 bills (a large consolidated parent account, same shape as NuCar's DCD_AUTOMOTIVE_HOLDINGS/NUCAR parent-vs-child-entity split), but none of RH Long's 3 real invoice numbers from statement STMT-F7126B55 (482646, 220688, 486976) were found under it by tranid, unscoped by amount. User elected to use 1760 anyway rather than trace a child entity. All 3 invoices will likely surface as 'Not Found' exceptions until/unless a more specific child entity is identified, the same way NuCar's real entities (2330/2331/287097/2399) turned out to be sub-brand accounts under the 'Long Automotive Group'-style parent, not the parent id itself."
-  },
-  "KSI_TRADING_CORP": {
-    "entity_ids": ["8726", "1759"],
-    "note": "KSI Auto Parts (1759) added 2026-10-13: prod KSI (MidNJ) statement STMT-F5444483 ties out under 1759 (4 of 5 lines, M-prefixed returns), while KSI (First Choice) STMT-44C4A145 ties out under 8726 (35 of 42). Earlier note: Plain 'KSI' (8726, active) -- derived 2026-08-26 by tracing all 69 invoice_numbers from a real statement (local bronze_vendor_statement_raw, statement_id TEST-WIRING-KSI-003) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 67 of 69 matched, all under entity 8726, amounts tying out correctly (e.g. a -15.0 credit line matches NetSuite's 15 before sign). 'KSI Auto Parts' (1759, also active, a plausible name match) got zero hits -- not the right entity despite the name similarity. Two other candidates ('KSI TRADING CORP - Clarkstown' 5662, 'KSI Auto Parts - Rockland' 5857) are both inactive and weren't tested, but 8726 alone already accounts for 67/69 -- no reason to expect them relevant."
-  },
-  "RIVIAN_LLC": {
-    "entity_ids": ["117788"],
-    "note": "Rivian LLC (117788) -- the only NetSuite vendor record matching this name, and already independently confirmed 2026-09-XX during manual research-SQL reconciliation of a real Rivian statement: the statement's own tranid I07XZVFM3H was first (wrongly) found under entity 6194 with no entity filter applied -- that turned out to be a coincidental match on an unrelated Tesla bill, not Rivian. Re-querying scoped to 117788 alone reconciled the full statement correctly (20 matched, 7 genuinely not found)."
-  },
-  "FENIX_NE": {
-    "entity_ids": ["400726", "112843", "180483", "295114", "134809", "227981", "4948"],
-    "note": "All 7 are genuine same-company location/entity records (Fenix NE Warehouse, Ocean County, Jerry Brown's, Fenix Parts (plain), Don's Automotive - Pennsburg, Fenix Parts - Rahway, Fenix NE (plain)) -- no name-noise candidates unlike ABC below. This exact entity list was already used against a real Fenix statement's charge+credit lines this session (research SQL, not yet the production path) and produced correct MATCHED results consistent with the hand-validated Fenix sheet in Reconciliation_Status.xlsx -- effectively confirmed via real use, though not traced entity-by-entity the way Nucar/Berlin City were. Worth a from-scratch trace against a second statement before treating this as fully Bald-Hill-grade confirmed. CONFIRMED 2026-09-29 by tranid trace of 2 real August statements (FENCollex0826 / Shrewsbury and Ocean County Nutley): every hit is under Ocean County (112843) -- invoices by reference_number verbatim (3341732 $282, 3353522 $1500, 3369533 $881.50, 3346083 $125) in netsuite_vendorbill, credits verbatim (3337667 $100, 3342118 $1315) in netsuite_vendorcredit. Misses (3345921, 3346710) exist nowhere in NetSuite; Payment rows (check number as reference) are expected Not Found exceptions."
-  },
-  "ABC_PARTS_INTERNATIONAL": {
-    "entity_ids": ["126692", "6406"],
-    "note": "ABC Parts International (126692) and ABC PARTS INTERNATIONAL INC. (6406) -- both literal name matches to the statement header ('ABC Parts International, Inc.'). Deliberately EXCLUDED 4 other 'ABC'-prefixed candidates from the same vendor name search -- ABC Fire Extinguisher Co. (385309), ABC AUTO GLASS (547650), WVII ABC 7 (100968), ABC AUTO (364005) -- these are almost certainly unrelated companies that happen to share the generic first word 'ABC', exactly the collision risk the first-word-LIKE fallback in netsuite_vendor_resolver.py warns about; including them as a Nucar-style safety net isn't appropriate here since they're plausible real unrelated vendors, not inactive siblings of the same company. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- do that against the hand-validated ABC sheet in Reconciliation_Status.xlsx before fully trusting this in production. CONFIRMED 2026-09-29 by tranid trace against 4 real August statements (Lyndhurst, Nutley x2, ABCCR/Churchill): 83 of 84 lines tie out exactly, ALL under entity 6406 -- 126692 has zero bills/credits in bronze.netsuite_vendorbill/netsuite_vendorcredit, kept only as a harmless fallback. Bills are keyed by the Sales Order reference (extract_abc.py's so_reference, e.g. C7318463T), NOT the printed INV number (zero INV tranids exist); credits by the CM number verbatim. The one miss (C7753861, $112) isn't in NetSuite under any entity -- a real Not Found."
-  },
-  "PARTS_BY_COCHRAN": {
-    "entity_ids": ["410838"],
-    "note": "Parts by Cochran 1 (410838) -- derived 2026-10-01 by tranid trace of 99 unique lines on 2 real August statements (CDK Global AR layout: WP5987 Duncansville, WP8752 Klapec/Cranberry): 96 tie out exactly, all under 410838 -- DOCUMENT / TRANSACTION is the tranid verbatim, incl. X1 supplements (81123893X1) and CM credits (CM81130006 in netsuite_vendorcredit). The 3 misses are dept-1 residual-balance lines (81122710 -$50.00, 81113991/81121676 -$0.01) whose NetSuite bills carry the full original amount -- real Amount Mismatch. NOT included: 'Parts by Cochran' (364006) -- zero hits on either statement. Claude names this vendor after the statement's department heading ('#1 Cochran Megacenter'), hence that alias."
-  },
-  "DARLINGS_AUTO_GROUP": {
-    "entity_ids": ["87595", "25846", "128703", "332867", "140684"],
-    "note": "Darling's Ford VW Audi (87595), Darling's Honda Nissan Volvo (25846), Darling's Hyundai Augusta (128703), Darling's Kia (332867) -- derived 2026-10-01 by tranid trace of all 158 unique lines on 3 real August statements (Harbour, Maurice, JC): 154 tie out exactly, every one under these 4 rooftops (Invoice Number is the NetSuite tranid verbatim); the other 4 exist under these rooftops with a different amount (real Amount Mismatch, e.g. 548374 $1265.14 vs $1261.22). 3 tranids also tie out under entity 12416, GOODWINS VOLVO -- an unrelated dealer, coincidental collision, deliberately excluded. Not included (no hits on these statements): Darling's Brunswick Ford (135210), Chrysler Dodge Augusta (140684), Auto Mall (9148), and the inactive Domestic (11568) / Audi Ford VW (25529); add on a confirmed hit only. KNOWN GAP: Darlings credit memos are printed with a CM SUFFIX (1016969CM, 1016143-01CM) and NetSuite has no consistent convention for them -- the same JC statement's credits are posted variously as 1016143CM (credit), CM544914AC (credit), 544914-01 (bill), or not at all (547807CM reverses bill 547807, no credit record) -- so no normalization rule can match them; ~9 of 135 JC lines surface as Not Found for AP review. Darling's Chrysler Dodge Augusta (140684) added 2026-10-05: the Maurice statement's 391650CM (credit $144.74) and 391975 (bill $734.47) tie out exactly there and nowhere under the other 4 rooftops."
-  },
-  "GRAPPONE": {
-    "entity_ids": ["10000"],
-    "note": "Grappone Companies (10000) -- the only Grappone vendor record. Derived 2026-10-01 by tranid trace of 58 unique lines on 2 real August statements (customerinvoice (4)/(5), CDK Global AR layout, Prestige Auto Body): 54 tie out exactly under 10000 -- invoices verbatim incl. the department suffix (415136H Honda dept 13, 67115M Mazda dept 14), credits verbatim incl. CM and sub-letters (CM415136H, CM67108MA) in netsuite_vendorcredit. The 4 misses exist under 10000 with a different amount (partial payments / split credits, e.g. 67108M charge $11.36 vs a $6.94 payment line)."
-  },
-  "NATIONAL_COATINGS_AND_SUPPLIES": {
-    "entity_ids": ["3478"],
-    "note": "National Coatings & Supplies, INC. (3478, active) -- derived 2026-10-01 by tranid trace of 143 unique lines on 6 real August statements (Bristol, Lees, Lyndhurst, Middletown, Pawtucket, Nutley): 142 tie out exactly, all under 3478 (Trans ID is the NetSuite tranid verbatim; CREDIT rows in netsuite_vendorcredit, e.g. 28059710 $431.28). The 1 miss (28089887, Pawtucket) is not in NetSuite. Excluded: National Coating and Supplies (NCS) (87594) -- inactive, no hits."
-  },
-  "CLINTON_HONDA": {
-    "entity_ids": ["80531"],
-    "note": "Clinton Honda (80531) -- derived 2026-09-29 by tranid trace of all 143 lines on 5 real August statements (CDK Global AR statement layout: Lees, Lyndhurst, Nutley, COLLEX Shrewsbury, COLLEX Tinton -- the two COLLEX files are Clinton Honda statements too): 138 tie out exactly, every one under entity 80531, with DOCUMENT / TRANSACTION as the NetSuite tranid verbatim -- supplements keep their suffix (234492X1 $55.20, 234623X1 $1,278.68) and credits keep their CM prefix (CM234518 $13.27 in netsuite_vendorcredit), so no normalization rule is needed. The 5 misses (234881, 235015, CM234760, CM234881, 235115) exist nowhere in NetSuite under this vendor; 235115 exists only under unrelated entity 180580 for a different amount ($38.29 vs $58.03), which this scope keeps out. Required because the first-word lookup on 'Clinton' would also pull in CLINTON WELDING SUPPLY INC (14096), an unrelated vendor."
-  },
-  "BLAISE_ALEXANDER": {
-    "entity_ids": ["239564", "239566", "161414"],
-    "note": "Blaise Alexander Nissan Muncy (239564), Blaise Alexander Subaru Montoursville (239566), Blaise Alexander Hyundai Mazda State College (161414) -- derived 2026-09-29 by tranid trace of real August statements (Reynolds and Reynolds template, scanned): Nissan Mont/Kingston NIW/NICS-prefixed invoices (e.g. NIW76647 -> 76647 $493.59, NICS377189 -> 377189 $155.45, NIW76717-1 -> 76717-1 $151.72, credit NIW76716 'PS' -> vendorcredit CM76716 $1225.96) all under 239564; Subaru Dallas SUW69084/SUW69187 -> 69084/69187 exact under 239566; Hyundai Dallas MAW39414/39484/39558 exact under 161414. 17 of 17 sampled lines tie out. This override is REQUIRED, not a nicety: the stripped numbers collide with unrelated vendors' tranids (39414 also under 147511, 39558 under 6478, 76741 under 243294, 69084 under 86984, 69187 under 347494) -- without the entity scope a first-word lookup on 'Blaise' would pull in 12 Blaise rooftops, and a wrong-entity tranid could tie out by coincidence. The other 9 Blaise Alexander vendor records (Chevrolet, CDJR, GMC, Ford, KIA, Subaru of Lewistown, etc.) are deliberately NOT included -- no statement for them seen yet; add on a confirmed hit only."
-  },
-  "ALL_STAR_AUTO_LIGHTS": {
-    "entity_ids": ["60731", "4950"],
-    "note": "ALL STAR AUTO LIGHTS (60731) + All Star Auto Lights - ARO (4950) -- derived 2026-09-29 by tranid trace of all 21 invoice lines on 5 real August statements (Nutley, Middletown, Lees, JC, Quonset) against bronze.netsuite_vendorbill: 15 matched exactly, split 6/9 across these two entities, and a single statement (JC) mixes both, so both are required. The other 6 (1940654P, S102740802, 1901725P, S112728629, 1952238P, S112722625) aren't in NetSuite under any entity -- real Not Found, not a scope gap. Without this override, the first-word LIKE fallback would search on 'All', matching many unrelated vendors. Deliberately NOT included yet: All Star Auto Lights - Aftermarket (15013, active, 178 bills), ALL STAR AUTO LIGHTS - CROWN (3584 -- a plausible fit for the Crown Collision Middletown statement, but neither of that statement's 2 invoices exists under it or anywhere else), and 5 older/near-dormant location records (134404, 164146, 65877, 5637, 8727); add any of them on a confirmed hit only. Excluded outright: East Jersey Elite All Starts LLC (234626), an unrelated company that only matches on the name. The Nutley statement's Payment row (#PYMT1183347, an unapplied $1,343.00 with the note 'Inv 1868342P pd w/ CM 1882723P') is expected to surface as a Not Found exception for AP review: its CM 1882723P does exist in bronze.netsuite_vendorcredit (60731, $1,343), but it is printed only as free text in the memo, not as the row's own reference."
-  },
-  "EMPIRE_AUTO_PARTS": {
-    "entity_ids": ["407925", "1753", "2333", "3017", "5650", "5849"],
-    "note": "Empire Auto Parts - MA (407925), Empire Auto Parts (1753, plain), EMPIRE AUTO PARTS - Taunton (2333), EMPIRE AUTO PARTS 1 (3017), Empire Auto Parts NJ - Clarkstown (5650), Empire Auto Parts NJ - Rockland (5849) -- all genuine same-company location records, no name-noise candidates. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- Empire's two statements are already hand-validated in Reconciliation_Status.xlsx (EMPCollex0826 / Statement(183372) sheets), so a from-scratch trace against those known invoice numbers should be quick and would upgrade this to full confidence."
-  },
-  "A_NEW_AGE_AUTO_GLASS": {
-    "entity_ids": ["125272"],
-    "note": "A New Age Auto Glass, INC. (125272) -- the only NetSuite vendor record matching this name, no ambiguity. Note separately: this vendor's own statement extraction has a confirmed row-shift bug (Bronze `total` values offset by one row for several invoices) -- 3 of 16 invoices on the one statement worked with this session are still genuinely unresolved pending a corrected re-extraction, unrelated to entity resolution. Re-confirmed 2026-10-01 against the August 'Sales By Customer' reports (scanned, rotated 90 degrees): all 12 Lyndhurst order numbers tie out verbatim under 125272 (I054467 $225 ... I054731 $95; Order Number = tranid, Total = bill total). OCR risk remains on these scans -- Claude read I054731 as I064731 in one local run, which then surfaces as Not Found."
-  },
-  "HOSELTON": {
-    "entity_ids": ["520257", "521671", "526753"],
-    "note": "Hoselton Nissan Inc (520257), Hoselton Toyota (521671), Hoselton Chevrolet Inc (526753) -- all genuine same-group dealership records, no name-noise candidates. This vendor's statement invoices use a shared 'TOW' prefix (stripped 3 chars) regardless of which of the 3 rooftops the invoice actually belongs to -- same shape as Quirk's rooftop-prefix pattern, but the entity boundary here just needs to cover all 3, no per-invoice rooftop routing has been attempted/needed. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- Hoselton's statement is already hand-validated in Reconciliation_Status.xlsx (Hoselton Toyota sheet, 90/95 matched), so a from-scratch trace against those known invoice numbers should be quick and would upgrade this to full confidence. Key renamed HOSELTON_TOYOTA -> HOSELTON 2026-10-05 so it matches the vendor_id the field mapping / normalization / line-selection seeds use: config/vendor_aliases.json had a duplicate HOSELTON_TOYOTA entry (both it and HOSELTON listed 'Hoselton Toyota', the later one won), so statements resolved to HOSELTON_TOYOTA, matched no seed rows and reconciled 0/0 (Hoselton Toyota.pdf 28 lines, Hoselton imports 9-30.pdf 108 lines). 'Hoselton Chevrolet, Inc.' statements (CVW-prefixed invoices, entity 526753 already listed) are now aliased to HOSELTON too."
-  },
-  "NYE_AUTOMOTIVE_GROUP": {
-    "entity_ids": ["376476", "379120", "370125", "371245", "371246"],
-    "note": "Nye Buick GMC (376476), Nye Volkswagen (379120), NYE Chrysler Dodge Jeep RAM (370125), NYE Ford (371245), Nye Toyota (371246) -- all genuine same-group dealership records, no name-noise candidates. Statement invoices use a shared 'CHW' prefix (stripped 3 chars) regardless of which of the 5 rooftops the invoice belongs to, same shape as Hoselton. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- NYE's statement is already hand-validated in Reconciliation_Status.xlsx (NYE Automotive Group sheet, 42/46 matched), so a from-scratch trace against those known invoice numbers should be quick and would upgrade this to full confidence."
-  },
-  "DOWNEAST_TOYOTA": {
-    "entity_ids": ["87592"],
-    "note": "Down East Toyota-Scion (87592) -- confirmed 2026-09-18 via a real reconciliation query traced against a real statement (STMT-F4DBEA2D): charges/credits matched cleanly against bronze.netsuite_vendorbill/netsuite_vendorcredit scoped to this single entity, with amounts tying out. Only one entity found/needed for this vendor, unlike Bald Hill/Berlin City/Nucar's multi-entity consolidated-statement cases. Also confirmed 2026-09-11 via a separate real tranid trace against STMT-7D79DB56 (73+ real bill/credit hits) -- dynamic name lookup alone was resolving to the wrong entity (26546, 'Downeast Signs') because the statement's own vendor_name_raw ('Downeast Toyota', no space) doesn't literally match NetSuite's entityid ('Down East Toyota-Scion', with a space) -- same class of gap as Brown's Auto Salvage's apostrophe mismatch. (This key previously appeared twice in this file with these two notes split across separate entries -- a literal duplicate JSON key, silently collapsed to whichever came last by every JSON parser; merged 2026-09-23, no entity_ids conflict since both entries already agreed on 87592.)"
-  },
-  "KEYSTONE_AUTOMOTIVE_INDUSTRIES": {
-    "entity_ids": ["134409", "156776", "165288", "372650", "3480", "6689", "10453", "12981", "12203"],
-    "note": "First 8 entities are what dynamic name lookup already resolves (Keystone - Complete- Bethlehem/134409, KeyCorn - Keystone/156776, Keystone Volvo Cars of Doylestown/165288, KEYSTONE PERFORMANCE & TRUCK PARTS/372650, Keystone Automotive Industries, Inc./3480, KEYSTONE/6689, Keystone Automotive-Paint/10453, KEYSTONE ALLIED/12981) -- kept here so adding this override doesn't regress statements already matching correctly on those. Added 2026-09-24: entity 12203, 'AUTO DATA LABELS INC' -- a genuinely separate NetSuite vendor record with no 'Keystone' in its companyname/entityid/altname at all, so dynamic/first-word-LIKE lookup could never find it no matter how it's tuned. This covers the 'Auto Data Labels' branded Keystone sub-statement layout (letterhead 'AUTODATALABELS - An LKQ Company', Remit-To 'Keystone Automotive Industries, Inc.', columns Reference Date/Reference Number/PO Number/Balance Forward/Period Activity/Credit Applied/Payment Applied/Balance Due -- Reference Number IS the NetSuite tranid directly, no normalization needed). Confirmed live against 4 real statements (Middletown/1150333, Bristol/1146716, Montoursville/1343716, Nutley/1244040): 20 of 22 charge lines matched exactly under entity 12203 alone (e.g. 900DC211 -> tranid 900DC211, $98.70 exact). The other 2 (900IC320, 900EC637) were checked directly by tranid under entity 12203 with no amount filter and genuinely don't exist there -- real 'Not Found' exceptions, not a resolution gap. Before this override, every line from this sub-format silently exceptioned as 'Not Found in NetSuite' since the 8 Keystone-named entities never contain Auto Data Labels' own tranids."
-  },
-  "QUIRK_AUTO_GROUP": {
-    "entity_ids": ["48069", "46333", "46332", "55672", "47163", "46059", "46637", "10654", "119935", "104293", "2338"],
-    "note": "2338 (generic 'QUIRK' record) added 2026-10-10: it holds the QCW-numbered bills (2077 bills, 314 credits; nothing else of note) of Quirk's 'Crown Collision' account statements (Bristol, Pawtucket), confirmed by tranid lookup (QCW1044906, QCW1040765). Earlier note: 10 of the statement's 15 rooftop codes confirmed 2026-09-05 against real tranid data across 3 real Quirk statements (STMT-8C2BCD72 and two others) -- CV=Chevy Bangor=48069 (Quirk Chevrolet Cadillac of Bangor), SU=Subaru=46333 (Quirk Subaru of Bangor), JE=Jeep=46332 (Quirk Chrysler Jeep Dodge Ram of Bangor, disambiguated from 2 other name-similar candidates via live match), MB=Mercedes=55672, HY=Hyundai=47163, 7C=Chev Portland=46059 (first one confirmed, via direct tranid lookup on 891928C), FO=Ford Augusta=46637, AM=Quirk Aftermarket=10654, 1F/1D=Belfast Ford Chrysler=119935 (shared by both prefixes), RC=Rockland Chevrolet GMC=104293. Unresolved: MI (Mitsubishi), 6U (Cars By Us), 6P (Quirk Motorsports), 8F (Alfa Romeo and Fiat) -- none of these four appear anywhere in bronze.netsuite_vendor under any name variant searched, despite 24 total 'quirk'-matching vendor records existing (Quirk Kia, Quirk Auto Glass, Quirk Buick GMC, Quirk Volkswagen Manchester, generic 'QUIRK', several Crown/Parts/Domestic/Foreign records, etc.) -- none of those 14 extra records are a name match for the 4 missing rooftops either, so they're deliberately NOT included here (same reasoning as ABC's excluded false-positive candidates: a 'Quirk'-prefixed name isn't enough on its own to justify inclusion in a 15-rooftop statement's own entity boundary without a specific business reason to believe it's one of the missing 4). This entity_ids list is used as a broad collision-guard scope only (entity IN (...) on the join), NOT for per-invoice rooftop precision -- confirmed 2026-09-05 that a credit's actual NetSuite entity doesn't reliably match what its invoice's rooftop prefix predicts (a 7C-prefixed credit landed under CV's entity), so per-rooftop entity comparison was deliberately dropped from the matching logic, not from this scope list."
-  },
-  "GATES_GMC_NISSAN": {
-    "entity_ids": ["81232"],
-    "note": "Gates GMC Nissan (81232). Derived 2026-10-05 by tranid trace of the stored Claude rows of the August Gates statements (New Britain, Pawtucket, Bristol): charges tie out under 81232 once the 2-char '00' invoice prefix is stripped (seed vendor_normalization_rule). Credits carry irregular NetSuite tranids and mostly surface as exceptions."
-  },
-  "LENTINI_AUTO_SALVAGE": {
-    "entity_ids": ["123828", "128702"],
-    "note": "Lentini Auto Salvage (123828, 128702). Derived 2026-10-05 by tranid trace of the stored Claude rows of the August Lentini statements: invoices tie out verbatim under these two records. Credit / payment lines reference the NetSuite vendorcredit as 'DT# nnnn' in the Reference column -- matched by the DT# fallback in fabric_matching.py."
-  },
-  "MASTRIA": {
-    "entity_ids": ["2572", "13402", "4407", "2337", "5344"],
-    "note": "Mastria rooftops (Buick GMC Cadillac, Subaru and siblings: 2572, 13402, 4407, 2337, Kia 5344). Derived 2026-10-05 by tranid trace of the Quonset / Pawtucket August statements (CDK AR layout, parsed by extract_mastria.py): invoices and CM credits tie out verbatim. 5344 confirmed by 200380K ($454.81, Kia dept 6). Nissan (2336), VW (15934) also exist in NetSuite -- add them only on a confirmed hit."
-  },
-  "GOODWINS": {
-    "entity_ids": ["6957", "12416"],
-    "note": "Goodwins Chevy Mazda-Domestic (6957) and Goodwins Volvo (12416). Derived 2026-10-05 by tranid trace of 6 stored Goodwins statements (Reynolds and Reynolds template, CVW-prefixed invoices): 33 of 34 unique lines tie out across ALL NetSuite entities only under these two -- charges after the 3-char prefix strip, credits as CM + stripped. Goodwins Chevy Mazda-Foreign (6688), Oxford-Sublet (11974) and Land Rover (13397) also exist; add them only on a confirmed hit."
-  },
-  "THOMPSON_VOLKSWAGEN": {
-    "entity_ids": ["479973"],
-    "note": "Thompson Volkswagen Inc. (479973). Added 2026-10-13: the prod Maurice statement (STMT-8C3B3805) line 73904 is bill tranid 73904 under 479973 (9/3/2026). Other Thompson records (BMW 622428, Lexus Doylestown 262212, Electrical, Overhead) are different businesses."
-  },
-  "LKQ": {
-    "entity_ids": ["3019", "63531", "32050", "138636"],
-    "note": "LKQ New England (3019), LKQ (63531), Royal Used LKQ Parts (32050), LKQ Corp Northeast (138636 -- added 2026-10-05 from the LKQ Venice / First Choice statement, 3 of 3 lines). Derived 2026-10-05 by tranid trace of 5 stored LKQ statements (Gorham, Thruway): 117 of 125 unique lines tie out verbatim across ALL NetSuite entities only under these three (103 / 13 / 1). LKQ is NOT under Keystone in NetSuite despite the corporate relationship."
-  },
-  "NAPA_AUTO_PARTS": {
-    "entity_ids": ["402001", "7147", "8495", "150640", "2568", "85458", "84789"],
-    "note": "Auto Parts Connection (402001), NAPA (7147), NAPA 1 (8495), plus store records added 2026-10-05 from statements Claude labelled with the store name: Napa Auto Parts (150640, Val-U / First Choice), NAPA - Pawtucket (2568, Raps), NAPA Auto Parts - Bridge Auto Supply (85458), Shrewsbury AutoParts Inc(NAPA) (84789). Derived 2026-10-05 by tranid trace of 6 stored NAPA statements: 14 of 22 unique lines tie out across ALL NetSuite entities only under these three. NAPA is a franchise network with ~20 store-level vendor records in NetSuite; add another store only on a confirmed hit."
-  },
-  "1800_RADIATOR": {
-    "entity_ids": ["8214", "637035"],
-    "note": "1-800-Radiator (8214) and 1 800-Radiator AC and Exhaust of Pittsburgh (637035). Derived 2026-10-05 by tranid trace of 12 stored statements: 26 of 32 unique lines tie out verbatim across ALL NetSuite entities only under these two (19 / 7)."
-  },
-  "CONTINENTAL_AUTO_PARTS": {
-    "entity_ids": ["7146"],
-    "note": "Continental Auto Parts LLC (7146). Derived 2026-10-05 by tranid trace of 6 stored statements: 162 of 181 unique lines tie out verbatim under 7146. Two more tied under Lehigh Valley Honda (134807) -- coincidental number collisions with another vendor, deliberately left out."
-  },
-  "BILL_DODGE": {
-    "entity_ids": ["26349", "653129", "121920", "416254"],
-    "note": "Bill Dodge Infiniti (26349), BMW of Westbrook (653129), Bill Dodge GMC (121920), Bill Dodge Kia (416254). Derived 2026-10-05 by tranid trace of 9 stored Bill Dodge Auto Group statements (Tekion AR layout, one statement covers several franchises): 47 of 58 unique lines tie out verbatim across ALL NetSuite entities only under these four (39 / 3 / 3 / 2). The misses are R-suffixed returns (F3335R, K10437-1R) with no NetSuite credit at that amount."
-  },
-  "BOW_AUTO_PARTS_-_AUTOLY": {
-    "entity_ids": ["6681"],
-    "note": "Bow Auto Parts (6681). Derived 2026-10-05 by tranid trace of 8 stored statements: 93 lines tie out under 6681 as the number after '#' in Transaction Type -- invoices as bills, 'Credit #nnn for inv. mmm' as vendorcredit nnn. Key renamed BOW_AUTO_PARTS -> BOW_AUTO_PARTS_-_AUTOLY 2026-10-06 on merging fix/oct1-validation, whose extract_autoly parser now reads Bow statements and whose alias uses that id. Bow Auto Parts 1 (10918) had no hits."
-  },
-  "HEALEY": {
-    "entity_ids": ["219785", "322933", "219786", "220235", "42211", "53967"],
-    "note": "Healey rooftops: Chrysler Dodge Jeep Ram (219785), Chevrolet (322933), Hyundai (219786), Kia 1 (220235), Chevrolet Buick Inc. (42211), Mitsubishi (53967). Derived 2026-10-05 by tranid trace of 7 stored Prestige statements (one shared layout): 48 of 65 unique lines tie out verbatim across ALL NetSuite entities only under these six. Healey Ford (35495) and Healey Chevy Buick (61610) also exist -- add only on a confirmed hit."
-  },
-  "OREILLY_AUTO_PARTS": {
-    "entity_ids": ["6967"],
-    "note": "OREILLY AUTO PARTS (6967) -- the only active O'Reilly record (5340, 6680, 87596 inactive). Derived 2026-10-05 by tranid trace of 10 stored statements: 155 of 218 unique lines tie out under 6967, 150 of them only after inserting a dash after the 4-digit store number (statement 4507140208 -> NetSuite 4507-140208; fabric_matching._alternate_tranids). Most misses are late-2025 items."
-  },
-  "PARAGON": {
-    "entity_ids": ["7149"],
-    "note": "Paragon Powder Coating and Wheel Repair (7149), the only Paragon record. Derived 2026-10-05 by tranid trace of 10 stored statements: the invoice number after 'Invoice #' in ACTIVITY is the NetSuite tranid, but most lines surface as Amount Mismatch -- NetSuite holds the list price ($195.00 / $200.00) while the statement bills the discounted amount ($175.50 / $180.50). Genuine discrepancy for AP review, not a key problem."
-  },
-  "BC_TIRE": {
-    "entity_ids": ["81234"],
-    "note": "BC Tire (81234), the only BC Tire record. Derived 2026-10-06 by tranid trace of 5 stored B-C Tire Service statements: NetSuite holds bills as PW + the statement's Ref # (352478 -> PW352478, some PW-355263) -- matched by fabric_matching._alternate_tranids."
-  },
-  "JACK_MADDEN_FORD": {
-    "entity_ids": ["112242"],
-    "note": "JACK MADDEN FORD (112242). Derived 2026-10-06 by tranid trace of 5 stored statements (CDK AR layout): 127 of 149 unique lines tie out verbatim under 112242, invoices as bills and CM-prefixed lines as credits."
-  },
-  "SULLIVAN_TIRE": {
-    "entity_ids": ["6960"],
-    "note": "Sullivan Tire (6960). Derived 2026-10-06 by tranid trace of 6 stored statements: 60 of 79 lines tie out under 6960 -- some verbatim (0000-4024835), most as the number after the store prefix without leading zeros (_alternate_tranids). Store 0119-prefixed invoices have no NetSuite record yet. Sullivan Tire Bangor (85161) exists -- add only on a confirmed hit; Sullivan Tire-Sublet (6961) is inactive."
-  },
-  "VIP_TIRES": {
-    "entity_ids": ["6694"],
-    "note": "VIP, Inc (6694) -- VIP Tires & Service (29856) is inactive. Derived 2026-10-06 by tranid trace of 5 stored statements: 77 of 78 invoice lines tie out under 6694 as the number after the dash in Document No. (INV7-2007037814 -> 2007037814, token_after normalization)."
-  },
-  "WHEELS_ON_SITE": {
-    "entity_ids": ["138869"],
-    "note": "Wheels on Site (138869). Derived 2026-10-06 by tranid trace of 5 stored statements: 33 of 33 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after), 3 of them without leading zeros (_alternate_tranids)."
-  },
-  "BISHOPS_USED_AUTO_PARTS": {
-    "entity_ids": ["49350"],
-    "note": "Bishop's Auto Parts Inc. (49350) -- BISHOP`S USED AUTO PARTS (10657) is inactive. Derived 2026-10-06 by tranid trace of 3 stored statements: the statement's own Invoice # is mostly NOT in NetSuite; the DT# number in its Reference column is ('PO#4102542 EDWIN, DT#443092'), 11 of 12 lines, bills and credits alike -- matched by fabric_matching's DT# fallback."
-  },
-  "CASCO_BAY_FORD": {
-    "entity_ids": ["8728"],
-    "note": "Casco Bay Ford (8728) -- Casco Bay Ford - Sublet (6685) is inactive. Derived 2026-10-06 by tranid trace of 3 stored statements (Tekion layout): 18 of 21 lines tie out verbatim."
-  },
-  "FAULKNER": {
-    "entity_ids": ["136016", "159420", "159092", "159744"],
-    "note": "Faulkner rooftops: INFINITI of Willow Grove (136016), Nissan Harrisburg (159420), Subaru (159092), Honda (159744). Derived 2026-10-06 by tranid trace of 6 stored statements (one shared layout): 38 of 38 lines tie out verbatim across ALL NetSuite entities only under these four. Faulkner has ~14 rooftop records (Alfa Romeo Maserati 200388, Dodge, Hyundai, Mazda, Toyota, ...) -- add one only on a confirmed hit."
-  },
-  "HEADLIGHTS_DEPOT": {
-    "entity_ids": ["6407"],
-    "note": "Headlights Depot (6407). Derived 2026-10-06 by tranid trace of 4 stored statements: 17 of 20 lines tie out as the token after '#' in Description (Invoice #CCC-6744261709 -> CCC-6744261709). HeadlightsDepot (26545) exists too -- add only on a confirmed hit."
-  },
-  "LEXUS_OF_EDISON": {
-    "entity_ids": ["82472"],
-    "note": "LEXUS OF EDISON (82472) -- Lexus Of Edison (26823) is inactive. Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 18 of 20 lines tie out verbatim."
-  },
-  "LEXUS_OF_WARWICK": {
-    "entity_ids": ["40605"],
-    "note": "Lexus of Warwick (40605). Derived 2026-10-06 by tranid trace of 1 stored statement: 5 of 5 lines tie out verbatim."
-  },
-  "CERTIFIED_AUTO_PARTS": {
-    "entity_ids": ["81837"],
-    "note": "Certified Auto Parts, Inc. (81837), the only active Certified record. Derived 2026-10-06 by tranid trace of 2 stored statements: bills are keyed by the SALES ORDER number, not the invoice number ('Sales Order #C7813250 T' -> C7813250T, token_after_nospace), credit memos by the memo number (CM145185). 38 of 45 lines."
-  },
-  "EASTERN_AUTOPARTS_WAREHOUSE": {
-    "entity_ids": ["134811"],
-    "note": "Eastern Autoparts Warehouse (134811). Derived 2026-10-06 by tranid trace of 3 stored statements: 11 of 14 non-payment lines tie out verbatim (3IV1308159). CSH rows (Transaction Number 'MC') are payments, excluded by line-selection rule."
-  },
-  "GOYETTE'S_INC": {
-    "entity_ids": ["1757"],
-    "note": "Goyette's Inc (1757) -- GOYETTE`S (5343) and GOYETTE`S INC. (32550) are inactive. Statements are read by extract_autoly (merged from fix/oct1-validation); configured 2026-10-06, see the simulation in that commit."
-  },
-  "MAINE_OXY": {
-    "entity_ids": ["4921"],
-    "note": "MAINE OXY (4921). Derived 2026-10-06 by tranid trace of 3 stored statements: 6 of 6 lines tie out verbatim."
-  },
-  "MCGOVERN": {
-    "entity_ids": ["12208", "9868", "127885", "101182"],
-    "note": "McGovern rooftops: Chrysler Jeep Dodge Ram (12208), Hyundai (9868), BMW of Shrewsbury (127885), Buick GMC (101182). Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 11 of 11 lines tie out across ALL NetSuite entities only under these four. McGovern has ~13 rooftop records (Ford, Subaru, Toyota, Volvo, Jaguar Land Rover, ...) -- add one only on a confirmed hit."
-  },
-  "ADHESIVE_TEMPLATES": {
-    "entity_ids": ["43045"],
-    "note": "Adhesive Templates (43045). Derived 2026-10-06 by tranid trace of 2 stored statements: 4 of 5 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after). adhesive templates 2 (37417) exists -- add only on a confirmed hit."
-  },
-  "BLUE_SUN_SUPER_SERVICE": {
-    "entity_ids": ["17898"],
-    "note": "Blue Sun Super Service (17898) -- not Blue Sun Towing (2766). Derived 2026-10-06 by tranid trace of 2 stored statements (the Crown Middletown / Pawtucket towing statements): 55 of 60 lines tie out verbatim (26-0730-7794)."
-  },
-  "BROWN'S_AUTO_SALVAGE-_AUTOLY": {
-    "entity_ids": ["181729"],
-    "note": "Browns Auto Salvage PRP (181729). Derived 2026-10-06 by tranid trace of 4 stored statements (same statement system as Lentini / Bishop's): 13 of 16 lines tie out verbatim. Keyed on intake's fallback vendor id rather than an alias, because tests/test_vendor_aliases_autoly.py asserts this name stays unaliased."
-  },
-  "RADIATOR_STORE": {
-    "entity_ids": ["26850", "8214"],
-    "note": "The Radiator Store, Inc. (26850) plus 1-800-Radiator (8214), which the same statements' invoices also post under. Derived 2026-10-06 by tranid trace of 3 stored statements (1-800 Radiator (Lamon / M3) files): 10 of 10 lines tie out verbatim."
-  },
-  "TOYOTA_OF_DARTMOUTH": {
-    "entity_ids": ["4615"],
-    "note": "TOYOTA OF DARTMOUTH (4615). Derived 2026-10-06 by tranid trace of 1 stored statement (Reynolds and Reynolds layout, Crown Collision Middletown): 37 of 42 lines tie out after the 3-char TOW strip, credits as CM + stripped."
-  },
-  "TOYOTA_OF_HACKENSACK": {
-    "entity_ids": ["125668"],
-    "note": "TOYOTA OF HACKENSACK (125668). Derived 2026-10-06 by tranid trace of 3 stored statements (Reynolds and Reynolds layout): 54 of 62 lines tie out after the 3-char TOW strip, credits as CM + stripped. One coincidental hit under Fred Beans (18706) deliberately left out."
-  },
-  "WURTH_USA": {
-    "entity_ids": ["4920"],
-    "note": "WURTH USA INC (4920). Derived 2026-10-06 by tranid trace of 3 stored statements: 15 of 15 lines tie out verbatim. WURTH USA LNC. (41106) exists -- add only on a confirmed hit."
-  },
-  "CHUCK'S_DOUGLASSVILLE_-_AUTOLY": {
-    "entity_ids": ["134806"],
-    "note": "Chuck's Auto Salvage - Douglassville - Team PRP (134806). Derived 2026-10-06 by tranid trace of 3 stored statements (Autoly ledger): 8 of 8 invoice lines tie out as the number after '#'. Chuck's Auto Salvage - York (242916) exists and the statements tag some parts (YOR) -- add it only on a confirmed hit."
-  },
-  "EL_M_AUTO_PARTS": {
-    "entity_ids": ["150641"],
-    "note": "EL&M Auto Recycling - Team PRP (150641). Derived 2026-10-06 by tranid trace of 2 stored statements (Autoly ledger): 15 of 17 non-payment lines tie out as the number after '#' (invoices as bills, 'Credit #n for inv. m' as vendorcredit n)."
-  },
-  "COLLISIONSTONEGUARD": {
-    "entity_ids": ["23634"],
-    "note": "CollisionStoneGuard (23634) -- the Clarkstown record (5642) is inactive. Derived 2026-10-06 by tranid trace of 2 stored statements: 2 of 2 lines tie out as the number after '#' in Transaction ('INV #252608. Due ...')."
-  },
-  "DOVER_DODGE": {
-    "entity_ids": ["81666"],
-    "note": "Dover Dodge Chrysler Jeep (81666). Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 5 of 5 lines tie out after the 3-char CHW strip."
-  },
-  "EMERSON_TOYOTA": {
-    "entity_ids": ["18506"],
-    "note": "Emerson Toyota (18506) -- the Coleman's sublet records (10859, 10860) are inactive. Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 4 of 4 -- TOW-prefixed invoices after the 3-char strip, TOCS-prefixed (source 3) verbatim."
-  },
-  "JAGUAR_LAND_ROVER_WARWICK": {
-    "entity_ids": ["134813"],
-    "note": "Jaguar Land Rover Warwick (134813). Derived 2026-10-06 by tranid trace of 2 stored statements (same layout as Lexus of Warwick): 12 of 18 lines tie out verbatim."
-  },
-  "NATIONAL_HAIL_AND_DENT": {
-    "entity_ids": ["92301"],
-    "note": "National Hail & Dent Removal LLC. (92301). Derived 2026-10-06 by tranid trace of 2 stored statements: 2 of 2 lines tie out as the number after '#' in Transaction ('INV #33609.. Orig. Amount $300.00.')."
-  },
-  "TIRE_RACK_WHOLESALE": {
-    "entity_ids": ["5128"],
-    "note": "TIRE RACK WHOLESALE (5128) -- TIRE RACK (23318) is inactive. Derived 2026-10-06 by tranid trace of 2 stored statements: 5 of 7 lines tie out verbatim (VJ8572701)."
-  },
-  "VINART": {
-    "entity_ids": ["134410", "134808", "134405", "135660", "134807"],
-    "note": "VinArt bills on behalf of the Lehigh Valley dealerships and has no NetSuite record of its own; invoices post under the dealership: Mercedes Benz of Lehigh Valley (134410), Lehigh Valley Acura (134808), Lehigh Valley Hyundai (134405), Porsche Lehigh Valley (135660), Lehigh Valley Honda (134807). Derived 2026-10-06 by tranid trace of 4 stored statements (Tekion layout): 219 of 253 unique lines tie out verbatim across ALL NetSuite entities only under these five. Most misses are R-suffixed returns with no NetSuite credit."
-  },
-  "PARTS_AUTHORITY": {
-    "entity_ids": ["68562"],
-    "note": "Parts Authority (68562). Derived 2026-10-06 by tracing the 9-digit document number on all 6 statements (extract_partsauthority): bills held as <branch>-<number> (055-568636), credits without the leading zero -- 41 of 58 lines, all under 68562. West Springfield (198476) and B&L (230399) are separate Parts Authority records -- add only on a confirmed hit."
-  },
-  "PRESTIGE_LEXUS_OF_RAMSEY": {
-    "entity_ids": ["29335", "80530"],
-    "note": "Prestige Lexus of Ramsey (29335) and BMW of Freehold (80530) -- the Lithia/billtrust statement covers both (customer ARC1612 is DCH Freehold BMW). Derived 2026-10-06 by tranid trace of 5 statements: 46 of 55 lines verbatim on the Lithia layout, 18 of 20 on the invoice-list layout via the last '_' segment."
-  },
-  "ELITE_WHEELS": {
-    "entity_ids": ["113850"],
-    "note": "Elite Wheels (113850). Derived 2026-10-06 by tracing 4 statements' text: invoices 'Invoice #I-003-03241' are held as 003-03241 (recent) or I-000-53938 (older) -- token_after + _alternate_tranids. Not to be confused with Elitek Vehicle Services (27647), where two numbers coincidentally collide."
-  },
-  "FETTE": {
-    "entity_ids": ["123687", "123686", "132084"],
-    "note": "Fette Kia (123687), Fette Ford (123686), Fette INFINITI (132084). Derived 2026-10-06 by tracing 4 statements (eF320 layout, as Faulkner): 41 of 45 lines verbatim across ALL NetSuite entities only under these three."
-  },
-  "TOWN_FAIR_TIRE": {
-    "entity_ids": ["2574"],
-    "note": "Town Fair Tire - East Haven (2574) -- the Centers records (3995, 4951, 8888) are inactive. Derived 2026-10-06 by tracing 4 statements: '40315-537 PO 4203067' -> 40315-537 (verbatim) or 72838580 (undashed). Town Fair Tire (256863) holds other stores' bills -- add only on a confirmed hit."
-  },
-  "ADAS_CALIBRATION_EXPERTS": {
-    "entity_ids": ["68559"],
-    "note": "ADAS CALIBRATION EXPERTS (68559). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 44 of 48 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "ALBANY_AUTO_MANAGEMENT": {
-    "entity_ids": ["180580", "219783", "180579"],
-    "note": "BMW of South Albany (180580), Northway Toyota (219783), Audi Albany (180579). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 117 of 123 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "ALLOY_WHEEL_REPAIR_SPECIALIST": {
-    "entity_ids": ["115114"],
-    "note": "Alloy Wheel Repair (115114). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "AUDI_NASHUA": {
-    "entity_ids": ["39603"],
-    "note": "Audi of Nashua (39603). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "AUTO_VALUE_PARTS_STORES": {
-    "entity_ids": ["126690"],
-    "note": "Auto Value Parts Stores (126690). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 21 of 32 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "BMW_OF_BRIDGEWATER": {
-    "entity_ids": ["145501"],
-    "note": "BMW of Bridgewater (145501). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "BALISE_HONDA_OF_NORTH_ATTLEBOROUGH": {
-    "entity_ids": ["11977"],
-    "note": "Balise Honda of North Attleborough (11977). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "BERGEY_S": {
-    "entity_ids": ["134810"],
-    "note": "Bergey's Wholesale Parts (134810). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 38 of 41 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "CAPITOL_CDJR_SOUTH": {
-    "entity_ids": ["648959"],
-    "note": "Capitol South Chrysler Dodge Jeep Ram (648959). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 9 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "CHERRY_HILL_NISSAN": {
-    "entity_ids": ["147119"],
-    "note": "Cherry Hill Nissan (147119). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 20 of 20 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "CONICELLI_HONDA": {
-    "entity_ids": ["199713"],
-    "note": "Conicelli Honda (199713). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 38 of 39 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
-  },
-  "CONICELLI_TOYOTA": {
-    "entity_ids": ["81667"],
-    "note": "Conicelli Toyota (81667). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 36 of 38 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
-  },
-  "DAVIS_ACURA": {
-    "entity_ids": ["147913"],
-    "note": "Davis Acura (147913). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 17 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "DEPAULA_MAZDA": {
-    "entity_ids": ["186001"],
-    "note": "DePaula Mazda (186001). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
-  },
-  "DENT_WIZARD_INTERNATIONAL_CORP": {
-    "entity_ids": ["47735"],
-    "note": "Dent Wizard International Corp,LLC. (47735). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out with the dash removed (_alternate_tranids) across ALL NetSuite entities."
-  },
-  "DENT_X": {
-    "entity_ids": ["417579"],
-    "note": "Dent-X, LLC (417579). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "EAST_COAST_BEVERAGE": {
-    "entity_ids": ["130974"],
-    "note": "East Coast Beverage (130974). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "EMPIRE_RIM_FIX": {
-    "entity_ids": ["272781"],
-    "note": "Empire Rim Fix Corp (272781). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 9 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "EVERGREEN_SUBARU": {
-    "entity_ids": ["11083"],
-    "note": "EVERGREEN SUBARU (11083). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "FISHERS": {
-    "entity_ids": ["159417"],
-    "note": "Fisher Auto Parts (159417). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 9 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "FREIGHTLINER_OF_HARRISBURG": {
-    "entity_ids": ["160147"],
-    "note": "Freightliner Western Star Of Harrisburg (160147). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "GEAR_SIX_AUTO_PARTS": {
-    "entity_ids": ["417076"],
-    "note": "Gear Six Auto Parts (417076). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "GOLDSTEIN_SUBARU": {
-    "entity_ids": ["203121"],
-    "note": "Goldstein Subaru (203121). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 11 of 12 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "GOTCHA_COVERED_AUTO_GLASS": {
-    "entity_ids": ["182185"],
-    "note": "Gotcha Covered Auto Glass (182185). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "GRIECO_TOYOTA": {
-    "entity_ids": ["4949", "2331"],
-    "note": "Grieco Toyota (4949), Nucar Toyota of Norwood (2331). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "INTERSTATE_BATTERY_OF_PASSAIC_COUNTY": {
-    "entity_ids": ["141662"],
-    "note": "Interstate Battery (141662). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "JAGUAR_LAND_ROVER_ALLENTOWN": {
-    "entity_ids": ["145498"],
-    "note": "Bennett Jaguar Land Rover (145498). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
-  },
-  "JAGUAR_LAND_ROVER_MANHATTAN": {
-    "entity_ids": ["164737"],
-    "note": "Land Rover Manhattan (164737). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 5 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "KUNDERT_VOLVO": {
-    "entity_ids": ["138034"],
-    "note": "Kundert Volvo (138034). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "L_AND_M_ADAS_CALIBRATION_CENTER": {
-    "entity_ids": ["88283"],
-    "note": "L&M Adas Calibration Center LLC (88283). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 12 of 18 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "LINE_X_OF_BANGOR": {
-    "entity_ids": ["193492"],
-    "note": "LINE-X OF BANGOR (193492). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "M_AND_P_USED_AUTO_PARTS": {
-    "entity_ids": ["12209"],
-    "note": "M&amp;P USED AUTO PARTS-PARTS (12209). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MG_APPEARANCE_PRODUCTS": {
-    "entity_ids": ["147004"],
-    "note": "MG Appearance Products (147004). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "MALCO_PRODUCTS_OF_MAINE": {
-    "entity_ids": ["228486"],
-    "note": "Malco Products of Maine (228486). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "MALOUF_FORD_LINCOLN": {
-    "entity_ids": ["109222"],
-    "note": "Malouf Ford-Lincoln, Inc (109222). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 18 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MAZDA_OF_MILFORD": {
-    "entity_ids": ["48342"],
-    "note": "Mazda of Milford (48342). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MERCEDES_BENZ_OF_BROOKLYN": {
-    "entity_ids": ["81668"],
-    "note": "Mercedes Benz of Brooklyn (81668). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 5 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MERCEDES_BENZ_OF_CHERRY_HILL": {
-    "entity_ids": ["609408"],
-    "note": "Mercedes-Benz of Cherry Hill (609408). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 23 of 28 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MERCEDES_BENZ_OF_WILMINGTON": {
-    "entity_ids": ["408133"],
-    "note": "Mercedes-Benz of Wilmington (408133). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MORGAN_TIRE": {
-    "entity_ids": ["402002"],
-    "note": "Morgan's Tire Service (402002). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MORONG_FALMOUTH": {
-    "entity_ids": ["10270"],
-    "note": "Morong Falmouth (10270). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MY_AUTO_STORE": {
-    "entity_ids": ["480497"],
-    "note": "My Auto Store LLC (480497). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 10 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "NEW_ENGLAND_TRUCK_CENTER": {
-    "entity_ids": ["396980"],
-    "note": "New England Truck Center dba Ray's Truck Service (396980). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "NOVUS_GLASS": {
-    "entity_ids": ["220732"],
-    "note": "Novus Glass (220732). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PATRIOT_ACURA": {
-    "entity_ids": ["327857"],
-    "note": "Patriot Acura (327857). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PATRIOT_SUBARU_OF_SACO": {
-    "entity_ids": ["6690"],
-    "note": "PATRIOT SUBARU (6690). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 10 of 12 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PAUL_MILLER_PORSCHE": {
-    "entity_ids": ["284273"],
-    "note": "Paul Miller Porsche (284273). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PENNSTONE_SUPPLY": {
-    "entity_ids": ["174703"],
-    "note": "PENNSTONE SUPPLY INC (174703). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PINE_BROOK_TIRE": {
-    "entity_ids": ["283671"],
-    "note": "Pine Brook Tire (283671). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PORTLAND_GLASS": {
-    "entity_ids": ["386452"],
-    "note": "Portland Glass (386452). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PRESTIGE_MITSUBISHI": {
-    "entity_ids": ["5341"],
-    "note": "PRESTIGE MITSUBISHI (5341). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PRINCETON_BMW": {
-    "entity_ids": ["157477"],
-    "note": "Princeton BMW (157477). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "ROBERTSON_AUTO_GLASS": {
-    "entity_ids": ["85159"],
-    "note": "Robertson Auto Glass LLC (85159). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out without leading zeros (_alternate_tranids) across ALL NetSuite entities."
-  },
-  "SPEEDCRAFT_ACURA": {
-    "entity_ids": ["13021"],
-    "note": "SPEEDCRAFT ACURA (13021). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 15 of 17 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "STOYSTOWN_AUTO_WRECKERS": {
-    "entity_ids": ["159090"],
-    "note": "Stoystown Auto Wreckers (159090). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "SUNRISE_TOYOTA": {
-    "entity_ids": ["6412"],
-    "note": "Sunrise Toyota (6412). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 28 of 30 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "TECH_TIRE_SUPPLY": {
-    "entity_ids": ["131681"],
-    "note": "Tech Tire Supply LLC (131681). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "THE_WYNN_GROUP": {
-    "entity_ids": ["149582"],
-    "note": "Wynn Volkswagen (149582). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "TILGHMANS_AUTO_PARTS_II": {
-    "entity_ids": ["164147"],
-    "note": "Tilghman's Auto Parts (164147). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "TULLEY_AUTOMOTIVE_GROUP": {
-    "entity_ids": ["254048"],
-    "note": "Tulley Mazda (254048). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "TWIN_CITY_TIRE_AND_SERVICE": {
-    "entity_ids": ["85162"],
-    "note": "Twin City Tire and Service (85162). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 14 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "VOLKSWAGEN_OF_SACO": {
-    "entity_ids": ["169450", "6698"],
-    "note": "Jack Volkswagen Of Saco (169450), Volkswagen Saco (6698). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 24 of 24 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "VOLVO_CARS_PRINCETON": {
-    "entity_ids": ["372450"],
-    "note": "Volvo Cars Princeton (372450). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "WELDON_TIRE": {
-    "entity_ids": ["22604"],
-    "note": "WELDON TIRE (22604). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "WHEEL_COLLISION_CENTER": {
-    "entity_ids": ["115114"],
-    "note": "Alloy Wheel Repair (115114). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 13 of 13 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "WILKIE_LEXUS": {
-    "entity_ids": ["147915"],
-    "note": "Wilkie Lexus (147915). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 31 of 39 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "YERTY_AUTO_SERVICE": {
-    "entity_ids": ["397880"],
-    "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "LIA_AUTO_GROUP": {
-    "entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854", "46057"],
-    "note": "Lia Honda of Brewster (46057) added 2026-10-13 from prod Lia Group Prestige 093026.pdf (STMT-64B08361): its HB-suffixed invoices are stored in NetSuite under 46057, mostly lowercase (151605hb) -- matching compares case-insensitively. Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
-  },
-  "WILBERTS": {
-    "entity_ids": ["240269", "346384"],
-    "note": "Wilbert's, Inc. - Team PRP (240269), Wilberts PAP Hudson Valley LLC (346384). Derived 2026-10-07 by tranid trace of 3 statements (extract_wilberts + one Claude run): 26 of 35 lines verbatim; misses are mostly 'CR for #' credits with no NetSuite record."
-  },
-  "DING'S_AUTO_PARTS": {
-    "entity_ids": ["30638"],
-    "note": "Ding's Auto Sales (30638). Derived 2026-10-07 by tranid trace of 2 statements through both extract_autoly and the stored Claude runs: 10 of 20 lines each way, all under 30638; the rest are payments and invoices not yet in NetSuite."
-  },
-  "ADAS_DIAGNOSTIC_SOLUTIONS": {
-    "entity_ids": ["374757"],
-    "note": "ADAS DIAGNOSTIC SOLUTIONS (374757). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 9 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "ACERBO_S_AUTO_TRIM_AND_LETTERING": {
-    "entity_ids": ["190930"],
-    "note": "Acerbo's Trim (190930). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "ACURA_OF_ABINGTON": {
-    "entity_ids": ["89488"],
-    "note": "Acura of Abington (89488). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 14 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "AUDI_DEVON": {
-    "entity_ids": ["138870"],
-    "note": "Audi Devon (138870). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 11 of 14 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "AUDI_WYNNEWOOD": {
-    "entity_ids": ["457780"],
-    "note": "Audi Service Conshohocken (457780). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "AUTOZONE": {
-    "entity_ids": ["181322", "10661", "136921", "38516", "19292"],
-    "note": "All five AutoZone vendor records (2026-11-09): AutoZone (181322, most bills), Auto Zone (10661), Autozone 3 (136921), Autozone 2 (38516), Autozone 1 (19292). Was 10661 only (2026-10-06 trace of one statement): every line of prod STMT-1726BB16 / -5A84E9DE / -3EA060A1 came back Not Found, and the 20 of those 30 invoices that are in NetSuite are all under 181322."
-  },
-  "BEST_CHEVROLET": {
-    "entity_ids": ["2328"],
-    "note": "BEST CHEVROLET (2328). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 49 of 56 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "BMW_OF_MANHATTAN": {
-    "entity_ids": ["77845"],
-    "note": "BMW OF MANHATTAN, INC. (77845). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "BROADWAY_TIRE": {
-    "entity_ids": ["3021"],
-    "note": "BROADWAY TIRE (3021). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "BELL_MOTOR_CARS": {
-    "entity_ids": ["400293"],
-    "note": "Bell Audi (400293). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 19 of 29 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "CAPITOL_CITY_IMPORTS": {
-    "entity_ids": ["596293"],
-    "note": "Capitol City Mazda (596293). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 6 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "CHERRY_HILL_IMPORTS": {
-    "entity_ids": ["450773", "409064"],
-    "note": "Porsche of Cherry Hill (450773), Cherry Hill Audi (409064). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 5 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "COUNTRY_HYUNDAI": {
-    "entity_ids": ["9869"],
-    "note": "Country Hyundai (9869). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 16 of 16 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "D_AND_M_BUMPER_EXCHANGE": {
-    "entity_ids": ["240268"],
-    "note": "D&M Bumper Exchange (240268). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "DING_MASTER": {
-    "entity_ids": ["196723"],
-    "note": "Ding Master (196723). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "DON_FOSHAY_S_TIRE_AND_ALIGNMENT_HALLOWEL": {
-    "entity_ids": ["556836"],
-    "note": "Don Foshay's Discount Tire & Alignment - Hallowell (556836). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 9 of 9 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "FLYNN_S_TOWING": {
-    "entity_ids": ["400727"],
-    "note": "Flynn's Towing (400727). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "IMPERIAL_SUBARU": {
-    "entity_ids": ["595992"],
-    "note": "Imperial Subaru (595992). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "JACK_GIAMBALVO": {
-    "entity_ids": ["367541"],
-    "note": "Jack Giambalvo Mitsubishi (367541). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "KELLEHER_TIRE": {
-    "entity_ids": ["242828"],
-    "note": "KELLEHER TIRE (242828). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "KEMPERLE": {
-    "entity_ids": ["3581"],
-    "note": "Albert Kemperle, Inc. (3581). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "LANGWAY_TOYOTA_OF_NEWPORT": {
-    "entity_ids": ["3701"],
-    "note": "LANGWAY TOYOTA (3701). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "LINDE_GAS_AND_EQUIPMENT": {
-    "entity_ids": ["135812"],
-    "note": "Linde Gas & Equipment Inc. (135812). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "MATTHEWS_AUTO": {
-    "entity_ids": ["520256", "521032", "529975", "522572"],
-    "note": "Mathews Import Center (520256), Mathews on the Parkway inc. (521032), Mathews Nissan (529975), Mathews GM Center Inc. (522572). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 46 of 54 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."
-  },
-  "NIPPON_SANSO_MATHESON": {
-    "entity_ids": ["584430"],
-    "note": "NIPPON SANSO MATHESON, INC. (584430). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "PRECISION_DIAGNOSTICS": {
-    "entity_ids": ["596792"],
-    "note": "Precision Diagnostics, LLC (596792). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 26 of 37 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "REYNOLDS_AND_REYNOLDS": {
-    "entity_ids": ["4097"],
-    "note": "REYNOLDS AND REYNOLDS (4097). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "SPINDLE_CITY_AUTO_GLASS": {
-    "entity_ids": ["2340"],
-    "note": "SPINDLE CITY AUTO GLASS (2340). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 16 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "STEVE_SHANNON_TIRE_AND_AUTO_CENTER": {
-    "entity_ids": ["296215"],
-    "note": "Steve Shannon Tire & Auto Center (296215). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "THE_WHEEL_RIM_GROUP": {
-    "entity_ids": ["511593"],
-    "note": "THE WHEEL RIM GROUP, LLC (511593). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 18 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "TASCA_AUTOMOTIVE_GROUP": {
-    "entity_ids": ["46636"],
-    "note": "Tasca Automotive Group (46636). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "TECHZONE_AIRBAG_SERVICE": {
-    "entity_ids": ["49951"],
-    "note": "TechZone Airbag Service (49951). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "U_S_A_WHEELS": {
-    "entity_ids": ["278521"],
-    "note": "U.S.A Wheels (278521). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."
-  },
-  "UNIFIRST": {
-    "entity_ids": ["6373"],
-    "note": "UniFirst Corporation (6373). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "VOLVO_CARS_BRIDGEWATER": {
-    "entity_ids": ["113076"],
-    "note": "Volvo Cars Bridgewater (113076). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 5 lines tie out verbatim across ALL NetSuite entities."
-  },
-  "AUTOMOTIVE_COLLISION_CALIBRATIONS": {
-    "entity_ids": ["280791"],
-    "note": "Automotive Collision Calibrations (280791). Details reads 'RO#6405989 INV-261071 - due on ...'; NetSuite's tranid is the INV- token (INV-261071), confirmed 2026-10-07 by amount probe (4 of 4)."
-  },
-  "MOMENTUM_TIRE_AND_WHEEL": {
-    "entity_ids": ["125676"],
-    "note": "Momentum Tire and Wheel (125676). Description reads 'Invoice # 588059 W-1376112 PO: ...'; NetSuite's tranid is the second number, the W- ticket (W-1381387), confirmed 2026-10-07 by amount probe."
-  },
-  "ASCENDANCE": {
-    "entity_ids": ["162826"],
-    "note": "Ascendance Truck Centers (162826). The statement prints XA101076824:01, NetSuite holds XA101076824.01 (colon -> dot), confirmed 2026-10-07 by amount probe."
-  },
-  "BULLOCKS_TIRE_AND_AUTO": {
-    "entity_ids": ["240270"],
-    "note": "BULLOCK'S TIRE & AUTO PARTS (240270). The statement prints ID-142270; NetSuite holds 8763-142270 (8763 = this account's customer number), confirmed 2026-10-07 by amount probe. 'PB-Statement' previous-balance rows are not documents."
-  },
-  "CARQUEST": {
-    "entity_ids": ["192734"],
-    "note": "CARQUEST OF PLEASANT VALLEY (192734). The statement prints ID-110464; NetSuite holds the store-prefixed number, 15962-110464 or 15962110533, confirmed 2026-10-07 by amount probe."
-  },
-  "COUNTRYSIDE_TOWING": {
-    "entity_ids": ["501577"],
-    "note": "COUNTRYSIDE TOWING (501577). The statement prints 26-434; NetSuite holds 26-00434 (zero-padded to 5 after the dash), confirmed 2026-10-07 by amount probe."
-  },
-  "GILBERTSVILLE_AUTO_GLASS": {
-    "entity_ids": ["465531"],
-    "note": "GILBERTSVILLE AUTO GLASS LLC (465531). DESCRIPTION reads 'Invoice #OMEGA-13940: Due ...'; NetSuite holds the number without OMEGA- (13940), confirmed 2026-10-07 by amount probe."
-  },
-  "RANDYS_AUTO_PARTS": {
-    "entity_ids": ["6959"],
-    "note": "Randy's Used Auto Parts (6959). Same statement system as Lentini / Bishop's: NetSuite holds the DT# number from Reference (DT#44390 -> 44390), confirmed 2026-10-07."
-  },
-  "SOUND_WAVES": {
-    "entity_ids": ["287386"],
-    "note": "SOUND WAVES (287386). ACTIVITY reads 'Invoice #220000014981: Due ...'; the number after # is the tranid (one bill is keyed with an extra 0), confirmed 2026-10-07."
-  },
-  "ABINGTON_HYUNDAI_MAZDA": {
-    "entity_ids": ["145497"],
-    "note": "Mazda of Abington (145497). The PDF filed as 'Burlington Hyundai' (customerinvoice (10).pdf) is Abington's Hyundai statement -- confirmed by the user 2026-10-07; Claude reads it as 'Abington Auto Parts Hyundai'. 2 of 3 lines tie out verbatim (573534AY) under 145497. Hyundai Mazda of Abington (136017) also exists -- add it only on a confirmed hit."
-  },
-  "COLUMBIA_FORD": {
-    "entity_ids": ["46932", "52380"],
-    "note": "Columbia Ford (46932), Columbia Kia (52380). Added 2026-10-13 from 5 prod statements (20261012113727, COLWorc0926, LBP0926, COLLund0926, COLNat0926): INV# ties out under these two, 51 of 54 lines (LBP0926's are all Columbia Kia)."
-  },
-  "MERCEDES_BENZ_OF_BOSTON": {
-    "entity_ids": ["477553"],
-    "note": "Mercedes-Benz of Boston (477553). Added 2026-10-13 from prod Benz 10-12-26 / MBBNatick0926: TRANSACTION ties out 5 of 5."
-  },
-  "BMW_OF_NORTH_HAVEN": {
-    "entity_ids": ["112743"],
-    "note": "BMW of North Haven (112743). Added 2026-10-13 from prod BMW.pdf: DOCUMENT ties out 8 of 8."
-  },
-  "MERCEDES_BENZ_OF_NORTH_HAVEN": {
-    "entity_ids": ["128704"],
-    "note": "Mercedes Benz of North Haven (128704). Added 2026-10-13 from prod Mercedes Benz.pdf: DOCUMENT ties out 2 of 2."
-  },
-  "FISHER_AUTO_PARTS": {
-    "entity_ids": ["159417"],
-    "note": "Fisher Auto Parts (159417). Added 2026-10-13 from prod Fisher Auto Parts.pdf: INVOICE NUMBER (333-433833 style) ties out 12 of 15."
-  },
-  "SCHALLER_SUBARU": {
-    "entity_ids": ["13403"],
-    "note": "Schaller Subaru (13403). Added 2026-10-13 from prod Schaller Subaru West Hartford.pdf: INVOICE ties out 11 of 12 (Reynolds layout, same as Goodwins)."
-  },
-  "BERTERA_MITSUBISHI": {
-    "entity_ids": ["71706"],
-    "note": "Bertera Mitsubishi (71706). Added 2026-10-13 from prod Bertera Mitsu.pdf: REFERENCE (MIW73609) ties out 8 of 10 after the 3-char MIW prefix is stripped."
-  },
-  "EZ_AUTO_GLASS_INSTALLERS": {
-    "entity_ids": ["518721"],
-    "note": "EZ Auto Glass Installers Inc (518721). Added 2026-10-13 from prod EZ Auto, Lees, Oct 26.pdf: the number after 'Invoice #' in DESCRIPTION ties out 13 of 16."
-  },
-  "WEBER_BROTHERS_AUTO": {
-    "entity_ids": ["206427"],
-    "note": "WEBER BROS. AUTO PARTS (206427). Added 2026-10-13 from prod Weber Brothers (Lamon).pdf: the number after 'Invoice #' in Transaction Type ties out (489548)."
-  },
-  "CHERRY_HILL_TRIPLEX": {
-    "entity_ids": ["369649", "147511"],
-    "note": "Cherry Hill Kia (369649), Cherry Hill Triplex (147511, older bills). Added 2026-10-14 from prod Cherry Hill Triplex (M3 Hwy35).pdf: REF NO. ties out 2 of 2 under 369649, exact amount."
-  },
-  "L_&_M_AUTO_CENTER": {
-    "entity_ids": ["85979"],
-    "note": "L&M Auto Center (85979). Added 2026-10-14 from prod L&M Auto (M3 S Main).pdf: its columns print no headers, so Claude names them UNLABELED_TRANSACTION_CODE[_n]; the first ties out 18 of 18."
-  },
-  "BENNETTS_AUTO_RECOVERY": {
-    "entity_ids": ["152957"],
-    "note": "Bennett's Auto Recovery (152957). Added 2026-10-14 from prod Bennetts (M3 Hwy35) / (M3 S Main): NetSuite holds Call # as yy-<call> (26-36498), see fabric_matching._alternate_tranids; 98 of 112 lines tie out, exact amount."
-  },
-  "ASBURY_AUTOMOTIVE_GROUP": {
-    "entity_ids": ["203119"],
-    "note": "Jaguar Land Rover Sudbury (203119). Added 2026-10-19 from HEBWorc0926.pdf (Asbury Automotive Group, Tekion layout, billed to Vive of Worcester): the statement groups its invoices by franchise ('Land Rover Sudbury') and NetSuite holds each franchise as its own vendor, so no vendor carries 'Asbury' in its name and name matching finds nothing. This covers ONLY the Land Rover Sudbury franchise: a statement listing another Asbury franchise needs that franchise's entity added here. The NetSuite tranid equals the printed invoice number as is (71-100428-2, $674.87 ties exactly)."
-  },
-  "BANKS_CHEVROLET-CADILLAC_BUICK-GMC": {
-    "entity_ids": ["239562"],
-    "note": "Banks Chevrolet Cadillac Buick GMC (239562) -- added 2026-10-29 from prod STMT-0CA7F62C: its bills tie out under 239562 once the CVW prefix is stripped (CVW994295 -> 994295 $42.92, CVW993160-x -> 993160-x) and its credits as CM + number (CMCVW991606 -> CM991606). NetSuite's name uses spaces where the statement uses hyphens, so it is pinned here instead of relying on name lookup."
-  },
+  "FRED_BEANS_PARTS": {"entity_ids": ["18706", "590648"], "note": "Dynamic name lookup was only resolving entity 18706, missing 'FRED BEANS PARTS PRIMARY' (590648) -- a separate NetSuite vendor record for the same real company, name-mismatched just enough (PRIMARY suffix) that fuzzy/exact lookup never found it. Confirmed live 2026-09-23 against STMT-F18B0DB4: 64 of 87 'Not Found in NetSuite' exceptions on that one statement tied out exactly under entity 590648 (e.g. 9503708X2 -> $52.04 exact, 9538536 -> $1355.91 exact) -- the shape/table classification (netsuite_vendorbill via Rule A) was already correct, the entity scope was just missing this one record. No entity override existed for this vendor at all before this -- it had been running on dynamic lookup alone since Fred Beans was first onboarded."},
+  "BALD_HILL": {"entity_ids": ["3482", "4121", "74524"], "note": "Bald Hill Dodge Chrysler (3482) + Bald Hill Kia (4121), both bill through one consolidated statement -- confirmed 2026-08-24. Dynamic name lookup can't find both: they're separate NetSuite vendor records with different company names, and neither matches the statement's own vendor name exactly. Key renamed from BALD_HILL_DODGE_CHRYSLER_JEEP_KIA to BALD_HILL 2026-08-27 to match config/vendor_aliases.json's renamed vendor_id -- same entity_ids, no re-tracing needed. Bald Hill Auto Group (74524) added 2026-10-05: three exception lines from real August statements tie out exactly there and nowhere under 3482/4121 -- Quonset 181675 ($66.40), Vive Worcester 180877 ($1,044.40) and 180873 ($444.40). 74524 is an active vendor with 838 bills in 2026."},
+  "BERLIN_CITY_AUTO_GROUP": {"entity_ids": ["25530", "6696", "6697", "497086", "6683", "38717"], "note": "Berlin City Toyota (25530), Berlin City Honda of Portland (6696), Berlin City Nissan (6697), Berlin City Lexus of Portland (497086) -- derived 2026-08-26 by tracing all 89 exception invoice_numbers from a real statement (STMT-53731B9C) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 85 of 89 matched, split across exactly these 4 entities (42/24/15/4), none under the parent 'Berlin City Auto Group' (6683) that dynamic name lookup had picked. 6683 kept in the list too as a fallback in case a future statement's invoices DO land there -- NOT independently confirmed the way Bald Hill's mapping was, worth a sanity check against a second statement. Berlin City Lexus (38717) added 2026-09-06 -- a genuinely SEPARATE entity from 'Berlin City Lexus of Portland' (497086), easy to miss precisely because the two names look like duplicates rather than distinct rooftops. Found via a real second statement: a live UI run flagged 8 bills as 'Not Found' that the hand-validated Reconciliation_Status.xlsx had as cleanly MATCHED (same tranids, same totals, not ambiguous, not voided) -- confirmed they all sit under entity 38717, which this list was missing. This is exactly the 'sanity check against a second statement' the original note called for, and it found a real gap."},
+  "NUCAR": {"entity_ids": ["2330", "2331", "287097", "2399", "80532", "3020"], "note": "Nucar Hyundai of Norwood (2330), Nucar Toyota of Norwood (2331), Nucar Volkswagen of Norwood (287097) -- derived 2026-08-26 by tracing all 57 exception invoice_numbers from a real statement (STMT-27F34603) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 45 of 57 matched under exactly these 3 entities (8/28/9). Nucar Honda of Norwood (2399) added too even though it had 0 hits in this batch -- it's literally the statement's own group label ('DCD BH, INC. DBA NUCAR HONDA OF NORWOOD'), so a future statement is likely to need it. Deliberately did NOT include entity 134807 (Lehigh Valley Honda) despite one tranid match there -- unrelated dealer, mismatching amount (223.42 vs NetSuite's 465.03), a coincidental tranid collision, not a real match. 'DCD Parts Distribution LLC' (the statement's other group label, ~12 remaining invoices, several with R/reversal suffixes) has NO known NetSuite entity yet -- searched every name variant, nothing found; still unresolved -- turns out that's expected, per the user 2026-08-27: 'DCD' isn't actually this vendor's real name, it's Nucar, so its NetSuite entity will surface once extracted-name-to-vendor mapping is fixed, not through more NetSuite-side searching. Key renamed from DCD_AUTOMOTIVE_HOLDINGS to NUCAR 2026-08-27 to match config/vendor_aliases.json's renamed vendor_id -- same entity_ids, no re-tracing needed. 'Nucar Dealerships' (80532) added 2026-09-21 -- a completely different Nucar statement layout (the 'Lees' Reynolds and Reynolds template, letter-prefixed invoices like CVW6283711, not the Pawtucket/DCD consolidated-statement layout the other 4 entities cover) posts under this entity instead. Confirmed live: CVW6283711 (stripped to 6283711 per the new NUCAR normalization rule) ties out exactly to bronze.netsuite_vendorbill entity 80532, total 754.04; its CM6283711 credit ties out to bronze.netsuite_vendorcredit entity 80532, unapplied 75. 'Nucar Nissan Of Norwood' (3020) added 2026-09-21 -- the Pawtucket/DCD layout is itself multi-brand (like the Norwood group), and Nissan was a brand this list was missing: STMT-62484E48's exceptions 66254-1/63370-1/66254-2/65028-1/63370-2 all tied out exactly under entity 3020 once found by an untargeted tranid search across every bronze.netsuite_vendorbill row (not scoped to the existing entity list). Other same-statement exceptions (55548-1, 54576-5, 55838-1, 66388-1, 876622-1, 67026-1, 59065-1) were searched the same way and found nowhere in bronze.netsuite_vendorbill/netsuite_vendorcredit under any entity -- genuinely not present in the extracted NetSuite data, not a config gap; likely more undiscovered Pawtucket-layout brand entities exist beyond 3020 (the Norwood roster alone lists ~15+ Nucar-branded vendor records: Chevrolet/387922, Infiniti/3704, Tarbox Hyundai+Toyota/180987+180988, North Kingstown Toyota+Hyundai/295614+295615, Nissan of Keene/302106, etc.) -- add on confirmed hits only, same as this one, not preemptively."},
+  "BOWSER": {"entity_ids": ["635577", "30237"], "note": "Derived 2026-09-18 by tracing real invoice/credit samples from two separately-fragmented bronze tables against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: bronze_bowser_pontiac_subaru_inc__raw (vendor_id BOWSER_PONTIAC_SUBARU_INC., 5/5 charge + 5/5 credit matched, amounts tying out) and bronze_power_bowser_raw (vendor_id POWER_BOWSER, letterhead brand name 'Power Bowser' for the same real-world vendor -- confirmed via matching remit address/legal name on the statement PDF itself). Power Bowser has NO vendor_aliases.json entry today, so it falls through to the first-word LIKE fallback on 'Power' -- confirmed live that this resolves to 10 unrelated entities with a 0% invoice match rate. Forcing entity_ids=['635577','30237'] (the ones that work for the other Bowser table) gave a 5/5 + 5/5 match instead. This override exists specifically to stop that bad fallback -- vendor_aliases.json should also be updated to alias 'Power Bowser' (and 'Bowser Pontiac Subaru, Inc.') to one consolidated canonical vendor_id matching this key, otherwise POWER_BOWSER-keyed lookups won't even reach this override. Direct tranid match confirmed on both sides (charge and credit) -- no invoice-number normalization rule needed for this vendor."},
+  "RH_LONG_MOTOR_SALES": {"entity_ids": ["1760", "1761"], "note": "Long Automotive Group (1760), per user 2026-09-18. NOT independently confirmed: entity 1760 has ~2,958 bills (a large consolidated parent account, same shape as NuCar's DCD_AUTOMOTIVE_HOLDINGS/NUCAR parent-vs-child-entity split), but none of RH Long's 3 real invoice numbers from statement STMT-F7126B55 (482646, 220688, 486976) were found under it by tranid, unscoped by amount. User elected to use 1760 anyway rather than trace a child entity. All 3 invoices will likely surface as 'Not Found' exceptions until/unless a more specific child entity is identified, the same way NuCar's real entities (2330/2331/287097/2399) turned out to be sub-brand accounts under the 'Long Automotive Group'-style parent, not the parent id itself."},
+  "KSI_TRADING_CORP": {"entity_ids": ["8726", "1759"], "note": "KSI Auto Parts (1759) added 2026-10-13: prod KSI (MidNJ) statement STMT-F5444483 ties out under 1759 (4 of 5 lines, M-prefixed returns), while KSI (First Choice) STMT-44C4A145 ties out under 8726 (35 of 42). Earlier note: Plain 'KSI' (8726, active) -- derived 2026-08-26 by tracing all 69 invoice_numbers from a real statement (local bronze_vendor_statement_raw, statement_id TEST-WIRING-KSI-003) against bronze.netsuite_vendorbill/netsuite_vendorcredit by tranid: 67 of 69 matched, all under entity 8726, amounts tying out correctly (e.g. a -15.0 credit line matches NetSuite's 15 before sign). 'KSI Auto Parts' (1759, also active, a plausible name match) got zero hits -- not the right entity despite the name similarity. Two other candidates ('KSI TRADING CORP - Clarkstown' 5662, 'KSI Auto Parts - Rockland' 5857) are both inactive and weren't tested, but 8726 alone already accounts for 67/69 -- no reason to expect them relevant."},
+  "RIVIAN_LLC": {"entity_ids": ["117788"], "note": "Rivian LLC (117788) -- the only NetSuite vendor record matching this name, and already independently confirmed 2026-09-XX during manual research-SQL reconciliation of a real Rivian statement: the statement's own tranid I07XZVFM3H was first (wrongly) found under entity 6194 with no entity filter applied -- that turned out to be a coincidental match on an unrelated Tesla bill, not Rivian. Re-querying scoped to 117788 alone reconciled the full statement correctly (20 matched, 7 genuinely not found)."},
+  "FENIX_NE": {"entity_ids": ["400726", "112843", "180483", "295114", "134809", "227981", "4948"], "note": "All 7 are genuine same-company location/entity records (Fenix NE Warehouse, Ocean County, Jerry Brown's, Fenix Parts (plain), Don's Automotive - Pennsburg, Fenix Parts - Rahway, Fenix NE (plain)) -- no name-noise candidates unlike ABC below. This exact entity list was already used against a real Fenix statement's charge+credit lines this session (research SQL, not yet the production path) and produced correct MATCHED results consistent with the hand-validated Fenix sheet in Reconciliation_Status.xlsx -- effectively confirmed via real use, though not traced entity-by-entity the way Nucar/Berlin City were. Worth a from-scratch trace against a second statement before treating this as fully Bald-Hill-grade confirmed. CONFIRMED 2026-09-29 by tranid trace of 2 real August statements (FENCollex0826 / Shrewsbury and Ocean County Nutley): every hit is under Ocean County (112843) -- invoices by reference_number verbatim (3341732 $282, 3353522 $1500, 3369533 $881.50, 3346083 $125) in netsuite_vendorbill, credits verbatim (3337667 $100, 3342118 $1315) in netsuite_vendorcredit. Misses (3345921, 3346710) exist nowhere in NetSuite; Payment rows (check number as reference) are expected Not Found exceptions."},
+  "ABC_PARTS_INTERNATIONAL": {"entity_ids": ["126692", "6406"], "note": "ABC Parts International (126692) and ABC PARTS INTERNATIONAL INC. (6406) -- both literal name matches to the statement header ('ABC Parts International, Inc.'). Deliberately EXCLUDED 4 other 'ABC'-prefixed candidates from the same vendor name search -- ABC Fire Extinguisher Co. (385309), ABC AUTO GLASS (547650), WVII ABC 7 (100968), ABC AUTO (364005) -- these are almost certainly unrelated companies that happen to share the generic first word 'ABC', exactly the collision risk the first-word-LIKE fallback in netsuite_vendor_resolver.py warns about; including them as a Nucar-style safety net isn't appropriate here since they're plausible real unrelated vendors, not inactive siblings of the same company. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- do that against the hand-validated ABC sheet in Reconciliation_Status.xlsx before fully trusting this in production. CONFIRMED 2026-09-29 by tranid trace against 4 real August statements (Lyndhurst, Nutley x2, ABCCR/Churchill): 83 of 84 lines tie out exactly, ALL under entity 6406 -- 126692 has zero bills/credits in bronze.netsuite_vendorbill/netsuite_vendorcredit, kept only as a harmless fallback. Bills are keyed by the Sales Order reference (extract_abc.py's so_reference, e.g. C7318463T), NOT the printed INV number (zero INV tranids exist); credits by the CM number verbatim. The one miss (C7753861, $112) isn't in NetSuite under any entity -- a real Not Found."},
+  "PARTS_BY_COCHRAN": {"entity_ids": ["410838"], "note": "Parts by Cochran 1 (410838) -- derived 2026-10-01 by tranid trace of 99 unique lines on 2 real August statements (CDK Global AR layout: WP5987 Duncansville, WP8752 Klapec/Cranberry): 96 tie out exactly, all under 410838 -- DOCUMENT / TRANSACTION is the tranid verbatim, incl. X1 supplements (81123893X1) and CM credits (CM81130006 in netsuite_vendorcredit). The 3 misses are dept-1 residual-balance lines (81122710 -$50.00, 81113991/81121676 -$0.01) whose NetSuite bills carry the full original amount -- real Amount Mismatch. NOT included: 'Parts by Cochran' (364006) -- zero hits on either statement. Claude names this vendor after the statement's department heading ('#1 Cochran Megacenter'), hence that alias."},
+  "DARLINGS_AUTO_GROUP": {"entity_ids": ["87595", "25846", "128703", "332867", "140684"], "note": "Darling's Ford VW Audi (87595), Darling's Honda Nissan Volvo (25846), Darling's Hyundai Augusta (128703), Darling's Kia (332867) -- derived 2026-10-01 by tranid trace of all 158 unique lines on 3 real August statements (Harbour, Maurice, JC): 154 tie out exactly, every one under these 4 rooftops (Invoice Number is the NetSuite tranid verbatim); the other 4 exist under these rooftops with a different amount (real Amount Mismatch, e.g. 548374 $1265.14 vs $1261.22). 3 tranids also tie out under entity 12416, GOODWINS VOLVO -- an unrelated dealer, coincidental collision, deliberately excluded. Not included (no hits on these statements): Darling's Brunswick Ford (135210), Chrysler Dodge Augusta (140684), Auto Mall (9148), and the inactive Domestic (11568) / Audi Ford VW (25529); add on a confirmed hit only. KNOWN GAP: Darlings credit memos are printed with a CM SUFFIX (1016969CM, 1016143-01CM) and NetSuite has no consistent convention for them -- the same JC statement's credits are posted variously as 1016143CM (credit), CM544914AC (credit), 544914-01 (bill), or not at all (547807CM reverses bill 547807, no credit record) -- so no normalization rule can match them; ~9 of 135 JC lines surface as Not Found for AP review. Darling's Chrysler Dodge Augusta (140684) added 2026-10-05: the Maurice statement's 391650CM (credit $144.74) and 391975 (bill $734.47) tie out exactly there and nowhere under the other 4 rooftops."},
+  "GRAPPONE": {"entity_ids": ["10000"], "note": "Grappone Companies (10000) -- the only Grappone vendor record. Derived 2026-10-01 by tranid trace of 58 unique lines on 2 real August statements (customerinvoice (4)/(5), CDK Global AR layout, Prestige Auto Body): 54 tie out exactly under 10000 -- invoices verbatim incl. the department suffix (415136H Honda dept 13, 67115M Mazda dept 14), credits verbatim incl. CM and sub-letters (CM415136H, CM67108MA) in netsuite_vendorcredit. The 4 misses exist under 10000 with a different amount (partial payments / split credits, e.g. 67108M charge $11.36 vs a $6.94 payment line)."},
+  "NATIONAL_COATINGS_AND_SUPPLIES": {"entity_ids": ["3478"], "note": "National Coatings & Supplies, INC. (3478, active) -- derived 2026-10-01 by tranid trace of 143 unique lines on 6 real August statements (Bristol, Lees, Lyndhurst, Middletown, Pawtucket, Nutley): 142 tie out exactly, all under 3478 (Trans ID is the NetSuite tranid verbatim; CREDIT rows in netsuite_vendorcredit, e.g. 28059710 $431.28). The 1 miss (28089887, Pawtucket) is not in NetSuite. Excluded: National Coating and Supplies (NCS) (87594) -- inactive, no hits."},
+  "CLINTON_HONDA": {"entity_ids": ["80531"], "note": "Clinton Honda (80531) -- derived 2026-09-29 by tranid trace of all 143 lines on 5 real August statements (CDK Global AR statement layout: Lees, Lyndhurst, Nutley, COLLEX Shrewsbury, COLLEX Tinton -- the two COLLEX files are Clinton Honda statements too): 138 tie out exactly, every one under entity 80531, with DOCUMENT / TRANSACTION as the NetSuite tranid verbatim -- supplements keep their suffix (234492X1 $55.20, 234623X1 $1,278.68) and credits keep their CM prefix (CM234518 $13.27 in netsuite_vendorcredit), so no normalization rule is needed. The 5 misses (234881, 235015, CM234760, CM234881, 235115) exist nowhere in NetSuite under this vendor; 235115 exists only under unrelated entity 180580 for a different amount ($38.29 vs $58.03), which this scope keeps out. Required because the first-word lookup on 'Clinton' would also pull in CLINTON WELDING SUPPLY INC (14096), an unrelated vendor."},
+  "BLAISE_ALEXANDER": {"entity_ids": ["239564", "239566", "161414"], "note": "Blaise Alexander Nissan Muncy (239564), Blaise Alexander Subaru Montoursville (239566), Blaise Alexander Hyundai Mazda State College (161414) -- derived 2026-09-29 by tranid trace of real August statements (Reynolds and Reynolds template, scanned): Nissan Mont/Kingston NIW/NICS-prefixed invoices (e.g. NIW76647 -> 76647 $493.59, NICS377189 -> 377189 $155.45, NIW76717-1 -> 76717-1 $151.72, credit NIW76716 'PS' -> vendorcredit CM76716 $1225.96) all under 239564; Subaru Dallas SUW69084/SUW69187 -> 69084/69187 exact under 239566; Hyundai Dallas MAW39414/39484/39558 exact under 161414. 17 of 17 sampled lines tie out. This override is REQUIRED, not a nicety: the stripped numbers collide with unrelated vendors' tranids (39414 also under 147511, 39558 under 6478, 76741 under 243294, 69084 under 86984, 69187 under 347494) -- without the entity scope a first-word lookup on 'Blaise' would pull in 12 Blaise rooftops, and a wrong-entity tranid could tie out by coincidence. The other 9 Blaise Alexander vendor records (Chevrolet, CDJR, GMC, Ford, KIA, Subaru of Lewistown, etc.) are deliberately NOT included -- no statement for them seen yet; add on a confirmed hit only."},
+  "ALL_STAR_AUTO_LIGHTS": {"entity_ids": ["60731", "4950"], "note": "ALL STAR AUTO LIGHTS (60731) + All Star Auto Lights - ARO (4950) -- derived 2026-09-29 by tranid trace of all 21 invoice lines on 5 real August statements (Nutley, Middletown, Lees, JC, Quonset) against bronze.netsuite_vendorbill: 15 matched exactly, split 6/9 across these two entities, and a single statement (JC) mixes both, so both are required. The other 6 (1940654P, S102740802, 1901725P, S112728629, 1952238P, S112722625) aren't in NetSuite under any entity -- real Not Found, not a scope gap. Without this override, the first-word LIKE fallback would search on 'All', matching many unrelated vendors. Deliberately NOT included yet: All Star Auto Lights - Aftermarket (15013, active, 178 bills), ALL STAR AUTO LIGHTS - CROWN (3584 -- a plausible fit for the Crown Collision Middletown statement, but neither of that statement's 2 invoices exists under it or anywhere else), and 5 older/near-dormant location records (134404, 164146, 65877, 5637, 8727); add any of them on a confirmed hit only. Excluded outright: East Jersey Elite All Starts LLC (234626), an unrelated company that only matches on the name. The Nutley statement's Payment row (#PYMT1183347, an unapplied $1,343.00 with the note 'Inv 1868342P pd w/ CM 1882723P') is expected to surface as a Not Found exception for AP review: its CM 1882723P does exist in bronze.netsuite_vendorcredit (60731, $1,343), but it is printed only as free text in the memo, not as the row's own reference."},
+  "EMPIRE_AUTO_PARTS": {"entity_ids": ["407925", "1753", "2333", "3017", "5650", "5849"], "note": "Empire Auto Parts - MA (407925), Empire Auto Parts (1753, plain), EMPIRE AUTO PARTS - Taunton (2333), EMPIRE AUTO PARTS 1 (3017), Empire Auto Parts NJ - Clarkstown (5650), Empire Auto Parts NJ - Rockland (5849) -- all genuine same-company location records, no name-noise candidates. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- Empire's two statements are already hand-validated in Reconciliation_Status.xlsx (EMPCollex0826 / Statement(183372) sheets), so a from-scratch trace against those known invoice numbers should be quick and would upgrade this to full confidence."},
+  "A_NEW_AGE_AUTO_GLASS": {"entity_ids": ["125272"], "note": "A New Age Auto Glass, INC. (125272) -- the only NetSuite vendor record matching this name, no ambiguity. Note separately: this vendor's own statement extraction has a confirmed row-shift bug (Bronze `total` values offset by one row for several invoices) -- 3 of 16 invoices on the one statement worked with this session are still genuinely unresolved pending a corrected re-extraction, unrelated to entity resolution. Re-confirmed 2026-10-01 against the August 'Sales By Customer' reports (scanned, rotated 90 degrees): all 12 Lyndhurst order numbers tie out verbatim under 125272 (I054467 $225 ... I054731 $95; Order Number = tranid, Total = bill total). OCR risk remains on these scans -- Claude read I054731 as I064731 in one local run, which then surfaces as Not Found."},
+  "HOSELTON": {"entity_ids": ["520257", "521671", "526753"], "note": "Hoselton Nissan Inc (520257), Hoselton Toyota (521671), Hoselton Chevrolet Inc (526753) -- all genuine same-group dealership records, no name-noise candidates. This vendor's statement invoices use a shared 'TOW' prefix (stripped 3 chars) regardless of which of the 3 rooftops the invoice actually belongs to -- same shape as Quirk's rooftop-prefix pattern, but the entity boundary here just needs to cover all 3, no per-invoice rooftop routing has been attempted/needed. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- Hoselton's statement is already hand-validated in Reconciliation_Status.xlsx (Hoselton Toyota sheet, 90/95 matched), so a from-scratch trace against those known invoice numbers should be quick and would upgrade this to full confidence. Key renamed HOSELTON_TOYOTA -> HOSELTON 2026-10-05 so it matches the vendor_id the field mapping / normalization / line-selection seeds use: config/vendor_aliases.json had a duplicate HOSELTON_TOYOTA entry (both it and HOSELTON listed 'Hoselton Toyota', the later one won), so statements resolved to HOSELTON_TOYOTA, matched no seed rows and reconciled 0/0 (Hoselton Toyota.pdf 28 lines, Hoselton imports 9-30.pdf 108 lines). 'Hoselton Chevrolet, Inc.' statements (CVW-prefixed invoices, entity 526753 already listed) are now aliased to HOSELTON too."},
+  "NYE_AUTOMOTIVE_GROUP": {"entity_ids": ["376476", "379120", "370125", "371245", "371246"], "note": "Nye Buick GMC (376476), Nye Volkswagen (379120), NYE Chrysler Dodge Jeep RAM (370125), NYE Ford (371245), Nye Toyota (371246) -- all genuine same-group dealership records, no name-noise candidates. Statement invoices use a shared 'CHW' prefix (stripped 3 chars) regardless of which of the 5 rooftops the invoice belongs to, same shape as Hoselton. Not yet independently trace-confirmed by invoice_number against real tranids the way Bald Hill/Nucar were -- NYE's statement is already hand-validated in Reconciliation_Status.xlsx (NYE Automotive Group sheet, 42/46 matched), so a from-scratch trace against those known invoice numbers should be quick and would upgrade this to full confidence."},
+  "DOWNEAST_TOYOTA": {"entity_ids": ["87592"], "note": "Down East Toyota-Scion (87592) -- confirmed 2026-09-18 via a real reconciliation query traced against a real statement (STMT-F4DBEA2D): charges/credits matched cleanly against bronze.netsuite_vendorbill/netsuite_vendorcredit scoped to this single entity, with amounts tying out. Only one entity found/needed for this vendor, unlike Bald Hill/Berlin City/Nucar's multi-entity consolidated-statement cases. Also confirmed 2026-09-11 via a separate real tranid trace against STMT-7D79DB56 (73+ real bill/credit hits) -- dynamic name lookup alone was resolving to the wrong entity (26546, 'Downeast Signs') because the statement's own vendor_name_raw ('Downeast Toyota', no space) doesn't literally match NetSuite's entityid ('Down East Toyota-Scion', with a space) -- same class of gap as Brown's Auto Salvage's apostrophe mismatch. (This key previously appeared twice in this file with these two notes split across separate entries -- a literal duplicate JSON key, silently collapsed to whichever came last by every JSON parser; merged 2026-09-23, no entity_ids conflict since both entries already agreed on 87592.)"},
+  "KEYSTONE_AUTOMOTIVE_INDUSTRIES": {"entity_ids": ["134409", "156776", "165288", "372650", "3480", "6689", "10453", "12981", "12203"], "note": "First 8 entities are what dynamic name lookup already resolves (Keystone - Complete- Bethlehem/134409, KeyCorn - Keystone/156776, Keystone Volvo Cars of Doylestown/165288, KEYSTONE PERFORMANCE & TRUCK PARTS/372650, Keystone Automotive Industries, Inc./3480, KEYSTONE/6689, Keystone Automotive-Paint/10453, KEYSTONE ALLIED/12981) -- kept here so adding this override doesn't regress statements already matching correctly on those. Added 2026-09-24: entity 12203, 'AUTO DATA LABELS INC' -- a genuinely separate NetSuite vendor record with no 'Keystone' in its companyname/entityid/altname at all, so dynamic/first-word-LIKE lookup could never find it no matter how it's tuned. This covers the 'Auto Data Labels' branded Keystone sub-statement layout (letterhead 'AUTODATALABELS - An LKQ Company', Remit-To 'Keystone Automotive Industries, Inc.', columns Reference Date/Reference Number/PO Number/Balance Forward/Period Activity/Credit Applied/Payment Applied/Balance Due -- Reference Number IS the NetSuite tranid directly, no normalization needed). Confirmed live against 4 real statements (Middletown/1150333, Bristol/1146716, Montoursville/1343716, Nutley/1244040): 20 of 22 charge lines matched exactly under entity 12203 alone (e.g. 900DC211 -> tranid 900DC211, $98.70 exact). The other 2 (900IC320, 900EC637) were checked directly by tranid under entity 12203 with no amount filter and genuinely don't exist there -- real 'Not Found' exceptions, not a resolution gap. Before this override, every line from this sub-format silently exceptioned as 'Not Found in NetSuite' since the 8 Keystone-named entities never contain Auto Data Labels' own tranids."},
+  "QUIRK_AUTO_GROUP": {"entity_ids": ["48069", "46333", "46332", "55672", "47163", "46059", "46637", "10654", "119935", "104293", "2338"], "note": "2338 (generic 'QUIRK' record) added 2026-10-10: it holds the QCW-numbered bills (2077 bills, 314 credits; nothing else of note) of Quirk's 'Crown Collision' account statements (Bristol, Pawtucket), confirmed by tranid lookup (QCW1044906, QCW1040765). Earlier note: 10 of the statement's 15 rooftop codes confirmed 2026-09-05 against real tranid data across 3 real Quirk statements (STMT-8C2BCD72 and two others) -- CV=Chevy Bangor=48069 (Quirk Chevrolet Cadillac of Bangor), SU=Subaru=46333 (Quirk Subaru of Bangor), JE=Jeep=46332 (Quirk Chrysler Jeep Dodge Ram of Bangor, disambiguated from 2 other name-similar candidates via live match), MB=Mercedes=55672, HY=Hyundai=47163, 7C=Chev Portland=46059 (first one confirmed, via direct tranid lookup on 891928C), FO=Ford Augusta=46637, AM=Quirk Aftermarket=10654, 1F/1D=Belfast Ford Chrysler=119935 (shared by both prefixes), RC=Rockland Chevrolet GMC=104293. Unresolved: MI (Mitsubishi), 6U (Cars By Us), 6P (Quirk Motorsports), 8F (Alfa Romeo and Fiat) -- none of these four appear anywhere in bronze.netsuite_vendor under any name variant searched, despite 24 total 'quirk'-matching vendor records existing (Quirk Kia, Quirk Auto Glass, Quirk Buick GMC, Quirk Volkswagen Manchester, generic 'QUIRK', several Crown/Parts/Domestic/Foreign records, etc.) -- none of those 14 extra records are a name match for the 4 missing rooftops either, so they're deliberately NOT included here (same reasoning as ABC's excluded false-positive candidates: a 'Quirk'-prefixed name isn't enough on its own to justify inclusion in a 15-rooftop statement's own entity boundary without a specific business reason to believe it's one of the missing 4). This entity_ids list is used as a broad collision-guard scope only (entity IN (...) on the join), NOT for per-invoice rooftop precision -- confirmed 2026-09-05 that a credit's actual NetSuite entity doesn't reliably match what its invoice's rooftop prefix predicts (a 7C-prefixed credit landed under CV's entity), so per-rooftop entity comparison was deliberately dropped from the matching logic, not from this scope list."},
+  "GATES_GMC_NISSAN": {"entity_ids": ["81232"], "note": "Gates GMC Nissan (81232). Derived 2026-10-05 by tranid trace of the stored Claude rows of the August Gates statements (New Britain, Pawtucket, Bristol): charges tie out under 81232 once the 2-char '00' invoice prefix is stripped (seed vendor_normalization_rule). Credits carry irregular NetSuite tranids and mostly surface as exceptions."},
+  "LENTINI_AUTO_SALVAGE": {"entity_ids": ["123828", "128702"], "note": "Lentini Auto Salvage (123828, 128702). Derived 2026-10-05 by tranid trace of the stored Claude rows of the August Lentini statements: invoices tie out verbatim under these two records. Credit / payment lines reference the NetSuite vendorcredit as 'DT# nnnn' in the Reference column -- matched by the DT# fallback in fabric_matching.py."},
+  "MASTRIA": {"entity_ids": ["2572", "13402", "4407", "2337", "5344"], "note": "Mastria rooftops (Buick GMC Cadillac, Subaru and siblings: 2572, 13402, 4407, 2337, Kia 5344). Derived 2026-10-05 by tranid trace of the Quonset / Pawtucket August statements (CDK AR layout, parsed by extract_mastria.py): invoices and CM credits tie out verbatim. 5344 confirmed by 200380K ($454.81, Kia dept 6). Nissan (2336), VW (15934) also exist in NetSuite -- add them only on a confirmed hit."},
+  "GOODWINS": {"entity_ids": ["6957", "12416"], "note": "Goodwins Chevy Mazda-Domestic (6957) and Goodwins Volvo (12416). Derived 2026-10-05 by tranid trace of 6 stored Goodwins statements (Reynolds and Reynolds template, CVW-prefixed invoices): 33 of 34 unique lines tie out across ALL NetSuite entities only under these two -- charges after the 3-char prefix strip, credits as CM + stripped. Goodwins Chevy Mazda-Foreign (6688), Oxford-Sublet (11974) and Land Rover (13397) also exist; add them only on a confirmed hit."},
+  "THOMPSON_VOLKSWAGEN": {"entity_ids": ["479973"], "note": "Thompson Volkswagen Inc. (479973). Added 2026-10-13: the prod Maurice statement (STMT-8C3B3805) line 73904 is bill tranid 73904 under 479973 (9/3/2026). Other Thompson records (BMW 622428, Lexus Doylestown 262212, Electrical, Overhead) are different businesses."},
+  "LKQ": {"entity_ids": ["3019", "63531", "32050", "138636"], "note": "LKQ New England (3019), LKQ (63531), Royal Used LKQ Parts (32050), LKQ Corp Northeast (138636 -- added 2026-10-05 from the LKQ Venice / First Choice statement, 3 of 3 lines). Derived 2026-10-05 by tranid trace of 5 stored LKQ statements (Gorham, Thruway): 117 of 125 unique lines tie out verbatim across ALL NetSuite entities only under these three (103 / 13 / 1). LKQ is NOT under Keystone in NetSuite despite the corporate relationship."},
+  "NAPA_AUTO_PARTS": {"entity_ids": ["402001", "7147", "8495", "150640", "2568", "85458", "84789"], "note": "Auto Parts Connection (402001), NAPA (7147), NAPA 1 (8495), plus store records added 2026-10-05 from statements Claude labelled with the store name: Napa Auto Parts (150640, Val-U / First Choice), NAPA - Pawtucket (2568, Raps), NAPA Auto Parts - Bridge Auto Supply (85458), Shrewsbury AutoParts Inc(NAPA) (84789). Derived 2026-10-05 by tranid trace of 6 stored NAPA statements: 14 of 22 unique lines tie out across ALL NetSuite entities only under these three. NAPA is a franchise network with ~20 store-level vendor records in NetSuite; add another store only on a confirmed hit."},
+  "1800_RADIATOR": {"entity_ids": ["8214", "637035"], "note": "1-800-Radiator (8214) and 1 800-Radiator AC and Exhaust of Pittsburgh (637035). Derived 2026-10-05 by tranid trace of 12 stored statements: 26 of 32 unique lines tie out verbatim across ALL NetSuite entities only under these two (19 / 7)."},
+  "CONTINENTAL_AUTO_PARTS": {"entity_ids": ["7146"], "note": "Continental Auto Parts LLC (7146). Derived 2026-10-05 by tranid trace of 6 stored statements: 162 of 181 unique lines tie out verbatim under 7146. Two more tied under Lehigh Valley Honda (134807) -- coincidental number collisions with another vendor, deliberately left out."},
+  "BILL_DODGE": {"entity_ids": ["26349", "653129", "121920", "416254"], "note": "Bill Dodge Infiniti (26349), BMW of Westbrook (653129), Bill Dodge GMC (121920), Bill Dodge Kia (416254). Derived 2026-10-05 by tranid trace of 9 stored Bill Dodge Auto Group statements (Tekion AR layout, one statement covers several franchises): 47 of 58 unique lines tie out verbatim across ALL NetSuite entities only under these four (39 / 3 / 3 / 2). The misses are R-suffixed returns (F3335R, K10437-1R) with no NetSuite credit at that amount."},
+  "BOW_AUTO_PARTS_-_AUTOLY": {"entity_ids": ["6681"], "note": "Bow Auto Parts (6681). Derived 2026-10-05 by tranid trace of 8 stored statements: 93 lines tie out under 6681 as the number after '#' in Transaction Type -- invoices as bills, 'Credit #nnn for inv. mmm' as vendorcredit nnn. Key renamed BOW_AUTO_PARTS -> BOW_AUTO_PARTS_-_AUTOLY 2026-10-06 on merging fix/oct1-validation, whose extract_autoly parser now reads Bow statements and whose alias uses that id. Bow Auto Parts 1 (10918) had no hits."},
+  "HEALEY": {"entity_ids": ["219785", "322933", "219786", "220235", "42211", "53967"], "note": "Healey rooftops: Chrysler Dodge Jeep Ram (219785), Chevrolet (322933), Hyundai (219786), Kia 1 (220235), Chevrolet Buick Inc. (42211), Mitsubishi (53967). Derived 2026-10-05 by tranid trace of 7 stored Prestige statements (one shared layout): 48 of 65 unique lines tie out verbatim across ALL NetSuite entities only under these six. Healey Ford (35495) and Healey Chevy Buick (61610) also exist -- add only on a confirmed hit."},
+  "OREILLY_AUTO_PARTS": {"entity_ids": ["6967"], "note": "OREILLY AUTO PARTS (6967) -- the only active O'Reilly record (5340, 6680, 87596 inactive). Derived 2026-10-05 by tranid trace of 10 stored statements: 155 of 218 unique lines tie out under 6967, 150 of them only after inserting a dash after the 4-digit store number (statement 4507140208 -> NetSuite 4507-140208; fabric_matching._alternate_tranids). Most misses are late-2025 items."},
+  "PARAGON": {"entity_ids": ["7149"], "note": "Paragon Powder Coating and Wheel Repair (7149), the only Paragon record. Derived 2026-10-05 by tranid trace of 10 stored statements: the invoice number after 'Invoice #' in ACTIVITY is the NetSuite tranid, but most lines surface as Amount Mismatch -- NetSuite holds the list price ($195.00 / $200.00) while the statement bills the discounted amount ($175.50 / $180.50). Genuine discrepancy for AP review, not a key problem."},
+  "BC_TIRE": {"entity_ids": ["81234"], "note": "BC Tire (81234), the only BC Tire record. Derived 2026-10-06 by tranid trace of 5 stored B-C Tire Service statements: NetSuite holds bills as PW + the statement's Ref # (352478 -> PW352478, some PW-355263) -- matched by fabric_matching._alternate_tranids."},
+  "JACK_MADDEN_FORD": {"entity_ids": ["112242"], "note": "JACK MADDEN FORD (112242). Derived 2026-10-06 by tranid trace of 5 stored statements (CDK AR layout): 127 of 149 unique lines tie out verbatim under 112242, invoices as bills and CM-prefixed lines as credits."},
+  "SULLIVAN_TIRE": {"entity_ids": ["6960"], "note": "Sullivan Tire (6960). Derived 2026-10-06 by tranid trace of 6 stored statements: 60 of 79 lines tie out under 6960 -- some verbatim (0000-4024835), most as the number after the store prefix without leading zeros (_alternate_tranids). Store 0119-prefixed invoices have no NetSuite record yet. Sullivan Tire Bangor (85161) exists -- add only on a confirmed hit; Sullivan Tire-Sublet (6961) is inactive."},
+  "VIP_TIRES": {"entity_ids": ["6694"], "note": "VIP, Inc (6694) -- VIP Tires & Service (29856) is inactive. Derived 2026-10-06 by tranid trace of 5 stored statements: 77 of 78 invoice lines tie out under 6694 as the number after the dash in Document No. (INV7-2007037814 -> 2007037814, token_after normalization)."},
+  "WHEELS_ON_SITE": {"entity_ids": ["138869"], "note": "Wheels on Site (138869). Derived 2026-10-06 by tranid trace of 5 stored statements: 33 of 33 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after), 3 of them without leading zeros (_alternate_tranids)."},
+  "BISHOPS_USED_AUTO_PARTS": {"entity_ids": ["49350"], "note": "Bishop's Auto Parts Inc. (49350) -- BISHOP`S USED AUTO PARTS (10657) is inactive. Derived 2026-10-06 by tranid trace of 3 stored statements: the statement's own Invoice # is mostly NOT in NetSuite; the DT# number in its Reference column is ('PO#4102542 EDWIN, DT#443092'), 11 of 12 lines, bills and credits alike -- matched by fabric_matching's DT# fallback."},
+  "CASCO_BAY_FORD": {"entity_ids": ["8728"], "note": "Casco Bay Ford (8728) -- Casco Bay Ford - Sublet (6685) is inactive. Derived 2026-10-06 by tranid trace of 3 stored statements (Tekion layout): 18 of 21 lines tie out verbatim."},
+  "FAULKNER": {"entity_ids": ["136016", "159420", "159092", "159744"], "note": "Faulkner rooftops: INFINITI of Willow Grove (136016), Nissan Harrisburg (159420), Subaru (159092), Honda (159744). Derived 2026-10-06 by tranid trace of 6 stored statements (one shared layout): 38 of 38 lines tie out verbatim across ALL NetSuite entities only under these four. Faulkner has ~14 rooftop records (Alfa Romeo Maserati 200388, Dodge, Hyundai, Mazda, Toyota, ...) -- add one only on a confirmed hit."},
+  "HEADLIGHTS_DEPOT": {"entity_ids": ["6407"], "note": "Headlights Depot (6407). Derived 2026-10-06 by tranid trace of 4 stored statements: 17 of 20 lines tie out as the token after '#' in Description (Invoice #CCC-6744261709 -> CCC-6744261709). HeadlightsDepot (26545) exists too -- add only on a confirmed hit."},
+  "LEXUS_OF_EDISON": {"entity_ids": ["82472"], "note": "LEXUS OF EDISON (82472) -- Lexus Of Edison (26823) is inactive. Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 18 of 20 lines tie out verbatim."},
+  "LEXUS_OF_WARWICK": {"entity_ids": ["40605"], "note": "Lexus of Warwick (40605). Derived 2026-10-06 by tranid trace of 1 stored statement: 5 of 5 lines tie out verbatim."},
+  "CERTIFIED_AUTO_PARTS": {"entity_ids": ["81837"], "note": "Certified Auto Parts, Inc. (81837), the only active Certified record. Derived 2026-10-06 by tranid trace of 2 stored statements: bills are keyed by the SALES ORDER number, not the invoice number ('Sales Order #C7813250 T' -> C7813250T, token_after_nospace), credit memos by the memo number (CM145185). 38 of 45 lines."},
+  "EASTERN_AUTOPARTS_WAREHOUSE": {"entity_ids": ["134811"], "note": "Eastern Autoparts Warehouse (134811). Derived 2026-10-06 by tranid trace of 3 stored statements: 11 of 14 non-payment lines tie out verbatim (3IV1308159). CSH rows (Transaction Number 'MC') are payments, excluded by line-selection rule."},
+  "GOYETTE'S_INC": {"entity_ids": ["1757"], "note": "Goyette's Inc (1757) -- GOYETTE`S (5343) and GOYETTE`S INC. (32550) are inactive. Statements are read by extract_autoly (merged from fix/oct1-validation); configured 2026-10-06, see the simulation in that commit."},
+  "MAINE_OXY": {"entity_ids": ["4921"], "note": "MAINE OXY (4921). Derived 2026-10-06 by tranid trace of 3 stored statements: 6 of 6 lines tie out verbatim."},
+  "MCGOVERN": {"entity_ids": ["12208", "9868", "127885", "101182"], "note": "McGovern rooftops: Chrysler Jeep Dodge Ram (12208), Hyundai (9868), BMW of Shrewsbury (127885), Buick GMC (101182). Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 11 of 11 lines tie out across ALL NetSuite entities only under these four. McGovern has ~13 rooftop records (Ford, Subaru, Toyota, Volvo, Jaguar Land Rover, ...) -- add one only on a confirmed hit."},
+  "ADHESIVE_TEMPLATES": {"entity_ids": ["43045"], "note": "Adhesive Templates (43045). Derived 2026-10-06 by tranid trace of 2 stored statements: 4 of 5 lines tie out as the number after 'Invoice #' in DESCRIPTION (token_after). adhesive templates 2 (37417) exists -- add only on a confirmed hit."},
+  "BLUE_SUN_SUPER_SERVICE": {"entity_ids": ["17898"], "note": "Blue Sun Super Service (17898) -- not Blue Sun Towing (2766). Derived 2026-10-06 by tranid trace of 2 stored statements (the Crown Middletown / Pawtucket towing statements): 55 of 60 lines tie out verbatim (26-0730-7794)."},
+  "BROWN'S_AUTO_SALVAGE-_AUTOLY": {"entity_ids": ["181729"], "note": "Browns Auto Salvage PRP (181729). Derived 2026-10-06 by tranid trace of 4 stored statements (same statement system as Lentini / Bishop's): 13 of 16 lines tie out verbatim. Keyed on intake's fallback vendor id rather than an alias, because tests/test_vendor_aliases_autoly.py asserts this name stays unaliased."},
+  "RADIATOR_STORE": {"entity_ids": ["26850", "8214"], "note": "The Radiator Store, Inc. (26850) plus 1-800-Radiator (8214), which the same statements' invoices also post under. Derived 2026-10-06 by tranid trace of 3 stored statements (1-800 Radiator (Lamon / M3) files): 10 of 10 lines tie out verbatim."},
+  "TOYOTA_OF_DARTMOUTH": {"entity_ids": ["4615"], "note": "TOYOTA OF DARTMOUTH (4615). Derived 2026-10-06 by tranid trace of 1 stored statement (Reynolds and Reynolds layout, Crown Collision Middletown): 37 of 42 lines tie out after the 3-char TOW strip, credits as CM + stripped."},
+  "TOYOTA_OF_HACKENSACK": {"entity_ids": ["125668"], "note": "TOYOTA OF HACKENSACK (125668). Derived 2026-10-06 by tranid trace of 3 stored statements (Reynolds and Reynolds layout): 54 of 62 lines tie out after the 3-char TOW strip, credits as CM + stripped. One coincidental hit under Fred Beans (18706) deliberately left out."},
+  "WURTH_USA": {"entity_ids": ["4920"], "note": "WURTH USA INC (4920). Derived 2026-10-06 by tranid trace of 3 stored statements: 15 of 15 lines tie out verbatim. WURTH USA LNC. (41106) exists -- add only on a confirmed hit."},
+  "CHUCK'S_DOUGLASSVILLE_-_AUTOLY": {"entity_ids": ["134806"], "note": "Chuck's Auto Salvage - Douglassville - Team PRP (134806). Derived 2026-10-06 by tranid trace of 3 stored statements (Autoly ledger): 8 of 8 invoice lines tie out as the number after '#'. Chuck's Auto Salvage - York (242916) exists and the statements tag some parts (YOR) -- add it only on a confirmed hit."},
+  "EL_M_AUTO_PARTS": {"entity_ids": ["150641"], "note": "EL&M Auto Recycling - Team PRP (150641). Derived 2026-10-06 by tranid trace of 2 stored statements (Autoly ledger): 15 of 17 non-payment lines tie out as the number after '#' (invoices as bills, 'Credit #n for inv. m' as vendorcredit n)."},
+  "COLLISIONSTONEGUARD": {"entity_ids": ["23634"], "note": "CollisionStoneGuard (23634) -- the Clarkstown record (5642) is inactive. Derived 2026-10-06 by tranid trace of 2 stored statements: 2 of 2 lines tie out as the number after '#' in Transaction ('INV #252608. Due ...')."},
+  "DOVER_DODGE": {"entity_ids": ["81666"], "note": "Dover Dodge Chrysler Jeep (81666). Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 5 of 5 lines tie out after the 3-char CHW strip."},
+  "EMERSON_TOYOTA": {"entity_ids": ["18506"], "note": "Emerson Toyota (18506) -- the Coleman's sublet records (10859, 10860) are inactive. Derived 2026-10-06 by tranid trace of 2 stored statements (Reynolds and Reynolds layout): 4 of 4 -- TOW-prefixed invoices after the 3-char strip, TOCS-prefixed (source 3) verbatim."},
+  "JAGUAR_LAND_ROVER_WARWICK": {"entity_ids": ["134813"], "note": "Jaguar Land Rover Warwick (134813). Derived 2026-10-06 by tranid trace of 2 stored statements (same layout as Lexus of Warwick): 12 of 18 lines tie out verbatim."},
+  "NATIONAL_HAIL_AND_DENT": {"entity_ids": ["92301"], "note": "National Hail & Dent Removal LLC. (92301). Derived 2026-10-06 by tranid trace of 2 stored statements: 2 of 2 lines tie out as the number after '#' in Transaction ('INV #33609.. Orig. Amount $300.00.')."},
+  "TIRE_RACK_WHOLESALE": {"entity_ids": ["5128"], "note": "TIRE RACK WHOLESALE (5128) -- TIRE RACK (23318) is inactive. Derived 2026-10-06 by tranid trace of 2 stored statements: 5 of 7 lines tie out verbatim (VJ8572701)."},
+  "VINART": {"entity_ids": ["134410", "134808", "134405", "135660", "134807"], "note": "VinArt bills on behalf of the Lehigh Valley dealerships and has no NetSuite record of its own; invoices post under the dealership: Mercedes Benz of Lehigh Valley (134410), Lehigh Valley Acura (134808), Lehigh Valley Hyundai (134405), Porsche Lehigh Valley (135660), Lehigh Valley Honda (134807). Derived 2026-10-06 by tranid trace of 4 stored statements (Tekion layout): 219 of 253 unique lines tie out verbatim across ALL NetSuite entities only under these five. Most misses are R-suffixed returns with no NetSuite credit."},
+  "PARTS_AUTHORITY": {"entity_ids": ["68562"], "note": "Parts Authority (68562). Derived 2026-10-06 by tracing the 9-digit document number on all 6 statements (extract_partsauthority): bills held as <branch>-<number> (055-568636), credits without the leading zero -- 41 of 58 lines, all under 68562. West Springfield (198476) and B&L (230399) are separate Parts Authority records -- add only on a confirmed hit."},
+  "PRESTIGE_LEXUS_OF_RAMSEY": {"entity_ids": ["29335", "80530"], "note": "Prestige Lexus of Ramsey (29335) and BMW of Freehold (80530) -- the Lithia/billtrust statement covers both (customer ARC1612 is DCH Freehold BMW). Derived 2026-10-06 by tranid trace of 5 statements: 46 of 55 lines verbatim on the Lithia layout, 18 of 20 on the invoice-list layout via the last '_' segment."},
+  "ELITE_WHEELS": {"entity_ids": ["113850"], "note": "Elite Wheels (113850). Derived 2026-10-06 by tracing 4 statements' text: invoices 'Invoice #I-003-03241' are held as 003-03241 (recent) or I-000-53938 (older) -- token_after + _alternate_tranids. Not to be confused with Elitek Vehicle Services (27647), where two numbers coincidentally collide."},
+  "FETTE": {"entity_ids": ["123687", "123686", "132084"], "note": "Fette Kia (123687), Fette Ford (123686), Fette INFINITI (132084). Derived 2026-10-06 by tracing 4 statements (eF320 layout, as Faulkner): 41 of 45 lines verbatim across ALL NetSuite entities only under these three."},
+  "TOWN_FAIR_TIRE": {"entity_ids": ["2574"], "note": "Town Fair Tire - East Haven (2574) -- the Centers records (3995, 4951, 8888) are inactive. Derived 2026-10-06 by tracing 4 statements: '40315-537 PO 4203067' -> 40315-537 (verbatim) or 72838580 (undashed). Town Fair Tire (256863) holds other stores' bills -- add only on a confirmed hit."},
+  "ADAS_CALIBRATION_EXPERTS": {"entity_ids": ["68559"], "note": "ADAS CALIBRATION EXPERTS (68559). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 44 of 48 lines tie out verbatim across ALL NetSuite entities."},
+  "ALBANY_AUTO_MANAGEMENT": {"entity_ids": ["180580", "219783", "180579"], "note": "BMW of South Albany (180580), Northway Toyota (219783), Audi Albany (180579). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 117 of 123 lines tie out verbatim across ALL NetSuite entities."},
+  "ALLOY_WHEEL_REPAIR_SPECIALIST": {"entity_ids": ["115114"], "note": "Alloy Wheel Repair (115114). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "AUDI_NASHUA": {"entity_ids": ["39603"], "note": "Audi of Nashua (39603). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "AUTO_VALUE_PARTS_STORES": {"entity_ids": ["126690"], "note": "Auto Value Parts Stores (126690). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 21 of 32 lines tie out verbatim across ALL NetSuite entities."},
+  "BMW_OF_BRIDGEWATER": {"entity_ids": ["145501"], "note": "BMW of Bridgewater (145501). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "BALISE_HONDA_OF_NORTH_ATTLEBOROUGH": {"entity_ids": ["11977"], "note": "Balise Honda of North Attleborough (11977). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "BERGEY_S": {"entity_ids": ["134810"], "note": "Bergey's Wholesale Parts (134810). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 38 of 41 lines tie out verbatim across ALL NetSuite entities."},
+  "CAPITOL_CDJR_SOUTH": {"entity_ids": ["648959"], "note": "Capitol South Chrysler Dodge Jeep Ram (648959). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 9 lines tie out verbatim across ALL NetSuite entities."},
+  "CHERRY_HILL_NISSAN": {"entity_ids": ["147119"], "note": "Cherry Hill Nissan (147119). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 20 of 20 lines tie out verbatim across ALL NetSuite entities."},
+  "CONICELLI_HONDA": {"entity_ids": ["199713"], "note": "Conicelli Honda (199713). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 38 of 39 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."},
+  "CONICELLI_TOYOTA": {"entity_ids": ["81667"], "note": "Conicelli Toyota (81667). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 36 of 38 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."},
+  "DAVIS_ACURA": {"entity_ids": ["147913"], "note": "Davis Acura (147913). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 17 lines tie out verbatim across ALL NetSuite entities."},
+  "DEPAULA_MAZDA": {"entity_ids": ["186001"], "note": "DePaula Mazda (186001). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."},
+  "DENT_WIZARD_INTERNATIONAL_CORP": {"entity_ids": ["47735"], "note": "Dent Wizard International Corp,LLC. (47735). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out with the dash removed (_alternate_tranids) across ALL NetSuite entities."},
+  "DENT_X": {"entity_ids": ["417579"], "note": "Dent-X, LLC (417579). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "EAST_COAST_BEVERAGE": {"entity_ids": ["130974"], "note": "East Coast Beverage (130974). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "EMPIRE_RIM_FIX": {"entity_ids": ["272781"], "note": "Empire Rim Fix Corp (272781). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 9 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "EVERGREEN_SUBARU": {"entity_ids": ["11083"], "note": "EVERGREEN SUBARU (11083). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "FISHERS": {"entity_ids": ["159417"], "note": "Fisher Auto Parts (159417). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 9 lines tie out verbatim across ALL NetSuite entities."},
+  "FREIGHTLINER_OF_HARRISBURG": {"entity_ids": ["160147"], "note": "Freightliner Western Star Of Harrisburg (160147). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out verbatim across ALL NetSuite entities."},
+  "GEAR_SIX_AUTO_PARTS": {"entity_ids": ["417076"], "note": "Gear Six Auto Parts (417076). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "GOLDSTEIN_SUBARU": {"entity_ids": ["203121"], "note": "Goldstein Subaru (203121). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 11 of 12 lines tie out verbatim across ALL NetSuite entities."},
+  "GOTCHA_COVERED_AUTO_GLASS": {"entity_ids": ["182185"], "note": "Gotcha Covered Auto Glass (182185). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "GRIECO_TOYOTA": {"entity_ids": ["4949", "2331"], "note": "Grieco Toyota (4949), Nucar Toyota of Norwood (2331). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "INTERSTATE_BATTERY_OF_PASSAIC_COUNTY": {"entity_ids": ["141662"], "note": "Interstate Battery (141662). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "JAGUAR_LAND_ROVER_ALLENTOWN": {"entity_ids": ["145498"], "note": "Bennett Jaguar Land Rover (145498). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."},
+  "JAGUAR_LAND_ROVER_MANHATTAN": {"entity_ids": ["164737"], "note": "Land Rover Manhattan (164737). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 5 lines tie out verbatim across ALL NetSuite entities."},
+  "KUNDERT_VOLVO": {"entity_ids": ["138034"], "note": "Kundert Volvo (138034). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out verbatim across ALL NetSuite entities."},
+  "L_AND_M_ADAS_CALIBRATION_CENTER": {"entity_ids": ["88283"], "note": "L&M Adas Calibration Center LLC (88283). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 12 of 18 lines tie out verbatim across ALL NetSuite entities."},
+  "LINE_X_OF_BANGOR": {"entity_ids": ["193492"], "note": "LINE-X OF BANGOR (193492). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "M_AND_P_USED_AUTO_PARTS": {"entity_ids": ["12209"], "note": "M&amp;P USED AUTO PARTS-PARTS (12209). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "MG_APPEARANCE_PRODUCTS": {"entity_ids": ["147004"], "note": "MG Appearance Products (147004). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "MALCO_PRODUCTS_OF_MAINE": {"entity_ids": ["228486"], "note": "Malco Products of Maine (228486). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "MALOUF_FORD_LINCOLN": {"entity_ids": ["109222"], "note": "Malouf Ford-Lincoln, Inc (109222). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 18 lines tie out verbatim across ALL NetSuite entities."},
+  "MAZDA_OF_MILFORD": {"entity_ids": ["48342"], "note": "Mazda of Milford (48342). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."},
+  "MERCEDES_BENZ_OF_BROOKLYN": {"entity_ids": ["81668"], "note": "Mercedes Benz of Brooklyn (81668). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 5 lines tie out verbatim across ALL NetSuite entities."},
+  "MERCEDES_BENZ_OF_CHERRY_HILL": {"entity_ids": ["609408"], "note": "Mercedes-Benz of Cherry Hill (609408). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 23 of 28 lines tie out verbatim across ALL NetSuite entities."},
+  "MERCEDES_BENZ_OF_WILMINGTON": {"entity_ids": ["408133"], "note": "Mercedes-Benz of Wilmington (408133). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "MORGAN_TIRE": {"entity_ids": ["402002"], "note": "Morgan's Tire Service (402002). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."},
+  "MORONG_FALMOUTH": {"entity_ids": ["10270"], "note": "Morong Falmouth (10270). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."},
+  "MY_AUTO_STORE": {"entity_ids": ["480497"], "note": "My Auto Store LLC (480497). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 10 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "NEW_ENGLAND_TRUCK_CENTER": {"entity_ids": ["396980"], "note": "New England Truck Center dba Ray's Truck Service (396980). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "NOVUS_GLASS": {"entity_ids": ["220732"], "note": "Novus Glass (220732). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."},
+  "PATRIOT_ACURA": {"entity_ids": ["327857"], "note": "Patriot Acura (327857). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "PATRIOT_SUBARU_OF_SACO": {"entity_ids": ["6690"], "note": "PATRIOT SUBARU (6690). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 10 of 12 lines tie out verbatim across ALL NetSuite entities."},
+  "PAUL_MILLER_PORSCHE": {"entity_ids": ["284273"], "note": "Paul Miller Porsche (284273). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out verbatim across ALL NetSuite entities."},
+  "PENNSTONE_SUPPLY": {"entity_ids": ["174703"], "note": "PENNSTONE SUPPLY INC (174703). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "PINE_BROOK_TIRE": {"entity_ids": ["283671"], "note": "Pine Brook Tire (283671). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "PORTLAND_GLASS": {"entity_ids": ["386452"], "note": "Portland Glass (386452). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "PRESTIGE_MITSUBISHI": {"entity_ids": ["5341"], "note": "PRESTIGE MITSUBISHI (5341). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "PRINCETON_BMW": {"entity_ids": ["157477"], "note": "Princeton BMW (157477). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "ROBERTSON_AUTO_GLASS": {"entity_ids": ["85159"], "note": "Robertson Auto Glass LLC (85159). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 8 of 8 lines tie out without leading zeros (_alternate_tranids) across ALL NetSuite entities."},
+  "SPEEDCRAFT_ACURA": {"entity_ids": ["13021"], "note": "SPEEDCRAFT ACURA (13021). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 15 of 17 lines tie out verbatim across ALL NetSuite entities."},
+  "STOYSTOWN_AUTO_WRECKERS": {"entity_ids": ["159090"], "note": "Stoystown Auto Wreckers (159090). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "SUNRISE_TOYOTA": {"entity_ids": ["6412"], "note": "Sunrise Toyota (6412). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 28 of 30 lines tie out verbatim across ALL NetSuite entities."},
+  "TECH_TIRE_SUPPLY": {"entity_ids": ["131681"], "note": "Tech Tire Supply LLC (131681). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "THE_WYNN_GROUP": {"entity_ids": ["149582"], "note": "Wynn Volkswagen (149582). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out verbatim across ALL NetSuite entities."},
+  "TILGHMANS_AUTO_PARTS_II": {"entity_ids": ["164147"], "note": "Tilghman's Auto Parts (164147). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "TULLEY_AUTOMOTIVE_GROUP": {"entity_ids": ["254048"], "note": "Tulley Mazda (254048). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out verbatim across ALL NetSuite entities."},
+  "TWIN_CITY_TIRE_AND_SERVICE": {"entity_ids": ["85162"], "note": "Twin City Tire and Service (85162). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 14 lines tie out verbatim across ALL NetSuite entities."},
+  "VOLKSWAGEN_OF_SACO": {"entity_ids": ["169450", "6698"], "note": "Jack Volkswagen Of Saco (169450), Volkswagen Saco (6698). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 24 of 24 lines tie out verbatim across ALL NetSuite entities."},
+  "VOLVO_CARS_PRINCETON": {"entity_ids": ["372450"], "note": "Volvo Cars Princeton (372450). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."},
+  "WELDON_TIRE": {"entity_ids": ["22604"], "note": "WELDON TIRE (22604). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "WHEEL_COLLISION_CENTER": {"entity_ids": ["115114"], "note": "Alloy Wheel Repair (115114). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 13 of 13 lines tie out verbatim across ALL NetSuite entities."},
+  "WILKIE_LEXUS": {"entity_ids": ["147915"], "note": "Wilkie Lexus (147915). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 31 of 39 lines tie out verbatim across ALL NetSuite entities."},
+  "YERTY_AUTO_SERVICE": {"entity_ids": ["397880"], "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "LIA_AUTO_GROUP": {"entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854", "46057"], "note": "Lia Honda of Brewster (46057) added 2026-10-13 from prod Lia Group Prestige 093026.pdf (STMT-64B08361): its HB-suffixed invoices are stored in NetSuite under 46057, mostly lowercase (151605hb) -- matching compares case-insensitively. Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."},
+  "WILBERTS": {"entity_ids": ["240269", "346384"], "note": "Wilbert's, Inc. - Team PRP (240269), Wilberts PAP Hudson Valley LLC (346384). Derived 2026-10-07 by tranid trace of 3 statements (extract_wilberts + one Claude run): 26 of 35 lines verbatim; misses are mostly 'CR for #' credits with no NetSuite record."},
+  "DING'S_AUTO_PARTS": {"entity_ids": ["30638"], "note": "Ding's Auto Sales (30638). Derived 2026-10-07 by tranid trace of 2 statements through both extract_autoly and the stored Claude runs: 10 of 20 lines each way, all under 30638; the rest are payments and invoices not yet in NetSuite."},
+  "ADAS_DIAGNOSTIC_SOLUTIONS": {"entity_ids": ["374757"], "note": "ADAS DIAGNOSTIC SOLUTIONS (374757). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 9 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "ACERBO_S_AUTO_TRIM_AND_LETTERING": {"entity_ids": ["190930"], "note": "Acerbo's Trim (190930). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 3 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "ACURA_OF_ABINGTON": {"entity_ids": ["89488"], "note": "Acura of Abington (89488). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 14 lines tie out verbatim across ALL NetSuite entities."},
+  "AUDI_DEVON": {"entity_ids": ["138870"], "note": "Audi Devon (138870). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 11 of 14 lines tie out verbatim across ALL NetSuite entities."},
+  "AUDI_WYNNEWOOD": {"entity_ids": ["457780"], "note": "Audi Service Conshohocken (457780). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."},
+  "AUTOZONE": {"entity_ids": ["181322", "10661", "136921", "38516", "19292"], "note": "All five AutoZone vendor records (2026-11-09): AutoZone (181322, most bills), Auto Zone (10661), Autozone 3 (136921), Autozone 2 (38516), Autozone 1 (19292). Was 10661 only (2026-10-06 trace of one statement): every line of prod STMT-1726BB16 / -5A84E9DE / -3EA060A1 came back Not Found, and the 20 of those 30 invoices that are in NetSuite are all under 181322."},
+  "BEST_CHEVROLET": {"entity_ids": ["2328"], "note": "BEST CHEVROLET (2328). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 49 of 56 lines tie out verbatim across ALL NetSuite entities."},
+  "BMW_OF_MANHATTAN": {"entity_ids": ["77845"], "note": "BMW OF MANHATTAN, INC. (77845). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "BROADWAY_TIRE": {"entity_ids": ["3021"], "note": "BROADWAY TIRE (3021). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "BELL_MOTOR_CARS": {"entity_ids": ["400293"], "note": "Bell Audi (400293). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 19 of 29 lines tie out verbatim across ALL NetSuite entities."},
+  "CAPITOL_CITY_IMPORTS": {"entity_ids": ["596293"], "note": "Capitol City Mazda (596293). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 6 lines tie out verbatim across ALL NetSuite entities."},
+  "CHERRY_HILL_IMPORTS": {"entity_ids": ["450773", "409064"], "note": "Porsche of Cherry Hill (450773), Cherry Hill Audi (409064). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 5 of 5 lines tie out verbatim across ALL NetSuite entities."},
+  "COUNTRY_HYUNDAI": {"entity_ids": ["9869"], "note": "Country Hyundai (9869). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 16 of 16 lines tie out verbatim across ALL NetSuite entities."},
+  "D_AND_M_BUMPER_EXCHANGE": {"entity_ids": ["240268"], "note": "D&M Bumper Exchange (240268). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 8 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "DING_MASTER": {"entity_ids": ["196723"], "note": "Ding Master (196723). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."},
+  "DON_FOSHAY_S_TIRE_AND_ALIGNMENT_HALLOWEL": {"entity_ids": ["556836"], "note": "Don Foshay's Discount Tire & Alignment - Hallowell (556836). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 9 of 9 lines tie out verbatim across ALL NetSuite entities."},
+  "FLYNN_S_TOWING": {"entity_ids": ["400727"], "note": "Flynn's Towing (400727). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "IMPERIAL_SUBARU": {"entity_ids": ["595992"], "note": "Imperial Subaru (595992). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."},
+  "JACK_GIAMBALVO": {"entity_ids": ["367541"], "note": "Jack Giambalvo Mitsubishi (367541). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 2 of 2 lines tie out verbatim across ALL NetSuite entities."},
+  "KELLEHER_TIRE": {"entity_ids": ["242828"], "note": "KELLEHER TIRE (242828). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 2 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "KEMPERLE": {"entity_ids": ["3581"], "note": "Albert Kemperle, Inc. (3581). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 3 lines tie out verbatim across ALL NetSuite entities."},
+  "LANGWAY_TOYOTA_OF_NEWPORT": {"entity_ids": ["3701"], "note": "LANGWAY TOYOTA (3701). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "LINDE_GAS_AND_EQUIPMENT": {"entity_ids": ["135812"], "note": "Linde Gas & Equipment Inc. (135812). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "MATTHEWS_AUTO": {"entity_ids": ["520256", "521032", "529975", "522572"], "note": "Mathews Import Center (520256), Mathews on the Parkway inc. (521032), Mathews Nissan (529975), Mathews GM Center Inc. (522572). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 46 of 54 lines tie out after the 3-char prefix strip, credits as CM + stripped across ALL NetSuite entities."},
+  "NIPPON_SANSO_MATHESON": {"entity_ids": ["584430"], "note": "NIPPON SANSO MATHESON, INC. (584430). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "PRECISION_DIAGNOSTICS": {"entity_ids": ["596792"], "note": "Precision Diagnostics, LLC (596792). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 26 of 37 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "REYNOLDS_AND_REYNOLDS": {"entity_ids": ["4097"], "note": "REYNOLDS AND REYNOLDS (4097). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 1 of 1 lines tie out verbatim across ALL NetSuite entities."},
+  "SPINDLE_CITY_AUTO_GLASS": {"entity_ids": ["2340"], "note": "SPINDLE CITY AUTO GLASS (2340). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 14 of 16 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "STEVE_SHANNON_TIRE_AND_AUTO_CENTER": {"entity_ids": ["296215"], "note": "Steve Shannon Tire & Auto Center (296215). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "THE_WHEEL_RIM_GROUP": {"entity_ids": ["511593"], "note": "THE WHEEL RIM GROUP, LLC (511593). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 17 of 18 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "TASCA_AUTOMOTIVE_GROUP": {"entity_ids": ["46636"], "note": "Tasca Automotive Group (46636). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 7 of 7 lines tie out verbatim across ALL NetSuite entities."},
+  "TECHZONE_AIRBAG_SERVICE": {"entity_ids": ["49951"], "note": "TechZone Airbag Service (49951). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "U_S_A_WHEELS": {"entity_ids": ["278521"], "note": "U.S.A Wheels (278521). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 6 of 7 lines tie out as the number after '#' (token_after) across ALL NetSuite entities."},
+  "UNIFIRST": {"entity_ids": ["6373"], "note": "UniFirst Corporation (6373). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 4 lines tie out verbatim across ALL NetSuite entities."},
+  "VOLVO_CARS_BRIDGEWATER": {"entity_ids": ["113076"], "note": "Volvo Cars Bridgewater (113076). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 4 of 5 lines tie out verbatim across ALL NetSuite entities."},
+  "AUTOMOTIVE_COLLISION_CALIBRATIONS": {"entity_ids": ["280791"], "note": "Automotive Collision Calibrations (280791). Details reads 'RO#6405989 INV-261071 - due on ...'; NetSuite's tranid is the INV- token (INV-261071), confirmed 2026-10-07 by amount probe (4 of 4)."},
+  "MOMENTUM_TIRE_AND_WHEEL": {"entity_ids": ["125676"], "note": "Momentum Tire and Wheel (125676). Description reads 'Invoice # 588059 W-1376112 PO: ...'; NetSuite's tranid is the second number, the W- ticket (W-1381387), confirmed 2026-10-07 by amount probe."},
+  "ASCENDANCE": {"entity_ids": ["162826"], "note": "Ascendance Truck Centers (162826). The statement prints XA101076824:01, NetSuite holds XA101076824.01 (colon -> dot), confirmed 2026-10-07 by amount probe."},
+  "BULLOCKS_TIRE_AND_AUTO": {"entity_ids": ["240270"], "note": "BULLOCK'S TIRE & AUTO PARTS (240270). The statement prints ID-142270; NetSuite holds 8763-142270 (8763 = this account's customer number), confirmed 2026-10-07 by amount probe. 'PB-Statement' previous-balance rows are not documents."},
+  "CARQUEST": {"entity_ids": ["192734"], "note": "CARQUEST OF PLEASANT VALLEY (192734). The statement prints ID-110464; NetSuite holds the store-prefixed number, 15962-110464 or 15962110533, confirmed 2026-10-07 by amount probe."},
+  "COUNTRYSIDE_TOWING": {"entity_ids": ["501577"], "note": "COUNTRYSIDE TOWING (501577). The statement prints 26-434; NetSuite holds 26-00434 (zero-padded to 5 after the dash), confirmed 2026-10-07 by amount probe."},
+  "GILBERTSVILLE_AUTO_GLASS": {"entity_ids": ["465531"], "note": "GILBERTSVILLE AUTO GLASS LLC (465531). DESCRIPTION reads 'Invoice #OMEGA-13940: Due ...'; NetSuite holds the number without OMEGA- (13940), confirmed 2026-10-07 by amount probe."},
+  "RANDYS_AUTO_PARTS": {"entity_ids": ["6959"], "note": "Randy's Used Auto Parts (6959). Same statement system as Lentini / Bishop's: NetSuite holds the DT# number from Reference (DT#44390 -> 44390), confirmed 2026-10-07."},
+  "SOUND_WAVES": {"entity_ids": ["287386"], "note": "SOUND WAVES (287386). ACTIVITY reads 'Invoice #220000014981: Due ...'; the number after # is the tranid (one bill is keyed with an extra 0), confirmed 2026-10-07."},
+  "ABINGTON_HYUNDAI_MAZDA": {"entity_ids": ["145497"], "note": "Mazda of Abington (145497). The PDF filed as 'Burlington Hyundai' (customerinvoice (10).pdf) is Abington's Hyundai statement -- confirmed by the user 2026-10-07; Claude reads it as 'Abington Auto Parts Hyundai'. 2 of 3 lines tie out verbatim (573534AY) under 145497. Hyundai Mazda of Abington (136017) also exists -- add it only on a confirmed hit."},
+  "COLUMBIA_FORD": {"entity_ids": ["46932", "52380"], "note": "Columbia Ford (46932), Columbia Kia (52380). Added 2026-10-13 from 5 prod statements (20261012113727, COLWorc0926, LBP0926, COLLund0926, COLNat0926): INV# ties out under these two, 51 of 54 lines (LBP0926's are all Columbia Kia)."},
+  "MERCEDES_BENZ_OF_BOSTON": {"entity_ids": ["477553"], "note": "Mercedes-Benz of Boston (477553). Added 2026-10-13 from prod Benz 10-12-26 / MBBNatick0926: TRANSACTION ties out 5 of 5."},
+  "BMW_OF_NORTH_HAVEN": {"entity_ids": ["112743"], "note": "BMW of North Haven (112743). Added 2026-10-13 from prod BMW.pdf: DOCUMENT ties out 8 of 8."},
+  "MERCEDES_BENZ_OF_NORTH_HAVEN": {"entity_ids": ["128704"], "note": "Mercedes Benz of North Haven (128704). Added 2026-10-13 from prod Mercedes Benz.pdf: DOCUMENT ties out 2 of 2."},
+  "FISHER_AUTO_PARTS": {"entity_ids": ["159417"], "note": "Fisher Auto Parts (159417). Added 2026-10-13 from prod Fisher Auto Parts.pdf: INVOICE NUMBER (333-433833 style) ties out 12 of 15."},
+  "SCHALLER_SUBARU": {"entity_ids": ["13403"], "note": "Schaller Subaru (13403). Added 2026-10-13 from prod Schaller Subaru West Hartford.pdf: INVOICE ties out 11 of 12 (Reynolds layout, same as Goodwins)."},
+  "BERTERA_MITSUBISHI": {"entity_ids": ["71706"], "note": "Bertera Mitsubishi (71706). Added 2026-10-13 from prod Bertera Mitsu.pdf: REFERENCE (MIW73609) ties out 8 of 10 after the 3-char MIW prefix is stripped."},
+  "EZ_AUTO_GLASS_INSTALLERS": {"entity_ids": ["518721"], "note": "EZ Auto Glass Installers Inc (518721). Added 2026-10-13 from prod EZ Auto, Lees, Oct 26.pdf: the number after 'Invoice #' in DESCRIPTION ties out 13 of 16."},
+  "WEBER_BROTHERS_AUTO": {"entity_ids": ["206427"], "note": "WEBER BROS. AUTO PARTS (206427). Added 2026-10-13 from prod Weber Brothers (Lamon).pdf: the number after 'Invoice #' in Transaction Type ties out (489548)."},
+  "CHERRY_HILL_TRIPLEX": {"entity_ids": ["369649", "147511"], "note": "Cherry Hill Kia (369649), Cherry Hill Triplex (147511, older bills). Added 2026-10-14 from prod Cherry Hill Triplex (M3 Hwy35).pdf: REF NO. ties out 2 of 2 under 369649, exact amount."},
+  "L_&_M_AUTO_CENTER": {"entity_ids": ["85979"], "note": "L&M Auto Center (85979). Added 2026-10-14 from prod L&M Auto (M3 S Main).pdf: its columns print no headers, so Claude names them UNLABELED_TRANSACTION_CODE[_n]; the first ties out 18 of 18."},
+  "BENNETTS_AUTO_RECOVERY": {"entity_ids": ["152957"], "note": "Bennett's Auto Recovery (152957). Added 2026-10-14 from prod Bennetts (M3 Hwy35) / (M3 S Main): NetSuite holds Call # as yy-<call> (26-36498), see fabric_matching._alternate_tranids; 98 of 112 lines tie out, exact amount."},
+  "ASBURY_AUTOMOTIVE_GROUP": {"entity_ids": ["203119"], "note": "Jaguar Land Rover Sudbury (203119). Added 2026-10-19 from HEBWorc0926.pdf (Asbury Automotive Group, Tekion layout, billed to Vive of Worcester): the statement groups its invoices by franchise ('Land Rover Sudbury') and NetSuite holds each franchise as its own vendor, so no vendor carries 'Asbury' in its name and name matching finds nothing. This covers ONLY the Land Rover Sudbury franchise: a statement listing another Asbury franchise needs that franchise's entity added here. The NetSuite tranid equals the printed invoice number as is (71-100428-2, $674.87 ties exactly)."},
+  "BANKS_CHEVROLET-CADILLAC_BUICK-GMC": {"entity_ids": ["239562"], "note": "Banks Chevrolet Cadillac Buick GMC (239562) -- added 2026-10-29 from prod STMT-0CA7F62C: its bills tie out under 239562 once the CVW prefix is stripped (CVW994295 -> 994295 $42.92, CVW993160-x -> 993160-x) and its credits as CM + number (CMCVW991606 -> CM991606). NetSuite's name uses spaces where the statement uses hyphens, so it is pinned here instead of relying on name lookup."},
   "MR_TIRE": {"entity_ids": ["588142"], "note": "MR. TIRE AUTO CENTERS (588142) -- added 2026-10-30 from prod STMT-1D59DFC6 (Mr.Tire_CherryHill_0926.pdf, no vendor name printed): 77 of its 80 lines are bills under 588142 at the exact amount, keyed by the middle part of Invoice No (second_segment rule)."},
   "MERCEDES-BENZ_OF_BURLINGTON": {"entity_ids": ["266702"], "note": "Mercedes-Benz of Burlington (266702) -- added 2026-11-02 from prod STMT-8414BAA7 (MB of Burlington Ben's 10-26.pdf): all 8 DOCUMENT numbers tie out exactly under 266702 (7 bills, and the -150.00 line is credit 8569175)."},
   "IRA_MOTOR_GROUP": {"entity_ids": ["416841", "167301"], "note": "Ira Motor Group statement (prod STMT-21D06DCB) covers IRA stores by section: '315 - IRA BMW STRATHAM' -> BMW of Stratham (416841), '302 - IRA LEX DANVERS' -> Ira Lexus (167301). Name lookup alone matched any vendor containing 'ira'. Added 2026-11-03."},
   "CORNELL'S_USED_AUTO_PARTS": {"entity_ids": ["183491"], "note": "Cornell's Parts - Team PRP (183491): the only Cornell's vendor; same 6-digit invoice series (637445, 2026-10-29). Prod STMT-D1547F87's invoices were not in NetSuite yet on 2026-11-03."},
   "TOLPA'S_AUTO_PARTS_-_AUTOLY": {"entity_ids": ["564800"], "note": "Tolpa's Auto Parts - Team PRPNE (564800): 4 of 4 sampled reference numbers from prod STMT-BA52F267 are bills here at the exact amount. Added 2026-11-03."},
   "GLASS_ROUTES": {"entity_ids": ["341537"], "note": "GLASS ROUTES INC (341537): name lookup matched every vendor with 'glass' (90+). 4 of 4 sampled invoices from prod STMT-3280D3FE are bills here at the exact amount. Added 2026-11-03."},
-  "VAN_BORTEL_MOTORCAR_INC.": {"entity_ids": ["600978"], "note": "Van Bortel Subaru of Victor (600978): prod STMT-EDF47B44 (Van Bortel Subaru_Norwich_1026.pdf, printed 'Van Bortel Motorcar, Inc.') -- 54 of its 57 REF NO. invoice numbers are bills here, 0 under Van Bortel Ford (626536). Without this the first-word lookup matched every vendor starting 'Van' (42 entities). Added 2026-11-05."}
+  "VAN_BORTEL_MOTORCAR_INC.": {"entity_ids": ["600978"], "note": "Van Bortel Subaru of Victor (600978): prod STMT-EDF47B44 (Van Bortel Subaru_Norwich_1026.pdf, printed 'Van Bortel Motorcar, Inc.') -- 54 of its 57 REF NO. invoice numbers are bills here, 0 under Van Bortel Ford (626536). Without this the first-word lookup matched every vendor starting 'Van' (42 entities). Added 2026-11-05."},
+  "MARTIN_NEMER_VOLKSWAGEN_CORP": {"entity_ids": ["187347"], "note": "Nemer Volkswagen (187347). 2026-11-10: prod STMT-644EC694's 7 invoices are all under 187347; the first-word lookup ('Martin') found 11 unrelated vendors and missed it."},
+  "ROHRICH_TOYOTA": {"entity_ids": ["643941", "638095"], "note": "Rohrich Automotive Group (643941) and Rohrich Toyota (638095). 2026-11-10: prod STMT-C32657CB ties out 57 lines under 643941 after the TOW strip; name lookup gave 638095 only."},
+  "MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S": {"entity_ids": ["383462"], "note": "Matthews Kia of Schenectady (383462). 2026-11-10: prod STMT-9A1C2E5E ties out 5 of 5 after the K1W strip; the first-word lookup also took unrelated 'Matthews' vendors."}
 }
