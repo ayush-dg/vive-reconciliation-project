@@ -69,6 +69,36 @@ class TestVanBortelEntity(unittest.TestCase):
 
 
 
+# Prod 2026-11-09 "No lines read" failures, each a layout already mapped for
+# another dealer (Rohrich Cadillac timed out before extraction; mapped as
+# Rohrich Toyota, its sister store). The INVOICE / AGE IN DAYS layout has one
+# AMOUNT column, so no payment_amount.
+NEW_2026_11_09 = {
+    "LEXUS_OF_BEDFORD": {"BALANCE", "DATE", "DOCUMENT / TRANSACTION", "PAYMENTS & CREDITS", "PURCHASES"},
+    "MARTIN_NEMER_VOLKSWAGEN_CORP": {"BALANCE", "DATE", "DOCUMENT / TRANSACTION", "PAYMENTS & CREDITS", "PURCHASES"},
+    "KEELER_UPSTATE_DEALERSHIP_HOLDINGS_LLC": {"BALANCE", "DATE", "DOCUMENT / TRANSACTION", "PAYMENTS & CREDITS",
+                                               "PURCHASES"},
+    "ROHRICH_TOYOTA": {"BALANCE", "CHARGES", "CREDITS", "DATE", "REFERENCE", "SOURCE"},
+    "ROHRICH_CADILLAC": {"BALANCE", "CHARGES", "CREDITS", "DATE", "REFERENCE", "SOURCE"},
+    "SHULTS_FORD_LINCOLN": {"BALANCE", "CHARGES", "CREDITS", "DATE", "REFERENCE", "SOURCE"},
+    "MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE",
+                                                          "REFERENCE", "SOURCE"},
+    "DENOOYER": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE", "REFERENCE", "SOURCE"},
+}
+
+
+class TestNov9Mappings(unittest.TestCase):
+    def test_every_extracted_field_is_mapped(self):
+        for vendor, fields in NEW_2026_11_09.items():
+            self.assertEqual(set(_mapping(vendor)), fields, vendor)
+
+    def test_invoice_number_and_charges_are_mapped(self):
+        for vendor in NEW_2026_11_09:
+            canon = set(_mapping(vendor).values())
+            self.assertIn("original_invoice_number", canon, vendor)
+            self.assertIn("charge_amount", canon, vendor)
+
+
 class TestAutoZoneEntities(unittest.TestCase):
     """AutoZone has five NetSuite vendor records (2026-11-09); its statements'
     bills are mostly under 181322, which the old 10661-only override missed."""

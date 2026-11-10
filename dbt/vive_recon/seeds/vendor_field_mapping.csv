@@ -1266,3 +1266,50 @@ MERCEDES-BENZ_OF_BUFFALO,PO Number,po_number,string,v1,1
 MERCEDES-BENZ_OF_BUFFALO,Purchases,charge_amount,decimal,v1,1
 MERCEDES-BENZ_OF_BUFFALO,Payments,payment_amount,decimal,v1,1
 MERCEDES-BENZ_OF_BUFFALO,Balance,amount_remaining,decimal,v1,1
+LEXUS_OF_BEDFORD,DATE,line_date,date,v1,1
+LEXUS_OF_BEDFORD,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+LEXUS_OF_BEDFORD,PURCHASES,charge_amount,decimal,v1,1
+LEXUS_OF_BEDFORD,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+LEXUS_OF_BEDFORD,BALANCE,amount_remaining,decimal,v1,1
+MARTIN_NEMER_VOLKSWAGEN_CORP,DATE,line_date,date,v1,1
+MARTIN_NEMER_VOLKSWAGEN_CORP,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+MARTIN_NEMER_VOLKSWAGEN_CORP,PURCHASES,charge_amount,decimal,v1,1
+MARTIN_NEMER_VOLKSWAGEN_CORP,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+MARTIN_NEMER_VOLKSWAGEN_CORP,BALANCE,amount_remaining,decimal,v1,1
+KEELER_UPSTATE_DEALERSHIP_HOLDINGS_LLC,DATE,line_date,date,v1,1
+KEELER_UPSTATE_DEALERSHIP_HOLDINGS_LLC,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+KEELER_UPSTATE_DEALERSHIP_HOLDINGS_LLC,PURCHASES,charge_amount,decimal,v1,1
+KEELER_UPSTATE_DEALERSHIP_HOLDINGS_LLC,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+KEELER_UPSTATE_DEALERSHIP_HOLDINGS_LLC,BALANCE,amount_remaining,decimal,v1,1
+ROHRICH_TOYOTA,DATE,line_date,date,v1,1
+ROHRICH_TOYOTA,SOURCE,transaction_code,string,v1,1
+ROHRICH_TOYOTA,REFERENCE,original_invoice_number,string,v1,1
+ROHRICH_TOYOTA,CHARGES,charge_amount,decimal,v1,1
+ROHRICH_TOYOTA,CREDITS,payment_amount,decimal,v1,1
+ROHRICH_TOYOTA,BALANCE,amount_remaining,decimal,v1,1
+SHULTS_FORD_LINCOLN,DATE,line_date,date,v1,1
+SHULTS_FORD_LINCOLN,SOURCE,transaction_code,string,v1,1
+SHULTS_FORD_LINCOLN,REFERENCE,original_invoice_number,string,v1,1
+SHULTS_FORD_LINCOLN,CHARGES,charge_amount,decimal,v1,1
+SHULTS_FORD_LINCOLN,CREDITS,payment_amount,decimal,v1,1
+SHULTS_FORD_LINCOLN,BALANCE,amount_remaining,decimal,v1,1
+ROHRICH_CADILLAC,DATE,line_date,date,v1,1
+ROHRICH_CADILLAC,SOURCE,transaction_code,string,v1,1
+ROHRICH_CADILLAC,REFERENCE,original_invoice_number,string,v1,1
+ROHRICH_CADILLAC,CHARGES,charge_amount,decimal,v1,1
+ROHRICH_CADILLAC,CREDITS,payment_amount,decimal,v1,1
+ROHRICH_CADILLAC,BALANCE,amount_remaining,decimal,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,DATE,line_date,date,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,SOURCE,transaction_code,string,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,INVOICE,original_invoice_number,string,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,REFERENCE,invoice_number_ref,string,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,DESCRIPTION,description_raw,string,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,AMOUNT,charge_amount,decimal,v1,1
+MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S,AGE IN DAYS,age_in_days,integer,v1,1
+DENOOYER,DATE,line_date,date,v1,1
+DENOOYER,SOURCE,transaction_code,string,v1,1
+DENOOYER,INVOICE,original_invoice_number,string,v1,1
+DENOOYER,REFERENCE,invoice_number_ref,string,v1,1
+DENOOYER,DESCRIPTION,description_raw,string,v1,1
+DENOOYER,AMOUNT,charge_amount,decimal,v1,1
+DENOOYER,AGE IN DAYS,age_in_days,integer,v1,1
