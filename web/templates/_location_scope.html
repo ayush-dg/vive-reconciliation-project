@@ -43,12 +43,46 @@
 {% endif %}
 {%- endmacro %}
 
-{% macro standalone(location_scope) -%}
-{% if location_scope and location_scope.has_shops %}
-<select class="filter-chip location-scope-select {{ 'active' if location_scope.mine }}" aria-label="Locations shown"
-        title="My locations: {{ location_scope.shops | join(', ') }}" data-scope-next="{{ scope_next(location_scope) }}">
-  <option value="{{ '' if location_scope.mine else '__scope_mine' }}" {{ 'selected' if location_scope.mine }}>My locations ({{ location_scope.shops | length }})</option>
-  <option value="{{ '' if not location_scope.mine else '__scope_all' }}" {{ 'selected' if not location_scope.mine }}>All locations</option>
+{# location_picker(): the location filter of Statement Processing and
+   Exceptions (2026-11-11). The hidden <select id="shop-filter"> (options from
+   shop_filter_options()) is still what the page filters on; static/app.js
+   draws a grouped dropdown over it:
+     My locations (N)  ▾   -- the user's shops; the group is open while in
+       Cherry Hill (12)       "My locations", folded while in "All locations"
+       ...
+     All locations     ▸   -- one choice while in "My locations"; while in
+       Albany (3)             "All locations" it opens to every location
+       ...
+   A user with no shops gets just the "All locations" group. #}
+{% macro location_picker(location_scope, shops) -%}
+{% set scope_name = ('mine' if location_scope.mine else 'all') if location_scope and location_scope.has_shops else 'none' %}
+<select id="shop-filter" class="ns-sr-only" tabindex="-1" aria-hidden="true"
+        data-scope-next="{{ scope_next(location_scope) }}" data-scope="{{ scope_name }}"
+        data-my-shops='{{ (location_scope.shops if location_scope else []) | tojson }}'>
+  {{ shop_filter_options(location_scope, shops) }}
 </select>
+<div class="ns-chip-wrap loc-picker" data-location-picker="shop-filter">
+  <button type="button" class="filter-chip sync-picker-btn loc-picker-btn" aria-haspopup="true" aria-expanded="false">
+    <span class="picker-label">{{ 'My locations' if scope_name == 'mine' else 'All locations' }}</span><svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  </button>
+  <div class="ns-popover loc-picker-pop" role="menu" hidden></div>
+</div>
+{%- endmacro %}
+
+{% macro standalone(location_scope) -%}
+{# Home: the same dropdown with just My locations / All locations. #}
+{% if location_scope and location_scope.has_shops %}
+<select id="home-location-scope" class="ns-sr-only" tabindex="-1" aria-hidden="true" data-scope-only
+        data-scope-next="{{ scope_next(location_scope) }}" data-scope="{{ 'mine' if location_scope.mine else 'all' }}"
+        data-my-shops='{{ location_scope.shops | tojson }}'>
+  <option value="{{ '' if location_scope.mine else '__scope_mine' }}">My locations</option>
+  <option value="{{ '' if not location_scope.mine else '__scope_all' }}">All locations</option>
+</select>
+<div class="ns-chip-wrap loc-picker" data-location-picker="home-location-scope">
+  <button type="button" class="filter-chip sync-picker-btn loc-picker-btn" aria-haspopup="true" aria-expanded="false">
+    <span class="picker-label">{{ 'My locations' if location_scope.mine else 'All locations' }}</span><svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+  </button>
+  <div class="ns-popover loc-picker-pop" role="menu" hidden></div>
+</div>
 {% endif %}
 {%- endmacro %}

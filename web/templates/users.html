@@ -3,26 +3,36 @@
 
 {% block topbar %}
 <div class="topbar">
-  <div class="topbar-title">Users</div>
-  <span style="font-size:12px;color:var(--text-secondary)">{{ users | length }} user{{ "s" if users | length != 1 }}</span>
+  <div class="topbar-title">
+    <h1>Users</h1>
+    <div class="um-subtitle">Create and manage user access and shop locations.</div>
+  </div>
 </div>
 {% endblock %}
 
-{% macro shop_picker(picked) %}
-<div class="shop-picker" data-shop-picker>
-  <div class="shop-picker-bar">
-    <input type="search" class="shop-picker-search" placeholder="Search shops" aria-label="Search shops" data-shop-search>
-    <span class="shop-picker-count" data-shop-count></span>
-    <button type="button" class="shop-picker-clear" data-shop-clear>Clear</button>
+{# Location chooser (2026-11-11): a search field that opens the shop list,
+   the picked shops as chips under it, and "Select all locations". The
+   checkboxes (name="shops") are what the form sends. None picked = the user
+   sees every location. #}
+{% macro location_select(picked) %}
+<div class="loc-select" data-loc-select>
+  <div class="loc-select-field" data-loc-field>
+    <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+    <input type="text" placeholder="Search locations…" aria-label="Search locations" autocomplete="off" data-loc-search>
+    <svg class="icon loc-select-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
   </div>
-  <div class="shop-picker-list">
+  <div class="loc-select-menu" data-loc-menu hidden>
     {% for shop in shop_choices %}
-    <label class="shop-picker-item" data-shop-name="{{ shop | lower }}">
+    <label class="loc-select-opt" data-name="{{ shop | lower }}">
       <input type="checkbox" name="shops" value="{{ shop }}" {% if shop in picked %}checked{% endif %}>
       <span>{{ shop }}</span>
     </label>
     {% endfor %}
+    <div class="loc-select-empty" data-loc-empty hidden>No location matches.</div>
   </div>
+  <label class="loc-select-all"><input type="checkbox" data-loc-all> Select all locations</label>
+  <div class="loc-chips" data-loc-chips></div>
+  <div class="loc-select-hint" data-loc-hint>No locations picked: sees every location.</div>
 </div>
 {% endmacro %}
 
@@ -30,157 +40,330 @@
 {% if error %}
 <div class="upload-error">{{ error }}</div>
 {% endif %}
-{% if notice %}
+{% if created %}
+<div class="upload-notice um-created-banner">
+  <div>
+    <strong>{{ created.name }}</strong> ({{ created.email }}) was created.
+    Download the login details now to share them: the password can't be shown again after you leave this page.
+  </div>
+  <form method="post" action="/users/credentials.xlsx">
+    <input type="hidden" name="name" value="{{ created.name }}">
+    <input type="hidden" name="email" value="{{ created.email }}">
+    <input type="hidden" name="password" value="{{ created.password }}">
+    {% for shop in created.shops %}<input type="hidden" name="shops" value="{{ shop }}">{% endfor %}
+    <button type="submit" class="btn btn-primary um-download-btn">
+      <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Download credentials (Excel)
+    </button>
+  </form>
+</div>
+{% elif notice %}
 <div class="upload-notice">{{ notice }}</div>
 {% endif %}
 
-<div class="section-header">
-  <div class="section-title">All users</div>
-</div>
+<div class="um-layout {{ 'um-layout--admin' if can_manage_users }}">
+  <div class="um-main">
+    <div class="um-stat">
+      <div class="um-stat-icon"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></div>
+      <div>
+        <div class="um-stat-label">Total users</div>
+        <div class="um-stat-value">{{ users | length }}</div>
+      </div>
+      {% if added_this_month %}<span class="um-stat-pill">+{{ added_this_month }} this month</span>{% endif %}
+    </div>
 
-{% if users %}
-<table class="table" style="margin-bottom:28px">
-  <thead>
-    <tr>
-      <th>Name</th>
-      <th>Email</th>
-      <th>Locations</th>
-      <th>Created</th>
-      <th>Status</th>
-      <th></th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for u in users %}
-    <tr>
-      <td style="display:flex;align-items:center;gap:10px">
-        <div class="vendor-avatar va-green">{{ u.name | initials }}</div>
-        <span style="font-weight:500">{{ u.name }}</span>
-      </td>
-      <td style="color:var(--text-secondary)">{{ u.email }}</td>
-      <td class="user-locations-cell">
-        <div class="user-locations-summary">
-          {% if u.shops %}
-          <span title="{{ u.shops | join(', ') }}">{{ u.shops[:3] | join(', ') }}{% if u.shops | length > 3 %} <span class="user-locations-more">+{{ u.shops | length - 3 }} more</span>{% endif %}</span>
-          {% else %}
-          <span class="user-locations-all">All locations</span>
-          {% endif %}
-          {% if can_manage_users %}
-          <button type="button" class="user-locations-edit-btn" data-open-dialog="loc-{{ u.id }}">Edit</button>
-          {% endif %}
+    <section class="um-card">
+      <div class="um-card-head">
+        <h2 class="um-card-title">User management</h2>
+      </div>
+      <div class="um-toolbar">
+        <label class="um-search">
+          <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+          <input type="search" placeholder="Search users by name or email…" aria-label="Search users" id="um-search">
+        </label>
+        <label class="um-filter">
+          <span>Role:</span>
+          <select id="um-role" aria-label="Role">
+            <option value="">All</option>
+            <option value="Admin">Admin</option>
+            <option value="User">User</option>
+          </select>
+        </label>
+        <span class="um-count" id="um-count">{{ users | length }} user{{ "s" if users | length != 1 }}</span>
+      </div>
+
+      {% if users %}
+      <div class="um-table-wrap">
+        <table class="um-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Assigned locations</th>
+              <th>Created</th>
+              {% if can_manage_users %}<th class="um-col-edit"><span class="ns-sr-only">Edit</span></th>{% endif %}
+            </tr>
+          </thead>
+          <tbody id="um-rows">
+            {% for u in users %}
+            <tr data-search="{{ (u.name ~ ' ' ~ u.email) | lower }}" data-role="{{ u.role }}">
+              <td>
+                <div class="um-user">
+                  <div class="vendor-avatar va-green">{{ u.name | initials }}</div>
+                  <span class="um-user-name">{{ u.name }}</span>
+                  {% if u.email == user_email %}<span class="um-you">You</span>{% endif %}
+                </div>
+              </td>
+              <td class="um-muted">{{ u.email }}</td>
+              <td><span class="um-role um-role--{{ u.role | lower }}">{{ u.role }}</span></td>
+              <td>
+                {% if u.shops %}
+                <div class="um-chips" title="{{ u.shops | join(', ') }}">
+                  {% for shop in u.shops[:2] %}<span class="um-chip">{{ shop }}</span>{% endfor %}
+                  {% if u.shops | length > 2 %}<span class="um-chip um-chip--more">+{{ u.shops | length - 2 }}</span>{% endif %}
+                </div>
+                {% else %}
+                <span class="um-muted">All locations</span>
+                {% endif %}
+              </td>
+              <td class="um-muted um-created" title="{{ u.created_at | friendly_dt }}">{{ (u.created_at or "")[:10] | friendly_date }}</td>
+              {% if can_manage_users %}
+              <td class="um-col-edit">
+                <button type="button" class="um-edit-btn" data-open-dialog="edit-{{ u.id }}">Edit</button>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="um-empty" id="um-nomatch" hidden>No users match.</div>
+      <div class="um-pager">
+        <span id="um-range"></span>
+        <label class="um-filter">Rows per page
+          <select id="um-per-page"><option>10</option><option>25</option><option>50</option></select>
+        </label>
+        <div class="um-pages">
+          <button type="button" class="um-page-btn" id="um-prev" aria-label="Previous page"><svg class="icon"><use href="#i-chevron-left"/></svg></button>
+          <span class="um-page-now" id="um-page">1</span>
+          <button type="button" class="um-page-btn" id="um-next" aria-label="Next page"><svg class="icon"><use href="#i-chevron-right"/></svg></button>
         </div>
-        {% if can_manage_users %}
-        <dialog class="ns-modal user-loc-modal" id="loc-{{ u.id }}" aria-labelledby="loc-{{ u.id }}-title">
-          <form method="post" action="/users/locations" class="user-loc-form">
-            <div class="ns-modal-head">
-              <div>
-                <h2 class="ns-modal-title" id="loc-{{ u.id }}-title">Locations for {{ u.name }}</h2>
-                <p class="ns-modal-sub">{{ u.email }} sees these shops on Home, Statement Processing and Exceptions. None ticked = every location.</p>
-              </div>
-              <button type="button" class="ns-modal-close" data-close-dialog aria-label="Close">&times;</button>
-            </div>
-            <div class="user-loc-body">
-              <input type="hidden" name="email" value="{{ u.email }}">
-              {{ shop_picker(u.shops) }}
-            </div>
-            <div class="user-loc-foot">
-              <button type="button" class="btn btn-secondary" data-close-dialog>Cancel</button>
-              <button type="submit" class="btn btn-primary">Save locations</button>
-            </div>
-          </form>
-        </dialog>
-        {% endif %}
-      </td>
-      <td style="color:var(--text-secondary)">{{ u.created_at | friendly_dt }}</td>
-      <td>
-        {% if u.is_active %}
-        <span class="badge success">Active</span>
-        {% else %}
-        <span class="badge neutral">Inactive</span>
-        {% endif %}
-      </td>
-      <td>
-        {% if u.email == user_email %}
-        <span style="font-size:11px;color:var(--text-secondary)">You</span>
-        {% elif can_manage_users %}
-        <form method="post" action="/users/remove" style="margin:0">
-          <input type="hidden" name="email" value="{{ u.email }}">
-          <button class="btn btn-dispute" type="submit" style="padding:5px 12px;font-size:11px">Remove</button>
-        </form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<div class="empty-state">No users yet.</div>
-{% endif %}
+      </div>
+      {% else %}
+      <div class="um-empty">No users yet.</div>
+      {% endif %}
+    </section>
 
-{% if not can_manage_users %}
-<div class="empty-state">Only admins can add or remove users.</div>
-{% else %}
-<div class="section-header">
-  <div class="section-title">Add user</div>
+    {% if not can_manage_users %}
+    <div class="um-note">Only admins can add or remove users.</div>
+    {% endif %}
+  </div>
+
+  {% if can_manage_users %}
+  <aside class="um-card um-create">
+    <h2 class="um-card-title um-create-title">
+      <svg class="icon" aria-hidden="true"><use href="#i-users"/></svg> Create user
+    </h2>
+    <form method="post" action="/users/add" id="um-create-form" autocomplete="off">
+      <div class="um-field">
+        <label for="um-name">Full name <span class="um-req">*</span></label>
+        <input type="text" id="um-name" name="name" placeholder="e.g. Jane Doe" required>
+      </div>
+      <div class="um-field">
+        <label for="um-email">Email address <span class="um-req">*</span></label>
+        <input type="email" id="um-email" name="email" placeholder="e.g. jane.doe@vivecollision.com" required>
+      </div>
+      <div class="um-field">
+        <label for="um-password">Password <span class="um-req">*</span></label>
+        <div class="um-password-row">
+          <div class="um-password">
+            <input type="password" id="um-password" name="password" required minlength="8" autocomplete="new-password">
+            <button type="button" class="um-eye" id="um-eye" aria-label="Show password" title="Show password">Show</button>
+          </div>
+          <button type="button" class="um-generate" id="um-generate">
+            <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Generate
+          </button>
+        </div>
+      </div>
+      <div class="um-field">
+        <label>Assign locations</label>
+        {{ location_select([]) }}
+      </div>
+      <div class="um-create-actions">
+        <button type="submit" class="btn btn-primary">Create user</button>
+        <button type="reset" class="btn btn-secondary">Cancel</button>
+      </div>
+    </form>
+  </aside>
+  {% endif %}
 </div>
-<form method="post" action="/users/add" style="max-width:600px">
-  <div class="form-group">
-    <label class="form-label">Name</label>
-    <input type="text" name="name" placeholder="e.g. Jane Doe" required />
-  </div>
-  <div class="form-group">
-    <label class="form-label">Email</label>
-    <input type="email" name="email" placeholder="name@vive-collision.com" required />
-  </div>
-  <div class="form-group">
-    <label class="form-label">Password</label>
-    <input type="password" name="password" placeholder="••••••••" required minlength="8" />
-  </div>
-  <div class="form-group">
-    <label class="form-label">Locations <span class="form-note">optional — none ticked = sees every location</span></label>
-    {{ shop_picker([]) }}
-  </div>
-  <button class="btn btn-primary" type="submit">Add user</button>
-</form>
+
+{% if can_manage_users %}
+{% for u in users %}
+<dialog class="ns-modal user-loc-modal" id="edit-{{ u.id }}" aria-labelledby="edit-{{ u.id }}-title">
+  <form method="post" action="/users/locations" class="user-loc-form">
+    <div class="ns-modal-head">
+      <div>
+        <h2 class="ns-modal-title" id="edit-{{ u.id }}-title">Edit {{ u.name }}</h2>
+        <p class="ns-modal-sub">{{ u.email }} · {{ u.role }}</p>
+      </div>
+      <button type="button" class="ns-modal-close" data-close-dialog aria-label="Close">&times;</button>
+    </div>
+    <div class="user-loc-body">
+      <input type="hidden" name="email" value="{{ u.email }}">
+      <label class="um-dialog-label">Assigned locations</label>
+      {{ location_select(u.shops) }}
+    </div>
+    <div class="user-loc-foot um-dialog-foot">
+      {% if u.email != user_email %}
+      <button type="submit" form="remove-{{ u.id }}" class="um-remove-btn">Remove user</button>
+      {% endif %}
+      <span class="um-spacer"></span>
+      <button type="button" class="btn btn-secondary" data-close-dialog>Cancel</button>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+  {% if u.email != user_email %}
+  <form method="post" action="/users/remove" id="remove-{{ u.id }}" hidden
+        onsubmit="return confirm('Remove {{ u.email }}? They will no longer be able to log in.');">
+    <input type="hidden" name="email" value="{{ u.email }}">
+  </form>
+  {% endif %}
+</dialog>
+{% endfor %}
 {% endif %}
 
 <script>
-// Shop picker: filter by the search box, count the ticked shops, Clear unticks all.
-document.querySelectorAll("[data-shop-picker]").forEach(function (picker) {
-  var search = picker.querySelector("[data-shop-search]");
-  var count = picker.querySelector("[data-shop-count]");
-  var boxes = picker.querySelectorAll("input[name=shops]");
-  function recount() {
-    var n = picker.querySelectorAll("input[name=shops]:checked").length;
-    count.textContent = n ? n + " selected" : "None selected";
-  }
-  search.addEventListener("input", function () {
-    var q = search.value.trim().toLowerCase();
-    picker.querySelectorAll(".shop-picker-item").forEach(function (item) {
-      item.hidden = !!q && item.dataset.shopName.indexOf(q) === -1;
+// Location chooser: the field opens the list, typing filters it, picked shops
+// show as chips (x unpicks), "Select all locations" picks or unpicks every one.
+document.querySelectorAll("[data-loc-select]").forEach(function (box) {
+  var field = box.querySelector("[data-loc-field]");
+  var search = box.querySelector("[data-loc-search]");
+  var menu = box.querySelector("[data-loc-menu]");
+  var empty = box.querySelector("[data-loc-empty]");
+  var all = box.querySelector("[data-loc-all]");
+  var chips = box.querySelector("[data-loc-chips]");
+  var hint = box.querySelector("[data-loc-hint]");
+  var boxes = Array.prototype.slice.call(box.querySelectorAll("input[name=shops]"));
+
+  function render() {
+    var picked = boxes.filter(function (b) { return b.checked; });
+    chips.textContent = "";
+    picked.forEach(function (b) {
+      var chip = document.createElement("span");
+      chip.className = "loc-chip";
+      chip.textContent = b.value;
+      var x = document.createElement("button");
+      x.type = "button";
+      x.className = "loc-chip-x";
+      x.setAttribute("aria-label", "Remove " + b.value);
+      x.textContent = "×";
+      x.addEventListener("click", function () { b.checked = false; render(); });
+      chip.appendChild(x);
+      chips.appendChild(chip);
     });
+    all.checked = picked.length === boxes.length && boxes.length > 0;
+    all.indeterminate = picked.length > 0 && picked.length < boxes.length;
+    hint.hidden = picked.length > 0;
+  }
+  function filter() {
+    var q = search.value.trim().toLowerCase();
+    var shown = 0;
+    box.querySelectorAll(".loc-select-opt").forEach(function (opt) {
+      var hit = !q || opt.dataset.name.indexOf(q) !== -1;
+      opt.hidden = !hit;
+      if (hit) shown += 1;
+    });
+    empty.hidden = shown > 0;
+  }
+  function openMenu() { menu.hidden = false; field.classList.add("open"); }
+  function closeMenu() { menu.hidden = true; field.classList.remove("open"); }
+
+  field.addEventListener("click", function () { search.focus(); openMenu(); });
+  search.addEventListener("focus", openMenu);
+  search.addEventListener("input", function () { filter(); openMenu(); });
+  search.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); }
+    if (e.key === "Escape") { closeMenu(); }
   });
-  // Enter in the search box must not submit the form.
-  search.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); } });
-  picker.querySelector("[data-shop-clear]").addEventListener("click", function () {
-    boxes.forEach(function (b) { b.checked = false; });
-    recount();
+  menu.addEventListener("change", render);
+  all.addEventListener("change", function () {
+    boxes.forEach(function (b) { b.checked = all.checked; });
+    render();
   });
-  picker.addEventListener("change", recount);
-  recount();
+  document.addEventListener("click", function (e) {
+    if (!menu.hidden && e.target.isConnected && !box.contains(e.target)) closeMenu();
+  });
+  var form = box.closest("form");
+  if (form) form.addEventListener("reset", function () {
+    setTimeout(function () { search.value = ""; filter(); closeMenu(); render(); }, 0);
+  });
+  render();
 });
-// Edit locations dialogs. Cancel, close and a backdrop click put the ticks back as saved.
+
+// Search, role filter and pages for the users table.
+(function () {
+  var rows = Array.prototype.slice.call(document.querySelectorAll("#um-rows tr"));
+  if (!rows.length) return;
+  var search = document.getElementById("um-search");
+  var role = document.getElementById("um-role");
+  var perPage = document.getElementById("um-per-page");
+  var page = 1;
+  function update() {
+    var q = search.value.trim().toLowerCase();
+    var match = rows.filter(function (r) {
+      return (!q || r.dataset.search.indexOf(q) !== -1) && (!role.value || r.dataset.role === role.value);
+    });
+    var size = parseInt(perPage.value, 10);
+    var pages = Math.max(1, Math.ceil(match.length / size));
+    page = Math.min(page, pages);
+    rows.forEach(function (r) { r.hidden = true; });
+    match.slice((page - 1) * size, page * size).forEach(function (r) { r.hidden = false; });
+    var from = match.length ? (page - 1) * size + 1 : 0;
+    document.getElementById("um-range").textContent =
+      "Showing " + from + "–" + Math.min(page * size, match.length) + " of " + match.length + " user" + (match.length === 1 ? "" : "s");
+    document.getElementById("um-count").textContent = match.length + " user" + (match.length === 1 ? "" : "s");
+    document.getElementById("um-nomatch").hidden = match.length > 0;
+    document.getElementById("um-page").textContent = page;
+    document.getElementById("um-prev").disabled = page <= 1;
+    document.getElementById("um-next").disabled = page >= pages;
+  }
+  search.addEventListener("input", function () { page = 1; update(); });
+  role.addEventListener("change", function () { page = 1; update(); });
+  perPage.addEventListener("change", function () { page = 1; update(); });
+  document.getElementById("um-prev").addEventListener("click", function () { page -= 1; update(); });
+  document.getElementById("um-next").addEventListener("click", function () { page += 1; update(); });
+  update();
+})();
+
+// Temporary password: show/hide, and Generate (12 random characters).
+(function () {
+  var input = document.getElementById("um-password");
+  if (!input) return;
+  var eye = document.getElementById("um-eye");
+  eye.addEventListener("click", function () {
+    var show = input.type === "password";
+    input.type = show ? "text" : "password";
+    eye.textContent = show ? "Hide" : "Show";
+    eye.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  });
+  document.getElementById("um-generate").addEventListener("click", function () {
+    var chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%";
+    var bytes = new Uint32Array(12);
+    window.crypto.getRandomValues(bytes);
+    input.value = Array.prototype.map.call(bytes, function (n) { return chars[n % chars.length]; }).join("");
+    input.type = "text";
+    eye.textContent = "Hide";
+  });
+})();
+
+// Edit dialogs. Cancel, close and a backdrop click put the locations back as saved.
 document.querySelectorAll("[data-open-dialog]").forEach(function (btn) {
   btn.addEventListener("click", function () { document.getElementById(btn.dataset.openDialog).showModal(); });
 });
 document.querySelectorAll("dialog.user-loc-modal").forEach(function (dlg) {
-  var form = dlg.querySelector("form");
-  function close() {
-    form.reset();
-    form.querySelectorAll(".shop-picker-item").forEach(function (item) { item.hidden = false; });
-    form.querySelector("[data-shop-picker]").dispatchEvent(new Event("change"));
-    dlg.close();
-  }
+  var form = dlg.querySelector("form.user-loc-form");
+  function close() { form.reset(); dlg.close(); }
   dlg.querySelectorAll("[data-close-dialog]").forEach(function (b) { b.addEventListener("click", close); });
   dlg.addEventListener("click", function (e) { if (e.target === dlg) { close(); } });
   dlg.addEventListener("cancel", function (e) { e.preventDefault(); close(); });

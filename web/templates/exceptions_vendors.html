@@ -83,9 +83,7 @@
     <option value="{{ vname }}" data-name="{{ vname }}">{{ vname }} ({{ vendor_counts[vname] }})</option>
     {% endfor %}
   </select>
-  <select id="shop-filter" class="filter-chip" style="cursor:pointer" data-scope-next="{{ loc.scope_next(location_scope) }}">
-    {{ loc.shop_filter_options(location_scope, shop_options) }}
-  </select>
+  {{ loc.location_picker(location_scope, shop_options) }}
   <select id="location-filter" class="filter-chip" style="cursor:pointer">
     <option value="">All regions</option>
     {% for lname in location_options %}

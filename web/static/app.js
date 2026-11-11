@@ -831,3 +831,130 @@ document.addEventListener("change", function (ev) {
 }, true);
 window.addEventListener("pageshow", resetScopeSelects);
 resetScopeSelects();
+
+// The grouped location filter (2026-11-11, _location_scope.html's
+// location_picker()). Drawn over the hidden <select id="shop-filter">, which
+// the page still filters on: picking anything sets that select and fires its
+// "change", so the page's own filter code (and the "__scope_" switch above)
+// runs as before.
+//   My locations (N)  ▾   click the name: all my shops; ▾/▸ folds the list
+//     Cherry Hill (12)    one of my shops
+//   All locations     ▸   while in My locations: switch to every location;
+//     Albany (3)          while in All locations: open, every location
+// The group of the view in force is open; the other is folded.
+document.querySelectorAll("[data-location-picker]").forEach(function (wrap) {
+  const select = document.getElementById(wrap.dataset.locationPicker);
+  const button = wrap.querySelector(".loc-picker-btn");
+  const pop = wrap.querySelector(".loc-picker-pop");
+  if (!select || !button || !pop) return;
+  const scope = select.dataset.scope || "none";
+  // Home (no location filter of its own): just the two switches, no lists.
+  const scopeOnly = select.hasAttribute("data-scope-only");
+  let myShops = [];
+  try { myShops = JSON.parse(select.dataset.myShops || "[]"); } catch (e) { myShops = []; }
+  const open = { mine: scope === "mine", all: scope !== "mine" };
+
+  function shopOptions() {
+    return Array.from(select.options).filter(function (o) { return o.dataset.name; });
+  }
+  function optionFor(name) {
+    return shopOptions().find(function (o) { return o.value === name; });
+  }
+  function label() {
+    const value = select.value || "";
+    const base = scope === "mine" ? "My locations" : "All locations";
+    if (!value || value.indexOf("__scope_") === 0) return base;
+    const opt = optionFor(value);
+    const name = opt ? opt.dataset.name : value;
+    return scope === "none" ? name : base + " › " + name;
+  }
+  function showSelection() {
+    const text = label();
+    button.querySelector(".picker-label").textContent = text;
+    button.title = text;
+    button.classList.toggle("active", !!select.value && select.value.indexOf("__scope_") !== 0);
+  }
+
+  function row(text, attrs, cls) {
+    const el = document.createElement("button");
+    el.type = "button";
+    el.className = "ns-pop-opt loc-picker-opt" + (cls ? " " + cls : "");
+    el.textContent = text;
+    Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
+    return el;
+  }
+  function group(key, title, selected, children, canFold) {
+    const box = document.createElement("div");
+    box.className = "loc-picker-group";
+    const head = document.createElement("div");
+    head.className = "loc-picker-head";
+    head.appendChild(row(title, { "data-act": key, "aria-pressed": String(selected) }, "loc-picker-title"));
+    if (canFold) {
+      const fold = document.createElement("button");
+      fold.type = "button";
+      fold.className = "loc-picker-fold";
+      fold.setAttribute("data-fold", key);
+      fold.setAttribute("aria-expanded", String(open[key]));
+      fold.setAttribute("aria-label", (open[key] ? "Fold " : "Open ") + title);
+      fold.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-chevron-right"/></svg>';
+      head.appendChild(fold);
+    }
+    box.appendChild(head);
+    if (open[key] && children.length) {
+      const list = document.createElement("div");
+      list.className = "loc-picker-list";
+      children.forEach(function (c) { list.appendChild(c); });
+      box.appendChild(list);
+    }
+    return box;
+  }
+  function shopRow(name, opt) {
+    const text = opt ? opt.textContent : name + " (0)";
+    const attrs = { "data-pick": name, "aria-pressed": String(select.value === name) };
+    if (!opt) { attrs.disabled = "disabled"; }
+    return row(text, attrs, "loc-picker-shop");
+  }
+
+  function build() {
+    pop.textContent = "";
+    const value = select.value || "";
+    if (scope !== "none") {
+      const mine = scopeOnly ? [] : myShops.map(function (n) { return shopRow(n, optionFor(n)); });
+      pop.appendChild(group("mine", "My locations (" + myShops.length + ")", scope === "mine" && !value, mine, !scopeOnly));
+    }
+    const all = (scope === "mine" || scopeOnly) ? [] : shopOptions().map(function (o) { return shopRow(o.value, o); });
+    pop.appendChild(group("all", "All locations", scope !== "mine" && !value, all, scope !== "mine" && !scopeOnly));
+  }
+  function show() { build(); pop.hidden = false; button.setAttribute("aria-expanded", "true"); }
+  function hide(focus) { pop.hidden = true; button.setAttribute("aria-expanded", "false"); if (focus) button.focus(); }
+  function choose(value) {
+    hide(true);
+    select.value = value;
+    showSelection();
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  button.addEventListener("click", function () { if (pop.hidden) { show(); } else { hide(false); } });
+  pop.addEventListener("click", function (ev) {
+    const fold = ev.target.closest("[data-fold]");
+    if (fold) { open[fold.dataset.fold] = !open[fold.dataset.fold]; build(); return; }
+    const act = ev.target.closest("[data-act]");
+    if (act) {
+      if (act.dataset.act === "mine") { choose(scope === "mine" ? "" : "__scope_mine"); }
+      else { choose(scope === "mine" ? "__scope_all" : ""); }
+      return;
+    }
+    const pick = ev.target.closest("[data-pick]");
+    if (pick && !pick.disabled) { choose(pick.dataset.pick); }
+  });
+  // Folding redraws the list, so the clicked arrow is no longer in the page
+  // by the time this runs: only a click on something still in the page and
+  // outside the dropdown closes it.
+  document.addEventListener("click", function (ev) {
+    if (!pop.hidden && ev.target.isConnected && !wrap.contains(ev.target)) hide(false);
+  });
+  wrap.addEventListener("keydown", function (ev) { if (ev.key === "Escape" && !pop.hidden) { ev.preventDefault(); hide(true); } });
+  // Saved filters restored into the select, or a reset, show on the button.
+  select.addEventListener("change", showSelection);
+  showSelection();
+});

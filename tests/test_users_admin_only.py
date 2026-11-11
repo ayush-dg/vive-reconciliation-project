@@ -74,7 +74,9 @@ class UsersPageTests(unittest.TestCase):
 
         added = client.post("/users/add", data={"name": "Dee", "email": "dee@vive.com", "password": "pw123456"},
                             follow_redirects=False)
-        self.assertEqual(added.status_code, 303)
+        # The page comes back with the one-time "Download credentials" button.
+        self.assertEqual(added.status_code, 200)
+        self.assertIn('action="/users/credentials.xlsx"', added.text)
         self.create.assert_called_once()
         removed = client.post("/users/remove", data={"email": "bob@vive.com"}, follow_redirects=False)
         self.assertEqual(removed.status_code, 303)

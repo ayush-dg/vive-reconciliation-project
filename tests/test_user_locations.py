@@ -193,8 +193,22 @@ class UsersPageTests(_TempDb):
             r = client.post("/users/add", data={"name": "Erin", "email": "erin@vivecollision.com",
                                                 "password": "pw123456", "shops": ["Albany", "Don Joe"]},
                             follow_redirects=False)
-        self.assertEqual(r.status_code, 303)
+        self.assertEqual(r.status_code, 200)
         self.assertEqual(ul.get_user_shops("erin@vivecollision.com"), ["Albany", "Don Joe"])
+        # The one-time download carries what was just set.
+        self.assertIn('name="shops" value="Albany"', r.text)
+
+    def test_credentials_download_is_an_excel_sheet_for_admins_only(self):
+        import io, zipfile
+        data = {"name": "Erin", "email": "erin@vivecollision.com", "password": "S3cret!pw", "shops": ["Albany", "Don Joe"]}
+        r = self._client("ann@vive.com").post("/users/credentials.xlsx", data=data)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("spreadsheetml", r.headers["content-type"])
+        self.assertIn('filename="login_erin_vivecollision.com.xlsx"', r.headers["content-disposition"])
+        sheet = zipfile.ZipFile(io.BytesIO(r.content)).read("xl/worksheets/sheet1.xml").decode("utf-8")
+        for text in ("Password", "erin@vivecollision.com", "S3cret!pw", "Albany, Don Joe", "/login"):
+            self.assertIn(text, sheet)
+        self.assertEqual(self._client("jenn@vivecollision.com").post("/users/credentials.xlsx", data=data).status_code, 403)
 
     def test_a_non_admin_cannot_change_locations(self):
         client = self._client("jenn@vivecollision.com")
