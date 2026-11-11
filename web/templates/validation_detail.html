@@ -273,6 +273,27 @@
 </table>
 {% endif %}
 {% endif %}
+{% if intake.payment_row_corrections %}
+<div class="section-header">
+  <div class="section-title">Payment rows counted as credits</div>
+</div>
+<p style="color:var(--text-secondary);margin:0 0 8px" id="payment-row-corrections">
+  {{ intake.payment_row_corrections | length }} row{{ "" if intake.payment_row_corrections | length == 1 else "s" }} printed as a payment had been read as a charge. With {{ "it" if intake.payment_row_corrections | length == 1 else "them" }} counted as a credit the statement reaches its printed total, and it passed only after this correction.
+</p>
+<table class="table" style="margin-bottom:28px">
+  <thead>
+    <tr><th>Row</th><th>Printed as</th><th>Date</th><th>Amount</th></tr>
+  </thead>
+  <tbody>
+    {% for c in intake.payment_row_corrections %}
+    <tr>
+      <td>{{ c.row_number }}</td><td>{{ c.text or "—" }}</td><td>{{ c.date or "—" }}</td><td>{{ c.amount | money }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 {% if intake.running_balance_corrections %}
 <div class="section-header">
   <div class="section-title">Amounts moved by the running balance</div>
