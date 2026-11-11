@@ -19,6 +19,54 @@
     <span class="badge {{ writeback.css }}" style="margin-right:10px" title="{{ writeback.tooltip }}{% if writeback.finished_at %} · {{ writeback.finished_at | friendly_dt }}{% endif %}">{% if writeback.ok %}<svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>{% endif %}{{ writeback.label }}</span>
     {% endif %}
     <span style="font-size:12px;color:var(--text-muted)">{{ total }} exceptions · {{ resolved }} resolved</span>
+    {# "Mark statement complete" (2026-11-11, web/statement_completion.py):
+       ticking or unticking posts at once, after a confirm; who and when is
+       logged (statement_completion_log). The page shows only who marked it
+       complete and when; an untick shows nothing, its row stays in the log. #}
+    {% if statement and statement.statement_id %}
+    {% set mark = completion_log[0] if completion_log and completion_log[0].action == 'completed' else none %}
+    {% set still_open = total - resolved %}
+    <form method="post" action="/exceptions/{{ vendor_url_name }}/complete" class="complete-toggle{{ ' is-on' if mark }}"
+          data-open="{{ still_open }}">
+      <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
+      <input type="hidden" name="filter" value="{{ filter }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="completed" value="{{ '' if mark else '1' }}">
+      <label class="complete-check" title="{{ 'Marked complete by ' ~ mark.done_by ~ ' · ' ~ (mark.done_at | friendly_dt) if mark else 'Mark this statement complete' }}">
+        <input type="checkbox" {{ 'checked' if mark }} id="complete-checkbox">
+        <span class="complete-box" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span>{{ 'Completed' if mark else 'Mark complete' }}</span>
+      </label>
+      {% if mark %}<span class="complete-by">by {{ mark.done_by }} · {{ mark.done_at | friendly_dt }}</span>{% endif %}
+    </form>
+    {# Follow-up status (2026-11-11): separate from Completed; picking posts
+       at once. Who and when is not shown (only Completed shows that); every
+       pick is still in statement_status_log. #}
+    <form method="post" action="/exceptions/{{ vendor_url_name }}/status" class="followup-form{{ ' is-set' if follow_up }}">
+      <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
+      <input type="hidden" name="filter" value="{{ filter }}">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <select name="status" class="followup-select" aria-label="Follow-up" onchange="this.form.submit()">
+        <option value="" {{ 'selected' if not follow_up }}>{{ 'Clear follow-up' if follow_up else 'Set follow-up' }}</option>
+        {% for key, label in follow_up_choices.items() %}
+        <option value="{{ key }}" {{ 'selected' if follow_up and follow_up.status == key }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <script>
+    (function () {
+      var box = document.getElementById("complete-checkbox");
+      box.addEventListener("change", function () {
+        var form = box.form, open = parseInt(form.dataset.open, 10) || 0;
+        var ask = box.checked
+          ? (open > 0 ? open + " exception" + (open === 1 ? " is" : "s are") + " still open. Mark this statement complete anyway?"
+                      : "Mark this statement complete?")
+          : "Remove the complete mark from this statement?";
+        if (window.confirm(ask)) { form.submit(); } else { box.checked = !box.checked; }
+      });
+    })();
+    </script>
+    {% endif %}
   </div>
   {% endif %}
 </div>

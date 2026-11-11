@@ -27,6 +27,7 @@ from web.deps import render, require_login, sidebar_context, smart_title, locati
 from web.shop_display import display_shop
 from web import queries
 from web import time_window as tw
+from web import statement_completion as completion
 from web.user_locations import location_scope
 from web.routers.statements import _inline_filename, pdf_editing_enabled
 from src.vendor_identity import display_name as vendor_display_name
@@ -136,6 +137,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
     scope = location_scope(request, user)
     runs = scope.apply(runs)
     _attach_writeback_status(runs)
+    _attach_completed(runs)
     summary_backed_count = sum(1 for v in runs if v.get("statement_id"))
     for v in runs:
         v["url_name"] = quote(v["vendor_name"] or "", safe="")
@@ -212,6 +214,7 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         "vendor_counts": vendor_counts,
         "shop_options": shop_options,
         "location_options": location_options,
+        "follow_up_choices": completion.STATUSES,
         "total_open": total_open,
         "vendor_count_with_ex": len(runs_with_ex),
         "reason_badge": REASON_BADGE,
@@ -231,6 +234,27 @@ def exceptions_vendors(request: Request, user: str = Depends(require_login),
         **sidebar_context(request),
     }
     return render(request, "exceptions_vendors.html", ctx)
+
+
+def _attach_completed(cards):
+    """card["completed"] (2026-11-11): the statement is 100% reconciled --
+    no open exceptions and its validation passed, the same rule as
+    Statement Processing's card (web/statement_processing.py). NetSuite
+    write-back is not part of it. If the intake log can't be read, the
+    exception count alone decides."""
+    passed = queries.get_validation_passed_ids()
+    marked = completion.all_marked()
+    statuses = completion.all_statuses()
+    for card in cards:
+        sid = card.get("statement_id")
+        card["completed"] = bool(sid) and (card.get("exception_count") or 0) == 0 and (
+            passed is None or sid in passed)
+        # Marked complete by a reviewer on its review page (2026-11-11).
+        card["completed_by"] = (marked.get(sid) or {}).get("done_by") if sid else None
+        if card["completed_by"]:
+            card["completed"] = True
+        # Follow-up status (2026-11-11), separate from Completed.
+        card["follow_up"] = statuses.get(sid) if sid else None
 
 
 def _attach_writeback_status(cards):
@@ -403,6 +427,12 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         # each with its note and Undo.
         "cleared": [] if exceptions_only else queries.get_cleared_exceptions((statement or {}).get("statement_id")),
         "match_msg": (match_msg or "")[:300] or None,
+        # "Mark statement complete" (2026-11-11): the newest mark if it is
+        # marked now, and the full who/when log.
+        "completion_log": [] if exceptions_only else completion.history(statement_id),
+        # Follow-up status (2026-11-11): separate from Completed.
+        "follow_up": None if exceptions_only else completion.current_status(statement_id),
+        "follow_up_choices": completion.STATUSES,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)
@@ -457,6 +487,49 @@ def exceptions_escalate(vendor_name: str, request: Request, user: str = Depends(
     queries.escalate_exception(exception_id, escalated_by=user)
     suffix = _filter_redirect_suffix(filter, statement_id, sort)
     return RedirectResponse(f"/exceptions/{quote(vendor_name, safe='')}{suffix}", status_code=303)
+
+
+@router.post("/exceptions/{vendor_name}/complete")
+def exceptions_mark_complete(vendor_name: str, request: Request, user: str = Depends(require_login),
+                             statement_id: str = Form(...), completed: str = Form(""), note: str = Form(""),
+                             filter: str = Form("all"), sort: str = Form("")):
+    """"Mark statement complete" (2026-11-11): the checkbox on the review
+    page. completed="1" marks, anything else un-marks; either way the user
+    and time are logged (web/statement_completion.py). Exceptions stay as
+    they are and nothing goes to NetSuite. Registered ahead of the
+    {vendor_name:path} POST route below, like accept-match."""
+    vendor_name = unquote(vendor_name)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{_filter_redirect_suffix(filter, statement_id, sort)}"
+    joiner = "&" if "?" in back else "?"
+    if not queries.get_statement_by_id(statement_id):
+        text = "Not saved: statement not found."
+    else:
+        done = completed == "1"
+        completion.set_completed(statement_id, done, user, note)
+        text = ("Statement marked complete." if done else "Statement no longer marked complete.")
+    return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
+
+
+@router.post("/exceptions/{vendor_name}/status")
+def exceptions_set_status(vendor_name: str, request: Request, user: str = Depends(require_login),
+                          statement_id: str = Form(...), status: str = Form(""),
+                          filter: str = Form("all"), sort: str = Form("")):
+    """Follow-up status (2026-11-11): the picker beside "Mark complete" on
+    the review page -- Requested copy from vendor / Sent to shop / Waiting
+    to post, or none. Logged with the user and time
+    (web/statement_completion.py); nothing else changes. Registered ahead
+    of the {vendor_name:path} POST route below, like accept-match."""
+    vendor_name = unquote(vendor_name)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{_filter_redirect_suffix(filter, statement_id, sort)}"
+    joiner = "&" if "?" in back else "?"
+    if status and status not in completion.STATUSES:
+        text = "Not saved: unknown follow-up."
+    elif not queries.get_statement_by_id(statement_id):
+        text = "Not saved: statement not found."
+    else:
+        completion.set_status(statement_id, status, user)
+        text = f"Follow-up: {completion.STATUSES[status]}." if status else "Follow-up cleared."
+    return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
 
 
 @router.post("/exceptions/{vendor_name}/accept-match")

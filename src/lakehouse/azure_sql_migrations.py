@@ -463,6 +463,31 @@ TABLES = {
             CONSTRAINT uq_user_locations UNIQUE (email, shop)
         )
     """,
+    # migrations/029_add_statement_completion_log.sql -- who marked a statement
+    # complete or un-marked it, and when (web/statement_completion.py, which
+    # also creates it on first use).
+    "statement_completion_log": """
+        CREATE TABLE statement_completion_log (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            statement_id NVARCHAR(100) NOT NULL,
+            action NVARCHAR(20) NOT NULL,
+            done_by NVARCHAR(255) NOT NULL,
+            done_at NVARCHAR(40) NOT NULL,
+            note NVARCHAR(500)
+        )
+    """,
+    # migrations/030_add_statement_status_log.sql -- a statement's follow-up
+    # status (requested copy / sent to shop / waiting to post), who set it and
+    # when (web/statement_completion.py, which also creates it on first use).
+    "statement_status_log": """
+        CREATE TABLE statement_status_log (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            statement_id NVARCHAR(100) NOT NULL,
+            status NVARCHAR(40) NOT NULL,
+            set_by NVARCHAR(255) NOT NULL,
+            set_at NVARCHAR(40) NOT NULL
+        )
+    """,
 }
 
 INDEXES = {

@@ -444,7 +444,7 @@ class EditLogSchemaTests(unittest.TestCase):
         self.assertEqual(azure_cols, sqlite_cols)
 
     def test_it_is_the_newest_table(self):
-        self.assertEqual(list(azure.TABLES)[-2:], ["statement_pdf_edits", "user_locations"])
+        self.assertEqual(list(azure.TABLES)[-4:], ["statement_pdf_edits", "user_locations", "statement_completion_log", "statement_status_log"])
 
 
 class IntakeEditedCopyTests(unittest.TestCase):

@@ -2922,6 +2922,19 @@ def action_review_item(review_id: str, action: str, reviewed_by: str) -> None:
 # Validation — Arithmetic Validation Gate (printed total vs. extracted sum)
 # ---------------------------------------------------------------------------
 
+def get_validation_passed_ids():
+    """The statement_ids whose validation passed (document_intake_log,
+    validation_status 'matches') -- the Exceptions page's Completed tab
+    (2026-11-11). None when the log can't be read, so the caller can fall
+    back to the exception count alone."""
+    try:
+        rows = execute_query(
+            "SELECT DISTINCT statement_id FROM document_intake_log WHERE validation_status = 'matches'")
+    except Exception:
+        return None
+    return {r["statement_id"] for r in rows if r.get("statement_id")}
+
+
 def get_validation_report() -> list:
     """Every intake attempt's Arithmetic Validation Gate result
     (document_intake_log.validation_status/validation_difference --

@@ -78,6 +78,12 @@ def _finish(card, extraction, validation, reconciliation, note, tone):
     # filters on any stage or one of them.
     card["failed_stages"] = [s["name"].lower() for s in card["stages"] if s["state"] == "fail"]
     card["has_exceptions"] = reconciliation["state"] == "warn"
+    # Completed (2026-11-11): validation passed and reconciliation ran with
+    # no open exceptions -- every line matched, or every exception accepted,
+    # rejected, cleared or matched by hand. NetSuite write-back is not part
+    # of it (the user, 2026-11-11). Only intake_card() can set it.
+    card["completed"] = (card.get("validation_passed") is True and card.get("reconciled") is True
+                         and reconciliation["state"] == "ok")
     return card
 
 
@@ -93,7 +99,7 @@ def intake_card(intake: dict, job: dict = None, recon: dict = None) -> dict:
         "difference": intake.get("validation_difference"), "method": intake.get("validation_method"),
         "validation_status": intake.get("validation_status"),
         "timestamp": intake.get("ingestion_timestamp"),
-        "validation_passed": passed, "checked": True,
+        "validation_passed": passed, "checked": True, "reconciled": recon is not None,
     }
     extraction = _stage("Extraction", "ok", "Done")
     validation = _stage("Validation", "ok", "Passed") if passed else _stage("Validation", "fail", "Failed")

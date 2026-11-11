@@ -18,6 +18,7 @@ from web.deps import render, require_login, sidebar_context, smart_title
 from web.shop_display import display_shop
 from web import queries
 from web import statement_processing as sp
+from web import statement_completion as completion
 from web import time_window as tw
 from web.user_locations import location_scope
 from web.routers.exceptions import _statement_pdf_url
@@ -48,6 +49,13 @@ def validation_list(request: Request, user: str = Depends(require_login)):
     # the stored matching results.
     recon = {**recon, **{sid: status for sid, status in recon_cards.items() if sid in recon}}
     cards = sp.build_cards(intake_rows, jobs, recon)
+    # Marked complete by a reviewer on the Exceptions review page (2026-11-11).
+    marked = completion.all_marked()
+    for card in cards:
+        mark = marked.get(card.get("statement_id")) if card.get("statement_id") else None
+        card["completed_by"] = mark["done_by"] if mark else None
+        if mark:
+            card["completed"] = True
     # "My locations" (web/user_locations.py): the user's shops plus cards with
     # no mapped shop (failed extractions, unmapped locations).
     scope = location_scope(request, user)

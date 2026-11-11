@@ -124,6 +124,10 @@
     <ul class="ns-popover sync-picker-list" id="failed-filter-list" role="listbox" aria-labelledby="failed-filter-btn" hidden></ul>
   </div>
   <button type="button" class="filter-chip" data-filter="exceptions">Exceptions</button>
+  {# Completed (2026-11-11): validation passed and no open exceptions --
+     web/statement_processing.py's card["completed"]. The count follows the
+     other filters. #}
+  <button type="button" class="filter-chip" data-filter="completed">Completed (<span id="completed-count">0</span>)</button>
   {# Vendor and shop (2026-10-28): the same button + listbox picker as "Past
      syncs" (static/app.js), over the hidden real <select> -- a browser
      dropdown of hundreds of long names opened wherever the browser chose;
@@ -161,9 +165,9 @@
   {% set stage_icon = {"ok": "✓", "fail": "✕", "warn": "!", "run": "", "skip": ""} %}
   {% set card_icon = {"ok": "i-check-circle", "failed": "i-x-circle", "review": "i-alert", "running": "i-clock"} %}
   {% for run in runs %}
-  <div class="report-card sp-card" data-state="{{ run.status }}"
+  <div class="report-card sp-card{{ ' is-completed' if run.completed }}" data-state="{{ run.status }}"
        data-validation="{{ 'pass' if run.validation_passed else 'fail' }}"
-       data-failed="{{ '1' if run.failed else '' }}" data-failed-stages="{{ run.failed_stages | join(' ') }}" data-exceptions="{{ '1' if run.has_exceptions else '' }}"
+       data-failed="{{ '1' if run.failed else '' }}" data-failed-stages="{{ run.failed_stages | join(' ') }}" data-exceptions="{{ '1' if run.has_exceptions else '' }}" data-completed="{{ '1' if run.completed else '' }}"
        data-checked="{{ '1' if run.checked else '' }}"
        data-vendor="{{ run.vendor_display_name or '' }}" data-shop="{{ run.shop or '' }}"
        data-period="{{ run.statement_period or '' }}"
@@ -175,6 +179,7 @@
         {% if run.shop %}<div class="report-card-sub" style="font-weight:600;color:var(--text)">{{ run.shop }}</div>{% endif %}
         <div class="report-card-sub report-card-file" title="{{ run.source_file }}">{{ run.source_file }}</div>
       </div>
+      {% if run.completed %}<span class="completed-tag" title="{{ 'Marked complete by ' ~ run.completed_by if run.completed_by else 'Every exception matched or resolved' }}"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Completed</span>{% endif %}
     </div>
 
     <ol class="sp-pipe" aria-label="Processing stages">
@@ -250,19 +255,22 @@
     var heroCount = 0;
     var heroPassedCount = 0;
     var shopCounts = {};
+    var completedCount = 0;
     cards.forEach(function (card) {
       var matchesStatus = currentStatus === "all"
         || (currentStatus === "pass" && card.dataset.validation === "pass")
         || (currentStatus === "fail" && card.dataset.failed === "1")
         || (currentStatus.indexOf("fail-") === 0
             && (" " + card.dataset.failedStages + " ").indexOf(" " + currentStatus.slice(5) + " ") !== -1)
-        || (currentStatus === "exceptions" && card.dataset.exceptions === "1");
+        || (currentStatus === "exceptions" && card.dataset.exceptions === "1")
+        || (currentStatus === "completed" && card.dataset.completed === "1");
       var inWindow = (!vendor || card.dataset.vendor === vendor)
         && (!shop || card.dataset.shop === shop)
         && (!period || card.dataset.period === period)
         && (!sync || card.dataset.sync === sync)
         && (!day || card.dataset.day === day);
       // Queued / running cards have no verdict yet, so they don't count.
+      if (inWindow && card.dataset.completed === "1") { completedCount += 1; }
       if (inWindow && card.dataset.checked === "1") {
         heroCount += 1;
         if (card.dataset.validation === "pass") { heroPassedCount += 1; }
@@ -274,6 +282,7 @@
       }
     });
     updateHero(heroCount, heroPassedCount);
+    document.getElementById("completed-count").textContent = completedCount.toLocaleString("en-US");
     updateShopCounts(shopCounts);
   }
 
@@ -358,7 +367,7 @@
   // Back/reload is honoured too (a restored older sync can only have come
   // from the picker).
   var start = window.viveFilterStart || {};
-  if (["pass", "exceptions"].concat(FAILED).indexOf(start.status) !== -1) { setStatus(start.status); }
+  if (["pass", "exceptions", "completed"].concat(FAILED).indexOf(start.status) !== -1) { setStatus(start.status); }
   setIfOffered(vendorFilter, start.vendor);
   setIfOffered(shopFilter, start.shop);
   setIfOffered(periodFilter, start.period);

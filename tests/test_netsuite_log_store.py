@@ -248,7 +248,7 @@ class SchemaParityTests(unittest.TestCase):
         tables, indexes = list(azure.TABLES), list(azure.INDEXES)
         start = tables.index("netsuite_writeback_run")
         self.assertEqual(tables[start:], ["netsuite_writeback_run", "netsuite_writeback_record",
-                                          "job_step_timing", "statement_pdf_edits", "user_locations"])
+                                          "job_step_timing", "statement_pdf_edits", "user_locations", "statement_completion_log", "statement_status_log"])
         start = indexes.index("idx_nswb_run_statement")
         self.assertEqual(indexes[start:start + 4], ["idx_nswb_run_statement", "idx_nswb_record_run",
                                                     "idx_nswb_record_statement", "idx_job_step_timing_job"])

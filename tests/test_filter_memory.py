@@ -31,7 +31,7 @@ class FilterMemoryWiringTests(unittest.TestCase):
     def test_each_list_page_starts_from_saves_to_and_can_reset_its_filters(self):
         pages = {
             "home.html": (r'ViveFilters\.init\(\[\], true\)', False),
-            "exceptions_vendors.html": (r'ViveFilters\.init\(\["vendor", "shop", "location"\], true\)', True),
+            "exceptions_vendors.html": (r'ViveFilters\.init\(\["tab", "status", "vendor", "shop", "location"\], true\)', True),
             "validation.html": (r'ViveFilters\.init\(\["status", "vendor", "shop", "period", "sync", "day"\], false\)', True),
         }
         for page, (init, saves) in pages.items():
