@@ -1316,3 +1316,71 @@ DENOOYER,AGE IN DAYS,age_in_days,integer,v1,1
 COLONIE_GARAGE_INC.,UNLABELED_TRANSACTION_CODE,line_date,date,v1,1
 COLONIE_GARAGE_INC.,UNLABELED_TRANSACTION_CODE_2,original_invoice_number,string,v1,1
 COLONIE_GARAGE_INC.,UNLABELED_TRANSACTION_CODE_3,charge_amount,decimal,v1,1
+NORTHEAST_ACURA,Date,line_date,date,v1,1
+NORTHEAST_ACURA,Document,original_invoice_number,string,v1,1
+NORTHEAST_ACURA,JR,transaction_code,string,v1,1
+NORTHEAST_ACURA,Description,description_raw,string,v1,1
+NORTHEAST_ACURA,Charges,charge_amount,decimal,v1,1
+NORTHEAST_ACURA,Pymts /Credits,payment_amount,decimal,v1,1
+NORTHEAST_ACURA,Remaining Balance,amount_remaining,decimal,v1,1
+ABINGTON_AUTO_PARTS_HONDA,DATE,line_date,date,v1,1
+ABINGTON_AUTO_PARTS_HONDA,INVOICE NUMBER,original_invoice_number,string,v1,1
+ABINGTON_AUTO_PARTS_HONDA,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+ABINGTON_AUTO_PARTS_HONDA,CHARGES,charge_amount,decimal,v1,1
+ABINGTON_AUTO_PARTS_HONDA,CREDITS,payment_amount,decimal,v1,1
+ABINGTON_AUTO_PARTS_HONDA,AMOUNT DUE,amount_remaining,decimal,v1,1
+DOUGLAS_INFINITI,DATE,line_date,date,v1,1
+DOUGLAS_INFINITI,SOURCE,transaction_code,string,v1,1
+DOUGLAS_INFINITI,REFERENCE,original_invoice_number,string,v1,1
+DOUGLAS_INFINITI,CHARGES,charge_amount,decimal,v1,1
+DOUGLAS_INFINITI,CREDITS,payment_amount,decimal,v1,1
+DOUGLAS_INFINITI,BALANCE,amount_remaining,decimal,v1,1
+ALLIANCE_AUTO_PARTS_INC.,Date,line_date,date,v1,1
+ALLIANCE_AUTO_PARTS_INC.,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+ALLIANCE_AUTO_PARTS_INC.,Invoice#,original_invoice_number,string,v1,1
+ALLIANCE_AUTO_PARTS_INC.,Description,description_raw,string,v1,1
+ALLIANCE_AUTO_PARTS_INC.,Charges,charge_amount,decimal,v1,1
+ALLIANCE_AUTO_PARTS_INC.,Credits,payment_amount,decimal,v1,1
+ALLIANCE_AUTO_PARTS_INC.,Amount Due,amount_remaining,decimal,v1,1
+ECS_AUTOMOTIVE_CONCEPTS_LLC.,Date,line_date,date,v1,1
+ECS_AUTOMOTIVE_CONCEPTS_LLC.,Transaction,original_invoice_number,string,v1,1
+ECS_AUTOMOTIVE_CONCEPTS_LLC.,Amount,charge_amount,decimal,v1,1
+TIRE_TOWN_WHOLESALE,Transaction Date,line_date,date,v1,1
+TIRE_TOWN_WHOLESALE,Transaction#,original_invoice_number,string,v1,1
+TIRE_TOWN_WHOLESALE,Transaction Description,description_raw,string,v1,1
+TIRE_TOWN_WHOLESALE,Transaction Amount,charge_amount,decimal,v1,1
+TIRE_TOWN_WHOLESALE,Transaction Balance,amount_remaining,decimal,v1,1
+TIRE_TOWN_WHOLESALE,Due Date,due_date,date,v1,1
+MR._GLASS_OF_LONG_ISLAND,DATE,line_date,date,v1,1
+MR._GLASS_OF_LONG_ISLAND,INVOICE NUMBER / DESCRIPTION OF WORK,original_invoice_number,string,v1,1
+MR._GLASS_OF_LONG_ISLAND,BALANCE,charge_amount,decimal,v1,1
+RALLYE_MOTORS,DATE,line_date,date,v1,1
+RALLYE_MOTORS,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+RALLYE_MOTORS,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+RALLYE_MOTORS,PURCHASES,charge_amount,decimal,v1,1
+RALLYE_MOTORS,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+RALLYE_MOTORS,BALANCE,amount_remaining,decimal,v1,1
+BMW_OF_FREEPORT,DATE,line_date,date,v1,1
+BMW_OF_FREEPORT,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+BMW_OF_FREEPORT,PURCHASES,charge_amount,decimal,v1,1
+BMW_OF_FREEPORT,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+BMW_OF_FREEPORT,BALANCE,amount_remaining,decimal,v1,1
+ROHRICH_HONDA,DATE,line_date,date,v1,1
+ROHRICH_HONDA,SOURCE,transaction_code,string,v1,1
+ROHRICH_HONDA,REFERENCE,original_invoice_number,string,v1,1
+ROHRICH_HONDA,CHARGES,charge_amount,decimal,v1,1
+ROHRICH_HONDA,CREDITS,payment_amount,decimal,v1,1
+ROHRICH_HONDA,BALANCE,amount_remaining,decimal,v1,1
+VAN_BORTEL_FORD_INC.,DATE,line_date,date,v1,1
+VAN_BORTEL_FORD_INC.,SOURCE,transaction_code,string,v1,1
+VAN_BORTEL_FORD_INC.,REFERENCE,original_invoice_number,string,v1,1
+VAN_BORTEL_FORD_INC.,INVOICE,invoice_number_ref,string,v1,1
+VAN_BORTEL_FORD_INC.,DESCRIPTION,description_raw,string,v1,1
+VAN_BORTEL_FORD_INC.,AMOUNT,charge_amount,decimal,v1,1
+VAN_BORTEL_FORD_INC.,AGE IN DAYS,age_in_days,integer,v1,1
+ABINGTON_AUTO_PARTS_KIA,DATE,line_date,date,v1,1
+ABINGTON_AUTO_PARTS_KIA,INVOICE NUMBER,original_invoice_number,string,v1,1
+ABINGTON_AUTO_PARTS_KIA,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
+ABINGTON_AUTO_PARTS_KIA,CHARGES,charge_amount,decimal,v1,1
+ABINGTON_AUTO_PARTS_KIA,CREDITS,payment_amount,decimal,v1,1
+ABINGTON_AUTO_PARTS_KIA,AMOUNT DUE,amount_remaining,decimal,v1,1

@@ -37,7 +37,37 @@ EXTRACTED = {
     # Prod STMT-517258E4 (AR Statement_94097_2026_OCT_Tekion.pdf, Vestal, 2026-11). The Tekion layout,
     # mapped as Casco Bay Ford / Asbury; '#' (a row counter) and 'section' are left unmapped.
     "MERCEDES-BENZ_OF_BUFFALO": {"Balance", "Invoice Date", "Invoice#", "PO Number", "Payments", "Purchases"},
+    # Prod STMT-60893176 (Neets Auto AR Statement.pdf): Document is the NetSuite tranid, 4 of 4 under Northeast Acura (203608). Running Balance left unmapped.
+    "NORTHEAST_ACURA": {"Charges", "Date", "Description", "Document", "JR", "Pymts /Credits", "Remaining Balance"},
+    # Prod STMT-0B412CA0: INVOICE NUMBER 294309AH is bill 294309AH (49.59) under Honda of Abington (111132).
+    "ABINGTON_AUTO_PARTS_HONDA": {"AMOUNT DUE", "CHARGES", "CREDITS", "DATE", "INVOICE NUMBER", "UNLABELED_TRANSACTION_CODE"},
+    # Prod STMT-827723E7: REFERENCE prints INW + tranid, 4 of 5 under DOUGLAS INFINITI (37992) after the INW strip.
+    "DOUGLAS_INFINITI": {"BALANCE", "CHARGES", "CREDITS", "DATE", "REFERENCE", "SOURCE"},
+    # Prod STMT-A943E6FC: invoice 1073438 is not in NetSuite yet; ROA is a payment on account.
+    "ALLIANCE_AUTO_PARTS_INC.": {"Amount Due", "Charges", "Credits", "Date", "Description", "Invoice#", "UNLABELED_TRANSACTION_CODE"},
+    # Prod STMT-8B29FD13 / STMT-140EE6A0: Transaction prints 'INV #100850. Due ... PO #...'; token_after 'INV #' gives the tranid (100850 = 102.95 under ECS Automotive Concepts 120405). Balance is a running balance, left unmapped.
+    "ECS_AUTOMOTIVE_CONCEPTS_LLC.": {"Amount", "Date", "Transaction"},
+    # Prod STMT-CBE085E0: Transaction# is the tranid, 9 of 9 under Tire Town (11089).
+    "TIRE_TOWN_WHOLESALE": {"Due Date", "Transaction Amount", "Transaction Balance", "Transaction Date", "Transaction Description", "Transaction#"},
+    # Prod STMT-B2E978DF: one amount column (BALANCE, per invoice); invoice numbers 20 of 26 under Mr. Glass (9151).
+    "MR._GLASS_OF_LONG_ISLAND": {"BALANCE", "DATE", "INVOICE NUMBER / DESCRIPTION OF WORK"},
+    # Prod STMT-283CA171: DOCUMENT / TRANSACTION is the tranid, 17 of 21 under Rallye Mercedes Benz (8740).
+    "RALLYE_MOTORS": {"BALANCE", "DATE", "DOCUMENT / TRANSACTION", "PAYMENTS & CREDITS", "PURCHASES", "UNLABELED_TRANSACTION_CODE"},
+    # Prod STMT-85EFE0B2: DOCUMENT / TRANSACTION is the tranid, 2 of 2 under BMW of Freeport (241025).
+    "BMW_OF_FREEPORT": {"BALANCE", "DATE", "DOCUMENT / TRANSACTION", "PAYMENTS & CREDITS", "PURCHASES"},
+    # Prod STMT-791877D6: same Reynolds layout as ROHRICH_TOYOTA; REFERENCE prints HOW + tranid, 17 of 20 under Rohrich Automotive Group (643941) after the strip.
+    "ROHRICH_HONDA": {"BALANCE", "CHARGES", "CREDITS", "DATE", "REFERENCE", "SOURCE"},
+    # Prod STMT-087A6C59: REFERENCE prints FOW / CMFOW + tranid (credits CMFOW), INVOICE the invoice a credit applies to; 39 of 42 under Van Bortel Ford (626536) after the strip.
+    "VAN_BORTEL_FORD_INC.": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE", "REFERENCE", "SOURCE"},
+    # Prod STMT-B0674DCD: INVOICE NUMBER 132752A is bill 132752A (844.72) under Kia of Abington (159742).
+    "ABINGTON_AUTO_PARTS_KIA": {"AMOUNT DUE", "CHARGES", "CREDITS", "DATE", "INVOICE NUMBER", "UNLABELED_TRANSACTION_CODE"},
 }
+
+
+# Layouts with one amount column (credits print as negative amounts, or there
+# are none): no payment_amount to map.
+SINGLE_AMOUNT_COLUMN = {"ECS_AUTOMOTIVE_CONCEPTS_LLC.", "TIRE_TOWN_WHOLESALE", "MR._GLASS_OF_LONG_ISLAND",
+                        "VAN_BORTEL_FORD_INC."}
 
 
 def _mapping(vendor):
@@ -55,7 +85,8 @@ class TestMappings(unittest.TestCase):
         for vendor in EXTRACTED:
             canon = set(_mapping(vendor).values())
             self.assertIn("original_invoice_number", canon, vendor)
-            self.assertTrue({"charge_amount", "payment_amount"} <= canon, vendor)
+            needed = {"charge_amount"} if vendor in SINGLE_AMOUNT_COLUMN else {"charge_amount", "payment_amount"}
+            self.assertTrue(needed <= canon, vendor)
 
     def test_van_bortel_credits_point_at_their_invoice(self):
         m = _mapping("VAN_BORTEL_MOTORCAR_INC.")
