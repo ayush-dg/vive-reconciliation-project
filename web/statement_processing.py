@@ -100,6 +100,7 @@ def intake_card(intake: dict, job: dict = None, recon: dict = None) -> dict:
         "validation_status": intake.get("validation_status"),
         "timestamp": intake.get("ingestion_timestamp"),
         "validation_passed": passed, "checked": True, "reconciled": recon is not None,
+        "resolved": (recon or {}).get("resolved") or 0,
     }
     extraction = _stage("Extraction", "ok", "Done")
     validation = _stage("Validation", "ok", "Passed") if passed else _stage("Validation", "fail", "Failed")

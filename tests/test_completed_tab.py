@@ -89,11 +89,46 @@ class TestStatementProcessingPage(unittest.TestCase):
         for name, fn in fns.items():
             mock.patch(f"web.queries.{name}", fn).start()
         mock.patch("web.statement_completion.all_marked", lambda: {}).start()
+        mock.patch("web.statement_completion.all_statuses", lambda: {}).start()
+        mock.patch("web.statement_completion.edited_ids", lambda: set()).start()
         html = _client(validation.router).get("/validation").text
         self.assertIn('data-filter="completed">Completed (<span id="completed-count">', html)
         self.assertEqual(html.count('data-completed="1"'), 1)
         self.assertEqual(html.count('sp-card is-completed'), 1)
         self.assertEqual(html.count('class="completed-tag"'), 1)
+        # Exceptions is the default (the script starts on it; no chip is pre-set).
+        self.assertIn('var currentStatus = "exceptions";', html)
+        self.assertIn('<option value="exceptions-new">New</option>', html)
+        self.assertIn('<option value="exceptions-progress">In progress</option>', html)
+        self.assertIn('id="followup-filter"', html)
+        self.assertIn('data-stage="new"', html)
+
+    def test_resolved_followup_or_pdf_edit_makes_it_in_progress(self):
+        from web.routers import validation
+        fns = {**SIDEBAR,
+               "get_validation_report": lambda: [_intake("A"), _intake("B"), _intake("C"), _intake("D")],
+               "get_processing_jobs": lambda: [],
+               "get_recon_status": lambda: {sid: {"exceptions": 2, "reasons": {}} for sid in "ABCD"},
+               "get_recon_card_status": lambda: {"B": {"exceptions": 1, "reasons": {}, "resolved": 1, "matched": 0}}}
+        for name, fn in fns.items():
+            mock.patch(f"web.queries.{name}", fn).start()
+        mock.patch("web.statement_completion.all_marked", lambda: {}).start()
+        mock.patch("web.statement_completion.all_statuses", lambda: {
+            "C": {"statement_id": "C", "status": "sent_to_shop", "set_by": "x", "set_at": "", "label": "Sent to shop"}}).start()
+        mock.patch("web.statement_completion.edited_ids", lambda: {"D"}).start()
+        html = _client(validation.router).get("/validation").text
+        self.assertEqual(html.count('data-stage="new"'), 1)
+        self.assertEqual(html.count('data-stage="progress"'), 3)
+        self.assertIn('data-followup="sent_to_shop"', html)
+
+
+class TestWorkStage(unittest.TestCase):
+
+    def test_new_until_anything_is_done(self):
+        self.assertEqual(completion.work_stage(0, None, False), completion.NEW)
+        self.assertEqual(completion.work_stage(1, None, False), completion.IN_PROGRESS)
+        self.assertEqual(completion.work_stage(0, {"status": "sent_to_shop"}, False), completion.IN_PROGRESS)
+        self.assertEqual(completion.work_stage(None, None, True), completion.IN_PROGRESS)
 
 
 class TestExceptionsPage(unittest.TestCase):
@@ -117,12 +152,18 @@ class TestExceptionsPage(unittest.TestCase):
         mock.patch("web.statement_completion.all_marked", lambda: self.marked).start()
         self.statuses = {}
         mock.patch("web.statement_completion.all_statuses", lambda: self.statuses).start()
+        mock.patch("web.statement_completion.edited_ids", lambda: set()).start()
+        mock.patch("web.queries.get_recon_card_status", lambda: {}).start()
         self.addCleanup(mock.patch.stopall)
 
     def test_tabs_default_all_and_only_the_clean_passed_run_is_completed(self):
         html = _client(exceptions.router).get("/exceptions").text
-        self.assertIn('class="filter-chip active" data-tab="all"', html)
-        self.assertIn('data-tab="open"', html)
+        # Exceptions is the default tab, with New / In progress under it.
+        self.assertIn('class="filter-chip sync-picker-btn active" id="exception-stage-btn"', html)
+        self.assertIn('var currentTab = "open";', html)
+        self.assertIn('<option value="open-new">New</option>', html)
+        self.assertIn('class="filter-chip" data-tab="all"', html)
+        self.assertEqual(html.count('data-stage="new"'), 3)
         self.assertIn('data-tab="completed"', html)
         self.assertEqual(html.count('data-completed="1"'), 1)
         self.assertEqual(html.count('class="completed-tag"'), 1)
@@ -220,7 +261,8 @@ class TestReviewPageCheckbox(_SqliteTable):
         page = self._page()
         self.assertIn('action="/exceptions/Douglas%20Infiniti/complete"', page)
         self.assertIn('data-open="2"', page)
-        self.assertNotIn('id="complete-checkbox" checked', page.replace("checked ", "checked"))
+        self.assertIn("stmt-btn stmt-btn-complete\"", page)
+        self.assertIn("Mark complete", page)
 
         done = self.client.post("/exceptions/Douglas%20Infiniti/complete",
                                 data={"statement_id": "S1", "completed": "1"}, follow_redirects=False)
@@ -228,13 +270,13 @@ class TestReviewPageCheckbox(_SqliteTable):
         self.assertIn("statement_id=S1", done.headers["location"])
         self.assertEqual(completion.marked("S1")["done_by"], "erin@vive.com")
         page = self._page()
-        self.assertIn("complete-toggle is-on", page)
+        self.assertIn("stmt-btn stmt-btn-complete is-on", page)
         self.assertIn("by erin@vive.com", page)
 
         self.client.post("/exceptions/Douglas%20Infiniti/complete", data={"statement_id": "S1", "completed": ""})
         self.assertIsNone(completion.marked("S1"))
         page = self._page()
-        self.assertNotIn("complete-toggle is-on", page)
+        self.assertNotIn("stmt-btn-complete is-on", page)
         self.assertNotIn("by erin@vive.com", page)
         # The untick stays in the log, with who did it.
         self.assertEqual(completion.history("S1")[0]["done_by"], "erin@vive.com")
@@ -249,19 +291,21 @@ class TestReviewPageCheckbox(_SqliteTable):
         page = self._page()
         self.assertIn('action="/exceptions/Douglas%20Infiniti/status"', page)
         self.assertIn(">Set follow-up</option>", page)
+        self.assertIn("stmt-btn stmt-btn-followup sync-picker-btn", page)
         resp = self.client.post("/exceptions/Douglas%20Infiniti/status",
                                 data={"statement_id": "S1", "status": "requested_copy"}, follow_redirects=False)
         self.assertIn("Requested+copy+from+vendor", resp.headers["location"])
         page = self._page()
         self.assertIn('<option value="requested_copy" selected>', page)
-        self.assertIn("followup-form is-set", page)
+        self.assertIn("stmt-btn-followup is-set", page)
+        self.assertIn('<option value="">Clear follow-up</option>', page)
         self.assertNotIn("by erin@vive.com", page)
         # Separate from Completed.
         self.assertIsNone(completion.marked("S1"))
 
         self.client.post("/exceptions/Douglas%20Infiniti/status", data={"statement_id": "S1", "status": ""})
         self.assertIsNone(completion.current_status("S1"))
-        self.assertNotIn("followup-form is-set", self._page())
+        self.assertNotIn("stmt-btn-followup is-set", self._page())
 
     def test_unknown_status_is_refused(self):
         resp = self.client.post("/exceptions/Douglas%20Infiniti/status",

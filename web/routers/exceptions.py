@@ -245,6 +245,10 @@ def _attach_completed(cards):
     passed = queries.get_validation_passed_ids()
     marked = completion.all_marked()
     statuses = completion.all_statuses()
+    # New / In progress (2026-11-11): resolved exceptions come from the recon
+    # table, PDF edits from statement_pdf_edits.
+    resolved = {sid: (status.get("resolved") or 0) for sid, status in queries.get_recon_card_status().items()}
+    edited = completion.edited_ids()
     for card in cards:
         sid = card.get("statement_id")
         card["completed"] = bool(sid) and (card.get("exception_count") or 0) == 0 and (
@@ -255,6 +259,7 @@ def _attach_completed(cards):
             card["completed"] = True
         # Follow-up status (2026-11-11), separate from Completed.
         card["follow_up"] = statuses.get(sid) if sid else None
+        card["work_stage"] = completion.work_stage(resolved.get(sid), card["follow_up"], sid in edited)
 
 
 def _attach_writeback_status(cards):

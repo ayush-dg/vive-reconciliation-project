@@ -19,50 +19,59 @@
     <span class="badge {{ writeback.css }}" style="margin-right:10px" title="{{ writeback.tooltip }}{% if writeback.finished_at %} · {{ writeback.finished_at | friendly_dt }}{% endif %}">{% if writeback.ok %}<svg class="icon" style="width:12px;height:12px"><use href="#i-check-circle"/></svg>{% endif %}{{ writeback.label }}</span>
     {% endif %}
     <span style="font-size:12px;color:var(--text-muted)">{{ total }} exceptions · {{ resolved }} resolved</span>
-    {# "Mark statement complete" (2026-11-11, web/statement_completion.py):
-       ticking or unticking posts at once, after a confirm; who and when is
+    {# "Mark complete" (2026-11-11, web/statement_completion.py): a toggle
+       button -- marks, or removes the mark, after a confirm; who and when is
        logged (statement_completion_log). The page shows only who marked it
-       complete and when; an untick shows nothing, its row stays in the log. #}
+       complete and when; removing it shows nothing, its row stays in the log. #}
     {% if statement and statement.statement_id %}
     {% set mark = completion_log[0] if completion_log and completion_log[0].action == 'completed' else none %}
     {% set still_open = total - resolved %}
-    <form method="post" action="/exceptions/{{ vendor_url_name }}/complete" class="complete-toggle{{ ' is-on' if mark }}"
-          data-open="{{ still_open }}">
+    <form method="post" action="/exceptions/{{ vendor_url_name }}/complete" class="stmt-action-form"
+          data-open="{{ still_open }}" data-marked="{{ '1' if mark else '' }}" id="complete-form">
       <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
       <input type="hidden" name="filter" value="{{ filter }}">
       <input type="hidden" name="sort" value="{{ sort }}">
       <input type="hidden" name="completed" value="{{ '' if mark else '1' }}">
-      <label class="complete-check" title="{{ 'Marked complete by ' ~ mark.done_by ~ ' · ' ~ (mark.done_at | friendly_dt) if mark else 'Mark this statement complete' }}">
-        <input type="checkbox" {{ 'checked' if mark }} id="complete-checkbox">
-        <span class="complete-box" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        <span>{{ 'Completed' if mark else 'Mark complete' }}</span>
-      </label>
+      <button type="submit" class="stmt-btn stmt-btn-complete{{ ' is-on' if mark }}"
+              title="{{ 'Marked complete by ' ~ mark.done_by ~ ' · ' ~ (mark.done_at | friendly_dt) ~ '. Click to remove the mark.' if mark else 'Mark this statement complete' }}">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        {{ 'Completed' if mark else 'Mark complete' }}
+      </button>
       {% if mark %}<span class="complete-by">by {{ mark.done_by }} · {{ mark.done_at | friendly_dt }}</span>{% endif %}
     </form>
-    {# Follow-up status (2026-11-11): separate from Completed; picking posts
-       at once. Who and when is not shown (only Completed shows that); every
-       pick is still in statement_status_log. #}
-    <form method="post" action="/exceptions/{{ vendor_url_name }}/status" class="followup-form{{ ' is-set' if follow_up }}">
+    {# Follow-up (2026-11-11): separate from Completed. A button + list (the
+       static/app.js picker) over the hidden select; picking posts at once.
+       Who and when is not shown (only Completed shows that); every pick is
+       still in statement_status_log. #}
+    <form method="post" action="/exceptions/{{ vendor_url_name }}/status" class="stmt-action-form">
       <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
       <input type="hidden" name="filter" value="{{ filter }}">
       <input type="hidden" name="sort" value="{{ sort }}">
-      <select name="status" class="followup-select" aria-label="Follow-up" onchange="this.form.submit()">
-        <option value="" {{ 'selected' if not follow_up }}>{{ 'Clear follow-up' if follow_up else 'Set follow-up' }}</option>
+      <select name="status" id="followup-select" class="ns-sr-only" tabindex="-1" aria-hidden="true" onchange="this.form.submit()">
+        {% if not follow_up %}<option value="" hidden selected>Set follow-up</option>{% endif %}
         {% for key, label in follow_up_choices.items() %}
         <option value="{{ key }}" {{ 'selected' if follow_up and follow_up.status == key }}>{{ label }}</option>
         {% endfor %}
+        {% if follow_up %}<option value="">Clear follow-up</option>{% endif %}
       </select>
+      <div class="ns-chip-wrap followup-wrap" data-sync-picker="followup-select">
+        <button type="button" class="stmt-btn stmt-btn-followup{{ ' is-set' if follow_up }} sync-picker-btn" id="followup-btn"
+                aria-haspopup="listbox" aria-expanded="false" aria-controls="followup-list">
+          <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>{{ follow_up.label if follow_up else 'Set follow-up' }}
+        </button>
+        <ul class="ns-popover sync-picker-list followup-list" id="followup-list" role="listbox" aria-labelledby="followup-btn" hidden></ul>
+      </div>
     </form>
     <script>
     (function () {
-      var box = document.getElementById("complete-checkbox");
-      box.addEventListener("change", function () {
-        var form = box.form, open = parseInt(form.dataset.open, 10) || 0;
-        var ask = box.checked
-          ? (open > 0 ? open + " exception" + (open === 1 ? " is" : "s are") + " still open. Mark this statement complete anyway?"
-                      : "Mark this statement complete?")
-          : "Remove the complete mark from this statement?";
-        if (window.confirm(ask)) { form.submit(); } else { box.checked = !box.checked; }
+      var form = document.getElementById("complete-form");
+      form.addEventListener("submit", function (ev) {
+        var open = parseInt(form.dataset.open, 10) || 0;
+        var ask = form.dataset.marked
+          ? "Remove the complete mark from this statement?"
+          : (open > 0 ? open + " exception" + (open === 1 ? " is" : "s are") + " still open. Mark this statement complete anyway?"
+                      : "Mark this statement complete?");
+        if (!window.confirm(ask)) { ev.preventDefault(); }
       });
     })();
     </script>

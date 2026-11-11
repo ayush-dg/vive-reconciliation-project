@@ -51,11 +51,17 @@ def validation_list(request: Request, user: str = Depends(require_login)):
     cards = sp.build_cards(intake_rows, jobs, recon)
     # Marked complete by a reviewer on the Exceptions review page (2026-11-11).
     marked = completion.all_marked()
+    # Follow-up (2026-11-11) and New / In progress for the Exceptions filter.
+    statuses = completion.all_statuses()
+    edited = completion.edited_ids()
     for card in cards:
-        mark = marked.get(card.get("statement_id")) if card.get("statement_id") else None
+        sid = card.get("statement_id")
+        mark = marked.get(sid) if sid else None
         card["completed_by"] = mark["done_by"] if mark else None
         if mark:
             card["completed"] = True
+        card["follow_up"] = statuses.get(sid) if sid else None
+        card["work_stage"] = completion.work_stage(card.get("resolved"), card["follow_up"], sid in edited)
     # "My locations" (web/user_locations.py): the user's shops plus cards with
     # no mapped shop (failed extractions, unmapped locations).
     scope = location_scope(request, user)
@@ -104,6 +110,7 @@ def validation_list(request: Request, user: str = Depends(require_login)):
     ctx = {
         "active_page": "validation",
         "location_scope": scope,
+        "follow_up_choices": completion.STATUSES,
         "runs": cards,
         "vendor_options": vendor_options,
         "shop_options": shop_options,

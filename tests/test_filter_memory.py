@@ -32,7 +32,7 @@ class FilterMemoryWiringTests(unittest.TestCase):
         pages = {
             "home.html": (r'ViveFilters\.init\(\[\], true\)', False),
             "exceptions_vendors.html": (r'ViveFilters\.init\(\["tab", "status", "vendor", "shop", "location"\], true\)', True),
-            "validation.html": (r'ViveFilters\.init\(\["status", "vendor", "shop", "period", "sync", "day"\], false\)', True),
+            "validation.html": (r'ViveFilters\.init\(\["status", "followup", "vendor", "shop", "period", "sync", "day"\], false\)', True),
         }
         for page, (init, saves) in pages.items():
             with self.subTest(page=page):

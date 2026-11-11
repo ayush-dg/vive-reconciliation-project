@@ -194,3 +194,30 @@ def all_statuses() -> dict:
     for r in rows:
         latest[r["statement_id"]] = r
     return {sid: _with_label(r) for sid, r in latest.items() if r["status"]}
+
+
+# ---- New / In progress (2026-11-11) -----------------------------------------
+# A statement with open exceptions that is not Completed is "In progress"
+# once anyone has worked on it -- an exception resolved (accepted, rejected,
+# cleared or matched by hand), a follow-up picked, or its PDF edited -- and
+# "New" until then. The Exceptions filter on Statement Processing and the
+# Exceptions page splits on it.
+
+NEW = "new"
+IN_PROGRESS = "progress"
+
+
+def edited_ids() -> set:
+    """statement_ids whose PDF was edited (statement_pdf_edits); empty on
+    any database problem (the table may not exist yet)."""
+    try:
+        rows = queries.execute_query("SELECT DISTINCT statement_id FROM statement_pdf_edits")
+    except Exception as error:
+        logger.warning("statement_pdf_edits read failed: %s", error)
+        return set()
+    return {r["statement_id"] for r in rows if r.get("statement_id")}
+
+
+def work_stage(resolved, follow_up, edited) -> str:
+    """IN_PROGRESS if anything was done on the statement, else NEW."""
+    return IN_PROGRESS if ((resolved or 0) > 0 or follow_up or edited) else NEW

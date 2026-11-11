@@ -1221,4 +1221,27 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
 .followup-form { display: inline-flex; align-items: center; gap: 8px; margin-left: 6px; }
 .followup-select { padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 12.5px; font-weight: 600; cursor: pointer; max-width: 230px; }
 .followup-form.is-set .followup-select { background: var(--warning-tint); border-color: var(--warning); color: var(--warning); }
-.followup-tag { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; background: var(--warning-tint); color: var(--warning); border: 1px solid var(--warning); }
+.followup-tag { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; background: var(--surface-sunk); color: var(--text-muted); border: 1px solid var(--border-strong); }
+
+/* Review page action buttons (2026-11-11): solid green "Mark complete",
+   outlined blue "Set follow-up". */
+.stmt-action-form { display: inline-flex; align-items: center; gap: 8px; margin-left: 8px; }
+.stmt-btn { display: inline-flex; align-items: center; gap: 7px; padding: 8px 16px; border-radius: 8px; font-size: 13.5px; font-weight: 600; line-height: 1.2; cursor: pointer; white-space: nowrap; width: auto; margin: 0; }
+.stmt-btn .icon { width: 16px; height: 16px; }
+/* Not yet marked: white with a green border; marked: solid green. */
+.stmt-btn-complete { background: var(--surface); border: 1.5px solid var(--success); color: var(--success); }
+.stmt-btn-complete:hover { background: var(--success-tint); }
+.stmt-btn-complete.is-on { background: var(--success); border-color: var(--success); color: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+.stmt-btn-complete.is-on:hover { filter: brightness(1.08); background: var(--success); }
+.stmt-btn-followup { background: var(--surface); border: 1.5px solid var(--navy-2); color: var(--navy-2); }
+.stmt-btn-followup:hover { background: color-mix(in srgb, var(--navy-2) 8%, var(--surface)); }
+.stmt-btn-followup.is-set { background: color-mix(in srgb, var(--navy-2) 10%, var(--surface)); }
+.followup-wrap .followup-list { left: auto; right: 0; min-width: 220px; }
+.card-tags { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; margin-left: auto; flex: none; }
+
+/* New / In progress tags (2026-11-11): same pill as Completed, top right of
+   the card. New = blue, In progress = amber. */
+.stage-tag { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.stage-tag .icon { width: 12px; height: 12px; }
+.stage-tag.stage-new { background: color-mix(in srgb, var(--navy-2) 10%, var(--surface)); color: var(--navy-2); border: 1px solid var(--navy-2); }
+.stage-tag.stage-progress { background: var(--warning-tint); color: var(--warning); border: 1px solid var(--warning); }

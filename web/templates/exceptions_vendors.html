@@ -74,12 +74,27 @@
   {% endif %}
 </div>
 
-{# Open / Completed / All (2026-11-11). Completed = validation passed and no
-   open exceptions (web/routers/exceptions.py v["completed"]); Open = the
-   rest. The counts follow the vendor/location filters. Default All. #}
+{# All / Exceptions / Completed (2026-11-11). Completed = validation passed
+   and no open exceptions, or marked complete (web/routers/exceptions.py
+   v["completed"]); Exceptions = the rest, and the default. Exceptions is a
+   picker: all of them, New (nobody has worked on it yet) or In progress (an
+   exception resolved, a follow-up set or the PDF edited). The counts follow
+   the other filters. #}
 <div class="filter-chips" id="exception-tabs" role="tablist" aria-label="Statements">
-  <button type="button" class="filter-chip active" data-tab="all" role="tab">All (<span data-tab-count="all">0</span>)</button>
-  <button type="button" class="filter-chip" data-tab="open" role="tab">Open (<span data-tab-count="open">0</span>)</button>
+  <button type="button" class="filter-chip" data-tab="all" role="tab">All (<span data-tab-count="all">0</span>)</button>
+  <select id="exception-stage" class="ns-sr-only" tabindex="-1" aria-hidden="true">
+    <option value="" hidden>Exceptions</option>
+    <option value="open">All exceptions</option>
+    <option value="open-new">New</option>
+    <option value="open-progress">In progress</option>
+  </select>
+  <div class="ns-chip-wrap" data-sync-picker="exception-stage">
+    <button type="button" class="filter-chip sync-picker-btn active" id="exception-stage-btn" data-tab-picker
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="exception-stage-list">
+      <span id="exception-stage-label">Exceptions</span> (<span data-tab-count="open">0</span>)<svg class="icon sync-picker-chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+    </button>
+    <ul class="ns-popover sync-picker-list" id="exception-stage-list" role="listbox" aria-labelledby="exception-stage-btn" hidden></ul>
+  </div>
   <button type="button" class="filter-chip" data-tab="completed" role="tab">Completed (<span data-tab-count="completed">0</span>)</button>
 </div>
 
@@ -114,7 +129,7 @@
   {% for v in vendors %}
   {% set detail_href = "/reports/" + v.statement_id if v.exception_count == 0 and v.statement_id else "/exceptions/" + v.url_name + (("?statement_id=" + v.statement_id) if v.statement_id else "") %}
   <a href="{{ detail_href }}" class="vendor-card {{ 'has-exceptions' if v.exception_count > 0 else 'clean' }}{{ ' is-completed' if v.completed }}"
-     data-completed="{{ '1' if v.completed else '' }}" data-status="{{ v.follow_up.status if v.follow_up else 'none' }}" data-vendor="{{ v.vendor_display_name }}" data-shop="{{ v.shop or '' }}" data-location="{{ v.billing_location or '' }}">
+     data-completed="{{ '1' if v.completed else '' }}" data-status="{{ v.follow_up.status if v.follow_up else 'none' }}" data-stage="{{ v.work_stage }}" data-vendor="{{ v.vendor_display_name }}" data-shop="{{ v.shop or '' }}" data-location="{{ v.billing_location or '' }}">
     <div class="vendor-card-head">
       <div class="vendor-card-id">
         <div class="vendor-badge-lg"{% if v.exception_count == 0 %} style="background:var(--matched-tint);color:var(--matched)"{% endif %}>{{ v.vendor_display_name | initials }}</div>
@@ -132,6 +147,10 @@
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
         {% if v.completed %}
         <span class="completed-tag" title="{{ 'Marked complete by ' ~ v.completed_by if v.completed_by else 'Every exception matched or resolved' }}"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg>Completed</span>
+        {% endif %}
+        {# New / In progress (2026-11-11) on every card not Completed. #}
+        {% if not v.completed %}
+        <span class="stage-tag stage-{{ v.work_stage }}">{% if v.work_stage == 'progress' %}<svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>In progress{% else %}<svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>New{% endif %}</span>
         {% endif %}
         {% if v.follow_up %}
         <span class="followup-tag" title="Set by {{ v.follow_up.set_by }} · {{ v.follow_up.set_at | friendly_dt }}">{{ v.follow_up.label }}</span>
@@ -178,16 +197,24 @@
   var statusFilter = document.getElementById("status-filter");
   var cards = document.querySelectorAll("#exception-run-grid .vendor-card");
   var tabs = document.querySelectorAll("#exception-tabs [data-tab]");
-  var TABS = ["all", "open", "completed"];
-  var currentTab = "all";
+  var stagePicker = document.getElementById("exception-stage");
+  var stageButton = document.getElementById("exception-stage-btn");
+  var TABS = ["all", "open", "open-new", "open-progress", "completed"];
+  var STAGE_LABEL = {"open": "Exceptions", "open-new": "Exceptions: New", "open-progress": "Exceptions: In progress"};
+  // Exceptions is the default view (2026-11-11).
+  var currentTab = "open";
 
   function setTab(tab) {
-    currentTab = TABS.indexOf(tab) !== -1 ? tab : "all";
+    currentTab = TABS.indexOf(tab) !== -1 ? tab : "open";
     tabs.forEach(function (t) {
       var on = t.dataset.tab === currentTab;
       t.classList.toggle("active", on);
       t.setAttribute("aria-selected", on ? "true" : "false");
     });
+    var stage = STAGE_LABEL[currentTab];
+    stagePicker.value = stage ? currentTab : "";
+    stageButton.classList.toggle("active", !!stage);
+    document.getElementById("exception-stage-label").textContent = stage || "Exceptions";
   }
 
   function applyFilters() {
@@ -195,22 +222,27 @@
     var shop = shopFilter.value;
     var location = locationFilter.value;
     var status = statusFilter.value;
-    var tabCounts = {all: 0, open: 0, completed: 0};
+    var tabCounts = {all: 0, open: 0, "open-new": 0, "open-progress": 0, completed: 0};
     cards.forEach(function (card) {
       var matchesVendor = !vendor || card.dataset.vendor === vendor;
       var matchesShop = !shop || card.dataset.shop === shop;
       var matchesLocation = (!location || card.dataset.location === location)
         && (!status || card.dataset.status === status);
       var done = card.dataset.completed === "1";
-      var matchesTab = currentTab === "all" || (currentTab === "completed") === done;
+      var stage = card.dataset.stage === "progress" ? "open-progress" : "open-new";
+      var matchesTab = currentTab === "all" || (currentTab === "completed" ? done
+        : !done && (currentTab === "open" || currentTab === stage));
       if (matchesVendor && matchesShop && matchesLocation) {
         tabCounts.all += 1;
         tabCounts[done ? "completed" : "open"] += 1;
+        if (!done) { tabCounts[stage] += 1; }
       }
       card.style.display = (matchesTab && matchesVendor && matchesShop && matchesLocation) ? "" : "none";
     });
     document.querySelectorAll("#exception-tabs [data-tab-count]").forEach(function (el) {
-      el.textContent = tabCounts[el.dataset.tabCount].toLocaleString("en-US");
+      // The Exceptions picker counts what it shows: all, New or In progress.
+      var key = el.dataset.tabCount === "open" && STAGE_LABEL[currentTab] ? currentTab : el.dataset.tabCount;
+      el.textContent = tabCounts[key].toLocaleString("en-US");
     });
   }
 
@@ -253,7 +285,7 @@
   // Kept in the address and remembered for this tab (static/filters.js),
   // so coming back from a statement brings the same filters back.
   function remember() {
-    ViveFilters.save({tab: currentTab === "all" ? "" : currentTab, status: statusFilter.value, vendor: vendorFilter.value, shop: shopFilter.value, location: locationFilter.value});
+    ViveFilters.save({tab: currentTab === "open" ? "" : currentTab, status: statusFilter.value, vendor: vendorFilter.value, shop: shopFilter.value, location: locationFilter.value});
   }
   function setIfOffered(select, value) {
     if (value && Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
@@ -262,6 +294,7 @@
   }
   var start = window.viveFilterStart || {};
   setTab(start.tab);
+  stagePicker.addEventListener("change", function () { setTab(stagePicker.value || "open"); applyFilters(); remember(); });
   tabs.forEach(function (t) {
     t.addEventListener("click", function () { setTab(t.dataset.tab); applyFilters(); remember(); });
   });

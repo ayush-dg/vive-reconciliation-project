@@ -334,7 +334,8 @@ class TestPages(unittest.TestCase):
                         "get_recon_status": lambda: {"S1": {"exceptions": 2, "reasons": {"Not Found in NetSuite": 2}}}
                         }).get("/validation").text
         self.assertIn("Statement Processing Status", html)
-        self.assertIn('data-filter="exceptions">Exceptions</button>', html)
+        # Exceptions is a picker since 2026-11-11 (All exceptions / New / In progress).
+        self.assertIn('<option value="exceptions">All exceptions</option>', html)
         self.assertIn("2 invoices not found in NetSuite.", html)
         self.assertIn("Extracted total doesn&#39;t match printed total.", html)
         self.assertIn("Scanned PDF, no text layer found.", html)
