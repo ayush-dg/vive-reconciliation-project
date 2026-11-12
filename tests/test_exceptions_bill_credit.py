@@ -279,6 +279,81 @@ class ReviewPageTests(unittest.TestCase):
         self.assertIn("No open exceptions", html)
 
 
+_DBT = os.path.join(os.path.dirname(__file__), "..", "dbt", "vive_recon")
+
+
+def _split_top_level(text):
+    """Splits a select list on commas outside (), {} and quotes."""
+    items, depth, start, quote = [], 0, 0, None
+    for i, ch in enumerate(text):
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "({":
+            depth += 1
+        elif ch in ")}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            items.append(text[start:i])
+            start = i + 1
+    return items + [text[start:]]
+
+
+def _model_columns(model):
+    """Output columns of a dbt model: its last top-level select list."""
+    with open(os.path.join(_DBT, "models", "silver", f"{model}.sql"), encoding="utf-8") as f:
+        sql = re.sub(r"--[^\n]*", "", f.read())
+    start = sql.rindex("\nselect\n") + len("\nselect\n")
+    select_list = sql[start:sql.index("\nfrom ", start)]
+    names = (re.search(r"(?:\bas\s+|\.|^)(\w+)\s*$", item.strip(), re.I) for item in _split_top_level(select_list))
+    return {m.group(1).lower() for m in names if m}
+
+
+def _seed_columns(seed):
+    with open(os.path.join(_DBT, "seeds", f"{seed}.csv"), encoding="utf-8") as f:
+        return {c.strip().lower() for c in f.readline().split(",")}
+
+
+SILVER_COLUMNS = {
+    "statement_line": _model_columns("statement_line"),
+    "statement": _model_columns("statement"),
+    "vendor_line_selection_rule": _seed_columns("vendor_line_selection_rule"),
+}
+
+
+def _unknown_columns(sql):
+    """Every alias.column in sql whose table (from `silver.<table> <alias>`) lacks that column."""
+    aliases = {a.lower(): t.lower() for t, a in re.findall(r"silver\.(\w+)\s+(?:AS\s+)?(\w+)", sql, re.I)}
+    used = {(a.lower(), c.lower()) for a, c in re.findall(r"\b(\w+)\.(\w+)\b", sql) if a.lower() in aliases}
+    return sorted(f"{a}.{c}" for a, c in used if c not in SILVER_COLUMNS[aliases[a]])
+
+
+def _silver_sql():
+    seen = []
+    with mock.patch.object(queries, "recon_query", lambda sql, params=None: seen.append(sql) or []):
+        queries._silver_line_types(["STMT-1"])
+    return seen[0]
+
+
+class SilverSqlColumnTests(unittest.TestCase):
+    """The Silver query is stubbed everywhere else, so check its columns
+    against the dbt models / seed that build those tables."""
+
+    def test_the_column_lists_are_read(self):
+        self.assertTrue({"statement_line_id", "statement_id", "line_type"} <= SILVER_COLUMNS["statement_line"])
+        self.assertNotIn("vendor_id", SILVER_COLUMNS["statement_line"])
+        self.assertTrue({"statement_id", "vendor_id"} <= SILVER_COLUMNS["statement"])
+        self.assertTrue({"vendor_id", "is_active", "rule_type", "credit_indicator"}
+                        <= SILVER_COLUMNS["vendor_line_selection_rule"])
+
+    def test_the_checker_catches_a_missing_column(self):
+        self.assertEqual(_unknown_columns("SELECT sl.vendor_id FROM silver.statement_line sl"), ["sl.vendor_id"])
+
+    def test_every_column_the_query_uses_exists(self):
+        self.assertEqual(_unknown_columns(_silver_sql()), [])
+
+
 class TemplateTests(unittest.TestCase):
     def test_a_row_without_the_key_renders_as_before(self):
         # Older callers / other pages that render rows without bill_or_credit.

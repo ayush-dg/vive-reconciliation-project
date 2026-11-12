@@ -1284,15 +1284,18 @@ def _recon_links(statement_ids: list) -> dict:
 
 
 def _silver_line_types(statement_ids: list) -> dict:
-    """{statement_line_id: line_type} -- one query for the whole page."""
+    """{statement_line_id: line_type} -- one query for the whole page.
+    silver.statement_line has no vendor_id: the vendor comes from
+    silver.statement, the same column the matcher reads."""
     rows = recon_query(
         f"""
         SELECT sl.statement_line_id, sl.line_type
         FROM silver.statement_line sl
+        JOIN silver.statement st ON st.statement_id = sl.statement_id
         WHERE sl.statement_id IN ({_in_placeholders(statement_ids)})
           AND NOT EXISTS (
               SELECT 1 FROM silver.vendor_line_selection_rule r
-              WHERE r.vendor_id = sl.vendor_id AND r.is_active = 1
+              WHERE r.vendor_id = st.vendor_id AND r.is_active = 1
           )
         """,
         list(statement_ids),
