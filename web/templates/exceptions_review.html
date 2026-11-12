@@ -204,7 +204,9 @@
     {% if match_msg %}<div class="match-msg" role="status">{{ match_msg }}</div>{% endif %}
     {% if selected %}
     <div class="detail-view-head">
-      <h2>Invoice #{{ selected.invoice_number or "Unknown" }}{% if selected.bill_or_credit %} <span class="einv-kind">({{ selected.bill_or_credit }})</span>{% endif %}</h2>
+      {# The invoice number opens the panel's NetSuite record in a new tab (2026-11-12). #}
+      <h2>{% if netsuite_url %}<a class="einv-ns-link" href="{{ netsuite_url }}" target="_blank" rel="noopener noreferrer"
+          title="Open {{ 'bill' if netsuite_record._source_table == 'netsuite_vendorbill' else 'credit' }} {{ selected.invoice_number }} in NetSuite">Invoice #{{ selected.invoice_number or "Unknown" }}<span class="ns-ext" aria-hidden="true">↗</span></a>{% else %}Invoice #{{ selected.invoice_number or "Unknown" }}{% endif %}{% if selected.bill_or_credit %} <span class="einv-kind">({{ selected.bill_or_credit }})</span>{% endif %}</h2>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         {% if selected.match_confidence is not none %}
         <span class="badge {{ 'badge-matched' if selected.match_confidence >= 0.80 else 'badge-review' }}">

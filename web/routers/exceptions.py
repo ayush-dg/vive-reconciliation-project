@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from web.netsuite_status import without_sandbox, writeback_pill
-from web.deps import render, require_login, sidebar_context, smart_title, location_group_key
+from web.deps import netsuite_record_url, render, require_login, sidebar_context, smart_title, location_group_key
 from web.shop_display import display_shop
 from web import queries
 from web import time_window as tw
@@ -276,6 +276,18 @@ def _attach_writeback_status(cards):
         card["writeback"] = writeback_pill(latest.get(card.get("statement_id")))
 
 
+_RECORD_TYPE_BY_TABLE = {"netsuite_vendorbill": "bill", "netsuite_vendorcredit": "credit"}
+
+
+def _netsuite_record_link(record):
+    """The NetSuite page of the record the "NetSuite record" panel shows
+    (2026-11-12), for the detail title's link -- or None (no record, an
+    unknown table, a missing or non-numeric id), so the title stays plain."""
+    if not record:
+        return None
+    return netsuite_record_url(_RECORD_TYPE_BY_TABLE.get(record.get("_source_table")), record.get("id"))
+
+
 def _writeback_status(statement_id):
     """The NetSuite write-back pill for a statement, or None. Reads the
     latest saved run; any database problem (e.g. the log tables not created
@@ -424,6 +436,8 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         "sort": sort or "",
         "reason_badge": REASON_BADGE,
         "netsuite_record": netsuite_record,
+        # The detail title links to that same record (2026-11-12).
+        "netsuite_url": _netsuite_record_link(netsuite_record),
         "bill_payments": bill_payments,
         "writeback": None if exceptions_only else _writeback_status(statement_id),
         # "View PDF" in the top bar (2026-10-20): opens the statement's PDF
