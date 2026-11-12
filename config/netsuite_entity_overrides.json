@@ -828,5 +828,9 @@
   "TIRE_TOWN_WHOLESALE": {"entity_ids": ["11089"], "note": "Tire Town (11089). 2026-11-11: prod STMT-CBE085E0's 9 invoices are all under 11089; the name lookup returned 75 unrelated 'Tire' vendors."},
   "VAN_BORTEL_FORD_INC.": {"entity_ids": ["626536"], "note": "Van Bortel Ford (626536). 2026-11-11: prod STMT-087A6C59 ties out 39 of 42 under 626536 after the FOW strip; the name lookup returned 42 vendors (other dealers share these numbers)."},
   "MR._GLASS_OF_LONG_ISLAND": {"entity_ids": ["9151"], "note": "Mr. Glass (9151). 2026-11-11: prod STMT-B2E978DF's invoice numbers are 20 of 26 under 9151; the name lookup found no vendor."},
-  "ROHRICH_HONDA": {"entity_ids": ["643941", "640902"], "note": "Rohrich Automotive Group (643941) and Rohrich Honda (640902). 2026-11-11: prod STMT-791877D6 ties out 17 of 20 under 643941 after the HOW strip; name lookup gave 640902 only (8 bills, none on this statement)."}
+  "ROHRICH_HONDA": {"entity_ids": ["643941", "640902"], "note": "Rohrich Automotive Group (643941) and Rohrich Honda (640902). 2026-11-11: prod STMT-791877D6 ties out 17 of 20 under 643941 after the HOW strip; name lookup gave 640902 only (8 bills, none on this statement)."},
+  "1-800-RADIATOR_OF_SYRACUSE": {"entity_ids": ["8214"], "note": "1-800-Radiator (8214). 2026-11-12: prod STMT-17D00055's 4 invoices are all under 8214; the name lookup found no vendor."},
+  "LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU": {"entity_ids": ["379119"], "note": "Subaru of Utica (379119). 2026-11-12: prod STMT-C336D048 ties out 30 of 31 under 379119; the name lookup gave Lithia Toyota (171700)."},
+  "LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU": {"entity_ids": ["379119"], "note": "Subaru of Utica (379119). 2026-11-12: prod STMT-2917E429 (same account, '744-' prefix) ties out 3 of 4 under 379119; the name lookup gave Lithia Toyota (171700)."},
+  "LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD": {"entity_ids": ["518013"], "note": "BMW of Bloomfield (518013). 2026-11-12: prod STMT-887FF185 ties out 3 of 4 under 518013; the name lookup gave Lithia Toyota (171700)."}
 }

@@ -61,12 +61,30 @@ EXTRACTED = {
     "VAN_BORTEL_FORD_INC.": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE", "REFERENCE", "SOURCE"},
     # Prod STMT-B0674DCD: INVOICE NUMBER 132752A is bill 132752A (844.72) under Kia of Abington (159742).
     "ABINGTON_AUTO_PARTS_KIA": {"AMOUNT DUE", "CHARGES", "CREDITS", "DATE", "INVOICE NUMBER", "UNLABELED_TRANSACTION_CODE"},
+    # Prod STMT-01105ED3 (UPPER VALLEY HONDA JASMIN 1026.pdf): CDK layout; DOCUMENT / TRANSACTION is the tranid (credits CM + number), 25 of 26 under Upper Valley Honda (486930).
+    "UPPER_VALLEY_HONDA_(GHNH_INC._DBA_UPPER_VALLEY_HON": {"BALANCE", "DATE", "DOCUMENT / TRANSACTION", "PAYMENTS & CREDITS", "PURCHASES"},
+    # Prod STMT-82437EF2 (MCGEES JASMIN 1026.pdf): DOCUMENT is the tranid, 33 of 35 under McGee Hyundai of Lebanon (677195); 'Last payment ... received' has no document or amount.
+    "MCGEE_HYUNDAI_OF_LEBANON": {"AMOUNT", "DATE", "DESCRIPTION", "DOCUMENT"},
+    # Prod STMT-17D00055 (Statement.pdf): same layout as 1800_RADIATOR; Ref# is the tranid, 4 of 4 under 1-800-Radiator (8214).
+    "1-800-RADIATOR_OF_SYRACUSE": {"Amount", "Balance", "Date", "Description", "Item", "Ref#"},
+    # Prod STMT-C336D048: Lithia Driveway layout; Reference/Invoice is the tranid as printed (165784X1 is its own bill), 30 of 31 under Subaru of Utica (379119). Purchase Location (the rooftop) is left unmapped.
+    "LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU": {"Balance Due", "Date", "Purchase/Payments Amount", "Reference/Invoice", "Transaction Type"},
+    # Prod STMT-2917E429: the same Carbone Utica Subaru account read with its '744-' rooftop prefix; 3 of 4 under Subaru of Utica (379119), the 4th is a payment (OP092926!).
+    "LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU": {"Balance Due", "Date", "Purchase/Payments Amount", "Reference/Invoice", "Transaction Type"},
+    # Prod STMT-887FF185: Lithia Driveway layout; 3 of 4 under BMW of Bloomfield (518013).
+    "LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD": {"Balance Due", "Date", "Purchase/Payments Amount", "Reference/Invoice", "Transaction Type"},
+    # Prod STMT-7E28AD08 (Mastrovito.pdf): same layout as TOWNE_AUTOMOTIVE_GROUP; REFERENCE # is the tranid, 7 of 7 under Mastrovito Hyundai (423136). COMPANY ID / JOURNAL ID left unmapped.
+    "MASTROVITO_HYUNDAI": {"BALANCE DUE ($)", "DATE", "PAYMENTS & CREDITS ($)", "PURCHASES ($)", "REFERENCE #"},
+    # Prod STMT-F20AC4CD (Matthews 11092026.pdf): another name for MATTHEWS_OF_SCHENECTADY_K_INC._/_MATTHEWS_KIA_OF_S; REFERENCE prints K1W + tranid, 5 of 5 under 383462 after the strip.
+    "MATTHEWS_KIA_OF_SCHENECTADY": {"AGE IN DAYS", "AMOUNT", "DATE", "DESCRIPTION", "INVOICE", "REFERENCE", "SOURCE"},
 }
 
 
 # Layouts with one amount column (credits print as negative amounts, or there
 # are none): no payment_amount to map.
 SINGLE_AMOUNT_COLUMN = {"ECS_AUTOMOTIVE_CONCEPTS_LLC.", "TIRE_TOWN_WHOLESALE", "MR._GLASS_OF_LONG_ISLAND",
+                        "MCGEE_HYUNDAI_OF_LEBANON", "1-800-RADIATOR_OF_SYRACUSE", "LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU",
+                        "LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU", "LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD", "MATTHEWS_KIA_OF_SCHENECTADY",
                         "VAN_BORTEL_FORD_INC."}
 
 

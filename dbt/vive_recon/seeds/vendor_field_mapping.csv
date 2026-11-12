@@ -1384,3 +1384,45 @@ ABINGTON_AUTO_PARTS_KIA,UNLABELED_TRANSACTION_CODE,transaction_code,string,v1,1
 ABINGTON_AUTO_PARTS_KIA,CHARGES,charge_amount,decimal,v1,1
 ABINGTON_AUTO_PARTS_KIA,CREDITS,payment_amount,decimal,v1,1
 ABINGTON_AUTO_PARTS_KIA,AMOUNT DUE,amount_remaining,decimal,v1,1
+UPPER_VALLEY_HONDA_(GHNH_INC._DBA_UPPER_VALLEY_HON,DATE,line_date,date,v1,1
+UPPER_VALLEY_HONDA_(GHNH_INC._DBA_UPPER_VALLEY_HON,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+UPPER_VALLEY_HONDA_(GHNH_INC._DBA_UPPER_VALLEY_HON,PURCHASES,charge_amount,decimal,v1,1
+UPPER_VALLEY_HONDA_(GHNH_INC._DBA_UPPER_VALLEY_HON,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+UPPER_VALLEY_HONDA_(GHNH_INC._DBA_UPPER_VALLEY_HON,BALANCE,amount_remaining,decimal,v1,1
+MCGEE_HYUNDAI_OF_LEBANON,DATE,line_date,date,v1,1
+MCGEE_HYUNDAI_OF_LEBANON,DOCUMENT,original_invoice_number,string,v1,1
+MCGEE_HYUNDAI_OF_LEBANON,DESCRIPTION,description_raw,string,v1,1
+MCGEE_HYUNDAI_OF_LEBANON,AMOUNT,charge_amount,decimal,v1,1
+1-800-RADIATOR_OF_SYRACUSE,Date,line_date,date,v1,1
+1-800-RADIATOR_OF_SYRACUSE,Item,transaction_code,string,v1,1
+1-800-RADIATOR_OF_SYRACUSE,Ref#,original_invoice_number,string,v1,1
+1-800-RADIATOR_OF_SYRACUSE,Description,description_raw,string,v1,1
+1-800-RADIATOR_OF_SYRACUSE,Amount,charge_amount,decimal,v1,1
+1-800-RADIATOR_OF_SYRACUSE,Balance,amount_remaining,decimal,v1,1
+LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU,Date,line_date,date,v1,1
+LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU,Transaction Type,transaction_code,string,v1,1
+LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU,Reference/Invoice,original_invoice_number,string,v1,1
+LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU,Purchase/Payments Amount,charge_amount,decimal,v1,1
+LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU,Balance Due,amount_remaining,decimal,v1,1
+LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU,Date,line_date,date,v1,1
+LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU,Transaction Type,transaction_code,string,v1,1
+LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU,Reference/Invoice,original_invoice_number,string,v1,1
+LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU,Purchase/Payments Amount,charge_amount,decimal,v1,1
+LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU,Balance Due,amount_remaining,decimal,v1,1
+LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD,Date,line_date,date,v1,1
+LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD,Transaction Type,transaction_code,string,v1,1
+LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD,Reference/Invoice,original_invoice_number,string,v1,1
+LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD,Purchase/Payments Amount,charge_amount,decimal,v1,1
+LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD,Balance Due,amount_remaining,decimal,v1,1
+MASTROVITO_HYUNDAI,DATE,line_date,date,v1,1
+MASTROVITO_HYUNDAI,REFERENCE #,original_invoice_number,string,v1,1
+MASTROVITO_HYUNDAI,PURCHASES ($),charge_amount,decimal,v1,1
+MASTROVITO_HYUNDAI,PAYMENTS & CREDITS ($),payment_amount,decimal,v1,1
+MASTROVITO_HYUNDAI,BALANCE DUE ($),amount_remaining,decimal,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,DATE,line_date,date,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,SOURCE,transaction_code,string,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,REFERENCE,original_invoice_number,string,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,INVOICE,invoice_number_ref,string,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,DESCRIPTION,description_raw,string,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,AMOUNT,charge_amount,decimal,v1,1
+MATTHEWS_KIA_OF_SCHENECTADY,AGE IN DAYS,age_in_days,integer,v1,1
