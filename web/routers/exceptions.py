@@ -319,6 +319,9 @@ def _statement_pdf_url(statement_id):
     return f"/statements/{statement_id}/{quote(name)}" + ("?edit=1" if sharepoint else "")
 
 
+KEEP_PLACE_COOKIE = "vive_next_exception"
+
+
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
                        filter: str = "all", selected: str = None, statement_id: str = None,
@@ -366,6 +369,12 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         total, resolved = queries.get_exception_counts(statement_id)
 
     selected_exc = None
+    if not selected:
+        # After an action (2026-11-12): the page's script names the exception
+        # to open next -- the same one if it is still open, else the one
+        # below it -- in a short-lived cookie (KEEP_PLACE_COOKIE), so the
+        # list stays where it was instead of jumping back to the first one.
+        selected = request.cookies.get(KEEP_PLACE_COOKIE) or None
     if selected:
         selected_exc = next((e for e in open_list if e["exception_id"] == selected), None)
     if not selected_exc and open_list:
@@ -438,6 +447,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         # Follow-up status (2026-11-11): separate from Completed.
         "follow_up": None if exceptions_only else completion.current_status(statement_id),
         "follow_up_choices": completion.STATUSES,
+        "keep_place_cookie": KEEP_PLACE_COOKIE,
         **sidebar_context(request),
     }
     return render(request, "exceptions_review.html", ctx)

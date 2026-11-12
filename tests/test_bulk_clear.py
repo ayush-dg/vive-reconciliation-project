@@ -122,6 +122,45 @@ class ClearExceptionsBulkTests(unittest.TestCase):
 
 class ReviewPageTests(unittest.TestCase):
 
+    def _page(self, cookie=None, url="/exceptions/Acme?statement_id=S1"):
+        statement = {"statement_id": "S1", "vendor_name": "Acme", "source_file": "s1.pdf"}
+        fns = {**SIDEBAR,
+               "get_statement_by_id": lambda sid: statement,
+               "get_open_exceptions": lambda sid, f=None, s=None: [EXC["E1"], EXC["E2"]],
+               "get_exception_counts": lambda sid: (2, 0),
+               "get_statement_shop": lambda sid: None,
+               "get_manual_matches": lambda sid: [],
+               "get_cleared_exceptions": lambda sid: []}
+        for name, fn in fns.items():
+            mock.patch(f"web.queries.{name}", fn).start()
+        mock.patch("web.routers.exceptions._writeback_status", lambda sid: None).start()
+        mock.patch("web.routers.exceptions._statement_pdf_url", lambda sid: None).start()
+        mock.patch("web.routers.exceptions.shop_options", lambda: []).start()
+        mock.patch("web.statement_completion.history", lambda sid: []).start()
+        mock.patch("web.statement_completion.current_status", lambda sid: None).start()
+        self.addCleanup(mock.patch.stopall)
+        client = _client()
+        if cookie:
+            client.cookies.set(exceptions.KEEP_PLACE_COOKIE, cookie)
+        return client.get(url).text
+
+    def test_after_an_action_the_named_exception_opens(self):
+        # Keep your place (2026-11-12): the cookie names the next exception.
+        self.assertIn('exception-row-wrap active" data-exc-id="E2"', self._page(cookie="E2"))
+
+    def test_without_it_the_first_opens_and_a_link_still_wins(self):
+        self.assertIn('exception-row-wrap active" data-exc-id="E1"', self._page())
+        self.assertIn('exception-row-wrap active" data-exc-id="E1"',
+                      self._page(cookie="E2", url="/exceptions/Acme?statement_id=S1&selected=E1"))
+
+    def test_a_stale_id_falls_back_to_the_first(self):
+        self.assertIn('exception-row-wrap active" data-exc-id="E1"', self._page(cookie="GONE"))
+
+    def test_the_page_remembers_its_place(self):
+        page = self._page()
+        self.assertIn("vive-review-place", page)
+        self.assertIn(exceptions.KEEP_PLACE_COOKIE, page)
+
     def test_checkboxes_select_all_and_dialog(self):
         statement = {"statement_id": "S1", "vendor_name": "Acme", "source_file": "s1.pdf"}
         fns = {**SIDEBAR,

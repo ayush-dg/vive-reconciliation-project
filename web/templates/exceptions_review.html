@@ -47,7 +47,7 @@
       <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
       <input type="hidden" name="filter" value="{{ filter }}">
       <input type="hidden" name="sort" value="{{ sort }}">
-      <select name="status" id="followup-select" class="ns-sr-only" tabindex="-1" aria-hidden="true" onchange="this.form.submit()">
+      <select name="status" id="followup-select" class="ns-sr-only" tabindex="-1" aria-hidden="true" onchange="if (this.form.requestSubmit) { this.form.requestSubmit(); } else { this.form.submit(); }">
         {% if not follow_up %}<option value="" hidden selected>Set follow-up</option>{% endif %}
         {% for key, label in (follow_up_choices | default({}, true)).items() %}
         <option value="{{ key }}" {{ 'selected' if follow_up and follow_up.status == key }}>{{ label }}</option>
@@ -130,7 +130,7 @@
 
     <div class="list-scroll">
       {% for exc in exceptions %}
-      <div class="exception-row-wrap{{ ' active' if selected and selected.exception_id == exc.exception_id }}">
+      <div class="exception-row-wrap{{ ' active' if selected and selected.exception_id == exc.exception_id }}" data-exc-id="{{ exc.exception_id }}">
       {% if bulk_on %}
       <label class="bulk-pick" title="Select invoice {{ exc.invoice_number or 'Unknown' }}">
         <input type="checkbox" class="bulk-check" value="{{ exc.exception_id }}"
@@ -633,6 +633,86 @@
     btn.textContent = "Clearing\u2026";
   });
   refresh();
+})();
+</script>
+{% endif %}
+{% if statement and statement.statement_id %}
+<script>
+/* Keep your place after an action or after opening another exception from
+   the list (2026-11-12). Every action on this page
+   (Clear, Accept as match, Undo, Mark complete, Follow-up, bulk clear)
+   reloads it. Just before the form is sent, remember how far the page, the
+   exception list and the details panel were scrolled, and which exception to
+   open next: the same one if it stays open, else the next one down (or the
+   one above, at the end of the list). The server reads that from a cookie
+   (routers/exceptions.py KEEP_PLACE_COOKIE); this script puts the scroll back. */
+(function () {
+  var KEY = "vive-review-place";
+  var here = location.pathname + "|{{ statement.statement_id }}";
+  var list = document.querySelector(".list-scroll");
+  var detail = document.querySelector(".detail-body");
+
+  function rowIds() {
+    return Array.prototype.map.call(document.querySelectorAll(".exception-row-wrap[data-exc-id]"),
+                                    function (r) { return r.dataset.excId; });
+  }
+  function nextOpen(form) {
+    var ids = rowIds();
+    var activeRow = document.querySelector(".exception-row-wrap.active[data-exc-id]");
+    var active = activeRow ? activeRow.dataset.excId : "";
+    var action = form.getAttribute("action") || "";
+    var leaving = {};
+    if (/\/(clear|accept-match)$/.test(action) && active) { leaving[active] = true; }
+    if (/\/clear-bulk$/.test(action)) {
+      document.querySelectorAll(".bulk-check:checked").forEach(function (c) { leaving[c.value] = true; });
+    }
+    if (active && !leaving[active]) { return active; }
+    var at = Math.max(ids.indexOf(active), 0);
+    for (var i = at; i < ids.length; i++) { if (!leaving[ids[i]]) { return ids[i]; } }
+    for (var j = at - 1; j >= 0; j--) { if (!leaving[ids[j]]) { return ids[j]; } }
+    return "";
+  }
+
+  function remember(keepDetail) {
+    try {
+      sessionStorage.setItem(KEY, JSON.stringify({
+        here: here, at: Date.now(), page: window.scrollY,
+        list: list ? list.scrollTop : 0, detail: keepDetail && detail ? detail.scrollTop : 0
+      }));
+    } catch (e) { /* private mode: the page just opens at the top */ }
+  }
+
+  document.addEventListener("submit", function (ev) {
+    var form = ev.target;
+    if ((form.getAttribute("method") || "").toLowerCase() !== "post" || ev.defaultPrevented) { return; }
+    var next = nextOpen(form);
+    document.cookie = "{{ keep_place_cookie }}=" + encodeURIComponent(next) + "; path=/; max-age=60; SameSite=Lax";
+    remember(true);
+  });
+  // Opening another exception from the list (a link, so a reload): keep the
+  // list and page where they are; the new exception's details start at the top.
+  if (list) {
+    list.addEventListener("click", function (ev) {
+      var link = ev.target.closest("a.exception-row");
+      if (link && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.button === 0) { remember(false); }
+    });
+  }
+
+  // Back from an action: used once, then forgotten.
+  document.cookie = "{{ keep_place_cookie }}=; path=/; max-age=0; SameSite=Lax";
+  var saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch (e) { saved = null; }
+  if (!saved || saved.here !== here || Date.now() - saved.at > 60000) { return; }
+  window.scrollTo(0, saved.page || 0);
+  if (list) { list.scrollTop = saved.list || 0; }
+  if (detail) { detail.scrollTop = saved.detail || 0; }
+  // Rows above may have left the list: keep the open exception in view.
+  var open = document.querySelector(".exception-row-wrap.active");
+  if (open && list) {
+    var top = open.offsetTop - list.offsetTop, bottom = top + open.offsetHeight;
+    if (top < list.scrollTop) { list.scrollTop = top; }
+    else if (bottom > list.scrollTop + list.clientHeight) { list.scrollTop = bottom - list.clientHeight; }
+  }
 })();
 </script>
 {% endif %}
