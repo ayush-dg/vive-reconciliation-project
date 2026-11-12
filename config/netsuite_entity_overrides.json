@@ -212,8 +212,8 @@
     "note": "MAINE OXY (4921). Derived 2026-10-06 by tranid trace of 3 stored statements: 6 of 6 lines tie out verbatim."
   },
   "MCGOVERN": {
-    "entity_ids": ["12208", "9868", "127885", "101182"],
-    "note": "McGovern rooftops: Chrysler Jeep Dodge Ram (12208), Hyundai (9868), BMW of Shrewsbury (127885), Buick GMC (101182). Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 11 of 11 lines tie out across ALL NetSuite entities only under these four. McGovern has ~13 rooftop records (Ford, Subaru, Toyota, Volvo, Jaguar Land Rover, ...) -- add one only on a confirmed hit."
+    "entity_ids": ["12208", "9868", "127885", "101182", "501578"],
+    "note": "McGovern Toyota of Concord (501578) added 2026-11-12 from prod STMT-5B43B7E7 / STMT-465EFB7C / STMT-7DC30D18 (Above All, customerinvoice.pdf): 94 of 96 open lines tie out verbatim under 501578, none under the other four. McGovern rooftops: Chrysler Jeep Dodge Ram (12208), Hyundai (9868), BMW of Shrewsbury (127885), Buick GMC (101182). Derived 2026-10-06 by tranid trace of 4 stored statements (CDK layout): 11 of 11 lines tie out across ALL NetSuite entities only under these four. McGovern has ~13 rooftop records (Ford, Subaru, Toyota, Volvo, Jaguar Land Rover, ...) -- add one only on a confirmed hit."
   },
   "ADHESIVE_TEMPLATES": {
     "entity_ids": ["43045"],
@@ -568,8 +568,8 @@
     "note": "Yerty Auto Service & Parts (397880). Derived 2026-10-06 by automated tranid trace of the stored statement(s): 3 of 4 lines tie out verbatim across ALL NetSuite entities."
   },
   "LIA_AUTO_GROUP": {
-    "entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854", "46057"],
-    "note": "Lia Honda of Brewster (46057) added 2026-10-13 from prod Lia Group Prestige 093026.pdf (STMT-64B08361): its HB-suffixed invoices are stored in NetSuite under 46057, mostly lowercase (151605hb) -- matching compares case-insensitively. Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
+    "entity_ids": ["180149", "65555", "541681", "103286", "102680", "67854", "46057", "66690", "271415", "186000", "62211", "138033", "180581"],
+    "note": "Six rooftops added 2026-11-12 from 14 prod Lia Auto Group statements that matched 0 (customerinvoice.pdf, incl. Jakes): the invoice-number suffix names the rooftop and each number ties out verbatim only under it -- NC=Lia Nissan (66690), JS=Lia Chrysler Jeep Dodge Ram (271415), HY=Lia Hyundai of Albany (186000), HK=Lia Honda Of Kingston (62211), TC=Lia Toyota of Colonie (138033), NS=Lia Nissan of Saratoga (180581); 198 open lines tie out. Lia Honda of Brewster (46057) added 2026-10-13 from prod Lia Group Prestige 093026.pdf (STMT-64B08361): its HB-suffixed invoices are stored in NetSuite under 46057, mostly lowercase (151605hb) -- matching compares case-insensitively. Lia Hyundai of Enfield (103286), Lia Volkswagen (102680), Lia Honda Enfield (67854) added 2026-10-13 from prod statements LIABP0926 / LIANatick0926 / Lia VW / Lia Honda (same Lia layout; 41 of 48 lines tie out under these). Lia Hyundai of Hartford (541681) added 2026-10-13: its prod statement (Lia Hyundai.pdf, STMT-760ABE07) ties out line for line under 541681 (108632HH, 108783HH, ...); same Lia statement layout. Lia Honda of Albany (180149), Lia Toyota of Wilbraham (65555). Derived 2026-10-07 by tranid trace of 3 statements (extract_lia + one stored run): 61 of 62 lines tie out verbatim (120683TW, credits CM120525TW). Lia has more rooftop records -- add one only on a confirmed hit."
   },
   "WILBERTS": {
     "entity_ids": ["240269", "346384"],
