@@ -31,14 +31,14 @@ from web.deps import require_login, templates
 from web.routers import exceptions
 from web.routers.exceptions import REASON_BADGE, SEARCHABLE_REASONS
 
-STMT = {"statement_id": "STMT-BC", "vendor_id": "COLUMBIA_FORD", "vendor_name": "Columbia Ford",
+STMT = {"statement_id": "STMT-BC", "vendor_id": "TEST_VENDOR", "vendor_name": "Test Vendor",
         "statement_period": "2026-10"}
-BILL = {"record_type": "bill", "id": 1, "tranid": "40693015", "amount": 120.0}
-CREDIT = {"record_type": "credit", "id": 2, "tranid": "CM77", "amount": 15.0}
+BILL = {"record_type": "bill", "id": 1, "tranid": "INV-1001", "amount": 120.0}
+CREDIT = {"record_type": "credit", "id": 2, "tranid": "CM-1005", "amount": 15.0}
 
 
 def _exc(eid, inv, reason, amount):
-    return {"exception_id": eid, "statement_id": "STMT-BC", "invoice_number": inv, "vendor_id": "COLUMBIA_FORD",
+    return {"exception_id": eid, "statement_id": "STMT-BC", "invoice_number": inv, "vendor_id": "TEST_VENDOR",
             "exception_reason": reason, "statement_amount": amount, "erp_amount": None,
             "match_confidence": None, "date_raised": None, "days_open": None, "invoice_date": None}
 
@@ -46,19 +46,19 @@ def _exc(eid, inv, reason, amount):
 # One exception per rule. E-PAY is a PAYMENT line with no NetSuite record:
 # nothing says bill or credit, so no label.
 EXCS = [
-    _exc("E-MISS", "40693015", "Not Found in NetSuite", 120.0),     # CHARGE line
-    _exc("E-CRL", "CM100", "Not Found in NetSuite", 42.5),           # CREDIT line (amount stored abs)
-    _exc("E-NEG", "OLD9", "Not Found in NetSuite", -8.0),            # no recon row, negative amount
-    _exc("E-PAID", "452527G", "Appears to be Paid", 298.47),         # line type unknown, NetSuite bill
-    _exc("E-NSCR", "CM77", "Amount Mismatch", 16.0),                 # line type unknown, NetSuite credit
-    _exc("E-PAY", "PMT1", "Not Found in NetSuite", 60.0),            # PAYMENT, no record
+    _exc("E-MISS", "INV-1001", "Not Found in NetSuite", 120.0),     # CHARGE line
+    _exc("E-CRL", "CM-1002", "Not Found in NetSuite", 42.5),           # CREDIT line (amount stored abs)
+    _exc("E-NEG", "INV-1003", "Not Found in NetSuite", -8.0),            # no recon row, negative amount
+    _exc("E-PAID", "INV-1004", "Appears to be Paid", 298.47),         # line type unknown, NetSuite bill
+    _exc("E-NSCR", "CM-1005", "Amount Mismatch", 16.0),                 # line type unknown, NetSuite credit
+    _exc("E-PAY", "PMT-1006", "Not Found in NetSuite", 60.0),            # PAYMENT, no record
 ]
 LINES = [
-    {"statement_line_id": "L1", "line_number": 1, "invoice_number": "40693015", "charge_amount": 120.0},
-    {"statement_line_id": "L2", "line_number": 2, "invoice_number": "CM100", "charge_amount": -42.5},
-    {"statement_line_id": "L3", "line_number": 3, "invoice_number": "452527G", "charge_amount": 298.47},
-    {"statement_line_id": "L4", "line_number": 4, "invoice_number": "CM77", "charge_amount": -16.0},
-    {"statement_line_id": "L5", "line_number": 5, "invoice_number": "PMT1", "payment_amount": 60.0},
+    {"statement_line_id": "L1", "line_number": 1, "invoice_number": "INV-1001", "charge_amount": 120.0},
+    {"statement_line_id": "L2", "line_number": 2, "invoice_number": "CM-1002", "charge_amount": -42.5},
+    {"statement_line_id": "L3", "line_number": 3, "invoice_number": "INV-1004", "charge_amount": 298.47},
+    {"statement_line_id": "L4", "line_number": 4, "invoice_number": "CM-1005", "charge_amount": -16.0},
+    {"statement_line_id": "L5", "line_number": 5, "invoice_number": "PMT-1006", "payment_amount": 60.0},
 ]
 RESULTS = {
     "L1": {"status": "Not found in NetSuite", "exception_id": "E-MISS", "statement_amount": 120.0},
@@ -167,7 +167,7 @@ def _client():
     return TestClient(app)
 
 
-def _page(kinds, url="/exceptions/Columbia%20Ford?statement_id=STMT-BC", rows=EXCS, counts=(9, 3)):
+def _page(kinds, url="/exceptions/Test%20Vendor?statement_id=STMT-BC", rows=EXCS, counts=(9, 3)):
     """The review page with every query stubbed; returns (html, get_open_exceptions mock)."""
     patches = [
         mock.patch.object(exceptions.queries, "get_statement_by_id", return_value=dict(STMT)),
@@ -208,16 +208,16 @@ class ReviewPageTests(unittest.TestCase):
     def test_rows_carry_the_label_in_brackets(self):
         html, _ = _page(lambda rows: EXPECTED)
         lines = dict(zip([eid for eid, _ in _list_rows(html)], _invoice_lines(html)))
-        self.assertEqual(lines["E-MISS"], 'Invoice #40693015 <span class="einv-kind">(Bill)</span>')
-        self.assertEqual(lines["E-CRL"], 'Invoice #CM100 <span class="einv-kind">(Credit)</span>')
-        self.assertEqual(lines["E-NEG"], 'Invoice #OLD9 <span class="einv-kind">(Credit)</span>')
-        self.assertEqual(lines["E-PAID"], 'Invoice #452527G <span class="einv-kind">(Bill)</span>')
-        self.assertEqual(lines["E-NSCR"], 'Invoice #CM77 <span class="einv-kind">(Credit)</span>')
-        self.assertEqual(lines["E-PAY"], "Invoice #PMT1")
+        self.assertEqual(lines["E-MISS"], 'Invoice #INV-1001 <span class="einv-kind">(Bill)</span>')
+        self.assertEqual(lines["E-CRL"], 'Invoice #CM-1002 <span class="einv-kind">(Credit)</span>')
+        self.assertEqual(lines["E-NEG"], 'Invoice #INV-1003 <span class="einv-kind">(Credit)</span>')
+        self.assertEqual(lines["E-PAID"], 'Invoice #INV-1004 <span class="einv-kind">(Bill)</span>')
+        self.assertEqual(lines["E-NSCR"], 'Invoice #CM-1005 <span class="einv-kind">(Credit)</span>')
+        self.assertEqual(lines["E-PAY"], "Invoice #PMT-1006")
 
     def test_the_detail_title_shows_it_too(self):
         html, _ = _page(lambda rows: EXPECTED)
-        self.assertIn('<h2>Invoice #40693015 <span class="einv-kind">(Bill)</span></h2>', html)
+        self.assertIn('<h2>Invoice #INV-1001 <span class="einv-kind">(Bill)</span></h2>', html)
 
     def test_the_label_is_escaped(self):
         html, _ = _page(lambda rows: {"E-MISS": "<b>x</b>"})
@@ -230,7 +230,7 @@ class ReviewPageTests(unittest.TestCase):
             html, _ = _page(queries.get_exception_kinds)
         self.assertEqual(len(_list_rows(html)), len(EXCS))
         self.assertEqual(html.count('class="einv-kind"'), 1)  # only the sign rule is left
-        self.assertIn('Invoice #OLD9 <span class="einv-kind">(Credit)</span>', html)
+        self.assertIn('Invoice #INV-1003 <span class="einv-kind">(Credit)</span>', html)
 
     def test_order_counts_badges_and_amounts_are_unchanged(self):
         with_label, open_a = _page(lambda rows: EXPECTED)
@@ -243,10 +243,10 @@ class ReviewPageTests(unittest.TestCase):
 
     def test_filter_and_sort_are_passed_through_unchanged(self):
         paid = [e for e in EXCS if e["exception_reason"] == "Appears to be Paid"]
-        html, open_exc = _page(lambda rows: EXPECTED, url="/exceptions/Columbia%20Ford?statement_id=STMT-BC"
+        html, open_exc = _page(lambda rows: EXPECTED, url="/exceptions/Test%20Vendor?statement_id=STMT-BC"
                                "&filter=paid&sort=amount", rows=paid)
         open_exc.assert_called_once_with("STMT-BC", "paid", "amount")
-        self.assertEqual(_invoice_lines(html), ['Invoice #452527G <span class="einv-kind">(Bill)</span>'])
+        self.assertEqual(_invoice_lines(html), ['Invoice #INV-1004 <span class="einv-kind">(Bill)</span>'])
 
     def test_one_lookup_per_page(self):
         lookup = mock.Mock(return_value=EXPECTED)
@@ -426,7 +426,7 @@ class TemplateTests(unittest.TestCase):
             not_found=False, statement={"statement_id": "S"}, exceptions=[dict(EXCS[0])], selected=None,
             total=1, resolved=0, progress_pct=0, filter="all", reason_badge=REASON_BADGE,
             searchable_reasons=SEARCHABLE_REASONS, follow_up_choices={}, user="t")
-        self.assertEqual(_invoice_lines(html), ["Invoice #40693015"])
+        self.assertEqual(_invoice_lines(html), ["Invoice #INV-1001"])
 
 
 if __name__ == "__main__":
