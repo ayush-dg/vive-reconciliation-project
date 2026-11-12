@@ -325,9 +325,9 @@ class TestReviewPageCarriesSort(unittest.TestCase):
 
     def test_both_post_forms_carry_sort(self):
         # Accept as match and Clear exception (2026-11-04) -- Escalate and Accept/Reject were removed (2026-10-28) --
-        # plus Mark complete and Set follow-up (2026-11-11).
+        # plus Mark complete and Set follow-up (2026-11-11), and bulk clear (2026-11-12).
         html = _render_review(sort="amount")
-        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 4)
+        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 5)
 
     def test_modal_still_has_no_form(self):
         html = _render_review()

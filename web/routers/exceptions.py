@@ -641,6 +641,48 @@ def exceptions_clear(vendor_name: str, request: Request, user: str = Depends(req
                     f"NetSuite: {without_sandbox(netsuite.get('status') or 'not written')}.")
 
 
+@router.post("/exceptions/{vendor_name}/clear-bulk")
+def exceptions_clear_bulk(vendor_name: str, request: Request, user: str = Depends(require_login),
+                          exception_ids: List[str] = Form([]), note: str = Form(""),
+                          filter: str = Form("all"), statement_id: str = Form(""), sort: str = Form("")):
+    """Bulk "Clear exception" (2026-11-12): the exceptions ticked on the
+    review page, one shared note (required), no limit. Each is cleared the
+    same way as one at a time (queries.clear_exceptions_bulk()), so each
+    keeps its own who/when/note and its own Undo. Only OPEN exceptions of
+    this statement are cleared; the rest are counted as skipped.
+    Registered ahead of the {vendor_name:path} POST route below, like clear."""
+    vendor_name = unquote(vendor_name)
+    back = f"/exceptions/{quote(vendor_name, safe='')}{_filter_redirect_suffix(filter, statement_id, sort)}"
+    joiner = "&" if "?" in back else "?"
+
+    def _message(text):
+        return RedirectResponse(f"{back}{joiner}{urlencode({'match_msg': text})}", status_code=303)
+
+    note = note.strip()
+    wanted = list(dict.fromkeys(i for i in exception_ids if i))
+    if not wanted:
+        return _message("Nothing cleared: no exceptions were selected.")
+    if not note:
+        return _message("Not cleared: add a note saying why these exceptions need no action. Nothing was changed.")
+    to_clear, skipped = [], 0
+    for exception_id in wanted:
+        exception = queries.get_recon_exception(exception_id)
+        if (not exception or exception.get("exception_status") != "OPEN"
+                or (statement_id and exception.get("statement_id") != statement_id)):
+            skipped += 1
+            continue
+        to_clear.append(exception)
+    results = queries.clear_exceptions_bulk(to_clear, vendor_name, user, note[:2000]) if to_clear else []
+    statuses = [without_sandbox((r or {}).get("status") or "not written") for r in results]
+    parts = [f"{len(to_clear)} exception{'s' if len(to_clear) != 1 else ''} cleared."]
+    if statuses:
+        counts = Counter(statuses)
+        parts.append("NetSuite: " + ", ".join(f"{n} {status}" for status, n in counts.most_common()) + ".")
+    if skipped:
+        parts.append(f"{skipped} skipped (already resolved, or not on this statement).")
+    return _message(" ".join(parts))
+
+
 @router.post("/exceptions/{vendor_name}/undo-clear")
 def exceptions_undo_clear(vendor_name: str, request: Request, user: str = Depends(require_login),
                           exception_id: str = Form(...), statement_id: str = Form(...),

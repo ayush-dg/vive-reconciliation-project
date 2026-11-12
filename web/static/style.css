@@ -1245,3 +1245,22 @@ select.filter-chip { flex: 0 1 200px; min-width: 120px; text-overflow: ellipsis;
 .stage-tag .icon { width: 12px; height: 12px; }
 .stage-tag.stage-new { background: color-mix(in srgb, var(--navy-2) 10%, var(--surface)); color: var(--navy-2); border: 1px solid var(--navy-2); }
 .stage-tag.stage-progress { background: var(--warning-tint); color: var(--warning); border: 1px solid var(--warning); }
+
+/* Bulk clear on the review page (2026-11-12). A plain row under the
+   progress count; the checkbox sits inside each exception row and shares its
+   hover / selected highlight. */
+.exc-pick-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); min-height: 30px; white-space: nowrap; }
+.exc-pick-bar [hidden] { display: none !important; }
+.bulk-all { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; margin: 0; }
+.bulk-all input, .bulk-pick input { width: 15px; height: 15px; margin: 0; accent-color: var(--navy-2); cursor: pointer; }
+.bulk-all .is-on { color: var(--navy-2); font-weight: 700; }
+.exc-pick-bar .bulk-clear-btn { width: auto; margin: 0 0 0 auto; padding: 5px 12px; font-size: 12.5px; line-height: 1.3; white-space: nowrap; flex: none; }
+.bulk-cancel { background: none; border: 0; padding: 0; color: var(--text-muted); font-size: 12.5px; text-decoration: underline; cursor: pointer; flex: none; white-space: nowrap; width: auto; margin: 0; }
+.exception-row-wrap { display: flex; align-items: flex-start; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }
+.exception-row-wrap:hover { background: var(--steel-tint); }
+.exception-row-wrap.active, .exception-row-wrap.is-picked { background: var(--navy-tint); }
+.exception-row-wrap.active { border-left-color: var(--navy-2); }
+.exception-row-wrap .exception-row { flex: 1; min-width: 0; border-bottom: 0; border-left: 0; padding-left: 10px; background: transparent; }
+.bulk-pick { display: flex; padding: 16px 0 0 15px; margin: 0; cursor: pointer; }
+.bulk-list { max-height: 220px; overflow: auto; margin: 6px 0 12px; padding-left: 18px; font-size: 13px; }
+.bulk-list li { margin: 2px 0; font-family: var(--font-mono); }
