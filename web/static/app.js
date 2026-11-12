@@ -9,6 +9,69 @@
   window.addEventListener("resize", setTopbarHeight);
 })();
 
+// "Find in NetSuite" column sorting (2026-11-12, UAT 23): the pure part,
+// outside the page code so it can be checked on its own. It only reorders
+// the rows the server already sent (at most 100) -- no new search.
+var nsSort = (function () {
+  function blank(value, type) {
+    if (value === null || value === undefined || String(value).trim() === "") return true;
+    return type === "number" && isNaN(parseFloat(value));
+  }
+
+  function compareText(a, b) {
+    const x = String(a).toLowerCase();
+    const y = String(b).toLowerCase();
+    return x < y ? -1 : (x > y ? 1 : 0);
+  }
+
+  function compareDigits(a, b) {
+    // Digit runs compared as numbers of any length: "10" after "9".
+    const x = a.replace(/^0+/, "");
+    const y = b.replace(/^0+/, "");
+    return x.length !== y.length ? x.length - y.length : compareText(x, y);
+  }
+
+  // Natural order, case-insensitive: INV-2 before INV-10.
+  function compareNatural(a, b) {
+    const x = String(a).toLowerCase().match(/\d+|\D+/g) || [];
+    const y = String(b).toLowerCase().match(/\d+|\D+/g) || [];
+    for (let i = 0; i < Math.min(x.length, y.length); i++) {
+      const digits = /^\d/.test(x[i]) && /^\d/.test(y[i]);
+      const c = digits ? compareDigits(x[i], y[i]) : compareText(x[i], y[i]);
+      if (c) return c;
+    }
+    return x.length - y.length || compareText(a, b);
+  }
+
+  function compareNumber(a, b) { return parseFloat(a) - parseFloat(b); }
+
+  const COMPARE = { text: compareText, natural: compareNatural, number: compareNumber };
+
+  // items: [{value, index}], index = the server's order. Returns a new,
+  // sorted array: empty values last in both directions, ties (and
+  // direction "none") in the server's order, so the sort is stable.
+  function order(items, type, direction) {
+    const byIndex = function (a, b) { return a.index - b.index; };
+    if (direction !== "ascending" && direction !== "descending") return items.slice().sort(byIndex);
+    const sign = direction === "descending" ? -1 : 1;
+    const cmp = COMPARE[type] || compareText;
+    return items.slice().sort(function (a, b) {
+      const ea = blank(a.value, type);
+      const eb = blank(b.value, type);
+      if (ea !== eb) return ea ? 1 : -1;
+      return (ea ? 0 : sign * cmp(a.value, b.value)) || byIndex(a, b);
+    });
+  }
+
+  // Click cycle: ascending, descending, back to the server's order.
+  function nextDirection(current) {
+    return current === "ascending" ? "descending" : (current === "descending" ? "none" : "ascending");
+  }
+
+  return { compareText: compareText, compareNatural: compareNatural, compareNumber: compareNumber,
+           order: order, nextDirection: nextDirection };
+})();
+
 // Upload page: list every picked file in the file-card (multiple files are
 // supported), and show a brief "Queuing..." overlay while the upload
 // request is in flight — it returns as soon as files are saved and queued,
@@ -487,6 +550,33 @@ document.addEventListener("DOMContentLoaded", function () {
         });
       });
     }
+
+    // Sortable headers (UAT 23). One delegated listener, since the results
+    // table is replaced on every search (and so starts unsorted again).
+    // A result row and its details row move together; moving rows keeps
+    // their ticks, hidden "already matched" state and open details.
+    function sortResults(btn) {
+      const th = btn.closest("th");
+      const table = th.closest("table");
+      const tbody = table.tBodies[0];
+      const col = Array.prototype.indexOf.call(th.parentNode.children, th);
+      const direction = nsSort.nextDirection(th.getAttribute("aria-sort"));
+      table.querySelectorAll("th[aria-sort]").forEach(function (other) { other.setAttribute("aria-sort", "none"); });
+      th.setAttribute("aria-sort", direction);
+      const items = Array.from(tbody.querySelectorAll("tr.ns-modal-row")).map(function (tr) {
+        return { tr: tr, value: tr.cells[col].dataset.sortValue,
+                 index: parseInt(tr.dataset.rowId.replace("nsrow-", ""), 10) };
+      });
+      nsSort.order(items, btn.dataset.sortType, direction).forEach(function (item) {
+        tbody.appendChild(item.tr);
+        const details = document.getElementById(item.tr.dataset.rowId + "-details");
+        if (details) { tbody.appendChild(details); }
+      });
+    }
+    nsResults.addEventListener("click", function (ev) {
+      const btn = ev.target.closest("button.ns-sort");
+      if (btn) { sortResults(btn); }
+    });
 
     // --- filter wiring -----------------------------------------------
     let invoiceDebounce = null;

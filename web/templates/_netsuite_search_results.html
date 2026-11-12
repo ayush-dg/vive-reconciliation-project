@@ -56,10 +56,13 @@
   <thead>
     <tr>
       <th class="ns-col-pick"><span class="ns-sr-only">Pick</span></th>
-      <th>Vendor</th>
-      <th>Bill #</th>
-      <th>Status</th>
-      <th class="ns-col-amount">Amount</th>
+      {# Sortable headers (2026-11-12, UAT 23): static/app.js sorts the rows
+         shown here in the browser by each cell's data-sort-value; a new
+         search starts in the server's order again. #}
+      <th aria-sort="none"><button type="button" class="ns-sort" data-sort="vendor" data-sort-type="text">Vendor<span class="ns-sort-arrow" aria-hidden="true"></span></button></th>
+      <th aria-sort="none"><button type="button" class="ns-sort" data-sort="bill" data-sort-type="natural">Bill #<span class="ns-sort-arrow" aria-hidden="true"></span></button></th>
+      <th aria-sort="none"><button type="button" class="ns-sort" data-sort="status" data-sort-type="text">Status<span class="ns-sort-arrow" aria-hidden="true"></span></button></th>
+      <th class="ns-col-amount" aria-sort="none"><button type="button" class="ns-sort" data-sort="amount" data-sort-type="number">Amount<span class="ns-sort-arrow" aria-hidden="true"></span></button></th>
       <th class="ns-col-toggle"><span class="ns-sr-only">Details</span></th>
     </tr>
   </thead>
@@ -78,8 +81,8 @@
                data-date="{{ row.trandate_display or row.trandate or '' }}" data-status="{{ row.status_label or '' }}">
         {% endif %}
       </td>
-      <td class="ns-cell-vendor">{{ row.vendor_name }}</td>
-      <td>
+      <td class="ns-cell-vendor" data-sort-value="{{ '' if row.vendor_name in (none, '—') else row.vendor_name }}">{{ row.vendor_name }}</td>
+      <td data-sort-value="{{ row.tranid or '' }}">
         {# The number opens the record in NetSuite, in a new tab (2026-11-03). #}
         {% set ns_url = netsuite_record_url(row.record_type, row.internal_id) if row.tranid else None %}
         {% if ns_url %}
@@ -103,11 +106,11 @@
           {%- if row.duedate_display %} · Due {{ row.duedate_display }}{% endif %}
         </div>
       </td>
-      <td>
+      <td data-sort-value="{{ row.status_label or '' }}">
         {% set st = row.status_label %}
         <span class="ns-pill {{ 'ns-pill-open' if st == 'Open' else ('ns-pill-paid' if st in ('Paid In Full', 'Fully Applied') else 'ns-pill-other') }}">{{ st }}</span>
       </td>
-      <td class="ns-col-amount ns-cell-amount">{{ row.total | money }}</td>
+      <td class="ns-col-amount ns-cell-amount" data-sort-value="{{ '%.2f' | format(row.total) if row.total is not none else '' }}">{{ row.total | money }}</td>
       <td class="ns-col-toggle">
         <button type="button" class="ns-details-btn" aria-expanded="false"
                 aria-controls="{{ rid }}-details" title="Show details">
@@ -131,6 +134,6 @@
 </table>
 
 {% if result.truncated %}
-<div class="ns-modal-truncated">Showing first {{ result.row_count }} — narrow your filters.</div>
+<div class="ns-modal-truncated">Showing first {{ result.row_count }} — narrow your filters. Sorting a column reorders only these {{ result.row_count }}.</div>
 {% endif %}
 {% endif %}
