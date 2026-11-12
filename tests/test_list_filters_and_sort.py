@@ -324,9 +324,10 @@ class TestReviewPageCarriesSort(unittest.TestCase):
         self.assertIn('class="filter-tab ">Invoice #', html)
 
     def test_both_post_forms_carry_sort(self):
-        # Accept as match and Clear exception (2026-11-04) -- Escalate and Accept/Reject were removed (2026-10-28).
+        # Accept as match and Clear exception (2026-11-04) -- Escalate and Accept/Reject were removed (2026-10-28) --
+        # plus Mark complete and Set follow-up (2026-11-11).
         html = _render_review(sort="amount")
-        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 2)
+        self.assertEqual(html.count('<input type="hidden" name="sort" value="amount">'), 4)
 
     def test_modal_still_has_no_form(self):
         html = _render_review()
@@ -415,7 +416,7 @@ class TestHomeRoute(unittest.TestCase):
     def setUp(self):
         self.calls = []
 
-        def get_home_dashboard(window=None, status="all", period=None, limit=10):
+        def get_home_dashboard(window=None, status="all", period=None, limit=10, scope=None):
             self.calls.append((window.range, status, period, limit))
             return {
                 "kpis": {"total_invoices": 5556, "auto_reconciled": 5179, "open_exceptions": 0,

@@ -283,6 +283,73 @@ def _settle_unmatched_lines(decisions: list, lines: list) -> None:
                      note=f"payment/reversal of invoice {item.get('invoice_number')}'s charge -- set aside, not an exception")
 
 
+def _letter_prefix_enabled() -> bool:
+    """The letter-prefix retry (2026-11-12, _letter_prefix_match()). On by
+    default; MATCHING_LETTER_PREFIX=false turns it off."""
+    return os.getenv("MATCHING_LETTER_PREFIX", "true").strip().lower() != "false"
+
+
+# Letter-prefix retry (2026-11-12): some shops' statements print a letter
+# prefix on the invoice number and NetSuite holds it without (Rohrich
+# Cadillac CDW821003 -> 821003), or the other way round (DeNooyer 275700 ->
+# SS#275700), or with other spacing (Astech SIN12701265 -> SIN 12701265).
+# 1-4 letters, then an optional '-', '#' or space, then the number (which
+# must start with a digit).
+_LETTER_PREFIX_RE = re.compile(r"^([A-Za-z]{1,4})[-#\s]?(\d[\w\-/.]*)$")
+LETTER_PREFIX_RULE = "letter prefix ignored"
+
+
+def _split_letter_prefix(number):
+    """(LETTERS, rest) -- rest lowercased; LETTERS '' when there are none."""
+    text = str(number or "").strip()
+    found = _LETTER_PREFIX_RE.match(text)
+    return (found.group(1).upper(), found.group(2).lower()) if found else ("", text.lower())
+
+
+def _letter_prefix_match(candidates, inv: str, stmt_amount):
+    """The one NetSuite BILL whose number differs from the statement's only
+    by a letter prefix, at the exact amount -- (tranid_lower, total) -- or
+    None. Tried only after every other rule missed (dry run on prod
+    2026-11-12: 60 such lines, mostly Rohrich Cadillac). `candidates` is
+    the vendor's own bills (its entity ids only), so another vendor's
+    invoice can never match. Never:
+      - a credit memo line (CM...) -- a full return has the bill's number and
+        amount, but must match a NetSuite credit, not the bill (34 dry-run
+        lines would have been wrong);
+      - letters that differ on each side (Keystone BANC8215 vs BABC8215) --
+        a different branch or document;
+      - fewer than 4 digits once the letters are gone;
+      - more than one qualifying NetSuite number."""
+    if stmt_amount is None:
+        return None
+    letters, rest = _split_letter_prefix(inv)
+    if letters == "CM" or sum(c.isdigit() for c in rest) < 4:
+        return None
+    index = getattr(candidates, "letter_prefix_index", None)
+    if index is None:
+        index = {}
+        for tranid, totals in candidates.items():
+            ns_letters, ns_rest = _split_letter_prefix(tranid)
+            index.setdefault(ns_rest, []).append((tranid, ns_letters, totals))
+        try:
+            candidates.letter_prefix_index = index
+        except AttributeError:  # a plain dict (tests): rebuilt each call
+            pass
+    own = str(inv or "").strip().lower()
+    hits = set()
+    for tranid, ns_letters, totals in index.get(rest, []):
+        if tranid == own or ns_letters == "CM":
+            continue
+        if letters and ns_letters and letters != ns_letters:
+            continue
+        for total in totals:
+            if _amounts_tie_out(float(stmt_amount), total):
+                hits.add((tranid, round(float(total), 2)))
+    if len({tranid for tranid, _ in hits}) != 1 or len(hits) != 1:
+        return None
+    return next(iter(hits))
+
+
 APPEARS_PAID = "Appears to be Paid"
 
 
@@ -303,7 +370,11 @@ def _appears_paid(table, match_rule, ns_record) -> bool:
     vendor's BILLS by its own invoice number (no alternate/DT#/CM rule) and
     amount, and NetSuite shows that bill Paid In Full. The shop/location does
     not matter -- same vendor is enough (the user, 2026-11-05)."""
-    if not _appears_paid_enabled() or table != "netsuite_vendorbill" or match_rule != "invoice number":
+    if not _appears_paid_enabled() or table != "netsuite_vendorbill":
+        return False
+    # The same number with a letter prefix ignored counts as its own number
+    # (2026-11-12, _letter_prefix_match()).
+    if match_rule != "invoice number" and not str(match_rule or "").startswith(LETTER_PREFIX_RULE):
         return False
     return bool(ns_record) and _is_paid_in_full(ns_record.get("status"))
 
@@ -1056,6 +1127,16 @@ def run_fabric_matching(statement_id: str, dry_run: bool = False, keep_run_time:
                             netsuite_total, is_exact = alt_total, alt_is_exact
                             matched_key, match_rule = alt.lower(), f"alternate number ({alt})"
                             break
+
+                if netsuite_total is None and table == "netsuite_vendorbill" and _letter_prefix_enabled():
+                    # Any vendor (2026-11-12): the same number with a letter
+                    # prefix on one side only -- see _letter_prefix_match().
+                    prefixed = _letter_prefix_match(netsuite_by_table.get(table, {}), inv, stmt_amount)
+                    if prefixed:
+                        matched_key, netsuite_total = prefixed
+                        record = netsuite_by_table[table].record_for(matched_key, netsuite_total) or {}
+                        is_exact = True
+                        match_rule = f"{LETTER_PREFIX_RULE} ({inv} \u2192 {record.get('tranid') or matched_key})"
 
                 if netsuite_total is None and table == "netsuite_vendorcredit" and generic_lines:
                     # Any vendor (2026-10-21): a credit NetSuite filed under a

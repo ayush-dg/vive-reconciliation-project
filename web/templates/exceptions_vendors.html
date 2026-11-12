@@ -111,7 +111,7 @@
   {# Follow-up status (2026-11-11), set on each statement's review page. #}
   <select id="status-filter" class="filter-chip" style="cursor:pointer" aria-label="Follow-up">
     <option value="">Any follow-up</option>
-    {% for key, label in follow_up_choices.items() %}
+    {% for key, label in (follow_up_choices | default({}, true)).items() %}
     <option value="{{ key }}">{{ label }}</option>
     {% endfor %}
     <option value="none">No follow-up</option>

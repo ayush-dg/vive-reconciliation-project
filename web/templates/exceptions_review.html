@@ -49,7 +49,7 @@
       <input type="hidden" name="sort" value="{{ sort }}">
       <select name="status" id="followup-select" class="ns-sr-only" tabindex="-1" aria-hidden="true" onchange="this.form.submit()">
         {% if not follow_up %}<option value="" hidden selected>Set follow-up</option>{% endif %}
-        {% for key, label in follow_up_choices.items() %}
+        {% for key, label in (follow_up_choices | default({}, true)).items() %}
         <option value="{{ key }}" {{ 'selected' if follow_up and follow_up.status == key }}>{{ label }}</option>
         {% endfor %}
         {% if follow_up %}<option value="">Clear follow-up</option>{% endif %}
