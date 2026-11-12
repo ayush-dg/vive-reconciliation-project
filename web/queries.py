@@ -1258,9 +1258,18 @@ def get_exception_counts_for_source_file(source_file: str):
 # recon_exceptions has no line type, and its statement_amount is abs() for
 # credits, so a positive amount says nothing. Order: the statement lines'
 # Silver line_type (via the recon table's exception_id -> statement_line_id),
-# then a negative amount, then the matched NetSuite record type. Vendors with
-# a line-selection rule are skipped for line_type: the matcher re-labels their
-# lines in Python (vendor_line_selection.py), so Silver's value can be wrong.
+# then a negative amount, then the matched NetSuite record type.
+#
+# Silver line_type is skipped for a vendor whose active line-selection rule
+# can make the matcher's line type differ from Silver's
+# (src/matching/vendor_line_selection.py): a credit_indicator re-labels every
+# line (:397-406), reclassify_payment_by_po_reference re-labels payment rows
+# (:281, :288), transaction_code_priority switches to shape matching
+# (fabric_matching.py:970), and an unknown rule_type is not proven safe. The
+# three types below only drop or pick rows, never set line_type:
+# keep_earliest (:321), exclude_by_transaction_code (:293),
+# dedup_by_earliest_date (:205, via :392).
+_LINE_TYPE_SAFE_RULES = ("keep_earliest", "exclude_by_transaction_code", "dedup_by_earliest_date")
 
 _KIND_BY_LINE_TYPE = {"CHARGE": "Bill", "CREDIT": "Credit"}
 _KIND_BY_RECORD_TYPE = {"bill": "Bill", "vendorbill": "Bill", "credit": "Credit", "vendorcredit": "Credit"}
@@ -1296,9 +1305,11 @@ def _silver_line_types(statement_ids: list) -> dict:
           AND NOT EXISTS (
               SELECT 1 FROM silver.vendor_line_selection_rule r
               WHERE r.vendor_id = st.vendor_id AND r.is_active = 1
+                AND (r.credit_indicator IS NOT NULL OR r.rule_type IS NULL
+                     OR r.rule_type NOT IN ({_in_placeholders(_LINE_TYPE_SAFE_RULES)}))
           )
         """,
-        list(statement_ids),
+        [*statement_ids, *_LINE_TYPE_SAFE_RULES],
     )
     return {r["statement_line_id"]: r["line_type"] for r in rows}
 

@@ -354,6 +354,70 @@ class SilverSqlColumnTests(unittest.TestCase):
         self.assertEqual(_unknown_columns(_silver_sql()), [])
 
 
+def _sel_lines():
+    """A charge, a reprint, a payment (code 50 batch row and code 5), a sign-typed credit, a CM row typed CHARGE."""
+    return [
+        {"statement_line_id": "A", "original_invoice_number": "INV-1001", "line_type": "CHARGE",
+         "transaction_code": "1", "line_date": "2026-10-01", "charge_amount": 10.0},
+        {"statement_line_id": "B", "original_invoice_number": "INV-1001", "line_type": "CHARGE",
+         "transaction_code": "1", "line_date": "2026-10-05", "charge_amount": 10.0},
+        {"statement_line_id": "C", "original_invoice_number": "INV-1002", "line_type": "PAYMENT",
+         "transaction_code": "5", "line_date": "2026-10-02", "payment_amount": 4.0, "po_number": "INV-1003"},
+        {"statement_line_id": "D", "original_invoice_number": "INV-1003", "line_type": "PAYMENT",
+         "transaction_code": "7", "line_date": "2026-10-02", "payment_amount": 6.0},
+        {"statement_line_id": "E", "original_invoice_number": "INV-1004", "line_type": "CREDIT",
+         "transaction_code": "4", "line_date": "2026-10-03", "charge_amount": -3.0},
+        {"statement_line_id": "F", "original_invoice_number": "CM1005", "line_type": "CHARGE",
+         "transaction_code": "1", "line_date": "2026-10-03", "charge_amount": 2.0},
+        {"statement_line_id": "G", "original_invoice_number": "INV-1006", "line_type": "CHARGE",
+         "transaction_code": "50", "line_date": "2026-10-03", "charge_amount": 1.0, "po_number": "INV-1003"},
+    ]
+
+
+def _changed_types(rules):
+    from src.matching.vendor_line_selection import select_lines
+    before = {l["statement_line_id"]: l["line_type"] for l in _sel_lines()}
+    after = select_lines("TEST_VENDOR", _sel_lines(), {"TEST_VENDOR": rules})
+    return {l["statement_line_id"] for l in after if l["line_type"] != before[l["statement_line_id"]]}
+
+
+def _rule(applies_to, rule_type, **extra):
+    return {applies_to: dict({"vendor_id": "TEST_VENDOR", "applies_to": applies_to, "rule_type": rule_type,
+                              "primary_code": "5", "fallback_code": None, "credit_indicator": None}, **extra)}
+
+
+class SkipNarrowingTests(unittest.TestCase):
+    """Only rules that can change line_type skip the Silver step."""
+
+    def test_safe_rule_types_never_change_line_type(self):
+        for rules in (_rule("charge", "keep_earliest"), _rule("charge", "exclude_by_transaction_code"),
+                      _rule("credit", "exclude_by_transaction_code"), _rule("credit", "dedup_by_earliest_date"),
+                      {**_rule("charge", "keep_earliest"), **_rule("credit", "dedup_by_earliest_date")}):
+            self.assertEqual(_changed_types(rules), set(), rules)
+
+    def test_the_skipped_ones_can(self):
+        self.assertTrue(_changed_types(_rule("charge", "keep_earliest", credit_indicator="CM")))
+        self.assertTrue(_changed_types(_rule("both", "reclassify_payment_by_po_reference")))
+
+    def test_safe_list_is_exactly_the_three(self):
+        self.assertEqual(set(queries._LINE_TYPE_SAFE_RULES),
+                         {"keep_earliest", "exclude_by_transaction_code", "dedup_by_earliest_date"})
+
+    def test_query_still_skips_credit_indicator_and_other_types(self):
+        sql = _silver_sql()
+        self.assertIn("r.credit_indicator IS NOT NULL", sql)
+        self.assertIn("r.rule_type IS NULL", sql)
+        self.assertRegex(sql, r"r\.rule_type NOT IN \(\?, \?, \?\)")
+
+    def test_params_are_statement_ids_then_rule_types(self):
+        seen = []
+        with mock.patch.object(queries, "recon_query", lambda sql, params=None: seen.append((sql, params)) or []):
+            queries._silver_line_types(["S1", "S2"])
+        sql, params = seen[0]
+        self.assertEqual(params, ["S1", "S2", *queries._LINE_TYPE_SAFE_RULES])
+        self.assertEqual(sql.count("?"), len(params))
+
+
 class TemplateTests(unittest.TestCase):
     def test_a_row_without_the_key_renders_as_before(self):
         # Older callers / other pages that render rows without bill_or_credit.
