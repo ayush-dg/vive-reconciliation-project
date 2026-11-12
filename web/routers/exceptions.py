@@ -319,6 +319,14 @@ def _statement_pdf_url(statement_id):
     return f"/statements/{statement_id}/{quote(name)}" + ("?edit=1" if sharepoint else "")
 
 
+def _attach_bill_or_credit(rows):
+    """row["bill_or_credit"] (2026-11-12): "Bill", "Credit" or None, shown
+    in brackets after the invoice number -- see queries.get_exception_kinds()."""
+    kinds = queries.get_exception_kinds(rows) if rows else {}
+    for row in rows:
+        row["bill_or_credit"] = kinds.get(row.get("exception_id"))
+
+
 @router.get("/exceptions/{vendor_name:path}")
 def exceptions_review(vendor_name: str, request: Request, user: str = Depends(require_login),
                        filter: str = "all", selected: str = None, statement_id: str = None,
@@ -364,6 +372,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         statement_id = statement["statement_id"]
         open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter, sort)
         total, resolved = queries.get_exception_counts(statement_id)
+    _attach_bill_or_credit(open_list)
 
     selected_exc = None
     if selected:

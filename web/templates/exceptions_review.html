@@ -124,7 +124,7 @@
          class="exception-row {{ 'active' if selected and selected.exception_id == exc.exception_id }}">
         <div class="exception-row-top">
           <div class="exception-row-main">
-            <div class="einv">Invoice #{{ exc.invoice_number or "Unknown" }}</div>
+            <div class="einv">Invoice #{{ exc.invoice_number or "Unknown" }}{% if exc.bill_or_credit %} <span class="einv-kind">({{ exc.bill_or_credit }})</span>{% endif %}</div>
             <div class="edate">{{ exc.invoice_date | friendly_date }}</div>
             <span class="badge {{ reason_badge.get(exc.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(exc.exception_reason, {}).label or exc.exception_reason }}</span>
           </div>
@@ -204,7 +204,7 @@
     {% if match_msg %}<div class="match-msg" role="status">{{ match_msg }}</div>{% endif %}
     {% if selected %}
     <div class="detail-view-head">
-      <h2>Invoice #{{ selected.invoice_number or "Unknown" }}</h2>
+      <h2>Invoice #{{ selected.invoice_number or "Unknown" }}{% if selected.bill_or_credit %} <span class="einv-kind">({{ selected.bill_or_credit }})</span>{% endif %}</h2>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         {% if selected.match_confidence is not none %}
         <span class="badge {{ 'badge-matched' if selected.match_confidence >= 0.80 else 'badge-review' }}">
