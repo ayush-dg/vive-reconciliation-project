@@ -1426,3 +1426,8 @@ MATTHEWS_KIA_OF_SCHENECTADY,INVOICE,invoice_number_ref,string,v1,1
 MATTHEWS_KIA_OF_SCHENECTADY,DESCRIPTION,description_raw,string,v1,1
 MATTHEWS_KIA_OF_SCHENECTADY,AMOUNT,charge_amount,decimal,v1,1
 MATTHEWS_KIA_OF_SCHENECTADY,AGE IN DAYS,age_in_days,integer,v1,1
+WHITE_RIVER_TOYOTA,DATE,line_date,date,v1,1
+WHITE_RIVER_TOYOTA,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
+WHITE_RIVER_TOYOTA,PURCHASES,charge_amount,decimal,v1,1
+WHITE_RIVER_TOYOTA,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
+WHITE_RIVER_TOYOTA,BALANCE,amount_remaining,decimal,v1,1
