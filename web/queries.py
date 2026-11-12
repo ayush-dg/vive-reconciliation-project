@@ -1252,6 +1252,97 @@ def get_exception_counts_for_source_file(source_file: str):
     return total, resolved
 
 
+# ---------------------------------------------------------------------------
+# Exceptions — "(Bill)" / "(Credit)" label on the review list (2026-11-12)
+# ---------------------------------------------------------------------------
+# recon_exceptions has no line type, and its statement_amount is abs() for
+# credits, so a positive amount says nothing. Order: the statement lines'
+# Silver line_type (via the recon table's exception_id -> statement_line_id),
+# then a negative amount, then the matched NetSuite record type. Vendors with
+# a line-selection rule are skipped for line_type: the matcher re-labels their
+# lines in Python (vendor_line_selection.py), so Silver's value can be wrong.
+
+_KIND_BY_LINE_TYPE = {"CHARGE": "Bill", "CREDIT": "Credit"}
+_KIND_BY_RECORD_TYPE = {"bill": "Bill", "vendorbill": "Bill", "credit": "Credit", "vendorcredit": "Credit"}
+
+
+def _in_placeholders(values) -> str:
+    return ", ".join("?" for _ in values)
+
+
+def _recon_links(statement_ids: list) -> dict:
+    """{exception_id: [recon rows]} -- one query for the whole page."""
+    rows = execute_query(
+        "SELECT exception_id, statement_line_id, netsuite_record_type FROM recon "
+        f"WHERE statement_id IN ({_in_placeholders(statement_ids)}) AND is_active = 1 AND exception_id IS NOT NULL",
+        list(statement_ids),
+    )
+    links = {}
+    for row in rows:
+        links.setdefault(row["exception_id"], []).append(row)
+    return links
+
+
+def _silver_line_types(statement_ids: list) -> dict:
+    """{statement_line_id: line_type} -- one query for the whole page."""
+    rows = recon_query(
+        f"""
+        SELECT sl.statement_line_id, sl.line_type
+        FROM silver.statement_line sl
+        WHERE sl.statement_id IN ({_in_placeholders(statement_ids)})
+          AND NOT EXISTS (
+              SELECT 1 FROM silver.vendor_line_selection_rule r
+              WHERE r.vendor_id = sl.vendor_id AND r.is_active = 1
+          )
+        """,
+        list(statement_ids),
+    )
+    return {r["statement_line_id"]: r["line_type"] for r in rows}
+
+
+def _one_kind(values) -> str:
+    """The kind when every value maps to the same one, else None."""
+    kinds = set(values)
+    return kinds.pop() if len(kinds) == 1 else None
+
+
+def _is_negative(amount) -> bool:
+    try:
+        return amount is not None and float(amount) < 0
+    except (TypeError, ValueError):
+        return False
+
+
+def exception_kind(exc: dict, links: list, line_types: dict):
+    """"Bill", "Credit" or None (unknown -- no label, never a guess)."""
+    kind = _one_kind(_KIND_BY_LINE_TYPE.get(line_types.get(l.get("statement_line_id"))) for l in links)
+    if kind:
+        return kind
+    if _is_negative(exc.get("statement_amount")):
+        return "Credit"
+    return _one_kind(_KIND_BY_RECORD_TYPE.get(str(l.get("netsuite_record_type") or "").lower()) for l in links)
+
+
+def _safe_lookup(fn, statement_ids: list) -> dict:
+    try:
+        return fn(statement_ids)
+    except Exception as e:
+        print(f"[queries] {fn.__name__} failed, no bill/credit label: {e}")
+        return {}
+
+
+def get_exception_kinds(exceptions: list) -> dict:
+    """{exception_id: "Bill" | "Credit"} for the review list's rows. Two
+    statement-scoped queries per page (recon table, then Silver), never one
+    per row; a failed lookup just leaves rows unlabelled."""
+    statement_ids = sorted({e["statement_id"] for e in exceptions if e.get("statement_id")})
+    links = _safe_lookup(_recon_links, statement_ids) if statement_ids else {}
+    line_types = _safe_lookup(_silver_line_types, statement_ids) if links else {}
+    kinds = {e.get("exception_id"): exception_kind(e, links.get(e.get("exception_id"), []), line_types)
+             for e in exceptions}
+    return {eid: kind for eid, kind in kinds.items() if kind}
+
+
 def _recompute_summary_counts(statement_id: str) -> None:
     """Keeps gold_reconciliation_summary.exception_count/overall_status
     truthful whenever the live OPEN count for statement_id changes --
