@@ -331,12 +331,16 @@ def _statement_pdf_url(statement_id):
     return f"/statements/{statement_id}/{quote(name)}" + ("?edit=1" if sharepoint else "")
 
 
-def _attach_bill_or_credit(rows):
+def _attach_kind_and_date(rows):
     """row["bill_or_credit"] (2026-11-12): "Bill", "Credit" or None, shown
-    in brackets after the invoice number -- see queries.get_exception_kinds()."""
-    kinds = queries.get_exception_kinds(rows) if rows else {}
+    in brackets after the invoice number; and (UAT 22) row["invoice_date"],
+    when it has none, from the statement line -- see
+    queries.get_exception_kinds_and_dates()."""
+    kinds, dates = queries.get_exception_kinds_and_dates(rows) if rows else ({}, {})
     for row in rows:
         row["bill_or_credit"] = kinds.get(row.get("exception_id"))
+        if not row.get("invoice_date") and dates.get(row.get("exception_id")):
+            row["invoice_date"] = dates[row.get("exception_id")]
 
 
 KEEP_PLACE_COOKIE = "vive_next_exception"
@@ -387,7 +391,7 @@ def exceptions_review(vendor_name: str, request: Request, user: str = Depends(re
         statement_id = statement["statement_id"]
         open_list = queries.get_open_exceptions(statement_id, None if filter == "all" else filter, sort)
         total, resolved = queries.get_exception_counts(statement_id)
-    _attach_bill_or_credit(open_list)
+    _attach_kind_and_date(open_list)
 
     selected_exc = None
     if not selected:

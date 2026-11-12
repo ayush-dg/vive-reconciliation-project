@@ -68,8 +68,9 @@ RESULTS = {
     "L5": {"status": "Not found in NetSuite", "exception_id": "E-PAY", "statement_amount": 60.0},
 }
 # Silver line types; L3/L4 missing (e.g. a line-selection-rule vendor, filtered out by the query).
-SILVER = [{"statement_line_id": "L1", "line_type": "CHARGE"}, {"statement_line_id": "L2", "line_type": "CREDIT"},
-          {"statement_line_id": "L5", "line_type": "PAYMENT"}]
+SILVER = [{"statement_line_id": "L1", "line_type": "CHARGE", "line_type_trusted": 1},
+          {"statement_line_id": "L2", "line_type": "CREDIT", "line_type_trusted": 1},
+          {"statement_line_id": "L5", "line_type": "PAYMENT", "line_type_trusted": 1}]
 EXPECTED = {"E-MISS": "Bill", "E-CRL": "Credit", "E-NEG": "Credit", "E-PAID": "Bill", "E-NSCR": "Credit"}
 
 
@@ -143,7 +144,12 @@ class GetExceptionKindsTests(_DbTest):
     def test_silver_query_skips_line_selection_vendors(self):
         queries.get_exception_kinds([dict(e) for e in EXCS])
         self.assertIn("silver.vendor_line_selection_rule", self.silver.sql[0])
-        self.assertIn("NOT EXISTS", self.silver.sql[0])
+        self.assertIn("THEN 0 ELSE 1 END AS line_type_trusted", self.silver.sql[0])
+
+    def test_untrusted_line_types_are_not_used(self):
+        self.silver.fn = lambda sql, params: [dict(r, line_type_trusted=0) for r in SILVER]
+        kinds = queries.get_exception_kinds([dict(e) for e in EXCS])
+        self.assertEqual(kinds, {"E-NEG": "Credit", "E-PAID": "Bill", "E-NSCR": "Credit"})
 
     def test_no_rows_means_no_query(self):
         self.assertEqual(queries.get_exception_kinds([]), {})
@@ -167,6 +173,9 @@ def _client():
     return TestClient(app)
 
 
+_REAL_KINDS_AND_DATES = queries.get_exception_kinds_and_dates
+
+
 def _page(kinds, url="/exceptions/Test%20Vendor?statement_id=STMT-BC", rows=EXCS, counts=(9, 3)):
     """The review page with every query stubbed; returns (html, get_open_exceptions mock)."""
     patches = [
@@ -175,7 +184,10 @@ def _page(kinds, url="/exceptions/Test%20Vendor?statement_id=STMT-BC", rows=EXCS
         mock.patch.object(exceptions.queries, "get_statement_shop", return_value=None),
         mock.patch.object(exceptions.queries, "get_manual_matches", return_value=[]),
         mock.patch.object(exceptions.queries, "get_cleared_exceptions", return_value=[]),
-        mock.patch.object(exceptions.queries, "get_exception_kinds", side_effect=kinds),
+        # The real lookup (queries.get_exception_kinds) runs unstubbed; anything else stands in for the kinds.
+        mock.patch.object(exceptions.queries, "get_exception_kinds_and_dates",
+                          side_effect=_REAL_KINDS_AND_DATES if kinds is queries.get_exception_kinds
+                          else lambda rows: (kinds(rows), {})),
         mock.patch.object(exceptions, "fetch_netsuite_record_for_invoice", return_value=None),
         mock.patch.object(exceptions, "_writeback_status", return_value=None),
         mock.patch.object(exceptions, "_statement_pdf_url", return_value=None),
@@ -259,17 +271,25 @@ class ReviewPageTests(unittest.TestCase):
         links = [{"exception_id": e["exception_id"], "statement_line_id": f"L{i}", "netsuite_record_type": None}
                  for i, e in enumerate(many)]
         recon = _Calls(lambda sql, params: links)
-        silver = _Calls(lambda sql, params: [{"statement_line_id": f"L{i}", "line_type": "CHARGE"}
+        silver = _Calls(lambda sql, params: [{"statement_line_id": f"L{i}", "line_type": "CHARGE", "line_type_trusted": 1}
                                              for i in range(len(many))])
         with mock.patch.object(queries, "execute_query", recon), mock.patch.object(queries, "recon_query", silver):
             html, _ = _page(queries.get_exception_kinds, rows=many)
         self.assertEqual((len(recon.sql), len(silver.sql)), (1, 1))
         self.assertEqual(html.count("(Bill)</span>"), len(many) + 1)  # every row + the detail title
 
-    def test_nothing_linked_skips_silver(self):
+    def test_nothing_linked_still_one_silver_query_for_the_dates(self):
+        # UAT 22: the invoice date falls back to Silver even without recon rows.
         recon, silver = _Calls(lambda sql, params: []), _Calls(lambda sql, params: [])
         with mock.patch.object(queries, "execute_query", recon), mock.patch.object(queries, "recon_query", silver):
             _page(queries.get_exception_kinds)
+        self.assertEqual((len(recon.sql), len(silver.sql)), (1, 1))
+
+    def test_nothing_linked_and_every_row_dated_skips_silver(self):
+        recon, silver = _Calls(lambda sql, params: []), _Calls(lambda sql, params: [])
+        dated = [dict(e, invoice_date="2026-10-01") for e in EXCS]
+        with mock.patch.object(queries, "execute_query", recon), mock.patch.object(queries, "recon_query", silver):
+            queries.get_exception_kinds_and_dates(dated)
         self.assertEqual((len(recon.sql), len(silver.sql)), (1, 0))
 
     def test_an_empty_list_makes_no_lookup(self):
@@ -332,7 +352,7 @@ def _unknown_columns(sql):
 def _silver_sql():
     seen = []
     with mock.patch.object(queries, "recon_query", lambda sql, params=None: seen.append(sql) or []):
-        queries._silver_line_types(["STMT-1"])
+        queries._silver_lines(["STMT-1"])
     return seen[0]
 
 
@@ -409,12 +429,12 @@ class SkipNarrowingTests(unittest.TestCase):
         self.assertIn("r.rule_type IS NULL", sql)
         self.assertRegex(sql, r"r\.rule_type NOT IN \(\?, \?, \?\)")
 
-    def test_params_are_statement_ids_then_rule_types(self):
+    def test_params_are_rule_types_then_statement_ids(self):
         seen = []
         with mock.patch.object(queries, "recon_query", lambda sql, params=None: seen.append((sql, params)) or []):
-            queries._silver_line_types(["S1", "S2"])
+            queries._silver_lines(["S1", "S2"])
         sql, params = seen[0]
-        self.assertEqual(params, ["S1", "S2", *queries._LINE_TYPE_SAFE_RULES])
+        self.assertEqual(params, [*queries._LINE_TYPE_SAFE_RULES, "S1", "S2"])
         self.assertEqual(sql.count("?"), len(params))
 
 

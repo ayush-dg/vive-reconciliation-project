@@ -14,7 +14,7 @@ import os
 import re
 import sys
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -1269,6 +1269,14 @@ def get_exception_counts_for_source_file(source_file: str):
 # three types below only drop or pick rows, never set line_type:
 # keep_earliest (:321), exclude_by_transaction_code (:293),
 # dedup_by_earliest_date (:205, via :392).
+#
+# Invoice date (2026-11-12, UAT 22): recon_exceptions has none, so the list
+# and the detail box showed "—". The date shown is the one printed on the
+# STATEMENT line (the vendor's invoice date), never a NetSuite date: the
+# recon table's line_date for the exception's lines, else Silver's line_date
+# (the same lines, then statement_id + invoice_number, then
+# original_invoice_number). Several dates -> the earliest. Both features
+# share the page's one recon query and one Silver query.
 _LINE_TYPE_SAFE_RULES = ("keep_earliest", "exclude_by_transaction_code", "dedup_by_earliest_date")
 
 _KIND_BY_LINE_TYPE = {"CHARGE": "Bill", "CREDIT": "Credit"}
@@ -1282,7 +1290,7 @@ def _in_placeholders(values) -> str:
 def _recon_links(statement_ids: list) -> dict:
     """{exception_id: [recon rows]} -- one query for the whole page."""
     rows = execute_query(
-        "SELECT exception_id, statement_line_id, netsuite_record_type FROM recon "
+        "SELECT exception_id, statement_line_id, netsuite_record_type, line_date FROM recon "
         f"WHERE statement_id IN ({_in_placeholders(statement_ids)}) AND is_active = 1 AND exception_id IS NOT NULL",
         list(statement_ids),
     )
@@ -1292,26 +1300,33 @@ def _recon_links(statement_ids: list) -> dict:
     return links
 
 
-def _silver_line_types(statement_ids: list) -> dict:
-    """{statement_line_id: line_type} -- one query for the whole page.
-    silver.statement_line has no vendor_id: the vendor comes from
-    silver.statement, the same column the matcher reads."""
-    rows = recon_query(
+def _silver_lines(statement_ids: list) -> list:
+    """The statements' Silver lines -- one query for the whole page -- with
+    line_type_trusted = 0 where a line-selection rule may change the line
+    type (above) or the statement's vendor is unknown. silver.statement_line
+    has no vendor_id: the vendor comes from silver.statement, the same column
+    the matcher reads."""
+    return recon_query(
         f"""
-        SELECT sl.statement_line_id, sl.line_type
+        SELECT sl.statement_line_id, sl.statement_id, sl.line_type, sl.line_date,
+               sl.invoice_number, sl.original_invoice_number,
+               CASE WHEN st.statement_id IS NULL OR EXISTS (
+                   SELECT 1 FROM silver.vendor_line_selection_rule r
+                   WHERE r.vendor_id = st.vendor_id AND r.is_active = 1
+                     AND (r.credit_indicator IS NOT NULL OR r.rule_type IS NULL
+                          OR r.rule_type NOT IN ({_in_placeholders(_LINE_TYPE_SAFE_RULES)}))
+               ) THEN 0 ELSE 1 END AS line_type_trusted
         FROM silver.statement_line sl
-        JOIN silver.statement st ON st.statement_id = sl.statement_id
+        LEFT JOIN silver.statement st ON st.statement_id = sl.statement_id
         WHERE sl.statement_id IN ({_in_placeholders(statement_ids)})
-          AND NOT EXISTS (
-              SELECT 1 FROM silver.vendor_line_selection_rule r
-              WHERE r.vendor_id = st.vendor_id AND r.is_active = 1
-                AND (r.credit_indicator IS NOT NULL OR r.rule_type IS NULL
-                     OR r.rule_type NOT IN ({_in_placeholders(_LINE_TYPE_SAFE_RULES)}))
-          )
         """,
-        [*statement_ids, *_LINE_TYPE_SAFE_RULES],
+        [*_LINE_TYPE_SAFE_RULES, *statement_ids],
     )
-    return {r["statement_line_id"]: r["line_type"] for r in rows}
+
+
+def _trusted_line_types(lines: list) -> dict:
+    """{statement_line_id: line_type}, only where the type can be trusted."""
+    return {l["statement_line_id"]: l["line_type"] for l in lines if l.get("line_type_trusted")}
 
 
 def _one_kind(values) -> str:
@@ -1337,24 +1352,82 @@ def exception_kind(exc: dict, links: list, line_types: dict):
     return _one_kind(_KIND_BY_RECORD_TYPE.get(str(l.get("netsuite_record_type") or "").lower()) for l in links)
 
 
-def _safe_lookup(fn, statement_ids: list) -> dict:
+def _iso_date(value):
+    """A date (or text starting with an ISO date) as 'YYYY-MM-DD', else None."""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    text = str(value).strip()[:10] if value else ""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return None
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
+
+
+def _earliest(values):
+    dates = sorted({d for d in map(_iso_date, values) if d})
+    return dates[0] if dates else None
+
+
+def _key(value):
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
+def _silver_date_index(lines: list) -> tuple:
+    """Silver line dates by statement_line_id, by (statement, invoice_number)
+    and by (statement, original_invoice_number)."""
+    by_line, by_invoice, by_original = {}, {}, {}
+    for l in lines:
+        by_line.setdefault(l.get("statement_line_id"), []).append(l.get("line_date"))
+        by_invoice.setdefault((l.get("statement_id"), _key(l.get("invoice_number"))), []).append(l.get("line_date"))
+        by_original.setdefault((l.get("statement_id"), _key(l.get("original_invoice_number"))), []).append(
+            l.get("line_date"))
+    return by_line, by_invoice, by_original
+
+
+def exception_invoice_date(exc: dict, links: list, index: tuple):
+    """The statement line's date for one exception ('YYYY-MM-DD'), or None."""
+    by_line, by_invoice, by_original = index
+    sid, invoice = exc.get("statement_id"), _key(exc.get("invoice_number"))
+    original = _key(exc.get("original_invoice_number")) or invoice
+    return (_earliest(l.get("line_date") for l in links)
+            or _earliest(d for l in links for d in by_line.get(l.get("statement_line_id"), []))
+            or _earliest(by_invoice.get((sid, invoice), []) if invoice else [])
+            or _earliest(by_original.get((sid, original), []) if original else []))
+
+
+def _safe_lookup(fn, statement_ids: list):
     try:
         return fn(statement_ids)
     except Exception as e:
-        print(f"[queries] {fn.__name__} failed, no bill/credit label: {e}")
+        print(f"[queries] {fn.__name__} failed, no bill/credit label or invoice date from it: {e}")
         return {}
 
 
-def get_exception_kinds(exceptions: list) -> dict:
-    """{exception_id: "Bill" | "Credit"} for the review list's rows. Two
-    statement-scoped queries per page (recon table, then Silver), never one
-    per row; a failed lookup just leaves rows unlabelled."""
+def get_exception_kinds_and_dates(exceptions: list) -> tuple:
+    """({exception_id: "Bill" | "Credit"}, {exception_id: 'YYYY-MM-DD'}) for
+    the review list's rows. One recon and at most one Silver query per page,
+    never one per row; a failed lookup just leaves rows without a label or
+    date. Dates only for rows that have no invoice_date yet."""
     statement_ids = sorted({e["statement_id"] for e in exceptions if e.get("statement_id")})
     links = _safe_lookup(_recon_links, statement_ids) if statement_ids else {}
-    line_types = _safe_lookup(_silver_line_types, statement_ids) if links else {}
+    undated = [e for e in exceptions if not e.get("invoice_date")]
+    lines = _safe_lookup(_silver_lines, statement_ids) if statement_ids and (links or undated) else []
+    line_types, index = _trusted_line_types(lines or []), _silver_date_index(lines or [])
     kinds = {e.get("exception_id"): exception_kind(e, links.get(e.get("exception_id"), []), line_types)
              for e in exceptions}
-    return {eid: kind for eid, kind in kinds.items() if kind}
+    dates = {e.get("exception_id"): exception_invoice_date(e, links.get(e.get("exception_id"), []), index)
+             for e in undated}
+    return ({eid: k for eid, k in kinds.items() if k}, {eid: d for eid, d in dates.items() if d})
+
+
+def get_exception_kinds(exceptions: list) -> dict:
+    """{exception_id: "Bill" | "Credit"} -- see get_exception_kinds_and_dates()."""
+    return get_exception_kinds_and_dates(exceptions)[0]
 
 
 def _recompute_summary_counts(statement_id: str) -> None:

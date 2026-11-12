@@ -45,7 +45,7 @@ def _page(selected, record, env=ACCOUNT, rows=EXCS):
         mock.patch.object(exceptions.queries, "get_statement_shop", return_value=None),
         mock.patch.object(exceptions.queries, "get_manual_matches", return_value=[]),
         mock.patch.object(exceptions.queries, "get_cleared_exceptions", return_value=[]),
-        mock.patch.object(exceptions.queries, "get_exception_kinds", return_value=dict(EXPECTED)),
+        mock.patch.object(exceptions.queries, "get_exception_kinds_and_dates", return_value=(dict(EXPECTED), {})),
         mock.patch.object(exceptions, "fetch_netsuite_record_for_invoice", fetch),
         mock.patch.object(exceptions, "fetch_bill_payments", payments),
         mock.patch.object(exceptions, "_writeback_status", return_value=None),
