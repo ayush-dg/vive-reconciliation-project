@@ -1558,6 +1558,40 @@ def clear_exception(exception: dict, vendor_name: str, cleared_by: str, note: st
     return result
 
 
+def clear_exceptions_bulk(exceptions: list, vendor_name: str, cleared_by: str, note: str) -> list:
+    """Bulk "Clear exception" (2026-11-12): clear_exception() for each OPEN
+    exception, with one shared note. The database side runs one exception at
+    a time (each resolve recomputes the statement's counts); the NetSuite
+    flag removals then run a few at a time. Returns one NetSuite result per
+    exception, in order -- a NetSuite problem is in the result, never raised."""
+    from concurrent.futures import ThreadPoolExecutor
+    from src.lakehouse import recon_table
+    from src.netsuite.clear_exception import STATUS_FAILED, clear_exception_writes
+    if not exceptions:
+        return []
+    for exception in exceptions:
+        resolve_exception(exception["exception_id"], exception["statement_id"], vendor_name,
+                          exception["invoice_number"], exception.get("exception_reason"), "CLEARED", note, cleared_by)
+    entity_ids = _statement_entity_ids(exceptions[0], vendor_name)
+
+    def _netsuite(exception):
+        try:
+            return clear_exception_writes(exception["statement_id"], exception["invoice_number"], entity_ids)
+        except Exception as error:  # noqa: BLE001 -- the clear itself is saved
+            logger.exception("NetSuite flag removal failed for %s", exception["invoice_number"])
+            return {"status": STATUS_FAILED, "error": str(error)[:300]}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(_netsuite, exceptions))
+    for exception, result in zip(exceptions, results):
+        try:
+            recon_table.set_clear_writeback(exception["statement_id"], exception["invoice_number"], result)
+        except Exception:
+            logger.exception("saving the NetSuite outcome failed for %s / %s",
+                             exception["statement_id"], exception["invoice_number"])
+    return results
+
+
 def _latest_dispositions_sql(where: str) -> str:
     """Each exception's most recent disposition (an Undo adds a newer PENDING
     row), filtered by `where` -- fixed SQL from the callers, never user input."""

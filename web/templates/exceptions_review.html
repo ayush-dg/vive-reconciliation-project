@@ -47,7 +47,7 @@
       <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
       <input type="hidden" name="filter" value="{{ filter }}">
       <input type="hidden" name="sort" value="{{ sort }}">
-      <select name="status" id="followup-select" class="ns-sr-only" tabindex="-1" aria-hidden="true" onchange="this.form.submit()">
+      <select name="status" id="followup-select" class="ns-sr-only" tabindex="-1" aria-hidden="true" onchange="if (this.form.requestSubmit) { this.form.requestSubmit(); } else { this.form.submit(); }">
         {% if not follow_up %}<option value="" hidden selected>Set follow-up</option>{% endif %}
         {% for key, label in (follow_up_choices | default({}, true)).items() %}
         <option value="{{ key }}" {{ 'selected' if follow_up and follow_up.status == key }}>{{ label }}</option>
@@ -116,10 +116,28 @@
         <span class="resolve-pct">{{ progress_pct }}%</span>
       </div>
       <div class="resolve-count">{{ resolved }} / {{ total }} resolved</div>
+      {# Bulk clear (2026-11-12): tick exceptions (or Select all -- what this
+         tab shows), then "Clear selected" asks for one note for all of them. #}
+      {% set bulk_on = statement and statement.statement_id and exceptions %}
+      {% if bulk_on %}
+      <div class="exc-pick-bar" id="bulkBar">
+        <label class="bulk-all"><input type="checkbox" id="bulkAll"><span id="bulkCount">Select all</span></label>
+        <button type="button" class="btn btn-primary bulk-clear-btn" id="bulkClearBtn" hidden>Clear selected</button>
+        <button type="button" class="bulk-cancel" id="bulkCancel" hidden>Cancel</button>
+      </div>
+      {% endif %}
     </div>
 
     <div class="list-scroll">
       {% for exc in exceptions %}
+      <div class="exception-row-wrap{{ ' active' if selected and selected.exception_id == exc.exception_id }}" data-exc-id="{{ exc.exception_id }}">
+      {% if bulk_on %}
+      <label class="bulk-pick" title="Select invoice {{ exc.invoice_number or 'Unknown' }}">
+        <input type="checkbox" class="bulk-check" value="{{ exc.exception_id }}"
+               data-invoice="{{ exc.invoice_number or 'Unknown' }}" data-amount="{{ exc.statement_amount | money }}"
+               aria-label="Select invoice {{ exc.invoice_number or 'Unknown' }}">
+      </label>
+      {% endif %}
       <a href="/exceptions/{{ vendor_url_name }}?filter={{ filter }}{{ stmt_qs }}{{ sort_qs }}&selected={{ exc.exception_id }}"
          class="exception-row {{ 'active' if selected and selected.exception_id == exc.exception_id }}">
         <div class="exception-row-top">
@@ -131,6 +149,7 @@
           <div class="exception-row-amt">{{ exc.statement_amount | money }}</div>
         </div>
       </a>
+      </div>
       {% else %}
       <div class="empty-state">No open exceptions{{ " in this filter" if filter != "all" else "" }}.</div>
       {% endfor %}
@@ -541,4 +560,162 @@
 </div>
 {% include "_pdf_pane.html" %}
 </div>
+{% if statement and statement.statement_id and exceptions %}
+{# Bulk clear dialog (2026-11-12) -- see the bulk bar above the list. #}
+<dialog class="ns-confirm" id="bulkClearDialog" aria-labelledby="bulkClearTitle">
+  <form method="post" action="/exceptions/{{ vendor_url_name }}/clear-bulk" id="bulkClearForm">
+    <input type="hidden" name="statement_id" value="{{ statement.statement_id }}">
+    <input type="hidden" name="filter" value="{{ filter }}">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <div id="bulkClearIds"></div>
+    <h2 class="ns-modal-title" id="bulkClearTitle">Clear <span id="bulkClearN"></span></h2>
+    <p>These need no further action:</p>
+    <ul class="bulk-list" id="bulkClearList"></ul>
+    <p class="ns-confirm-sub">Each one's NetSuite exception flag is removed. You can undo each one from the Cleared list.</p>
+    <label class="ns-search-label" for="bulkClearNote">Note for all of them <span class="field-hint">(required)</span></label>
+    <textarea id="bulkClearNote" name="note" rows="3" required maxlength="2000"
+              placeholder="Why they need no action, e.g. paid by check 1234, not ours"></textarea>
+    <div class="ns-confirm-actions">
+      <button type="button" class="btn" onclick="document.getElementById('bulkClearDialog').close()">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="bulkClearSubmit">Clear</button>
+    </div>
+  </form>
+</dialog>
+<script>
+(function () {
+  var checks = Array.prototype.slice.call(document.querySelectorAll(".bulk-check"));
+  var all = document.getElementById("bulkAll");
+  var count = document.getElementById("bulkCount");
+  var clearBtn = document.getElementById("bulkClearBtn");
+  var cancel = document.getElementById("bulkCancel");
+  var dialog = document.getElementById("bulkClearDialog");
+  if (!checks.length || !all) { return; }
+
+  function picked() { return checks.filter(function (c) { return c.checked; }); }
+  function refresh() {
+    var n = picked().length;
+    all.checked = n === checks.length;
+    all.indeterminate = n > 0 && n < checks.length;
+    clearBtn.hidden = cancel.hidden = n === 0;
+    count.textContent = n ? n + " selected" : "Select all";
+    count.classList.toggle("is-on", n > 0);
+    checks.forEach(function (c) { c.closest(".exception-row-wrap").classList.toggle("is-picked", c.checked); });
+  }
+  checks.forEach(function (c) { c.addEventListener("change", refresh); });
+  all.addEventListener("change", function () {
+    checks.forEach(function (c) { c.checked = all.checked; });
+    refresh();
+  });
+  cancel.addEventListener("click", function () {
+    checks.forEach(function (c) { c.checked = false; });
+    refresh();
+  });
+  clearBtn.addEventListener("click", function () {
+    var chosen = picked();
+    var ids = document.getElementById("bulkClearIds");
+    var list = document.getElementById("bulkClearList");
+    ids.textContent = "";
+    list.textContent = "";
+    chosen.forEach(function (c) {
+      var input = document.createElement("input");
+      input.type = "hidden"; input.name = "exception_ids"; input.value = c.value;
+      ids.appendChild(input);
+      var li = document.createElement("li");
+      li.textContent = "Invoice #" + c.dataset.invoice + " \u2014 " + c.dataset.amount;
+      list.appendChild(li);
+    });
+    var label = chosen.length + " exception" + (chosen.length === 1 ? "" : "s");
+    document.getElementById("bulkClearN").textContent = label;
+    document.getElementById("bulkClearSubmit").textContent = "Clear " + label;
+    dialog.showModal();
+  });
+  document.getElementById("bulkClearForm").addEventListener("submit", function () {
+    var btn = document.getElementById("bulkClearSubmit");
+    btn.disabled = true;
+    btn.textContent = "Clearing\u2026";
+  });
+  refresh();
+})();
+</script>
+{% endif %}
+{% if statement and statement.statement_id %}
+<script>
+/* Keep your place after an action or after opening another exception from
+   the list (2026-11-12). Every action on this page
+   (Clear, Accept as match, Undo, Mark complete, Follow-up, bulk clear)
+   reloads it. Just before the form is sent, remember how far the page, the
+   exception list and the details panel were scrolled, and which exception to
+   open next: the same one if it stays open, else the next one down (or the
+   one above, at the end of the list). The server reads that from a cookie
+   (routers/exceptions.py KEEP_PLACE_COOKIE); this script puts the scroll back. */
+(function () {
+  var KEY = "vive-review-place";
+  var here = location.pathname + "|{{ statement.statement_id }}";
+  var list = document.querySelector(".list-scroll");
+  var detail = document.querySelector(".detail-body");
+
+  function rowIds() {
+    return Array.prototype.map.call(document.querySelectorAll(".exception-row-wrap[data-exc-id]"),
+                                    function (r) { return r.dataset.excId; });
+  }
+  function nextOpen(form) {
+    var ids = rowIds();
+    var activeRow = document.querySelector(".exception-row-wrap.active[data-exc-id]");
+    var active = activeRow ? activeRow.dataset.excId : "";
+    var action = form.getAttribute("action") || "";
+    var leaving = {};
+    if (/\/(clear|accept-match)$/.test(action) && active) { leaving[active] = true; }
+    if (/\/clear-bulk$/.test(action)) {
+      document.querySelectorAll(".bulk-check:checked").forEach(function (c) { leaving[c.value] = true; });
+    }
+    if (active && !leaving[active]) { return active; }
+    var at = Math.max(ids.indexOf(active), 0);
+    for (var i = at; i < ids.length; i++) { if (!leaving[ids[i]]) { return ids[i]; } }
+    for (var j = at - 1; j >= 0; j--) { if (!leaving[ids[j]]) { return ids[j]; } }
+    return "";
+  }
+
+  function remember(keepDetail) {
+    try {
+      sessionStorage.setItem(KEY, JSON.stringify({
+        here: here, at: Date.now(), page: window.scrollY,
+        list: list ? list.scrollTop : 0, detail: keepDetail && detail ? detail.scrollTop : 0
+      }));
+    } catch (e) { /* private mode: the page just opens at the top */ }
+  }
+
+  document.addEventListener("submit", function (ev) {
+    var form = ev.target;
+    if ((form.getAttribute("method") || "").toLowerCase() !== "post" || ev.defaultPrevented) { return; }
+    var next = nextOpen(form);
+    document.cookie = "{{ keep_place_cookie }}=" + encodeURIComponent(next) + "; path=/; max-age=60; SameSite=Lax";
+    remember(true);
+  });
+  // Opening another exception from the list (a link, so a reload): keep the
+  // list and page where they are; the new exception's details start at the top.
+  if (list) {
+    list.addEventListener("click", function (ev) {
+      var link = ev.target.closest("a.exception-row");
+      if (link && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.button === 0) { remember(false); }
+    });
+  }
+
+  // Back from an action: used once, then forgotten.
+  document.cookie = "{{ keep_place_cookie }}=; path=/; max-age=0; SameSite=Lax";
+  var saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(KEY) || "null"); sessionStorage.removeItem(KEY); } catch (e) { saved = null; }
+  if (!saved || saved.here !== here || Date.now() - saved.at > 60000) { return; }
+  window.scrollTo(0, saved.page || 0);
+  if (list) { list.scrollTop = saved.list || 0; }
+  if (detail) { detail.scrollTop = saved.detail || 0; }
+  // Rows above may have left the list: keep the open exception in view.
+  var open = document.querySelector(".exception-row-wrap.active");
+  if (open && list) {
+    var top = open.offsetTop - list.offsetTop, bottom = top + open.offsetHeight;
+    if (top < list.scrollTop) { list.scrollTop = top; }
+    else if (bottom > list.scrollTop + list.clientHeight) { list.scrollTop = bottom - list.clientHeight; }
+  }
+})();
+</script>
+{% endif %}
 {% endblock %}
