@@ -142,7 +142,7 @@
          class="exception-row {{ 'active' if selected and selected.exception_id == exc.exception_id }}">
         <div class="exception-row-top">
           <div class="exception-row-main">
-            <div class="einv">Invoice #{{ exc.invoice_number or "Unknown" }}{% if exc.bill_or_credit %} <span class="einv-kind">({{ exc.bill_or_credit }})</span>{% endif %}</div>
+            <div class="einv">Invoice #{{ exc.invoice_number or "Unknown" }}{% if exc.bill_or_credit %} <span class="einv-kind einv-kind-{{ exc.bill_or_credit | lower }}">({{ exc.bill_or_credit }})</span>{% endif %}</div>
             <div class="edate">{{ exc.invoice_date | friendly_date }}</div>
             <span class="badge {{ reason_badge.get(exc.exception_reason, {}).css or 'neutral' }}">{{ reason_badge.get(exc.exception_reason, {}).label or exc.exception_reason }}</span>
           </div>
@@ -225,7 +225,7 @@
     <div class="detail-view-head">
       {# The invoice number opens the panel's NetSuite record in a new tab (2026-11-12). #}
       <h2>{% if netsuite_url %}<a class="einv-ns-link" href="{{ netsuite_url }}" target="_blank" rel="noopener noreferrer"
-          title="Open {{ 'bill' if netsuite_record._source_table == 'netsuite_vendorbill' else 'credit' }} {{ selected.invoice_number }} in NetSuite">Invoice #{{ selected.invoice_number or "Unknown" }}<span class="ns-ext" aria-hidden="true">↗</span></a>{% else %}Invoice #{{ selected.invoice_number or "Unknown" }}{% endif %}{% if selected.bill_or_credit %} <span class="einv-kind">({{ selected.bill_or_credit }})</span>{% endif %}</h2>
+          title="Open {{ 'bill' if netsuite_record._source_table == 'netsuite_vendorbill' else 'credit' }} {{ selected.invoice_number }} in NetSuite">Invoice #{{ selected.invoice_number or "Unknown" }}<span class="ns-ext" aria-hidden="true">↗</span></a>{% else %}Invoice #{{ selected.invoice_number or "Unknown" }}{% endif %}{% if selected.bill_or_credit %} <span class="einv-kind einv-kind-{{ selected.bill_or_credit | lower }}">({{ selected.bill_or_credit }})</span>{% endif %}</h2>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         {% if selected.match_confidence is not none %}
         <span class="badge {{ 'badge-matched' if selected.match_confidence >= 0.80 else 'badge-review' }}">

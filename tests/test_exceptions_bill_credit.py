@@ -208,16 +208,16 @@ class ReviewPageTests(unittest.TestCase):
     def test_rows_carry_the_label_in_brackets(self):
         html, _ = _page(lambda rows: EXPECTED)
         lines = dict(zip([eid for eid, _ in _list_rows(html)], _invoice_lines(html)))
-        self.assertEqual(lines["E-MISS"], 'Invoice #INV-1001 <span class="einv-kind">(Bill)</span>')
-        self.assertEqual(lines["E-CRL"], 'Invoice #CM-1002 <span class="einv-kind">(Credit)</span>')
-        self.assertEqual(lines["E-NEG"], 'Invoice #INV-1003 <span class="einv-kind">(Credit)</span>')
-        self.assertEqual(lines["E-PAID"], 'Invoice #INV-1004 <span class="einv-kind">(Bill)</span>')
-        self.assertEqual(lines["E-NSCR"], 'Invoice #CM-1005 <span class="einv-kind">(Credit)</span>')
+        self.assertEqual(lines["E-MISS"], 'Invoice #INV-1001 <span class="einv-kind einv-kind-bill">(Bill)</span>')
+        self.assertEqual(lines["E-CRL"], 'Invoice #CM-1002 <span class="einv-kind einv-kind-credit">(Credit)</span>')
+        self.assertEqual(lines["E-NEG"], 'Invoice #INV-1003 <span class="einv-kind einv-kind-credit">(Credit)</span>')
+        self.assertEqual(lines["E-PAID"], 'Invoice #INV-1004 <span class="einv-kind einv-kind-bill">(Bill)</span>')
+        self.assertEqual(lines["E-NSCR"], 'Invoice #CM-1005 <span class="einv-kind einv-kind-credit">(Credit)</span>')
         self.assertEqual(lines["E-PAY"], "Invoice #PMT-1006")
 
     def test_the_detail_title_shows_it_too(self):
         html, _ = _page(lambda rows: EXPECTED)
-        self.assertIn('<h2>Invoice #INV-1001 <span class="einv-kind">(Bill)</span></h2>', html)
+        self.assertIn('<h2>Invoice #INV-1001 <span class="einv-kind einv-kind-bill">(Bill)</span></h2>', html)
 
     def test_the_label_is_escaped(self):
         html, _ = _page(lambda rows: {"E-MISS": "<b>x</b>"})
@@ -229,13 +229,13 @@ class ReviewPageTests(unittest.TestCase):
                 mock.patch.object(queries, "recon_query", side_effect=RuntimeError("down")):
             html, _ = _page(queries.get_exception_kinds)
         self.assertEqual(len(_list_rows(html)), len(EXCS))
-        self.assertEqual(html.count('class="einv-kind"'), 1)  # only the sign rule is left
-        self.assertIn('Invoice #INV-1003 <span class="einv-kind">(Credit)</span>', html)
+        self.assertEqual(html.count('class="einv-kind '), 1)  # only the sign rule is left
+        self.assertIn('Invoice #INV-1003 <span class="einv-kind einv-kind-credit">(Credit)</span>', html)
 
     def test_order_counts_badges_and_amounts_are_unchanged(self):
         with_label, open_a = _page(lambda rows: EXPECTED)
         without, open_b = _page(lambda rows: {})
-        strip = lambda h: re.sub(r' <span class="einv-kind">\([^)]*\)</span>', "", h)
+        strip = lambda h: re.sub(r' <span class="einv-kind[^"]*">\([^)]*\)</span>', "", h)
         self.assertEqual(strip(with_label), without)
         self.assertEqual([eid for eid, _ in _list_rows(with_label)], [e["exception_id"] for e in EXCS])
         self.assertIn("3 / 9 resolved", with_label)
@@ -246,7 +246,7 @@ class ReviewPageTests(unittest.TestCase):
         html, open_exc = _page(lambda rows: EXPECTED, url="/exceptions/Test%20Vendor?statement_id=STMT-BC"
                                "&filter=paid&sort=amount", rows=paid)
         open_exc.assert_called_once_with("STMT-BC", "paid", "amount")
-        self.assertEqual(_invoice_lines(html), ['Invoice #INV-1004 <span class="einv-kind">(Bill)</span>'])
+        self.assertEqual(_invoice_lines(html), ['Invoice #INV-1004 <span class="einv-kind einv-kind-bill">(Bill)</span>'])
 
     def test_one_lookup_per_page(self):
         lookup = mock.Mock(return_value=EXPECTED)

@@ -103,7 +103,7 @@ class TitleLinkPageTests(unittest.TestCase):
             _title(html),
             f'<a class="einv-ns-link" href="{BASE}vendbill.nl?id=4711" target="_blank" rel="noopener noreferrer"\n'
             '          title="Open bill CM-1005 in NetSuite">Invoice #CM-1005'
-            '<span class="ns-ext" aria-hidden="true">↗</span></a> <span class="einv-kind">(Credit)</span>')
+            '<span class="ns-ext" aria-hidden="true">↗</span></a> <span class="einv-kind einv-kind-credit">(Credit)</span>')
         fetch.assert_called_once_with("TEST_VENDOR", "Test Vendor", "CM-1005")
 
     def test_credit_record_links_the_credit_page(self):
@@ -122,14 +122,14 @@ class TitleLinkPageTests(unittest.TestCase):
 
     def test_not_found_has_no_link_and_no_lookup(self):
         html, fetch, _ = _page("E-MISS", BILL_RECORD)
-        self.assertEqual(_title(html), 'Invoice #INV-1001 <span class="einv-kind">(Bill)</span>')
+        self.assertEqual(_title(html), 'Invoice #INV-1001 <span class="einv-kind einv-kind-bill">(Bill)</span>')
         fetch.assert_not_called()
 
     def test_no_record_or_bad_id_is_plain_text(self):
         for record in (None, dict(BILL_RECORD, id=None), dict(BILL_RECORD, id="abc"), {k: v for k, v in
                        BILL_RECORD.items() if k != "id"}):
             html, _, _ = _page("E-NSCR", record)
-            self.assertEqual(_title(html), 'Invoice #CM-1005 <span class="einv-kind">(Credit)</span>', record)
+            self.assertEqual(_title(html), 'Invoice #CM-1005 <span class="einv-kind einv-kind-credit">(Credit)</span>', record)
             self.assertNotIn("einv-ns-link", html)
 
     def test_no_account_is_plain_text(self):
