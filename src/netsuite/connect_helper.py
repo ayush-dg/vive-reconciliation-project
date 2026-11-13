@@ -55,7 +55,14 @@ DEFAULT_QUERY_TIMEOUT_SECONDS = 60
 # client's 60 s idle replacement (NETSUITE_CONNECT_IDLE_SECONDS) and its
 # 30 min refresh happens here, never during someone's search.
 DEFAULT_KEEPALIVE_SECONDS = 45
-KEEPALIVE_SQL = "SELECT id FROM vendor WHERE id = 0"
+# It joins the same tables as the search (and returns no row): a NetSuite
+# session's first query on a table is slow (dev, 2026-11-13: the first burst
+# after start-up, on freshly logged-in connections, took a median 8.1 s with
+# 8 of 15 falling back; on sessions that had already queried transactions,
+# 15 never-searched vendors took 2.5 s, all live).
+KEEPALIVE_SQL = ("SELECT t.id FROM transaction t "
+                 "LEFT JOIN transactionline tl ON tl.transaction = t.id AND tl.mainline = 'T' "
+                 "LEFT JOIN vendor v ON v.id = t.entity WHERE t.id = 0")
 # A read sent without a time limit (e.g. the vendor list) still gets one here,
 # so a dead helper can never block a web request for good.
 UNTIMED_LIMIT_SECONDS = 120

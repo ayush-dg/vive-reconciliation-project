@@ -20,7 +20,7 @@ class FakeClient:
         self.query_timeout = query_timeout
 
     def query(self, sql, params=None, timeout=None):
-        if "FROM vendor WHERE id = 0" in sql:  # connect_helper.KEEPALIVE_SQL
+        if "WHERE t.id = 0" in sql:  # connect_helper.KEEPALIVE_SQL
             with _lock:
                 _pings["n"] += 1
             return []
