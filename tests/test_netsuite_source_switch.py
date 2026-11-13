@@ -97,6 +97,8 @@ class CandidateTests(unittest.TestCase):
 class ResolverTests(unittest.TestCase):
     def setUp(self):
         connect_source.reset_used()
+        resolver.reset_vendor_cache()  # the vendor list is cached since 2026-11-13
+        self.addCleanup(resolver.reset_vendor_cache)
 
     def test_vendor_rows_come_from_connect_when_switched_on(self):
         rows = [("5", "Gates GMC Nissan", "Gates GMC Nissan", None)]
@@ -114,9 +116,13 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(connect_source.used_summary(), "fabric (connect failed)")
 
     def test_first_word_search_uses_connect(self):
-        with _env("connect"), mock.patch.object(connect_source, "active_vendor_ids_like", return_value=["8", "9"]) as live:
+        # Since 2026-11-13 it runs on the cached vendor list (read from Connect),
+        # not as a query of its own.
+        rows = [("8", "Berlin City Toyota", None, None), ("9", None, "BERLIN CITY HONDA", None),
+                ("10", "Gates GMC", None, None)]
+        with _env("connect"), mock.patch.object(connect_source, "active_vendor_rows", return_value=rows),                 mock.patch.object(connect_source, "active_vendor_ids_like") as live:
             self.assertEqual(resolver._first_word_like_lookup("Berlin City Toyota"), ["8", "9"])
-        live.assert_called_once_with("%berlin%")
+        live.assert_not_called()
 
 
 class ConnectQueryTests(unittest.TestCase):

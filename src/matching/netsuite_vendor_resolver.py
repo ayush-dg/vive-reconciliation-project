@@ -34,6 +34,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 
 from src.lakehouse.fabric_sql import get_lakehouse_connection
 from src.netsuite import connect_source
@@ -48,6 +50,34 @@ OVERRIDES_PATH = os.path.join(
 _overrides_cache = None
 
 MIN_FIRST_WORD_LEN = 3
+
+# Vendor-list cache (2026-11-13): the whole active-vendor list is the same for
+# every search and every statement, but it used to be fetched -- live from
+# NetSuite when NETSUITE_SOURCE=connect, with no time limit -- on almost every
+# lookup, holding the one shared Connect connection while other searches
+# waited. It is now fetched at most once per NETSUITE_VENDOR_CACHE_SECONDS
+# (default 30 min) and shared by every thread; name searches run on that copy.
+# A vendor created in NetSuite since the last fetch: resolve_entity_ids()
+# refreshes once when nothing resolves (see REFRESH_ON_MISS_AFTER_SECONDS).
+DEFAULT_VENDOR_CACHE_SECONDS = 1800
+REFRESH_ON_MISS_AFTER_SECONDS = 60
+_vendor_cache = {"rows": None, "at": 0.0, "source": None}
+_vendor_cache_lock = threading.Lock()
+_clock = time.monotonic
+
+
+def _vendor_cache_seconds() -> float:
+    try:
+        value = float(os.getenv("NETSUITE_VENDOR_CACHE_SECONDS") or DEFAULT_VENDOR_CACHE_SECONDS)
+    except ValueError:
+        return DEFAULT_VENDOR_CACHE_SECONDS
+    return value if value >= 0 else DEFAULT_VENDOR_CACHE_SECONDS
+
+
+def reset_vendor_cache() -> None:
+    """Forget the cached vendor list (tests; a forced refresh)."""
+    with _vendor_cache_lock:
+        _vendor_cache.update(rows=None, at=0.0, source=None)
 
 
 def _normalize(name: str) -> str:
@@ -67,25 +97,80 @@ def _load_overrides() -> dict:
     return _overrides_cache
 
 
-def _active_vendor_rows() -> list:
-    """(id, companyname, entityid, altname) of every active vendor -- live
-    from NetSuite when NETSUITE_SOURCE=connect (src/netsuite/connect_source.py),
-    else (or if that read fails) from the Fabric copy."""
+def _active_vendor_rows(force_refresh: bool = False) -> list:
+    """(id, companyname, entityid, altname) of every active vendor, from the
+    shared cache (see DEFAULT_VENDOR_CACHE_SECONDS). Only one thread fetches
+    at a time; while it does, others keep using the previous copy. If a fetch
+    fails, the previous copy is kept; with no copy at all the error is raised
+    as before (callers treat it as not resolved)."""
+    rows, at, source = _vendor_cache["rows"], _vendor_cache["at"], _vendor_cache["source"]
+    fresh = rows is not None and _clock() - at < _vendor_cache_seconds()
+    if fresh and not force_refresh:
+        _note_source(source)
+        return rows
+    if rows is not None and not _vendor_cache_lock.acquire(blocking=False):
+        _note_source(source)
+        return rows  # another thread is refreshing: use the current copy
+    if rows is None:
+        _vendor_cache_lock.acquire()
+    try:
+        if _vendor_cache["rows"] is not None and _vendor_cache["at"] > at:
+            _note_source(_vendor_cache["source"])
+            return _vendor_cache["rows"]  # refreshed while we waited
+        try:
+            fetched, used = _fetch_active_vendor_rows()
+        except Exception:
+            if rows is None:
+                raise
+            logger.exception("Refreshing the NetSuite vendor list failed; using the copy from %.0fs ago",
+                             _clock() - at)
+            _note_source(source)
+            return rows
+        _vendor_cache.update(rows=list(fetched), at=_clock(), source=used)
+        return _vendor_cache["rows"]
+    finally:
+        _vendor_cache_lock.release()
+
+
+def _note_source(source) -> None:
+    if source == connect_source.SOURCE_CONNECT:
+        connect_source.note_used(connect_source.SOURCE_CONNECT)
+
+
+def _fetch_active_vendor_rows() -> tuple:
+    """(rows, source): live from NetSuite when NETSUITE_SOURCE=connect
+    (src/netsuite/connect_source.py), else (or if that read fails) from the
+    Fabric copy."""
     if connect_source.use_connect():
         try:
             rows = connect_source.active_vendor_rows()
             connect_source.note_used(connect_source.SOURCE_CONNECT)
-            return rows
+            return rows, connect_source.SOURCE_CONNECT
         except Exception:
             connect_source.note_fallback("vendor list")
     cur = get_lakehouse_connection().cursor()
     cur.execute("SELECT id, companyname, entityid, altname FROM bronze.netsuite_vendor WHERE isinactive = 'F'")
-    return cur.fetchall()
+    return [tuple(row) for row in cur.fetchall()], "fabric"
 
 
 def _active_vendor_ids_like(pattern: str) -> list:
     """Ids of active vendors whose companyname/entityid/altname contains
-    `pattern` (lowercase, with % wildcards) -- same source rule as above."""
+    `pattern` (lowercase, with % wildcards). A plain '%word%' (all the
+    first-word lookup ever sends) runs on the cached vendor list (2026-11-13);
+    anything else still asks the source directly."""
+    needle = pattern[1:-1] if len(pattern) > 2 and pattern[0] == pattern[-1] == "%" else None
+    if needle and "%" not in needle and "_" not in needle:
+        rows = _active_vendor_rows()
+        return list(dict.fromkeys(
+            row[0] for row in rows
+            if any(needle in str(value or "").lower() for value in (row[1], row[2], row[3]))
+        ))
+    return _fetch_active_vendor_ids_like(pattern)
+
+
+def _fetch_active_vendor_ids_like(pattern: str) -> list:
+    """_active_vendor_ids_like() asked of the source itself (live NetSuite or
+    the Fabric copy) -- same source rule as _fetch_active_vendor_rows()."""
     if connect_source.use_connect():
         try:
             ids = connect_source.active_vendor_ids_like(pattern)
@@ -151,12 +236,24 @@ def resolve_entity_ids(vendor_id: str, vendor_name: str) -> list:
     if override and override.get("entity_ids"):
         return override["entity_ids"]
 
-    dynamic = _dynamic_lookup(vendor_name)
-    if dynamic:
-        return dynamic
+    for attempt in (1, 2):
+        dynamic = _dynamic_lookup(vendor_name)
+        if dynamic:
+            return dynamic
 
-    like_matches = _first_word_like_lookup(vendor_name)
-    if like_matches:
-        return like_matches
+        like_matches = _first_word_like_lookup(vendor_name)
+        if like_matches:
+            return like_matches
 
-    return None
+        # Nothing resolved: perhaps a vendor created in NetSuite after the
+        # cached list was fetched -- refresh once (not more than once a
+        # minute, so a name that never resolves can't refetch on every call).
+        age = _clock() - _vendor_cache["at"]
+        if attempt == 1 and _vendor_cache["rows"] is not None and age >= REFRESH_ON_MISS_AFTER_SECONDS:
+            try:
+                _active_vendor_rows(force_refresh=True)
+            except Exception:
+                logger.exception("Vendor list refresh after a miss failed (non-fatal)")
+                return None
+            continue
+        return None
