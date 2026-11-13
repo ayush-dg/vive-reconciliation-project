@@ -1431,3 +1431,17 @@ WHITE_RIVER_TOYOTA,DOCUMENT / TRANSACTION,original_invoice_number,string,v1,1
 WHITE_RIVER_TOYOTA,PURCHASES,charge_amount,decimal,v1,1
 WHITE_RIVER_TOYOTA,PAYMENTS & CREDITS,payment_amount,decimal,v1,1
 WHITE_RIVER_TOYOTA,BALANCE,amount_remaining,decimal,v1,1
+MATT_NIMEY_GMC,invoice_date,line_date,date,v1,1
+MATT_NIMEY_GMC,invoice_no,original_invoice_number,string,v1,1
+MATT_NIMEY_GMC,purchases,charge_amount,decimal,v1,1
+MATT_NIMEY_GMC,payments,payment_amount,decimal,v1,1
+MATT_NIMEY_GMC,balance,amount_remaining,decimal,v1,1
+MATT_NIMEY_GMC,row_no,,,v1,1
+MATT_NIMEY_GMC,note,,,v1,1
+JAMES_CARS_OF_ROME_LLC,DATE,line_date,date,v1,1
+JAMES_CARS_OF_ROME_LLC,REF NO.,original_invoice_number,string,v1,1
+JAMES_CARS_OF_ROME_LLC,CHARGES,charge_amount,decimal,v1,1
+JAMES_CARS_OF_ROME_LLC,CREDITS,payment_amount,decimal,v1,1
+JAMES_CARS_OF_ROME_LLC,BALANCE,amount_remaining,decimal,v1,1
+JAMES_CARS_OF_ROME_LLC,SRC,,,v1,1
+JAMES_CARS_OF_ROME_LLC,APPLY TO,,,v1,1

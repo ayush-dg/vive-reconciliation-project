@@ -832,5 +832,7 @@
   "1-800-RADIATOR_OF_SYRACUSE": {"entity_ids": ["8214"], "note": "1-800-Radiator (8214). 2026-11-12: prod STMT-17D00055's 4 invoices are all under 8214; the name lookup found no vendor."},
   "LITHIA_DRIVEWAY_/_CARBONE_UTICA_SUBARU": {"entity_ids": ["379119"], "note": "Subaru of Utica (379119). 2026-11-12: prod STMT-C336D048 ties out 30 of 31 under 379119; the name lookup gave Lithia Toyota (171700)."},
   "LITHIA_DRIVEWAY_/_744-CARBONE_UTICA_SUBARU": {"entity_ids": ["379119"], "note": "Subaru of Utica (379119). 2026-11-12: prod STMT-2917E429 (same account, '744-' prefix) ties out 3 of 4 under 379119; the name lookup gave Lithia Toyota (171700)."},
-  "LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD": {"entity_ids": ["518013"], "note": "BMW of Bloomfield (518013). 2026-11-12: prod STMT-887FF185 ties out 3 of 4 under 518013; the name lookup gave Lithia Toyota (171700)."}
+  "LITHIA_DRIVEWAY_/_710-BMW_OF_BLOOMFIELD": {"entity_ids": ["518013"], "note": "BMW of Bloomfield (518013). 2026-11-12: prod STMT-887FF185 ties out 3 of 4 under 518013; the name lookup gave Lithia Toyota (171700)."},
+  "MATT_NIMEY_GMC": {"entity_ids": ["443989"], "note": "Matt Nimey Buick GMC (443989). 2026-11-13: prod STMT-B56C72E7 (Sprague) ties out 27 of 36 invoice_no values verbatim under 443989; the name lookup gave Jim Matthews Chevrolet / Mattie Imports and others."},
+  "JAMES_CARS_OF_ROME_LLC": {"entity_ids": ["384936"], "note": "James Mitsubishi (384936). 2026-11-13: prod STMT-0A6EA201 (Sprague) REF NO. 14610 = bill 14610 $217.21 10/9/2026 under 384936; the name lookup gave 20 vendors named James."}
 }
