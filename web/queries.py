@@ -462,23 +462,23 @@ def get_last_netsuite_sync():
 
 
 def get_last_outlook_sync():
-    """Home page's "Last Sync" freshness label for Outlook. Reads the
-    mailbox-sync Function's own watermark file's last-write time
-    (watermark/mailbox.json in the mailbox container -- see
-    azure-functions/mailbox-sync/function_app.py's write_watermark(),
-    advanced once per run right after each new message is written) as a
-    proxy for when "Sync to Blob" (web/routers/mailbox_sync.py) last
-    actually pulled new mail, rather than parsing the watermark JSON's
-    own message-received timestamp. Returns None on any failure -- same
-    reasoning as get_last_netsuite_sync()."""
-    from src.storage.blob_client import BlobStorageClient
+    """Home page's "Outlook" freshness badge: when the newest PDF arrived
+    from the mailbox -- the newest job queued from mailbox storage (jobs
+    with source_blob_path; only the mailbox flow sets it). Duplicates count:
+    the PDF still arrived.
 
-    client = BlobStorageClient(
-        container_name="raw",
-        connection_string_env_var="AZURE_BLOB_MAILBOX_CONNECTION_STRING",
-    )
-    return client.get_blob_last_modified("watermark/mailbox.json")
-
+    Changed 2026-11-13: it used to read the last-write time of the old
+    timer-based mailbox sync Function's watermark file
+    (raw/watermark/mailbox.json). That Function has been switched off since
+    2026-10-20, when the Logic Apps took over instant intake, so the badge
+    stuck at Oct 20 while mail kept arriving. Returns None on any failure:
+    a freshness display must never break the Home page."""
+    try:
+        rows = execute_query("SELECT MAX(submitted_at) AS newest FROM jobs WHERE source_blob_path IS NOT NULL")
+    except Exception:
+        logger.exception("Outlook freshness lookup failed")
+        return None
+    return rows[0]["newest"] if rows and rows[0].get("newest") else None
 
 def get_open_exceptions_count() -> int:
     """

@@ -11,7 +11,7 @@
   </div>
   <div class="topbar-actions">
     <span class="badge badge-neutral" title="Most recent successful NetSuite ingestion run"><svg class="icon"><use href="#i-refresh"/></svg>NetSuite: {{ netsuite_last_sync | friendly_dt if netsuite_last_sync else "never synced" }}</span>
-    <span class="badge badge-neutral" title="Last time Outlook mail was pulled into blob storage"><svg class="icon"><use href="#i-refresh"/></svg>Outlook: {{ outlook_last_sync | friendly_dt if outlook_last_sync else "never synced" }}</span>
+    <span class="badge badge-neutral" title="When the newest statement PDF arrived from the mailbox"><svg class="icon"><use href="#i-refresh"/></svg>Outlook: {{ outlook_last_sync | friendly_dt if outlook_last_sync else "never synced" }}</span>
     <button class="icon-btn"><svg class="icon"><use href="#i-search"/></svg></button>
     <button class="icon-btn"><svg class="icon"><use href="#i-bell"/></svg></button>
   </div>
