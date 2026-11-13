@@ -87,6 +87,16 @@ class ConnectHelperTests(unittest.TestCase):
         self.assertNotEqual(rows[0]["pid"], first_pid)
         self.assertEqual(helper.restarts, 1)
 
+    def test_connections_log_in_at_start_and_idle_ones_are_kept_alive(self):
+        helper = connect_helper.ConnectHelper(size=2, max_wait=3.0, odbc_timeout=45, factory_path=FAKE, keepalive=0.3)
+        self.addCleanup(helper.stop)
+        helper.warm_up()
+        time.sleep(0.5)
+        at_start = helper.query("SELECT 'pings'", timeout=20)[0]["pings"]
+        self.assertGreaterEqual(at_start, 2)  # each connection logged in before any search
+        time.sleep(1.5)
+        self.assertGreater(helper.query("SELECT 'pings'", timeout=20)[0]["pings"], at_start + 2)
+
     def test_only_selects_are_sent(self):
         helper = self._helper()
         with self.assertRaises(ReadOnlyError):

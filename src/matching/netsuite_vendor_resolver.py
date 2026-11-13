@@ -74,6 +74,41 @@ def _vendor_cache_seconds() -> float:
     return value if value >= 0 else DEFAULT_VENDOR_CACHE_SECONDS
 
 
+_refresher = {"thread": None, "stop": None}
+
+
+def start_background_refresh(interval_seconds: float = None) -> None:
+    """Keep the cached vendor list fresh in the background (2026-11-13, the
+    web app): fetched now, then every `interval` (default 5 minutes under the
+    cache lifetime), so no search waits on the list expiring. Idempotent."""
+    if _refresher["thread"] is not None:
+        return
+    interval = interval_seconds or max(60.0, _vendor_cache_seconds() - 300)
+    stop = threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            try:
+                _active_vendor_rows(force_refresh=True)
+            except Exception:
+                logger.exception("Background NetSuite vendor list refresh failed (non-fatal)")
+            stop.wait(interval)
+
+    _refresher["stop"] = stop
+    _refresher["thread"] = threading.Thread(target=loop, daemon=True, name="vendor-list-refresh")
+    _refresher["thread"].start()
+
+
+def stop_background_refresh() -> None:
+    """At web app shutdown (and in tests)."""
+    thread, stop = _refresher["thread"], _refresher["stop"]
+    _refresher.update(thread=None, stop=None)
+    if stop is not None:
+        stop.set()
+    if thread is not None:
+        thread.join(5)
+
+
 def reset_vendor_cache() -> None:
     """Forget the cached vendor list (tests; a forced refresh)."""
     with _vendor_cache_lock:

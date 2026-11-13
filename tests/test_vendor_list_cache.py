@@ -95,6 +95,23 @@ class VendorListCacheTests(unittest.TestCase):
             self.assertEqual(resolver.resolve_entity_ids("V1", "Gates GMC Nissan"), ["77", "78"])
         self.fetch.assert_not_called()
 
+    def test_background_refresh_keeps_the_list_fresh(self):
+        refreshed = threading.Event()
+        calls = []
+
+        def fake_rows(force_refresh=False):
+            calls.append(force_refresh)
+            if len(calls) >= 2:
+                refreshed.set()
+            return []
+        with mock.patch.object(resolver, "_active_vendor_rows", side_effect=fake_rows):
+            resolver.stop_background_refresh()
+            resolver.start_background_refresh(interval_seconds=0.05)
+            resolver.start_background_refresh(interval_seconds=0.05)  # idempotent
+            self.assertTrue(refreshed.wait(5))
+            resolver.stop_background_refresh()  # stopped before the mock goes away
+        self.assertTrue(all(calls))  # always a forced refresh
+
     def test_many_threads_at_once_fetch_once(self):
         started = threading.Event()
 

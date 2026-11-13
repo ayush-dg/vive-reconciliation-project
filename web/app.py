@@ -29,15 +29,30 @@ from web.routers import auth, batches, dashboard, exceptions, intake_trigger, jo
 from web.worker import start_worker, stop_workers
 
 
+def _live_netsuite() -> bool:
+    """Live NetSuite in use (NETSUITE_SOURCE or NETSUITE_SEARCH_SOURCE =
+    connect): only then is there a pool to warm."""
+    from src.netsuite.connect_source import use_connect
+    return use_connect() or (os.getenv("NETSUITE_SEARCH_SOURCE") or "").strip().lower() == "connect"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Live NetSuite reads go to a helper process with a pool of connections
     # (2026-11-13, src/netsuite/connect_helper.py); it starts on first use.
     from src.netsuite import connect_client, connect_helper
     connect_client.use_helper(True)
+    if _live_netsuite():
+        # Warm before the first search: the pool logs in now, and the cached
+        # NetSuite vendor list is fetched now and kept fresh in the background.
+        from src.matching import netsuite_vendor_resolver
+        connect_helper.get_helper().warm_up()
+        netsuite_vendor_resolver.start_background_refresh()
     start_worker()
     yield
     stop_workers()
+    from src.matching import netsuite_vendor_resolver
+    netsuite_vendor_resolver.stop_background_refresh()
     connect_helper.stop_helper()
 
 

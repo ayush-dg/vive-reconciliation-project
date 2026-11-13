@@ -50,6 +50,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_POOL_SIZE = 4
 DEFAULT_QUEUE_WAIT_SECONDS = 3.0
 DEFAULT_QUERY_TIMEOUT_SECONDS = 60
+# Keep the pool warm (2026-11-13): each connection logs in when the helper
+# starts, and one idle this long runs KEEPALIVE_SQL, so it never reaches the
+# client's 60 s idle replacement (NETSUITE_CONNECT_IDLE_SECONDS) and its
+# 30 min refresh happens here, never during someone's search.
+DEFAULT_KEEPALIVE_SECONDS = 45
+KEEPALIVE_SQL = "SELECT id FROM vendor WHERE id = 0"
 # A read sent without a time limit (e.g. the vendor list) still gets one here,
 # so a dead helper can never block a web request for good.
 UNTIMED_LIMIT_SECONDS = 120
@@ -77,6 +83,10 @@ def query_timeout_seconds() -> int:
     return _env_number("NETSUITE_CONNECT_QUERY_TIMEOUT_SECONDS", DEFAULT_QUERY_TIMEOUT_SECONDS, int)
 
 
+def keepalive_seconds() -> float:
+    return _env_number("NETSUITE_CONNECT_KEEPALIVE_SECONDS", DEFAULT_KEEPALIVE_SECONDS)
+
+
 class HelperBusy(QueryTimeout):
     """Every pooled connection stayed busy longer than the queue wait."""
 
@@ -99,16 +109,30 @@ def _load_factory(path):
     return getattr(importlib.import_module(module), name)
 
 
-def _helper_main(requests, replies, size, max_wait, odbc_timeout, factory_path=None):
+def _helper_main(requests, replies, size, max_wait, odbc_timeout, factory_path=None,
+                 keepalive=DEFAULT_KEEPALIVE_SECONDS):
     """Runs in the helper process: `size` worker threads, each with its own
-    client (connection), taking requests off one queue."""
+    client (connection), taking requests off one queue; an idle one keeps
+    its connection alive."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [connect-helper] %(message)s")
+    log = logging.getLogger(__name__)
     factory = _load_factory(factory_path)
+
+    def ping(client, number):
+        try:
+            client.query(KEEPALIVE_SQL, [], timeout=30)
+        except Exception as exc:  # noqa: BLE001 -- the next real query retries on a fresh connection
+            log.warning("connection %d keep-alive failed: %s", number, str(exc)[:200])
 
     def worker(number):
         client = factory(odbc_timeout)
+        ping(client, number)  # log in now, not on someone's first search
         while True:
-            item = requests.get()
+            try:
+                item = requests.get(timeout=keepalive)
+            except queue.Empty:
+                ping(client, number)
+                continue
             if item is None:  # shutdown: pass it on to the next worker
                 requests.put(None)
                 return
@@ -141,8 +165,9 @@ class ConnectHelper:
     """What the web app calls: query() like ConnectClient.query(), answered
     by the helper process's pool."""
 
-    def __init__(self, size=None, max_wait=None, odbc_timeout=None, factory_path=None):
+    def __init__(self, size=None, max_wait=None, odbc_timeout=None, factory_path=None, keepalive=None):
         self.size = size or pool_size()
+        self.keepalive = keepalive or keepalive_seconds()
         self.max_wait = max_wait or queue_wait_seconds()
         self.odbc_timeout = odbc_timeout or query_timeout_seconds()
         self.factory_path = factory_path
@@ -165,7 +190,8 @@ class ConnectHelper:
         self._requests, replies = self._ctx.Queue(), self._ctx.Queue()
         self._process = self._ctx.Process(
             target=_helper_main, name="netsuite-connect-helper", daemon=True,
-            args=(self._requests, replies, self.size, self.max_wait, self.odbc_timeout, self.factory_path))
+            args=(self._requests, replies, self.size, self.max_wait, self.odbc_timeout, self.factory_path,
+                  self.keepalive))
         self._process.start()
         threading.Thread(target=self._dispatch, args=(replies, self._process, generation),
                          daemon=True, name=f"connect-helper-replies-{generation}").start()
@@ -279,6 +305,11 @@ class ConnectHelper:
         if self._silent_in_a_row >= self.size:
             self._silent_in_a_row = 0
             self.restart(f"{self.size} requests in a row got no answer")
+
+    def warm_up(self):
+        """Start the helper now (its connections log in right away) instead of
+        on the first search -- called at web app startup."""
+        self._ensure_running()
 
     # ConnectClient compatibility (callers sometimes close/retire the shared client)
     def close(self):

@@ -8,7 +8,11 @@ marker in the SQL:
 """
 
 import os
+import threading
 import time
+
+_pings = {"n": 0}
+_lock = threading.Lock()
 
 
 class FakeClient:
@@ -16,6 +20,12 @@ class FakeClient:
         self.query_timeout = query_timeout
 
     def query(self, sql, params=None, timeout=None):
+        if "FROM vendor WHERE id = 0" in sql:  # connect_helper.KEEPALIVE_SQL
+            with _lock:
+                _pings["n"] += 1
+            return []
+        if "'pings'" in sql:
+            return [{"pings": _pings["n"]}]
         if "'hang'" in sql:
             time.sleep(3600)
         if "'crash'" in sql:
