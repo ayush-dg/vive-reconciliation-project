@@ -156,8 +156,12 @@ class ConnectClient:
     """One reusable Connect connection. Thread-safe: queries on one client run
     one at a time (an ODBC connection must not run two at once)."""
 
-    def __init__(self, config: dict = None, connect_fn=None, clock=time.monotonic):
+    def __init__(self, config: dict = None, connect_fn=None, clock=time.monotonic, query_timeout: int = None):
         self.config = config or load_config()
+        # Driver-level query timeout (2026-11-13, the helper process's pool):
+        # the ODBC driver cancels a statement itself after this many seconds,
+        # so most slow queries end cleanly instead of being abandoned.
+        self.query_timeout = query_timeout
         self._connect_fn = connect_fn
         self._clock = clock
         self._lock = threading.Lock()
@@ -176,6 +180,11 @@ class ConnectClient:
             connect = pyodbc.connect
         started = self._clock()
         conn = connect(connection_string(self.config, build_password(self.config)), timeout=LOGIN_TIMEOUT_SECONDS)
+        if self.query_timeout:
+            try:
+                conn.timeout = int(self.query_timeout)
+            except Exception:
+                logger.warning("could not set the NetSuite Connect query timeout (ignored)")
         self.last_login_seconds = round(self._clock() - started, 2)
         self.logins += 1
         logger.info("NetSuite Connect login #%d took %.1fs", self.logins, self.last_login_seconds)
@@ -341,8 +350,25 @@ def _note_query_outcome(client, timed_out: bool) -> None:
     client.retire()
 
 
+_use_helper = False
+
+
+def use_helper(enabled: bool = True) -> None:
+    """The web app turns this on at startup (2026-11-13): its live NetSuite
+    reads then go to the helper process (src/netsuite/connect_helper.py) and
+    its pool of connections, so the web app itself never loads the NetSuite
+    driver. Off by default: pipeline processes (one per job) keep their own
+    in-process client."""
+    global _use_helper
+    _use_helper = enabled
+
+
 def get_shared_client() -> ConnectClient:
-    """The process-wide client (the web app keeps one connection open)."""
+    """The process-wide client (the web app keeps one connection open) -- or,
+    with use_helper() on, the helper process's pool (same query() call)."""
+    if _use_helper:
+        from src.netsuite.connect_helper import get_helper
+        return get_helper()
     global _shared
     with _shared_lock:
         if _shared is None:

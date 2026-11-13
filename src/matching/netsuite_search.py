@@ -783,12 +783,19 @@ def _run_search_connect(entity_ids, bounds, invoice_contains, statuses,
     """_run_search() on live NetSuite: one capped, ordered query per table,
     both within one search_timeout()."""
     deadline = time.monotonic() + search_timeout()
-    rows = []
-    for table in (BILL_TABLE, CREDIT_TABLE):
+
+    def one_table(table):
         sql, params = build_connect_select(table, entity_ids, bounds, invoice_contains, statuses,
                                            date_from, date_to, locations, limit, sort_amount)
-        rows.extend(_shape_row(raw) for raw in _connect_rows(sql, params, table, deadline))
-    return rows
+        return [_shape_row(raw) for raw in _connect_rows(sql, params, table, deadline)]
+
+    # Bills and credits side by side (2026-11-13): with the web app's pool of
+    # connections (src/netsuite/connect_helper.py) the two queries no longer
+    # wait for each other. Bills first in the result, as before.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        bills, credits = pool.submit(one_table, BILL_TABLE), pool.submit(one_table, CREDIT_TABLE)
+        return bills.result() + credits.result()
 
 
 def _fetch_record_connect(table: str, internal_id: str):

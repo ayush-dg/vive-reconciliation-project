@@ -31,12 +31,26 @@ from web.worker import start_worker, stop_workers
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Live NetSuite reads go to a helper process with a pool of connections
+    # (2026-11-13, src/netsuite/connect_helper.py); it starts on first use.
+    from src.netsuite import connect_client, connect_helper
+    connect_client.use_helper(True)
     start_worker()
     yield
     stop_workers()
+    connect_helper.stop_helper()
 
 
 app = FastAPI(title="VIVE Reconciliation", lifespan=lifespan)
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    """Liveness for the App Service health check (2026-11-13): answered on the
+    event loop itself -- no login, no database, no worker thread -- so it only
+    fails when the app is truly frozen."""
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("ok", headers={"Cache-Control": "no-store"})
 
 app.add_middleware(
     SessionMiddleware,
